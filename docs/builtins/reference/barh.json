@@ -1,0 +1,120 @@
+{
+  "title": "barh",
+  "category": "plotting",
+  "keywords": [
+    "barh",
+    "horizontal bar chart",
+    "bar chart",
+    "grouped bar chart",
+    "stacked bar chart",
+    "matlab barh",
+    "categorical comparison"
+  ],
+  "summary": "Create horizontal bar charts in MATLAB and RunMat.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-bar-grouped-category.webp",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`barh` uses the shared bar rendering path. Supported gpuArray inputs are packed into horizontal bar vertices directly on the plotting GPU context."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::bar::tests",
+    "vm": "runmat-vm plotting::barh_dispatches_and_sets_horizontal_bars",
+    "integration": "runmat-plot/tests/renderer_tests.rs"
+  },
+  "description": "`barh` creates horizontal bar charts from vector or matrix-style inputs. It returns a bar handle and supports grouped and stacked forms through the shared MATLAB/RunMat plotting handle-property system.",
+  "behaviors": [
+    "Vector inputs create a single horizontal bar series with implicit category positions on the y-axis.",
+    "Matrix inputs support grouped and stacked horizontal bar rendering workflows.",
+    "The returned value is a bar handle that can be queried and updated through `get` and `set`.",
+    "Display names, bar width, and face color participate in the shared plotting object/property model.",
+    "RunMat preserves the same fast GPU-backed rendering path as `bar` when inputs and style options can be handled by the shared bar vertex packer."
+  ],
+  "examples": [
+    {
+      "description": "Create a basic horizontal bar chart from a vector",
+      "input": "values = [3 5 2 9];\nbarh(values);"
+    },
+    {
+      "description": "Create grouped horizontal bars from a matrix",
+      "input": "Y = [3 5 2; 4 6 1; 5 4 3];\nbarh(Y);"
+    },
+    {
+      "description": "Create stacked horizontal bars",
+      "input": "Y = [8 15 25; 30 35 40; 50 55 62];\nbarh(Y, 'stacked');"
+    },
+    {
+      "description": "Style a horizontal bar object and label it for the legend",
+      "input": "h = barh([2 4 1 5]);\nset(h, 'FaceColor', 'g', 'DisplayName', 'counts');\nlegend;"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `barh` different from `bar`?",
+      "answer": "`barh` draws the same bar data horizontally. The y-axis is the category axis and the x-axis shows the numeric values.\n\n```matlab\nbar([3 5 2 9]);   % vertical bars\nbarh([3 5 2 9]);  % horizontal bars\n```"
+    },
+    {
+      "question": "How do I create grouped vs stacked horizontal bar charts?",
+      "answer": "Pass a matrix to `barh`. By default, each row becomes a group with side-by-side horizontal bars. To stack them instead, pass `'stacked'`.\n\n```matlab\nY = [3 5 2; 4 6 1; 5 4 3];\nbarh(Y);            % grouped\nbarh(Y, 'stacked'); % stacked\n```"
+    },
+    {
+      "question": "Can `barh` use explicit category positions?",
+      "answer": "Yes. Pass `X` and `Y` like MATLAB's `barh(X,Y)` form. The `X` values label the category positions on the vertical axis.\n\n```matlab\nx = [1980 1990 2000];\ny = [10 20 30];\nbarh(x, y);\n```"
+    }
+  ],
+  "links": [
+    {
+      "label": "bar",
+      "url": "./bar"
+    },
+    {
+      "label": "histogram",
+      "url": "./histogram"
+    },
+    {
+      "label": "pie",
+      "url": "./pie"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/bar.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/bar.rs"
+  },
+  "gpu_residency": "`barh` preserves GPU residency where the shared bar geometry pipeline can consume exported buffers directly. Stacked gpuArray charts read values for stacked extent calculation, matching the existing `bar` stacked-bounds behavior, then render through the same GPU plotting path.",
+  "gpu_behavior": [
+    "Horizontal bar rendering shares the same plotting architecture and shader vertex-packing path as vertical `bar`.",
+    "The builtin is a plotting sink and fusion barrier."
+  ]
+}

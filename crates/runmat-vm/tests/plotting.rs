@@ -94,6 +94,20 @@ fn gobjects_preallocates_assignable_graphics_handle_arrays() {
 }
 
 #[test]
+fn barh_dispatches_and_sets_horizontal_bars() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        h = barh([2 5 3]); \
+        if ~isgraphics(h); error('barh did not return a graphics handle'); end; \
+        if ~strcmp(get(h, 'Type'), 'bar'); error('barh handle type mismatch'); end; \
+        set(h, 'DisplayName', 'horizontal'); \
+        if ~strcmp(get(h, 'DisplayName'), 'horizontal'); error('barh display name mismatch'); end; \
+        h2 = barh([1980 1990 2000], [10 20 30], 'stacked'); \
+        if ~isgraphics(h2); error('barh x/y stacked handle mismatch'); end;";
+    execute_source(input).expect("execute barh script");
+}
+
+#[test]
 fn ancestor_dispatches_graphics_parent_queries() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

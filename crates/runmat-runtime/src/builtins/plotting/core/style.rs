@@ -859,6 +859,15 @@ pub(crate) fn value_as_f64(value: &Value) -> Option<f64> {
     }
 }
 
+fn value_as_scalar_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(v) => Some(*v),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        _ => None,
+    }
+}
+
 pub(crate) fn value_as_bool(value: &Value) -> Option<bool> {
     match value {
         Value::Bool(b) => Some(*b),
@@ -1032,12 +1041,41 @@ pub fn parse_bar_style_args(
     let rest = filtered.as_slice();
 
     let mut idx = 0usize;
-    if let Some(token) = rest.first().and_then(value_as_string) {
-        let trimmed = token.trim();
-        if !trimmed.is_empty() && !is_bar_option_name(trimmed) {
+    let mut saw_positional_width = false;
+    let mut saw_positional_color = false;
+    while let Some(value) = rest.get(idx) {
+        if let Some(token) = value_as_string(value) {
+            let trimmed = token.trim();
+            if trimmed.is_empty() || is_bar_option_name(trimmed) {
+                break;
+            }
+            if saw_positional_color {
+                return Err(bar_ctx_err(
+                    builtin,
+                    "only one positional color argument is supported",
+                ));
+            }
             style.face_color = parse_bar_color_literal(&opts, trimmed)?;
-            idx = 1;
+            saw_positional_color = true;
+            idx += 1;
+            continue;
         }
+        if let Some(width) = value_as_scalar_f64(value) {
+            if saw_positional_width {
+                return Err(bar_ctx_err(
+                    builtin,
+                    "only one positional width argument is supported",
+                ));
+            }
+            if width <= 0.0 {
+                return Err(bar_ctx_err(builtin, "width must be positive"));
+            }
+            style.bar_width = width as f32;
+            saw_positional_width = true;
+            idx += 1;
+            continue;
+        }
+        break;
     }
 
     let remaining = &rest[idx..];
@@ -1308,6 +1346,33 @@ pub(crate) mod tests {
         assert!((style.bar_width - 0.5).abs() < f32::EPSILON);
         assert_eq!(style.face_color, Vec4::new(1.0, 0.0, 0.0, 1.0));
         assert_eq!(style.edge_color, Some(Vec4::new(0.0, 0.0, 0.0, 1.0)));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn bar_style_parses_positional_width_and_color() {
+        let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);
+        let rest = vec![Value::from(0.4), Value::String("red".into())];
+        let style = parse_bar_style_args("barh", &rest, defaults).expect("parsed");
+        assert!((style.bar_width - 0.4).abs() < f32::EPSILON);
+        assert_eq!(style.face_color, Vec4::new(1.0, 0.0, 0.0, 1.0));
+        assert!(!style.requires_cpu_path());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn bar_style_does_not_treat_rgb_triplet_as_positional_width() {
+        let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);
+        let rest = vec![Value::Tensor(Tensor {
+            data: vec![0.8, 0.1, 0.2],
+            shape: vec![1, 3],
+            rows: 1,
+            cols: 3,
+            dtype: runmat_builtins::NumericDType::F64,
+        })];
+
+        let err = parse_bar_style_args("barh", &rest, defaults).expect_err("rgb is not width");
+        assert!(err.message.contains("name-value arguments"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

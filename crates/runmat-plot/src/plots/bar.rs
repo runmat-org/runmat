@@ -64,6 +64,8 @@ struct BarGpuSource {
     inputs: BarGpuInputs,
     series_index: usize,
     series_count: usize,
+    source_row_count: usize,
+    transpose_source: bool,
 }
 
 impl BarChart {
@@ -77,16 +79,27 @@ impl BarChart {
                 "bar chart has GPU source data but no shared WGPU context is installed".to_string()
             })?;
             let row_count = source.inputs.row_count as usize;
+            let source_row_count = source.source_row_count.max(row_count).max(1);
             let series_count = source.series_count.max(1);
             let all_values = readback_scalar_buffer_f64(
                 &context.device,
                 &context.queue,
                 &source.inputs.values_buffer,
-                row_count * series_count,
+                source_row_count * series_count,
                 source.inputs.scalar,
             )
             .await?;
-            let offset = source.series_index * row_count;
+            if source.transpose_source {
+                let mut values = Vec::with_capacity(row_count);
+                for row in 0..row_count {
+                    let idx = row * source_row_count + source.series_index;
+                    values.push(*all_values.get(idx).ok_or_else(|| {
+                        "bar chart GPU source series is out of range".to_string()
+                    })?);
+                }
+                return Ok(values);
+            }
+            let offset = source.series_index * source_row_count;
             return Ok(all_values
                 .get(offset..offset + row_count)
                 .ok_or_else(|| "bar chart GPU source series is out of range".to_string())?
@@ -203,15 +216,29 @@ impl BarChart {
     }
 
     pub fn with_gpu_source(
+        self,
+        inputs: BarGpuInputs,
+        series_index: usize,
+        series_count: usize,
+    ) -> Self {
+        let value_count = self.value_count;
+        self.with_gpu_source_layout(inputs, series_index, series_count, value_count, false)
+    }
+
+    pub fn with_gpu_source_layout(
         mut self,
         inputs: BarGpuInputs,
         series_index: usize,
         series_count: usize,
+        source_row_count: usize,
+        transpose_source: bool,
     ) -> Self {
         self.gpu_source = Some(BarGpuSource {
             inputs,
             series_index,
             series_count: series_count.max(1),
+            source_row_count: source_row_count.max(1),
+            transpose_source,
         });
         self
     }

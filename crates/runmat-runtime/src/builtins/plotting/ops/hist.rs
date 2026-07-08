@@ -1374,6 +1374,8 @@ async fn build_histogram_gpu_chart_async(
         bar_width: style.bar_width,
         series_index: 0,
         series_count: 1,
+        source_row_count: bin_count_u32,
+        transpose_source: false,
         group_index: 0,
         group_count: 1,
         orientation: BarOrientation::Vertical,
