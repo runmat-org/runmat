@@ -525,6 +525,24 @@ fn fsurf_dispatches_function_handle_surface_through_vm() {
 }
 
 #[test]
+fn fcontour_dispatches_function_handle_contour_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        f1 = figure(211); \
+        ax1 = gca; \
+        f2 = figure(212); \
+        h = fcontour(ax1, @(x,y) x.^2 - y, [0 2 -1 1], 'MeshDensity', 5, 'LevelList', [-1 0 1], 'LineWidth', 2, 'DisplayName', 'levels'); \
+        if ~ishandle(h); error('fcontour did not return a handle'); end; \
+        if ~strcmp(get(h, 'Type'), 'functioncontour'); error('fcontour did not create function contour graphics'); end; \
+        if get(h, 'Parent') ~= ax1; error('fcontour parent axes mismatch'); end; \
+        if gcf() ~= f1; error('fcontour did not select target figure'); end; \
+        if get(h, 'MeshDensity') ~= 5; error('fcontour mesh density mismatch'); end; \
+        if get(h, 'LineWidth') ~= 2; error('fcontour line width mismatch'); end; \
+        if ~strcmp(get(h, 'DisplayName'), 'levels'); error('fcontour display name mismatch'); end;";
+    execute_source(input).expect("execute fcontour script");
+}
+
+#[test]
 fn animatedline_and_addpoints_dispatch_through_vm() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

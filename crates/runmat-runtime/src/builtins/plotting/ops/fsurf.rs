@@ -608,7 +608,7 @@ fn function_surface_state(function: &SurfaceFunction) -> FunctionSurfaceFunction
     }
 }
 
-fn function_surface_ref(function: &Value) -> FunctionSurfaceFunctionRef {
+pub(crate) fn function_surface_ref(function: &Value) -> FunctionSurfaceFunctionRef {
     match function {
         Value::FunctionHandle(name) => FunctionSurfaceFunctionRef::FunctionHandle(name.clone()),
         Value::ExternalFunctionHandle(name) => {

@@ -769,7 +769,7 @@ impl ContourCall {
     }
 }
 
-fn parse_level_spec(value: Value, context: &str) -> BuiltinResult<ContourLevelSpec> {
+pub(crate) fn parse_level_spec(value: Value, context: &str) -> BuiltinResult<ContourLevelSpec> {
     match value {
         Value::Tensor(tensor) => parse_tensor_levels(tensor, context),
         other => {
@@ -831,7 +831,10 @@ fn parse_tensor_levels(tensor: Tensor, context: &str) -> BuiltinResult<ContourLe
     Ok(ContourLevelSpec::Values(tensor.data))
 }
 
-fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> BuiltinResult<()> {
+pub(crate) fn apply_contour_options(
+    args: &mut ContourArgs,
+    options: &[Value],
+) -> BuiltinResult<()> {
     if options.is_empty() {
         return Ok(());
     }

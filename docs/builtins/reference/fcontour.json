@@ -1,0 +1,85 @@
+{
+  "title": "fcontour",
+  "category": "plotting",
+  "keywords": [
+    "fcontour",
+    "function contour",
+    "contour plot",
+    "matlab fcontour"
+  ],
+  "summary": "Plot contour lines of a scalar function.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-contour.webp",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`fcontour` samples arbitrary function handles on the host, then uses RunMat's existing contour renderer. There is no provider callback kernel because MATLAB callbacks are not GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::fcontour::tests",
+    "integration": "runmat-vm --test plotting::fcontour_dispatches_function_handle_contour_through_vm"
+  },
+  "description": "`fcontour` evaluates a function handle over a rectangular two-variable domain and renders contour lines from the sampled values.",
+  "behaviors": [
+    "`fcontour(f)` samples `f(x,y)` on the default `[-5 5 -5 5]` domain.",
+    "`fcontour(f, [xmin xmax ymin ymax])` uses an explicit rectangular domain; a two-element vector applies the same limits to both axes.",
+    "`fcontour(ax, ___)` renders into the requested axes and returns a function-contour graphics handle.",
+    "Function-handle outputs must be scalar real numeric values at every sampled point; non-finite samples are preserved as contour discontinuities."
+  ],
+  "options": [
+    "`'MeshDensity'` controls the number of samples along each domain dimension. RunMat accepts integer values from 2 through 400.",
+    "`'LevelList'`, `'Levels'`, `'LevelStep'`, `'LevelListMode'`, `'LineColor'`, `'Color'`, and `'LineWidth'` use the same parsing path as `contour`.",
+    "`'DisplayName'` sets the function-contour graphics handle display name."
+  ],
+  "examples": [
+    {
+      "description": "Plot function contours over the default domain",
+      "input": "fcontour(@(x,y) sin(x) + cos(y));"
+    },
+    {
+      "description": "Set the domain, levels, and mesh density",
+      "input": "h = fcontour(@(x,y) x.^2 - y.^2, [-2 2 -1 1], 'LevelList', [-1 0 1], 'MeshDensity', 75);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `fcontour` evaluate the function handle on the GPU?",
+      "answer": "No. MATLAB function handles can contain arbitrary user code, so RunMat samples them on the host and then hands the sampled grid to the contour renderer."
+    },
+    {
+      "question": "What happens if the function returns a vector?",
+      "answer": "RunMat raises `RunMat:fcontour:EvaluationFailed`; each sampled point must produce one scalar numeric value."
+    }
+  ],
+  "links": [
+    {
+      "label": "contour",
+      "url": "./contour"
+    },
+    {
+      "label": "contourf",
+      "url": "./contourf"
+    },
+    {
+      "label": "fsurf",
+      "url": "./fsurf"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/fcontour.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/fcontour.rs"
+  },
+  "gpu_residency": "`fcontour` is a callback-sampling builtin. It creates a new sampled contour plot and does not preserve input residency, because the input is a MATLAB function handle rather than a numeric provider buffer.",
+  "gpu_behavior": [
+    "Callback sampling runs on the host.",
+    "The resulting contour uses the existing `runmat-plot` contour rendering path."
+  ]
+}

@@ -76,6 +76,8 @@ pub(crate) mod datacursormode;
 pub(crate) mod drawnow;
 #[path = "ops/errorbar.rs"]
 pub(crate) mod errorbar;
+#[path = "ops/fcontour.rs"]
+pub(crate) mod fcontour;
 #[path = "ops/figure.rs"]
 pub(crate) mod figure;
 #[path = "ops/figure_persistence.rs"]

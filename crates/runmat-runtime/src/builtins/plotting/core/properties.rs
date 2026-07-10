@@ -2278,6 +2278,9 @@ fn get_plot_child_property(
         super::state::PlotChildHandleState::FunctionSurface(function_surface) => {
             get_function_surface_property(function_surface, property, builtin)
         }
+        super::state::PlotChildHandleState::FunctionContour(function_contour) => {
+            get_function_contour_property(function_contour, property, builtin)
+        }
         super::state::PlotChildHandleState::Area(area) => {
             get_area_property(area, property, builtin)
         }
@@ -2354,6 +2357,9 @@ fn apply_plot_child_property(
         }
         super::state::PlotChildHandleState::FunctionSurface(function_surface) => {
             apply_function_surface_property(function_surface, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::FunctionContour(function_contour) => {
+            apply_function_contour_property(function_contour, key, value, builtin)
         }
         super::state::PlotChildHandleState::Area(area) => {
             apply_area_property(area, key, value, builtin)
@@ -3245,6 +3251,79 @@ fn function_surface_function_value(function: &super::state::FunctionSurfaceFunct
             },
             None => Value::String(function_name.clone()),
         },
+    }
+}
+
+fn get_function_contour_property(
+    function_contour: &super::state::FunctionContourHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let contour_handle = super::state::SimplePlotHandleState {
+        figure: function_contour.figure,
+        axes_index: function_contour.axes_index,
+        plot_index: function_contour.plot_index,
+    };
+    let plot = get_simple_plot(&contour_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Contour(contour) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid function contour handle"),
+        ));
+    };
+    match property.map(canonical_property_name).as_deref() {
+        None => {
+            let mut st = child_base_struct(
+                "functioncontour",
+                function_contour.figure,
+                function_contour.axes_index,
+            );
+            st.insert(
+                "Function",
+                function_surface_function_value(&function_contour.function),
+            );
+            st.insert(
+                "MeshDensity",
+                Value::Num(function_contour.mesh_density as f64),
+            );
+            st.insert(
+                "XRange",
+                tensor_from_vec(vec![function_contour.x_range.0, function_contour.x_range.1]),
+            );
+            st.insert(
+                "YRange",
+                tensor_from_vec(vec![function_contour.y_range.0, function_contour.y_range.1]),
+            );
+            st.insert("LineWidth", Value::Num(contour.line_width as f64));
+            st.insert(
+                "DisplayName",
+                Value::String(contour.label.clone().unwrap_or_default()),
+            );
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("functioncontour".into())),
+        Some("parent") => Ok(child_parent_handle(
+            function_contour.figure,
+            function_contour.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("function") => Ok(function_surface_function_value(&function_contour.function)),
+        Some("meshdensity") => Ok(Value::Num(function_contour.mesh_density as f64)),
+        Some("xrange") => Ok(tensor_from_vec(vec![
+            function_contour.x_range.0,
+            function_contour.x_range.1,
+        ])),
+        Some("yrange") => Ok(tensor_from_vec(vec![
+            function_contour.y_range.0,
+            function_contour.y_range.1,
+        ])),
+        Some("linewidth") => Ok(Value::Num(contour.line_width as f64)),
+        Some("displayname") => Ok(Value::String(contour.label.unwrap_or_default())),
+        Some("zdata") => Ok(Value::Num(contour.base_z as f64)),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported functioncontour property `{other}`"),
+        )),
     }
 }
 
@@ -4855,6 +4934,29 @@ fn apply_function_surface_property(
     }
 }
 
+fn apply_function_contour_property(
+    function_contour: &super::state::FunctionContourHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    match key {
+        "linewidth" | "displayname" => {
+            let contour_handle = super::state::SimplePlotHandleState {
+                figure: function_contour.figure,
+                axes_index: function_contour.axes_index,
+                plot_index: function_contour.plot_index,
+            };
+            apply_contour_property(&contour_handle, key, value, builtin)
+        }
+        "meshdensity" | "xrange" | "yrange" | "function" => Err(plotting_error(
+            builtin,
+            format!("{builtin}: changing {key} after fcontour sampling is not supported yet"),
+        )),
+        _ => Ok(()),
+    }
+}
+
 fn apply_binscatter_property(
     binscatter: &super::state::BinscatterHandleState,
     key: &str,
@@ -5247,6 +5349,10 @@ fn apply_contour_property(
         if let runmat_plot::plots::figure::PlotElement::Contour(contour) = plot {
             if key == "displayname" {
                 contour.label = value_as_string(value).map(|s| s.to_string());
+            } else if key == "linewidth" {
+                if let Some(width) = value_as_f64(value) {
+                    contour.line_width = (width as f32).max(0.5);
+                }
             }
         }
     })
