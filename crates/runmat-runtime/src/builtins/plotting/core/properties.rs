@@ -2175,6 +2175,9 @@ fn get_plot_child_property(
         super::state::PlotChildHandleState::Line(plot) => {
             get_line_property(plot, property, builtin)
         }
+        super::state::PlotChildHandleState::AnimatedLine(plot) => {
+            get_animated_line_property(plot, property, builtin)
+        }
         super::state::PlotChildHandleState::Scatter(plot) => {
             get_scatter_property(plot, property, builtin)
         }
@@ -2243,6 +2246,9 @@ fn apply_plot_child_property(
         }
         super::state::PlotChildHandleState::Line(plot) => {
             apply_line_property(plot, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::AnimatedLine(plot) => {
+            apply_animated_line_property(plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Scatter(plot) => {
             apply_scatter_property(plot, key, value, builtin)
@@ -2316,6 +2322,9 @@ fn apply_plot_child_properties(
     match state {
         super::state::PlotChildHandleState::Line(plot) => {
             apply_line_properties(plot, &pairs, builtin)
+        }
+        super::state::PlotChildHandleState::AnimatedLine(plot) => {
+            apply_animated_line_properties(plot, &pairs, builtin)
         }
         super::state::PlotChildHandleState::Line3(plot) => {
             apply_line3_properties(plot, &pairs, builtin)
@@ -2577,6 +2586,144 @@ fn get_line_property(
             if line.visible { "on" } else { "off" }.into(),
         )),
         Some(name) => line_marker_property_value(&line.marker, name, builtin),
+    }
+}
+
+fn get_animated_line_property(
+    line_handle: &super::state::AnimatedLineHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let simple = animated_line_simple_state(line_handle);
+    let plot = get_simple_plot(&simple, builtin)?;
+    let property = property.map(canonical_property_name);
+    match plot {
+        runmat_plot::plots::figure::PlotElement::Line(line) => {
+            let (x_data, y_data) = line_xy_data_for_properties(&line, builtin)?;
+            match property.as_deref() {
+                None => {
+                    let mut st = child_base_struct(
+                        "animatedline",
+                        line_handle.figure,
+                        line_handle.axes_index,
+                    );
+                    st.insert("XData", tensor_from_vec(x_data));
+                    st.insert("YData", tensor_from_vec(y_data));
+                    st.insert("Color", Value::String(color_to_short_name(line.color)));
+                    st.insert("LineWidth", Value::Num(line.line_width as f64));
+                    st.insert(
+                        "LineStyle",
+                        Value::String(line_style_name(line.line_style).into()),
+                    );
+                    st.insert(
+                        "DisplayName",
+                        Value::String(line.label.clone().unwrap_or_default()),
+                    );
+                    st.insert(
+                        "Visible",
+                        Value::String(if line.visible { "on" } else { "off" }.into()),
+                    );
+                    st.insert(
+                        "MaximumNumPoints",
+                        animated_line_maximum_value(line_handle.maximum_num_points),
+                    );
+                    insert_line_marker_struct_props(&mut st, line.marker.as_ref());
+                    Ok(Value::Struct(st))
+                }
+                Some("type") => Ok(Value::String("animatedline".into())),
+                Some("parent") => Ok(child_parent_handle(
+                    line_handle.figure,
+                    line_handle.axes_index,
+                )),
+                Some("children") => Ok(handles_value(Vec::new())),
+                Some("xdata") => Ok(tensor_from_vec(x_data)),
+                Some("ydata") => Ok(tensor_from_vec(y_data)),
+                Some("zdata") => Ok(tensor_from_vec(Vec::new())),
+                Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+                Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
+                Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
+                Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
+                Some("visible") => Ok(Value::String(
+                    if line.visible { "on" } else { "off" }.into(),
+                )),
+                Some("maximumnumpoints") => {
+                    Ok(animated_line_maximum_value(line_handle.maximum_num_points))
+                }
+                Some(name) => line_marker_property_value(&line.marker, name, builtin),
+            }
+        }
+        runmat_plot::plots::figure::PlotElement::Line3(line) => match property.as_deref() {
+            None => {
+                let mut st =
+                    child_base_struct("animatedline", line_handle.figure, line_handle.axes_index);
+                st.insert("XData", tensor_from_vec(line.x_data.clone()));
+                st.insert("YData", tensor_from_vec(line.y_data.clone()));
+                st.insert("ZData", tensor_from_vec(line.z_data.clone()));
+                st.insert("Color", Value::String(color_to_short_name(line.color)));
+                st.insert("LineWidth", Value::Num(line.line_width as f64));
+                st.insert(
+                    "LineStyle",
+                    Value::String(line_style_name(line.line_style).into()),
+                );
+                st.insert(
+                    "DisplayName",
+                    Value::String(line.label.clone().unwrap_or_default()),
+                );
+                st.insert(
+                    "Visible",
+                    Value::String(if line.visible { "on" } else { "off" }.into()),
+                );
+                st.insert(
+                    "MaximumNumPoints",
+                    animated_line_maximum_value(line_handle.maximum_num_points),
+                );
+                Ok(Value::Struct(st))
+            }
+            Some("type") => Ok(Value::String("animatedline".into())),
+            Some("parent") => Ok(child_parent_handle(
+                line_handle.figure,
+                line_handle.axes_index,
+            )),
+            Some("children") => Ok(handles_value(Vec::new())),
+            Some("xdata") => Ok(tensor_from_vec(line.x_data)),
+            Some("ydata") => Ok(tensor_from_vec(line.y_data)),
+            Some("zdata") => Ok(tensor_from_vec(line.z_data)),
+            Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+            Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
+            Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
+            Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
+            Some("visible") => Ok(Value::String(
+                if line.visible { "on" } else { "off" }.into(),
+            )),
+            Some("maximumnumpoints") => {
+                Ok(animated_line_maximum_value(line_handle.maximum_num_points))
+            }
+            Some(other) => Err(plotting_error(
+                builtin,
+                format!("{builtin}: unsupported animatedline property `{other}`"),
+            )),
+        },
+        _ => Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid animatedline handle"),
+        )),
+    }
+}
+
+fn animated_line_maximum_value(maximum: Option<usize>) -> Value {
+    match maximum {
+        Some(value) => Value::Num(value as f64),
+        None => Value::Num(f64::INFINITY),
+    }
+}
+
+fn animated_line_simple_state(
+    line_handle: &super::state::AnimatedLineHandleState,
+) -> super::state::SimplePlotHandleState {
+    super::state::SimplePlotHandleState {
+        figure: line_handle.figure,
+        axes_index: line_handle.axes_index,
+        plot_index: line_handle.plot_index,
     }
 }
 
@@ -4017,6 +4164,81 @@ fn apply_line_properties(
     })
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
+}
+
+fn apply_animated_line_property(
+    line_handle: &super::state::AnimatedLineHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    apply_animated_line_properties(line_handle, &[(key.to_string(), value)], builtin)
+}
+
+fn apply_animated_line_properties(
+    line_handle: &super::state::AnimatedLineHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let mut maximum = None;
+    let mut plot_pairs = Vec::new();
+    for (key, value) in pairs {
+        match key.as_str() {
+            "maximumnumpoints" => {
+                maximum = Some(animated_line_maximum_from_value(value, builtin)?);
+            }
+            _ => plot_pairs.push((key.clone(), *value)),
+        }
+    }
+
+    if !plot_pairs.is_empty() {
+        let simple = animated_line_simple_state(line_handle);
+        if line_handle.is_3d {
+            apply_line3_properties(&simple, &plot_pairs, builtin)?;
+        } else {
+            if plot_pairs.iter().any(|(key, _)| key == "zdata") {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: ZData requires a 3-D animated line"),
+                ));
+            }
+            apply_line_properties(&simple, &plot_pairs, builtin)?;
+        }
+    }
+
+    if let Some(maximum) = maximum {
+        super::state::set_animated_line_maximum_num_points(line_handle, maximum)
+            .map_err(|err| plotting_error(builtin, format!("{builtin}: {err}")))?;
+    }
+    Ok(())
+}
+
+fn animated_line_maximum_from_value(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<Option<usize>> {
+    let Some(maximum) = value_as_f64(value) else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: MaximumNumPoints must be numeric"),
+        ));
+    };
+    if maximum.is_infinite() && maximum.is_sign_positive() {
+        return Ok(None);
+    }
+    if !maximum.is_finite() || maximum <= 0.0 {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: MaximumNumPoints must be positive or Inf"),
+        ));
+    }
+    if maximum > usize::MAX as f64 {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: MaximumNumPoints is too large"),
+        ));
+    }
+    Ok(Some(maximum.floor() as usize))
 }
 
 fn apply_reference_line_property(

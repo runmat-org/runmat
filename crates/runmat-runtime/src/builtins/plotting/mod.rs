@@ -24,8 +24,12 @@ pub mod web;
 #[path = "type_resolvers.rs"]
 pub(crate) mod type_resolvers;
 
+#[path = "ops/addpoints.rs"]
+pub(crate) mod addpoints;
 #[path = "ops/ancestor.rs"]
 pub(crate) mod ancestor;
+#[path = "ops/animatedline.rs"]
+pub(crate) mod animatedline;
 #[path = "ops/area.rs"]
 pub(crate) mod area;
 #[path = "ops/axes.rs"]

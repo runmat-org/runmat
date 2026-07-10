@@ -456,6 +456,25 @@ fn line_dispatches_and_round_trips_properties() {
 }
 
 #[test]
+fn animatedline_and_addpoints_dispatch_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        an = animatedline('MaximumNumPoints', 3, 'Color', 'r'); \
+        if ~strcmp(get(an, 'Type'), 'animatedline'); error('animatedline type mismatch'); end; \
+        if get(an, 'MaximumNumPoints') ~= 3; error('animatedline max mismatch'); end; \
+        addpoints(an, [1 2], [10 20]); \
+        addpoints(an, [3 4], [30 40]); \
+        x = get(an, 'XData'); \
+        y = get(an, 'YData'); \
+        if numel(x) ~= 3 || x(1) ~= 2 || x(3) ~= 4; error('animatedline x trim mismatch'); end; \
+        if y(1) ~= 20 || y(3) ~= 40; error('animatedline y trim mismatch'); end; \
+        addpoints(an, 5, 50, 500); \
+        z = get(an, 'ZData'); \
+        if numel(z) ~= 3 || z(3) ~= 500; error('animatedline z append mismatch'); end;";
+    execute_source(input).expect("execute animatedline/addpoints script");
+}
+
+#[test]
 fn plotyy_dispatches_and_returns_dual_axes_outputs() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

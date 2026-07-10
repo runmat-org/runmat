@@ -1,0 +1,102 @@
+{
+  "title": "animatedline",
+  "category": "plotting",
+  "keywords": [
+    "animatedline",
+    "addpoints",
+    "animated line",
+    "live plot",
+    "graphics handle",
+    "matlab plotting"
+  ],
+  "summary": "Create an animated line graphics object for incremental plotting.",
+  "hero_image": null,
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`animatedline` is a graphics-state constructor. GPU-resident coordinate inputs are accepted through the plotting input path and gathered into the client-side animated-line state before incremental updates."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::animatedline::tests",
+    "integration": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`animatedline` creates a graphics handle backed by RunMat's normal 2-D or 3-D line rendering paths. The handle can be updated with `addpoints` and queried or styled with `get` and `set`.",
+  "behaviors": [
+    "`animatedline()` creates an empty animated line on the current axes.",
+    "`animatedline(x,y)` creates a 2-D animated line with initial points.",
+    "`animatedline(x,y,z)` creates a 3-D animated line when the initial coordinate vectors are nonempty.",
+    "A leading axes handle or `Parent` name/value pair routes the animated line to explicit axes.",
+    "`MaximumNumPoints` limits retained points by dropping the oldest samples. The default is 1000000; `Inf` disables trimming.",
+    "Returned handles report `Type` as `animatedline` and support line styling properties such as `Color`, `LineWidth`, `LineStyle`, marker properties for 2-D animated lines, `DisplayName`, and `Visible`."
+  ],
+  "options": [
+    "`Parent` accepts an axes handle.",
+    "`MaximumNumPoints` accepts a positive numeric value or `Inf`.",
+    "Common line properties include `Color`, `LineWidth`, `LineStyle`, `DisplayName`, and `Visible`. Marker properties are supported for 2-D animated lines; 3-D animated lines reject marker metadata until RunMat's 3-D line renderer has marker support."
+  ],
+  "examples": [
+    {
+      "description": "Create and update a 2-D animated line",
+      "input": "an = animatedline('Color', 'r', 'MaximumNumPoints', 100);\naddpoints(an, 1:3, [2 4 8]);\nget(an, 'XData')",
+      "output": "ans =\n     1     2     3"
+    },
+    {
+      "description": "Create a 3-D animated line",
+      "input": "an = animatedline();\naddpoints(an, [1 2], [3 4], [5 6]);\nget(an, 'ZData')",
+      "output": "ans =\n     5     6"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does animatedline render through a separate animation engine?",
+      "answer": "No. RunMat stores the animated-line handle as plotting state that points at the existing `LinePlot` or `Line3Plot` object, so updates reuse the established line rendering paths."
+    },
+    {
+      "question": "What happens when the maximum point count is exceeded?",
+      "answer": "RunMat drops the oldest coordinates and keeps the newest `MaximumNumPoints` samples, matching MATLAB's compatibility behavior for streaming plots."
+    },
+    {
+      "question": "Can 3-D animated lines use marker properties?",
+      "answer": "Not yet. RunMat rejects marker-styled 2-D animated-line handles when callers try to promote them with `addpoints(an,x,y,z)` because the current 3-D line renderer does not store marker metadata."
+    }
+  ],
+  "links": [
+    {
+      "label": "addpoints",
+      "url": "./addpoints"
+    },
+    {
+      "label": "line",
+      "url": "./line"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/animatedline.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/animatedline.rs"
+  },
+  "gpu_residency": "`animatedline` accepts GPU-resident coordinate inputs but stores animated state as host-side graphics data so subsequent `addpoints`, `get`, and `set` operations have MATLAB-compatible handle semantics.",
+  "gpu_behavior": [
+    "Construction gathers GPU coordinate vectors into the animated-line state.",
+    "Rendering still uses RunMat's existing line and line3 rendering paths after points are stored."
+  ]
+}

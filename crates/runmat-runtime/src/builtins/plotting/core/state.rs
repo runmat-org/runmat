@@ -521,6 +521,15 @@ pub struct SimplePlotHandleState {
 }
 
 #[derive(Clone, Debug)]
+pub struct AnimatedLineHandleState {
+    pub figure: FigureHandle,
+    pub axes_index: usize,
+    pub plot_index: usize,
+    pub is_3d: bool,
+    pub maximum_num_points: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
 pub struct ErrorBarHandleState {
     pub figure: FigureHandle,
     pub axes_index: usize,
@@ -590,6 +599,7 @@ pub struct TextAnnotationHandleState {
 pub enum PlotChildHandleState {
     Histogram(HistogramHandleState),
     Line(SimplePlotHandleState),
+    AnimatedLine(AnimatedLineHandleState),
     Scatter(SimplePlotHandleState),
     Bar(SimplePlotHandleState),
     Stem(StemHandleState),
@@ -627,6 +637,7 @@ impl PlotChildHandleState {
             | Self::ContourFill(state)
             | Self::ReferenceLine(state)
             | Self::Pie(state) => (state.figure, state.axes_index),
+            Self::AnimatedLine(state) => (state.figure, state.axes_index),
             Self::Stem(state) => (state.figure, state.axes_index),
             Self::ErrorBar(state) => (state.figure, state.axes_index),
             Self::Quiver(state) => (state.figure, state.axes_index),
@@ -642,6 +653,7 @@ impl PlotChildHandleState {
         match self {
             Self::Histogram(_) => "histogram",
             Self::Line(_) | Self::Line3(_) => "line",
+            Self::AnimatedLine(_) => "animatedline",
             Self::Scatter(_) | Self::Scatter3(_) => "scatter",
             Self::Bar(_) => "bar",
             Self::Stem(_) => "stem",
@@ -3156,6 +3168,29 @@ pub fn register_line_handle(figure: FigureHandle, axes_index: usize, plot_index:
     register_simple_plot_handle(figure, axes_index, plot_index, PlotChildHandleState::Line)
 }
 
+pub fn register_animated_line_handle(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    is_3d: bool,
+    maximum_num_points: Option<usize>,
+) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children.insert(
+        id,
+        PlotChildHandleState::AnimatedLine(AnimatedLineHandleState {
+            figure,
+            axes_index,
+            plot_index,
+            is_3d,
+            maximum_num_points,
+        }),
+    );
+    id as f64
+}
+
 pub fn register_reference_line_handle(
     figure: FigureHandle,
     axes_index: usize,
@@ -3655,6 +3690,188 @@ pub fn update_plot_element(
     Ok(())
 }
 
+pub fn append_points_to_animated_line(
+    handle: &AnimatedLineHandleState,
+    x: Vec<f64>,
+    y: Vec<f64>,
+    z: Option<Vec<f64>>,
+) -> Result<(), String> {
+    if x.len() != y.len() || z.as_ref().is_some_and(|z| z.len() != x.len()) {
+        return Err("coordinate vectors must have the same length".to_string());
+    }
+    if x.is_empty() {
+        return Ok(());
+    }
+
+    let (figure_clone, became_3d) = {
+        let mut reg = registry();
+        let mut became_3d = false;
+        let figure_clone = {
+            let state = get_state_mut(&mut reg, handle.figure);
+            let plot = state
+                .figure
+                .get_plot_mut(handle.plot_index)
+                .ok_or_else(|| "invalid animated line handle".to_string())?;
+
+            match z {
+                None => match plot {
+                    PlotElement::Line(line) => {
+                        let mut next_x = std::mem::take(&mut line.x_data);
+                        let mut next_y = std::mem::take(&mut line.y_data);
+                        next_x.extend(x);
+                        next_y.extend(y);
+                        trim_oldest_xy(handle.maximum_num_points, &mut next_x, &mut next_y);
+                        line.update_data(next_x, next_y)
+                            .map_err(|err| format!("failed to update animated line: {err}"))?;
+                    }
+                    PlotElement::Line3(_) => {
+                        return Err(
+                            "3-D animated lines require X, Y, and Z coordinates".to_string()
+                        );
+                    }
+                    _ => return Err("invalid animated line handle".to_string()),
+                },
+                Some(z) => match plot {
+                    PlotElement::Line(line) => {
+                        if line.marker.is_some() {
+                            return Err("3-D animated lines do not support marker properties yet"
+                                .to_string());
+                        }
+                        let mut next_x = std::mem::take(&mut line.x_data);
+                        let mut next_y = std::mem::take(&mut line.y_data);
+                        let mut next_z = vec![0.0; next_x.len()];
+                        next_x.extend(x);
+                        next_y.extend(y);
+                        next_z.extend(z);
+                        trim_oldest_xyz(
+                            handle.maximum_num_points,
+                            &mut next_x,
+                            &mut next_y,
+                            &mut next_z,
+                        );
+                        let mut line3 = runmat_plot::plots::Line3Plot::new(next_x, next_y, next_z)
+                            .map_err(|err| format!("failed to update animated line: {err}"))?;
+                        line3.color = line.color;
+                        line3.line_width = line.line_width;
+                        line3.line_style = line.line_style;
+                        line3.label = line.label.clone();
+                        line3.visible = line.visible;
+                        *plot = PlotElement::Line3(line3);
+                        became_3d = true;
+                    }
+                    PlotElement::Line3(line) => {
+                        let mut next_x = std::mem::take(&mut line.x_data);
+                        let mut next_y = std::mem::take(&mut line.y_data);
+                        let mut next_z = std::mem::take(&mut line.z_data);
+                        next_x.extend(x);
+                        next_y.extend(y);
+                        next_z.extend(z);
+                        trim_oldest_xyz(
+                            handle.maximum_num_points,
+                            &mut next_x,
+                            &mut next_y,
+                            &mut next_z,
+                        );
+                        line.update_data(next_x, next_y, next_z)
+                            .map_err(|err| format!("failed to update animated line: {err}"))?;
+                    }
+                    _ => return Err("invalid animated line handle".to_string()),
+                },
+            }
+
+            state.revision = state.revision.wrapping_add(1);
+            state.figure.clone()
+        };
+
+        if became_3d {
+            for child in reg.plot_children.values_mut() {
+                if let PlotChildHandleState::AnimatedLine(animated) = child {
+                    if animated.figure == handle.figure && animated.plot_index == handle.plot_index
+                    {
+                        animated.is_3d = true;
+                    }
+                }
+            }
+        }
+        (figure_clone, became_3d)
+    };
+    let _ = became_3d;
+    notify_with_figure(handle.figure, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_animated_line_maximum_num_points(
+    handle: &AnimatedLineHandleState,
+    maximum_num_points: Option<usize>,
+) -> Result<(), String> {
+    let figure_clone = {
+        let mut reg = registry();
+        let figure_clone = {
+            let state = get_state_mut(&mut reg, handle.figure);
+            let plot = state
+                .figure
+                .get_plot_mut(handle.plot_index)
+                .ok_or_else(|| "invalid animated line handle".to_string())?;
+            match plot {
+                PlotElement::Line(line) => {
+                    let mut x = std::mem::take(&mut line.x_data);
+                    let mut y = std::mem::take(&mut line.y_data);
+                    trim_oldest_xy(maximum_num_points, &mut x, &mut y);
+                    line.update_data(x, y)
+                        .map_err(|err| format!("failed to update animated line: {err}"))?;
+                }
+                PlotElement::Line3(line) => {
+                    let mut x = std::mem::take(&mut line.x_data);
+                    let mut y = std::mem::take(&mut line.y_data);
+                    let mut z = std::mem::take(&mut line.z_data);
+                    trim_oldest_xyz(maximum_num_points, &mut x, &mut y, &mut z);
+                    line.update_data(x, y, z)
+                        .map_err(|err| format!("failed to update animated line: {err}"))?;
+                }
+                _ => return Err("invalid animated line handle".to_string()),
+            }
+            state.revision = state.revision.wrapping_add(1);
+            state.figure.clone()
+        };
+
+        for child in reg.plot_children.values_mut() {
+            if let PlotChildHandleState::AnimatedLine(animated) = child {
+                if animated.figure == handle.figure && animated.plot_index == handle.plot_index {
+                    animated.maximum_num_points = maximum_num_points;
+                }
+            }
+        }
+        figure_clone
+    };
+    notify_with_figure(handle.figure, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+fn trim_oldest_xy(maximum: Option<usize>, x: &mut Vec<f64>, y: &mut Vec<f64>) {
+    let Some(maximum) = maximum else {
+        return;
+    };
+    if x.len() <= maximum {
+        return;
+    }
+    let drop = x.len() - maximum;
+    x.drain(0..drop);
+    y.drain(0..drop);
+}
+
+fn trim_oldest_xyz(maximum: Option<usize>, x: &mut Vec<f64>, y: &mut Vec<f64>, z: &mut Vec<f64>) {
+    let Some(maximum) = maximum else {
+        return;
+    };
+    if x.len() <= maximum {
+        return;
+    }
+    let drop = x.len() - maximum;
+    x.drain(0..drop);
+    y.drain(0..drop);
+    z.drain(0..drop);
+}
+
 fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) {
     reg.plot_children.retain(|_, state| match state {
         PlotChildHandleState::Histogram(hist) => hist.figure != handle,
@@ -3670,6 +3887,7 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         | PlotChildHandleState::ContourFill(plot)
         | PlotChildHandleState::ReferenceLine(plot)
         | PlotChildHandleState::Pie(plot) => plot.figure != handle,
+        PlotChildHandleState::AnimatedLine(animated) => animated.figure != handle,
         PlotChildHandleState::Stem(stem) => stem.figure != handle,
         PlotChildHandleState::ErrorBar(err) => err.figure != handle,
         PlotChildHandleState::Quiver(quiver) => quiver.figure != handle,
@@ -3699,6 +3917,9 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
         | PlotChildHandleState::ReferenceLine(plot)
         | PlotChildHandleState::Pie(plot) => {
             !(plot.figure == handle && plot.axes_index == axes_index)
+        }
+        PlotChildHandleState::AnimatedLine(animated) => {
+            !(animated.figure == handle && animated.axes_index == axes_index)
         }
         PlotChildHandleState::Stem(stem) => {
             !(stem.figure == handle && stem.axes_index == axes_index)
