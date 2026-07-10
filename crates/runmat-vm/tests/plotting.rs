@@ -349,6 +349,40 @@ fn zoom_object_dispatches_and_preserves_mode_properties() {
 }
 
 #[test]
+fn plotting_ui_compat_helpers_dispatch_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        f = figure('Visible', 'off'); \
+        p = pan(f); \
+        set(p, 'Motion', 'horizontal', 'Enable', 'on'); \
+        if ~strcmp(get(p, 'Enable'), 'on'); error('pan Enable mismatch'); end; \
+        if ~strcmp(get(p, 'Motion'), 'horizontal'); error('pan Motion mismatch'); end; \
+        dcm = datacursormode(f); \
+        set(dcm, 'Enable', 'on', 'DisplayStyle', 'window', 'SnapToDataVertex', 'off'); \
+        if ~strcmp(get(dcm, 'Enable'), 'on'); error('datacursormode Enable mismatch'); end; \
+        if ~strcmp(get(dcm, 'DisplayStyle'), 'window'); error('datacursormode DisplayStyle mismatch'); end; \
+        if ~strcmp(get(dcm, 'SnapToDataVertex'), 'off'); error('datacursormode SnapToDataVertex mismatch'); end; \
+        h = waitbar(0.25, 'Loading', 'Name', 'Progress'); \
+        waitbar(0.75, h, 'Almost done'); \
+        if get(h, 'WaitbarProgress') ~= 0.75; error('waitbar progress mismatch'); end; \
+        if ~strcmp(get(h, 'WaitbarMessage'), 'Almost done'); error('waitbar message mismatch'); end; \
+        waitbar(0.9); \
+        if get(h, 'WaitbarProgress') ~= 0.9; error('waitbar implicit update mismatch'); end; \
+        info = opengl('info'); \
+        if ~strcmp(info.Renderer, 'runmat-plot'); error('opengl renderer mismatch'); end; \
+        if ~strcmp(opengl('save', 'hardware'), 'ok'); error('opengl save mismatch'); end; \
+        if ~strcmp(opengl('hardwarebasic'), 'hardwarebasic'); error('opengl hardwarebasic mismatch'); end; \
+        if ~strcmp(opengl('save', 'none'), 'ok'); error('opengl save none mismatch'); end; \
+        out = class(dcm);";
+    let vars = execute_source(input).expect("execute plotting UI compatibility script");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::String(class_name)
+            if class_name == "matlab.graphics.shape.internal.DataCursorManager"
+    )));
+}
+
+#[test]
 fn tickformat_dispatches_and_updates_axes_properties() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

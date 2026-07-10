@@ -7,16 +7,16 @@ use super::state::{
     axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
     axis_display_bounds_snapshot_for_axes, current_axes_handle_for_figure,
     current_figure_handle_if_exists, decode_axes_handle, decode_plot_object_handle,
-    figure_handle_exists, figure_has_sg_title, legend_entries_snapshot, present_figure_update,
-    root_default_properties, root_default_property, root_figure_handles, root_show_hidden_handles,
-    root_units, select_axes_for_figure, select_current_figure_if_exists,
+    figure_handle_exists, figure_has_sg_title, figure_tag, legend_entries_snapshot,
+    present_figure_update, root_default_properties, root_default_property, root_figure_handles,
+    root_show_hidden_handles, root_units, select_axes_for_figure, select_current_figure_if_exists,
     set_axes_position_for_axes, set_axes_style_for_axes, set_axes_units_for_axes,
     set_axis_tick_angles_for_axes, set_axis_tick_formats_for_axes, set_axis_tick_labels_for_axes,
     set_axis_ticks_for_axes, set_figure_background_color, set_figure_name, set_figure_number_title,
-    set_figure_position, set_figure_visible, set_legend_for_axes, set_root_default_property,
-    set_root_show_hidden_handles, set_root_units, set_sg_title_properties_for_figure,
-    set_text_annotation_properties_for_axes, set_text_properties_for_axes, FigureHandle,
-    PlotObjectKind, RootPropertyValue,
+    set_figure_position, set_figure_tag, set_figure_visible, set_legend_for_axes,
+    set_root_default_property, set_root_show_hidden_handles, set_root_units,
+    set_sg_title_properties_for_figure, set_text_annotation_properties_for_axes,
+    set_text_properties_for_axes, FigureHandle, PlotObjectKind, RootPropertyValue,
 };
 use super::style::{
     parse_color_value, value_as_bool, value_as_f64, value_as_string, LineStyleParseOptions,
@@ -377,6 +377,13 @@ fn get_figure_property(
                 "Color",
                 Value::String(color_to_short_name(figure.background_color)),
             );
+            st.insert("Tag", Value::String(figure_tag(handle).unwrap_or_default()));
+            if let Some(waitbar) = super::state::waitbar_state_snapshot(handle)
+                .map_err(|err| map_figure_error(builtin, err))?
+            {
+                st.insert("WaitbarProgress", Value::Num(waitbar.progress));
+                st.insert("WaitbarMessage", Value::String(waitbar.message));
+            }
             st.insert("SGTitle", Value::Num(sg_title_handle));
             Ok(Value::Struct(st))
         }
@@ -396,6 +403,19 @@ fn get_figure_property(
         Some("visible") => Ok(Value::Bool(figure.visible)),
         Some("position") => Ok(figure_position_value(figure.position)),
         Some("color") => Ok(Value::String(color_to_short_name(figure.background_color))),
+        Some("waitbarprogress") => Ok(Value::Num(
+            super::state::waitbar_state_snapshot(handle)
+                .map_err(|err| map_figure_error(builtin, err))?
+                .map(|state| state.progress)
+                .unwrap_or(f64::NAN),
+        )),
+        Some("waitbarmessage") => Ok(Value::String(
+            super::state::waitbar_state_snapshot(handle)
+                .map_err(|err| map_figure_error(builtin, err))?
+                .map(|state| state.message)
+                .unwrap_or_default(),
+        )),
+        Some("tag") => Ok(Value::String(figure_tag(handle).unwrap_or_default())),
         Some("sgtitle") => Ok(Value::Num(sg_title_handle)),
         Some(other) => Err(plotting_error(
             builtin,
@@ -1203,7 +1223,7 @@ fn property_name_text(value: &Value, builtin: &'static str) -> BuiltinResult<Str
 fn canonical_property_name(name: &str) -> Cow<'_, str> {
     match name.to_ascii_lowercase().as_str() {
         "textcolor" => Cow::Borrowed("textcolor"),
-        "color" => Cow::Borrowed("color"),
+        "color" | "backgroundcolor" => Cow::Borrowed("color"),
         "fontsize" => Cow::Borrowed("fontsize"),
         "fontweight" => Cow::Borrowed("fontweight"),
         "fontangle" => Cow::Borrowed("fontangle"),
@@ -1932,6 +1952,12 @@ fn apply_figure_property(
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(true)
         }
+        "tag" => {
+            let tag = value_as_text_string(value)
+                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Tag must be text")))?;
+            set_figure_tag(figure_handle, tag).map_err(|err| map_figure_error(builtin, err))?;
+            Ok(true)
+        }
         "currentaxes" => {
             let resolved = resolve_plot_handle(value, builtin)?;
             let PlotHandle::Axes(fig, axes_index) = resolved else {
@@ -1989,6 +2015,10 @@ pub(crate) fn validate_figure_property_value(
         }
         "color" => {
             let _ = parse_color_value(&opts, property_value)?;
+        }
+        "tag" => {
+            value_as_text_string(property_value)
+                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Tag must be text")))?;
         }
         "currentaxes" => {
             let resolved = resolve_plot_handle(property_value, builtin)?;

@@ -123,6 +123,18 @@ pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     {
         return Ok(value);
     }
+    if let Some(value) =
+        super::pan::get_pan_object_property(&args[0], property.as_deref(), BUILTIN_NAME)?
+    {
+        return Ok(value);
+    }
+    if let Some(value) = super::datacursormode::get_data_cursor_object_property(
+        &args[0],
+        property.as_deref(),
+        BUILTIN_NAME,
+    )? {
+        return Ok(value);
+    }
     let handle = resolve_plot_handle(&args[0], BUILTIN_NAME).map_err(map_get_error)?;
     get_properties(handle, property.as_deref(), BUILTIN_NAME).map_err(map_get_error)
 }

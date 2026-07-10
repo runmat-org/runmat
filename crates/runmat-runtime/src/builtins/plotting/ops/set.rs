@@ -103,6 +103,16 @@ pub fn set_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     if let Some(()) = super::zoom::set_zoom_object_properties(&args[0], &args[1..], BUILTIN_NAME)? {
         return Ok("ok".to_string());
     }
+    if let Some(()) = super::pan::set_pan_object_properties(&args[0], &args[1..], BUILTIN_NAME)? {
+        return Ok("ok".to_string());
+    }
+    if let Some(()) = super::datacursormode::set_data_cursor_object_properties(
+        &args[0],
+        &args[1..],
+        BUILTIN_NAME,
+    )? {
+        return Ok("ok".to_string());
+    }
     let handle = resolve_plot_handle(&args[0], BUILTIN_NAME).map_err(map_set_error)?;
     set_properties(handle, &args[1..], BUILTIN_NAME).map_err(map_set_error)?;
     Ok("ok".to_string())

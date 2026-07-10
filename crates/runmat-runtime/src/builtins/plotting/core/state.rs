@@ -175,6 +175,66 @@ pub struct ZoomStateSnapshot {
     pub mode: ZoomModeState,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PanModeState {
+    pub enabled: bool,
+    pub motion: ZoomMotion,
+}
+
+impl Default for PanModeState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            motion: ZoomMotion::Both,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PanStateSnapshot {
+    pub figure: FigureHandle,
+    pub axes_index: Option<usize>,
+    pub mode: PanModeState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PanModeCommand {
+    On,
+    Off,
+    Toggle,
+    XOn,
+    YOn,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DataCursorModeState {
+    pub enabled: bool,
+    pub snap_to_data_vertex: bool,
+    pub display_style: String,
+}
+
+impl Default for DataCursorModeState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            snap_to_data_vertex: true,
+            display_style: "datatip".into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DataCursorStateSnapshot {
+    pub figure: FigureHandle,
+    pub mode: DataCursorModeState,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct WaitbarState {
+    pub progress: f64,
+    pub message: String,
+}
+
 const DEFAULT_LINE_STYLE_ORDER: [LineStyle; 1] = [LineStyle::Solid];
 
 #[derive(Clone)]
@@ -257,6 +317,7 @@ impl LineColorCycle {
 struct FigureState {
     figure: Figure,
     active_axes: usize,
+    tag: String,
     hold_per_axes: HashMap<usize, bool>,
     line_style_cycles: HashMap<usize, LineStyleCycle>,
     line_color_cycles: HashMap<usize, LineColorCycle>,
@@ -266,6 +327,11 @@ struct FigureState {
     last_enabled_zoom_motion: ZoomMotion,
     zoom_axes_modes: HashMap<usize, ZoomModeState>,
     zoom_baselines: HashMap<usize, AxisLimitSnapshot>,
+    pan_mode: PanModeState,
+    last_enabled_pan_motion: ZoomMotion,
+    pan_axes_modes: HashMap<usize, PanModeState>,
+    data_cursor_mode: DataCursorModeState,
+    waitbar: Option<WaitbarState>,
     revision: u64,
 }
 
@@ -276,6 +342,7 @@ impl FigureState {
         Self {
             figure,
             active_axes: 0,
+            tag: String::new(),
             hold_per_axes: HashMap::new(),
             line_style_cycles: HashMap::new(),
             line_color_cycles: HashMap::new(),
@@ -285,6 +352,11 @@ impl FigureState {
             last_enabled_zoom_motion: ZoomMotion::Both,
             zoom_axes_modes: HashMap::new(),
             zoom_baselines: HashMap::new(),
+            pan_mode: PanModeState::default(),
+            last_enabled_pan_motion: ZoomMotion::Both,
+            pan_axes_modes: HashMap::new(),
+            data_cursor_mode: DataCursorModeState::default(),
+            waitbar: None,
             revision: 0,
         }
     }
@@ -1099,6 +1171,14 @@ pub fn set_sg_title_properties_for_figure(
 pub fn set_figure_name(handle: FigureHandle, name: String) -> Result<(), FigureError> {
     let ((), figure_clone) = with_figure_mut(handle, |state| {
         state.figure.set_name(name);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_figure_tag(handle: FigureHandle, tag: String) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        state.tag = tag;
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
@@ -2433,6 +2513,184 @@ pub fn apply_zoom_factor_for_axes(
     Ok(())
 }
 
+fn pan_mode_for_target(state: &FigureState, axes_index: Option<usize>) -> PanModeState {
+    axes_index
+        .and_then(|index| state.pan_axes_modes.get(&index).copied())
+        .unwrap_or(state.pan_mode)
+}
+
+fn apply_pan_mode_command(
+    mode: &mut PanModeState,
+    last_enabled_motion: &mut ZoomMotion,
+    command: PanModeCommand,
+) {
+    match command {
+        PanModeCommand::On => {
+            mode.enabled = true;
+            mode.motion = *last_enabled_motion;
+        }
+        PanModeCommand::Off => mode.enabled = false,
+        PanModeCommand::Toggle => {
+            mode.enabled = !mode.enabled;
+            if mode.enabled {
+                mode.motion = *last_enabled_motion;
+            }
+        }
+        PanModeCommand::XOn => {
+            mode.enabled = true;
+            mode.motion = ZoomMotion::Horizontal;
+            *last_enabled_motion = ZoomMotion::Horizontal;
+        }
+        PanModeCommand::YOn => {
+            mode.enabled = true;
+            mode.motion = ZoomMotion::Vertical;
+            *last_enabled_motion = ZoomMotion::Vertical;
+        }
+    }
+}
+
+pub fn pan_state_snapshot(
+    handle: FigureHandle,
+    axes_index: Option<usize>,
+) -> Result<PanStateSnapshot, FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    if let Some(index) = axes_index {
+        validate_axes_index(state, index)?;
+    }
+    Ok(PanStateSnapshot {
+        figure: handle,
+        axes_index,
+        mode: pan_mode_for_target(state, axes_index),
+    })
+}
+
+pub fn set_pan_mode_for_figure(
+    handle: FigureHandle,
+    command: PanModeCommand,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        apply_pan_mode_command(
+            &mut state.pan_mode,
+            &mut state.last_enabled_pan_motion,
+            command,
+        );
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_pan_mode_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    command: PanModeCommand,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        let mut mode = pan_mode_for_target(state, Some(axes_index));
+        apply_pan_mode_command(&mut mode, &mut state.last_enabled_pan_motion, command);
+        state.pan_axes_modes.insert(axes_index, mode);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_pan_enabled_for_figure(handle: FigureHandle, enabled: bool) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        state.pan_mode.enabled = enabled;
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_pan_motion_for_figure(
+    handle: FigureHandle,
+    motion: ZoomMotion,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        state.pan_mode.motion = motion;
+        state.last_enabled_pan_motion = motion;
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn data_cursor_state_snapshot(
+    handle: FigureHandle,
+) -> Result<DataCursorStateSnapshot, FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    Ok(DataCursorStateSnapshot {
+        figure: handle,
+        mode: state.data_cursor_mode.clone(),
+    })
+}
+
+pub fn set_data_cursor_enabled_for_figure(
+    handle: FigureHandle,
+    enabled: bool,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        state.data_cursor_mode.enabled = enabled;
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_data_cursor_snap_to_data_vertex_for_figure(
+    handle: FigureHandle,
+    enabled: bool,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        state.data_cursor_mode.snap_to_data_vertex = enabled;
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_data_cursor_display_style_for_figure(
+    handle: FigureHandle,
+    style: String,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        state.data_cursor_mode.display_style = style;
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_waitbar_state(
+    handle: FigureHandle,
+    progress: f64,
+    message: String,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        if state.tag.is_empty() {
+            state.tag = "TMWWaitbar".into();
+        }
+        state.waitbar = Some(WaitbarState { progress, message });
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn waitbar_state_snapshot(handle: FigureHandle) -> Result<Option<WaitbarState>, FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    Ok(state.waitbar.clone())
+}
+
+pub fn current_or_any_waitbar_handle() -> Option<FigureHandle> {
+    let reg = registry();
+    if let Some(state) = reg.figures.get(&reg.current) {
+        if state.waitbar.is_some() {
+            return Some(reg.current);
+        }
+    }
+    reg.figures
+        .iter()
+        .find_map(|(handle, state)| state.waitbar.as_ref().map(|_| *handle))
+}
+
 pub fn z_limits_snapshot() -> Option<(f64, f64)> {
     let mut reg = registry();
     let handle = reg.current;
@@ -3680,9 +3938,11 @@ pub fn current_axes_state() -> FigureAxesState {
 }
 
 pub fn axes_handle_exists(handle: FigureHandle, axes_index: usize) -> bool {
-    let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
-    axes_index < axes_count(state)
+    let reg = registry();
+    reg.figures
+        .get(&handle)
+        .map(|state| axes_index < axes_count(state))
+        .unwrap_or(false)
 }
 
 pub fn figure_handle_exists(handle: FigureHandle) -> bool {
@@ -3901,6 +4161,11 @@ pub fn set_root_show_hidden_handles(enabled: bool) {
 pub fn clone_figure(handle: FigureHandle) -> Option<Figure> {
     let reg = registry();
     reg.figures.get(&handle).map(|state| state.figure.clone())
+}
+
+pub fn figure_tag(handle: FigureHandle) -> Option<String> {
+    let reg = registry();
+    reg.figures.get(&handle).map(|state| state.tag.clone())
 }
 
 pub fn figure_has_sg_title(handle: FigureHandle) -> bool {

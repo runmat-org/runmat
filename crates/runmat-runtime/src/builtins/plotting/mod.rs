@@ -64,6 +64,8 @@ pub(crate) mod contour3;
 pub(crate) mod contourf;
 #[path = "ops/data_tip_text_row.rs"]
 pub(crate) mod data_tip_text_row;
+#[path = "ops/datacursormode.rs"]
+pub(crate) mod datacursormode;
 #[path = "ops/drawnow.rs"]
 pub(crate) mod drawnow;
 #[path = "ops/errorbar.rs"]
@@ -116,6 +118,10 @@ pub(crate) mod mesh;
 pub(crate) mod meshc;
 #[path = "ops/common/mod.rs"]
 pub(crate) mod op_common;
+#[path = "ops/opengl.rs"]
+pub(crate) mod opengl;
+#[path = "ops/pan.rs"]
+pub(crate) mod pan;
 #[path = "ops/patch.rs"]
 pub(crate) mod patch;
 #[path = "ops/pie.rs"]
@@ -168,6 +174,8 @@ pub(crate) mod text;
 pub(crate) mod title;
 #[path = "ops/view.rs"]
 pub(crate) mod view;
+#[path = "ops/waitbar.rs"]
+pub(crate) mod waitbar;
 #[path = "ops/xlabel.rs"]
 pub(crate) mod xlabel;
 #[path = "ops/xlim.rs"]
