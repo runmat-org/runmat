@@ -475,6 +475,27 @@ fn animatedline_and_addpoints_dispatch_through_vm() {
 }
 
 #[test]
+fn plotmatrix_dispatches_multi_output_grid_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        X = [1 10; 2 20; 3 30]; \
+        [S, AX, BigAx, H, HAx] = plotmatrix(X); \
+        if numel(S) ~= 4; error('plotmatrix scatter matrix mismatch'); end; \
+        if numel(AX) ~= 4; error('plotmatrix axes matrix mismatch'); end; \
+        if gca() ~= BigAx; error('plotmatrix big axes current mismatch'); end; \
+        if numel(H) ~= 2 || numel(HAx) ~= 2; error('plotmatrix diagonal histogram mismatch'); end; \
+        if ~strcmp(get(H(1), 'Type'), 'histogram'); error('plotmatrix histogram type mismatch'); end; \
+        S3 = plotmatrix(X, 'g+'); \
+        if numel(S3) ~= 4; error('plotmatrix x-linespec matrix mismatch'); end; \
+        [S2, AX2] = plotmatrix(X, [4; 5; 6], 'r+'); \
+        if size(S2,1) ~= 2 || size(S2,2) ~= 1; error('plotmatrix rectangular scatter shape mismatch'); end; \
+        if size(AX2,1) ~= 2 || size(AX2,2) ~= 1; error('plotmatrix rectangular axes shape mismatch'); end; \
+        if ~strcmp(get(S2(1), 'Type'), 'scatter'); error('plotmatrix rectangular scatter type mismatch'); end; \
+        if ~strcmp(get(S2(1), 'Marker'), '+'); error('plotmatrix style mismatch'); end;";
+    execute_source(input).expect("execute plotmatrix script");
+}
+
+#[test]
 fn daspect_dispatches_and_updates_axes_properties() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\
