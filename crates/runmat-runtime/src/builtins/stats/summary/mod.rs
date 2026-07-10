@@ -13,6 +13,7 @@ pub(crate) mod ecdf;
 pub(crate) mod encoding;
 pub(crate) mod fitdist;
 pub(crate) mod hypothesis;
+pub(crate) mod lsline;
 pub(crate) mod mode;
 pub(crate) mod normalize;
 pub(crate) mod order_stats;

@@ -170,7 +170,7 @@ fn internal_error(message: impl Into<String>) -> RuntimeError {
     descriptor(crate::builtins::stats::summary::refline::REFLINE_DESCRIPTOR),
     builtin_path = "crate::builtins::stats::summary::refline"
 )]
-pub(crate) fn refline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn refline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let (target, args) = split_optional_axes(args)?;
     apply_axes_target(target, NAME).map_err(|err| {
         if err.identifier().is_some() {
@@ -192,7 +192,7 @@ pub(crate) fn refline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             intercept,
             x_span: refline_x_span(figure_handle, axes.active_index)?,
         }],
-        ReflinePlan::LeastSquares => least_squares_specs(figure_handle, axes.active_index)?,
+        ReflinePlan::LeastSquares => least_squares_specs(figure_handle, axes.active_index).await?,
     };
     if specs.is_empty() {
         return Ok(Value::Tensor(
@@ -351,7 +351,7 @@ fn refline_x_span(handle: FigureHandle, axes_index: usize) -> BuiltinResult<(f64
     Ok((0.0, 1.0))
 }
 
-fn least_squares_specs(
+async fn least_squares_specs(
     handle: FigureHandle,
     axes_index: usize,
 ) -> BuiltinResult<Vec<ReflineLineSpec>> {
@@ -376,18 +376,24 @@ fn least_squares_specs(
         }
 
         let data = match plot {
-            PlotElement::Scatter(plot) => Some((&plot.x_data, &plot.y_data)),
+            PlotElement::Scatter(plot) => {
+                Some(plot.export_scene_xy_data().await.map_err(|err| {
+                    internal_error(format!("refline: unable to read scatter data: {err}"))
+                })?)
+            }
             PlotElement::Line(plot)
                 if plot.marker.is_some() && matches!(plot.line_style, LineStyle::None) =>
             {
-                Some((&plot.x_data, &plot.y_data))
+                Some(plot.export_scene_xy_data().await.map_err(|err| {
+                    internal_error(format!("refline: unable to read line data: {err}"))
+                })?)
             }
             _ => None,
         };
         let Some((x, y)) = data else {
             continue;
         };
-        if let Some((slope, intercept)) = least_squares_coefficients(x, y)? {
+        if let Some((slope, intercept)) = least_squares_coefficients(&x, &y)? {
             specs.push(ReflineLineSpec {
                 slope,
                 intercept,
@@ -400,29 +406,28 @@ fn least_squares_specs(
 }
 
 fn least_squares_coefficients(x: &[f64], y: &[f64]) -> BuiltinResult<Option<(f64, f64)>> {
-    let pairs = x
-        .iter()
-        .zip(y.iter())
-        .filter_map(|(&x, &y)| {
-            if x.is_finite() && y.is_finite() {
-                Some((x, y))
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    if pairs.is_empty() {
+    let mut n = 0usize;
+    let mut sum_x = 0.0;
+    let mut sum_y = 0.0;
+    for (&x, &y) in x.iter().zip(y.iter()) {
+        if x.is_finite() && y.is_finite() {
+            n += 1;
+            sum_x += x;
+            sum_y += y;
+        }
+    }
+    if n == 0 {
         return Ok(None);
     }
 
-    let n = pairs.len() as f64;
-    let sum_x = pairs.iter().map(|(x, _)| *x).sum::<f64>();
-    let sum_y = pairs.iter().map(|(_, y)| *y).sum::<f64>();
-    let mean_x = sum_x / n;
-    let mean_y = sum_y / n;
+    let mean_x = sum_x / n as f64;
+    let mean_y = sum_y / n as f64;
     let mut ss_xx = 0.0;
     let mut ss_xy = 0.0;
-    for (x, y) in pairs {
+    for (&x, &y) in x.iter().zip(y.iter()) {
+        if !x.is_finite() || !y.is_finite() {
+            continue;
+        }
         let dx = x - mean_x;
         ss_xx += dx * dx;
         ss_xy += dx * (y - mean_y);
@@ -534,7 +539,7 @@ mod tests {
             Vec::new(),
         ))
         .unwrap();
-        let handle = refline_builtin(Vec::new()).unwrap();
+        let handle = block_on(refline_builtin(Vec::new())).unwrap();
         let Value::Num(handle) = handle else {
             panic!("expected line handle");
         };
@@ -545,13 +550,13 @@ mod tests {
     #[test]
     fn refline_accepts_coeff_vector_and_slope_intercept_forms() {
         let _guard = setup();
-        let handle = refline_builtin(vec![tensor(vec![2.0, -1.0], 1, 2)]).unwrap();
+        let handle = block_on(refline_builtin(vec![tensor(vec![2.0, -1.0], 1, 2)])).unwrap();
         let Value::Num(handle) = handle else {
             panic!("expected line handle");
         };
         assert_eq!(y_data(handle), vec![-1.0, 1.0]);
 
-        let handle = refline_builtin(vec![Value::Num(-0.5), Value::Num(3.0)]).unwrap();
+        let handle = block_on(refline_builtin(vec![Value::Num(-0.5), Value::Num(3.0)])).unwrap();
         let Value::Num(handle) = handle else {
             panic!("expected line handle");
         };
@@ -566,7 +571,7 @@ mod tests {
             tensor(vec![10.0, 20.0], 1, 2),
         ]))
         .unwrap();
-        let handle = refline_builtin(vec![Value::Num(1.0), Value::Num(0.0)]).unwrap();
+        let handle = block_on(refline_builtin(vec![Value::Num(1.0), Value::Num(0.0)])).unwrap();
         let Value::Num(handle) = handle else {
             panic!("expected line handle");
         };
@@ -575,7 +580,7 @@ mod tests {
 
         let _ = crate::builtins::plotting::xlim::xlim_builtin(vec![tensor(vec![-1.0, 3.0], 1, 2)])
             .unwrap();
-        let handle = refline_builtin(vec![Value::Num(2.0), Value::Num(1.0)]).unwrap();
+        let handle = block_on(refline_builtin(vec![Value::Num(2.0), Value::Num(1.0)])).unwrap();
         let Value::Num(handle) = handle else {
             panic!("expected line handle");
         };
@@ -600,14 +605,14 @@ mod tests {
         .unwrap();
         let fig = current_figure_handle();
         let ax = encode_axes_handle(fig, 1);
-        let handle = refline_builtin(vec![
+        let handle = block_on(refline_builtin(vec![
             Value::Num(ax),
             Value::Num(0.0),
             Value::Num(2.0),
             Value::String("--r".into()),
             Value::String("DisplayName".into()),
             Value::String("threshold".into()),
-        ])
+        ]))
         .unwrap();
         let Value::Num(handle) = handle else {
             panic!("expected line handle");
@@ -629,10 +634,108 @@ mod tests {
     #[test]
     fn refline_rejects_bad_coefficients() {
         let _guard = setup();
-        let err = refline_builtin(vec![tensor(vec![1.0, 2.0, 3.0], 1, 3)]).unwrap_err();
+        let err = block_on(refline_builtin(vec![tensor(vec![1.0, 2.0, 3.0], 1, 3)])).unwrap_err();
         assert!(err.message.contains("coefficients"));
 
-        let err = refline_builtin(vec![Value::Num(f64::NAN), Value::Num(0.0)]).unwrap_err();
+        let err =
+            block_on(refline_builtin(vec![Value::Num(f64::NAN), Value::Num(0.0)])).unwrap_err();
         assert!(err.message.contains("finite"));
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn refline_least_squares_reads_gpu_scatter_source_data() {
+        use runmat_accelerate_api::AccelProvider;
+        use runmat_plot::core::{BoundingBox, GpuVertexBuffer};
+        use runmat_plot::gpu::scatter2::Scatter2GpuInputs;
+        use runmat_plot::gpu::ScalarType;
+        use runmat_plot::plots::scatter::ScatterGpuStyle;
+        use runmat_plot::plots::ScatterPlot;
+
+        let _guard = setup();
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            tracing::warn!("Skipping refline GPU scatter regression: no WGPU provider");
+            return;
+        };
+        let context = crate::builtins::plotting::context::ensure_context_from_provider()
+            .expect("shared plotting context");
+
+        let x = block_on(crate::call_builtin_async(
+            "gpuArray",
+            &[tensor(vec![1.0, 2.0, 3.0], 1, 3)],
+        ))
+        .expect("gpu x");
+        let y = block_on(crate::call_builtin_async(
+            "gpuArray",
+            &[tensor(vec![2.0, 4.0, 6.0], 1, 3)],
+        ))
+        .expect("gpu y");
+        let Value::GpuTensor(x_handle) = x.clone() else {
+            panic!("expected gpu x");
+        };
+        let Value::GpuTensor(y_handle) = y.clone() else {
+            panic!("expected gpu y");
+        };
+        let x_ref = runmat_accelerate_api::export_wgpu_buffer(&x_handle).expect("export x");
+        let y_ref = runmat_accelerate_api::export_wgpu_buffer(&y_handle).expect("export y");
+        let dummy_vertices = context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("refline-lsline-gpu-scatter-test-dummy-vertices"),
+            size: 16,
+            usage: wgpu::BufferUsages::VERTEX,
+            mapped_at_creation: false,
+        });
+        let scatter = ScatterPlot::from_gpu_buffer(
+            GpuVertexBuffer::new(std::sync::Arc::new(dummy_vertices), 0),
+            0,
+            BoundingBox::new(
+                glam::Vec3::new(1.0, 2.0, 0.0),
+                glam::Vec3::new(3.0, 6.0, 0.0),
+            ),
+            ScatterGpuStyle {
+                color: glam::Vec4::new(1.0, 0.0, 0.0, 1.0),
+                edge_color: glam::Vec4::new(0.0, 0.0, 0.0, 1.0),
+                edge_thickness: 1.0,
+                marker_size: 12.0,
+                marker_style: runmat_plot::plots::MarkerStyle::Circle,
+                filled: false,
+                has_per_point_sizes: false,
+                has_per_point_colors: false,
+                edge_from_vertex_colors: false,
+            },
+        )
+        .with_gpu_source_inputs(Scatter2GpuInputs {
+            x_buffer: x_ref.buffer.clone(),
+            y_buffer: y_ref.buffer.clone(),
+            len: x_ref.len as u32,
+            scalar: ScalarType::from_is_f64(
+                x_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
+            ),
+        });
+        let mut scatter = Some(scatter);
+        append_active_plot(NAME, PlotRenderOptions::default(), move |figure, axes| {
+            let scatter = scatter
+                .take()
+                .ok_or_else(|| internal_error("refline: test scatter already inserted"))?;
+            figure.add_scatter_plot_on_axes(scatter, axes);
+            Ok(())
+        })
+        .expect("insert GPU scatter plot");
+
+        let handle = block_on(refline_builtin(Vec::new())).expect("gpu-backed refline");
+        let Value::Num(handle) = handle else {
+            panic!("expected line handle");
+        };
+        assert_eq!(x_data(handle), vec![1.0, 3.0]);
+        assert_eq!(y_data(handle), vec![2.0, 6.0]);
+
+        if let Value::GpuTensor(handle) = x {
+            provider.free(&handle).ok();
+        }
+        if let Value::GpuTensor(handle) = y {
+            provider.free(&handle).ok();
+        }
+        runmat_accelerate::simple_provider::register_inprocess_provider();
     }
 }

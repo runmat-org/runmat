@@ -230,6 +230,21 @@ fn refline_surface_executes_from_scripts() {
 }
 
 #[test]
+fn lsline_surface_executes_from_scripts() {
+    let _plot_guard = disable_interactive_plots_for_test();
+    let vars = execute_source(
+        "scatter([1 2 3], [2 4 6]); h = lsline; xd = get(h, 'XData'); yd = get(h, 'YData'); x1 = xd(1); x2 = xd(2); y1 = yd(1); y2 = yd(2);",
+    )
+    .expect("lsline script");
+    assert!(has_tensor_shape(&vars, &[1, 3]));
+    assert!(has_tensor_shape(&vars, &[1, 2]));
+    assert!(has_num(&vars, 1.0));
+    assert!(has_num(&vars, 2.0));
+    assert!(has_num(&vars, 3.0));
+    assert!(has_num(&vars, 6.0));
+}
+
+#[test]
 fn statset_options_feed_named_stats_builtins() {
     let vars = execute_source(
         "X = [0 0; 0.2 0.1; 9.8 9.9; 10 10.1]; kopts = statset('kmeans'); [idx,C] = kmeans(X, 2, 'Start', [0 0; 10 10], 'Options', kopts); rng('default'); topts = statset('tsne'); Y = tsne(X, 'Algorithm', 'exact', 'Perplexity', 2, 'Options', topts); ks = size(C); ts = size(Y); krows = ks(1); kcols = ks(2); trows = ts(1); tcols = ts(2);",
