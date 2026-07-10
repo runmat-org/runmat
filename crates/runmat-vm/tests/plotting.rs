@@ -483,6 +483,31 @@ fn line_dispatches_and_round_trips_properties() {
 }
 
 #[test]
+fn triplot_dispatches_and_returns_line_handle() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        TRI = [1 2 3; 2 4 3]; \
+        X = [0 1 0 1]; \
+        Y = [0 0 1 1]; \
+        f1 = figure(101); \
+        ax1 = gca; \
+        f2 = figure(102); \
+        ax2 = gca; \
+        h = triplot(ax1, TRI, X, Y, 'r--', 'LineWidth', 2, 'DisplayName', 'mesh'); \
+        if ~ishandle(h); error('triplot did not return a handle'); end; \
+        if ~strcmp(get(h, 'Type'), 'line'); error('triplot did not create line graphics'); end; \
+        if get(h, 'Parent') ~= ax1; error('triplot parent axes mismatch'); end; \
+        if gcf() ~= f1; error('triplot did not select target figure'); end; \
+        if get(h, 'LineWidth') ~= 2; error('triplot line width mismatch'); end; \
+        if ~strcmp(get(h, 'DisplayName'), 'mesh'); error('triplot display name mismatch'); end; \
+        x = get(h, 'XData'); \
+        y = get(h, 'YData'); \
+        if numel(x) ~= 10 || x(1) ~= 0 || x(2) ~= 1 || ~isnan(x(5)); error('triplot XData mismatch'); end; \
+        if y(8) ~= 1 || ~isnan(y(10)); error('triplot YData mismatch'); end;";
+    execute_source(input).expect("execute triplot script");
+}
+
+#[test]
 fn animatedline_and_addpoints_dispatch_through_vm() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

@@ -182,6 +182,8 @@ pub(crate) mod surfc;
 pub(crate) mod text;
 #[path = "ops/title.rs"]
 pub(crate) mod title;
+#[path = "ops/triplot.rs"]
+pub(crate) mod triplot;
 #[path = "ops/view.rs"]
 pub(crate) mod view;
 #[path = "ops/waitbar.rs"]
