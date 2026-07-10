@@ -15,6 +15,7 @@ pub mod ls;
 pub mod mkdir;
 pub mod movefile;
 pub mod open;
+pub mod opentoline;
 pub mod path;
 pub mod pwd;
 pub mod rmdir;

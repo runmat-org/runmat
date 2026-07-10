@@ -43,6 +43,10 @@ pub fn open_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
 
+pub fn opentoline_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Void
+}
+
 pub fn audioread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::tensor()

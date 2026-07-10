@@ -5,12 +5,17 @@ use runmat_accelerate::ShapeInfo;
 use runmat_builtins::Value;
 use runmat_vm::{EndExpr, Instr};
 use std::convert::TryInto;
+use std::path::Path;
 use test_helpers::compile_source;
 use test_helpers::interpret;
 
 fn execute_source(source: &str) -> Vec<Value> {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).expect("execute bytecode")
+}
+
+fn matlab_single_quoted_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\'', "''")
 }
 
 #[test]
@@ -47,6 +52,56 @@ fn bare_random_builtin_identifiers_execute_as_zero_arg_calls() {
     assert_eq!(out.data[1], 6.0);
     assert_eq!(out.data[2], 1.0);
     assert_eq!(out.data[3], 7.0);
+}
+
+#[test]
+fn opentoline_dispatches_editor_navigation_request() {
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "runmat_opentoline_vm_{}_{}.m",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::write(&path, "a = 1;\nb = 2;\n").expect("write temp script");
+    let quoted = matlab_single_quoted_path(&path);
+    let source = format!("opentoline('{quoted}', 2, 1); ok = 1;");
+
+    let vars = execute_source(&source);
+    let _ = std::fs::remove_file(&path);
+
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(v) if *v == 1.0)));
+}
+
+#[test]
+fn opentoline_command_form_dispatches_text_line_and_column() {
+    let mut dir = std::env::temp_dir();
+    dir.push(format!(
+        "runmat_opentoline_vm_dir_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::create_dir(&dir).expect("create temp dir");
+    let path = dir.join("opentoline_command_form.m");
+    std::fs::write(&path, "alpha = 1;\nbeta = 2;\n").expect("write temp script");
+    let quoted_dir = matlab_single_quoted_path(&dir);
+    let source =
+        format!("addpath('{quoted_dir}'); opentoline opentoline_command_form 2 1; ok = 1;");
+
+    let vars = execute_source(&source);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
+
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(v) if *v == 1.0)));
 }
 
 #[test]
