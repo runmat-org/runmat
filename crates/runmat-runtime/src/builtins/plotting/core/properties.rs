@@ -2401,6 +2401,9 @@ fn apply_plot_child_properties(
         super::state::PlotChildHandleState::Line3(plot) => {
             apply_line3_properties(plot, &pairs, builtin)
         }
+        super::state::PlotChildHandleState::Scatter(plot) => {
+            apply_scatter_properties(plot, &pairs, builtin)
+        }
         _ => {
             for (key, value) in pairs {
                 apply_plot_child_property(state, &key, value, builtin)?;
@@ -2930,14 +2933,17 @@ fn get_scatter_property(
                 child_base_struct("scatter", scatter_handle.figure, scatter_handle.axes_index);
             st.insert("XData", tensor_from_vec(scatter.x_data.clone()));
             st.insert("YData", tensor_from_vec(scatter.y_data.clone()));
+            if let Some(theta) = scatter.theta_data.clone() {
+                st.insert("ThetaData", tensor_from_vec(theta));
+            }
+            if let Some(r) = scatter.r_data.clone() {
+                st.insert("RData", tensor_from_vec(r));
+            }
             st.insert(
                 "Marker",
                 Value::String(marker_style_name(scatter.marker_style).into()),
             );
-            st.insert(
-                "SizeData",
-                Value::Num(marker_diameter_px_to_area_points2(scatter.marker_size)),
-            );
+            st.insert("SizeData", scatter_size_data_value(&scatter));
             st.insert(
                 "MarkerFaceColor",
                 Value::String(color_to_short_name(scatter.color)),
@@ -2960,12 +2966,20 @@ fn get_scatter_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("xdata") => Ok(tensor_from_vec(scatter.x_data.clone())),
         Some("ydata") => Ok(tensor_from_vec(scatter.y_data.clone())),
+        Some("thetadata") => {
+            Ok(tensor_from_vec(scatter.theta_data.clone().unwrap_or_else(
+                || cartesian_theta(&scatter.x_data, &scatter.y_data),
+            )))
+        }
+        Some("rdata") => {
+            Ok(tensor_from_vec(scatter.r_data.clone().unwrap_or_else(
+                || cartesian_radius(&scatter.x_data, &scatter.y_data),
+            )))
+        }
         Some("marker") => Ok(Value::String(
             marker_style_name(scatter.marker_style).into(),
         )),
-        Some("sizedata") => Ok(Value::Num(marker_diameter_px_to_area_points2(
-            scatter.marker_size,
-        ))),
+        Some("sizedata") => Ok(scatter_size_data_value(&scatter)),
         Some("markerfacecolor") => Ok(Value::String(color_to_short_name(scatter.color))),
         Some("markeredgecolor") => Ok(Value::String(color_to_short_name(scatter.edge_color))),
         Some("linewidth") => Ok(Value::Num(scatter.edge_thickness as f64)),
@@ -4413,47 +4427,181 @@ fn apply_scatter_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    apply_scatter_properties(scatter_handle, &[(key.to_string(), value)], builtin)
+}
+
+fn apply_scatter_properties(
+    scatter_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let current = get_simple_plot(scatter_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Scatter(current_scatter) = current else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid scatter handle"),
+        ));
+    };
+
+    let current_theta = current_scatter
+        .theta_data
+        .clone()
+        .unwrap_or_else(|| cartesian_theta(&current_scatter.x_data, &current_scatter.y_data));
+    let current_r = current_scatter
+        .r_data
+        .clone()
+        .unwrap_or_else(|| cartesian_radius(&current_scatter.x_data, &current_scatter.y_data));
+    let mut theta_update = None;
+    let mut r_update = None;
+    let mut style_pairs = Vec::new();
+    for (key, value) in pairs {
+        match key.as_str() {
+            "thetadata" => theta_update = Some(line_numeric_data(value, "ThetaData", builtin)?),
+            "rdata" => r_update = Some(line_numeric_data(value, "RData", builtin)?),
+            _ => style_pairs.push((key.as_str(), *value)),
+        }
+    }
+
+    let next_theta = theta_update.unwrap_or_else(|| current_theta.clone());
+    let next_r = r_update.unwrap_or_else(|| current_r.clone());
+    let polar_update =
+        (next_theta != current_theta || next_r != current_r).then_some((next_theta, next_r));
+    if let Some((theta, r)) = polar_update.as_ref() {
+        validate_polar_scatter_data(theta, r, builtin)?;
+    }
+
     super::state::update_plot_element(scatter_handle.figure, scatter_handle.plot_index, |plot| {
         if let runmat_plot::plots::figure::PlotElement::Scatter(scatter) = plot {
-            match key {
-                "marker" => {
-                    if let Some(s) = value_as_string(value) {
-                        scatter.marker_style = scatter_marker_from_name(&s, scatter.marker_style);
+            if let Some((theta, r)) = polar_update.as_ref() {
+                replace_polar_scatter_data_unchecked(scatter, theta.clone(), r.clone());
+            }
+            for (key, value) in &style_pairs {
+                match *key {
+                    "marker" => {
+                        if let Some(s) = value_as_string(value) {
+                            scatter.marker_style =
+                                scatter_marker_from_name(&s, scatter.marker_style);
+                        }
                     }
-                }
-                "sizedata" => {
-                    if let Some(v) = value_as_f64(value) {
-                        scatter.marker_size = marker_area_points2_to_diameter_px(v);
+                    "sizedata" => {
+                        if let Some(v) = value_as_f64(value) {
+                            scatter.marker_size = marker_area_points2_to_diameter_px(v);
+                        }
                     }
-                }
-                "markerfacecolor" => {
-                    if let Ok(c) =
-                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                    {
-                        scatter.set_face_color(c);
+                    "markerfacecolor" => {
+                        if let Ok(c) =
+                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                        {
+                            scatter.set_face_color(c);
+                        }
                     }
-                }
-                "markeredgecolor" => {
-                    if let Ok(c) =
-                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                    {
-                        scatter.set_edge_color(c);
+                    "markeredgecolor" => {
+                        if let Ok(c) =
+                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                        {
+                            scatter.set_edge_color(c);
+                        }
                     }
-                }
-                "linewidth" => {
-                    if let Some(v) = value_as_f64(value) {
-                        scatter.set_edge_thickness(v as f32);
+                    "linewidth" => {
+                        if let Some(v) = value_as_f64(value) {
+                            scatter.set_edge_thickness(v as f32);
+                        }
                     }
+                    "displayname" => {
+                        scatter.label = value_as_string(value).map(|s| s.to_string());
+                    }
+                    _ => {}
                 }
-                "displayname" => {
-                    scatter.label = value_as_string(value).map(|s| s.to_string());
-                }
-                _ => {}
             }
         }
     })
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
+}
+
+fn validate_polar_scatter_data(
+    theta: &[f64],
+    r: &[f64],
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if theta.len() != r.len() {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: ThetaData and RData must contain the same number of elements"),
+        ));
+    }
+    if theta.is_empty() {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: ThetaData and RData cannot be empty"),
+        ));
+    }
+    Ok(())
+}
+
+fn replace_polar_scatter_data_unchecked(
+    scatter: &mut runmat_plot::plots::ScatterPlot,
+    theta: Vec<f64>,
+    r: Vec<f64>,
+) {
+    let x_data = theta
+        .iter()
+        .zip(r.iter())
+        .map(|(theta, r)| r * theta.cos())
+        .collect();
+    let y_data = theta
+        .iter()
+        .zip(r.iter())
+        .map(|(theta, r)| r * theta.sin())
+        .collect();
+    let point_count = theta.len();
+    scatter
+        .update_data(x_data, y_data)
+        .expect("validated polar scatter data can update cartesian scatter data");
+    if scatter
+        .per_point_sizes
+        .as_ref()
+        .is_some_and(|sizes| sizes.len() != point_count)
+    {
+        scatter.per_point_sizes = None;
+    }
+    if scatter
+        .per_point_colors
+        .as_ref()
+        .is_some_and(|colors| colors.len() != point_count)
+    {
+        scatter.per_point_colors = None;
+    }
+    if scatter
+        .color_values
+        .as_ref()
+        .is_some_and(|values| values.len() != point_count)
+    {
+        scatter.color_values = None;
+        scatter.color_limits = None;
+    }
+    scatter.theta_data = Some(theta);
+    scatter.r_data = Some(r);
+}
+
+fn scatter_size_data_value(scatter: &runmat_plot::plots::ScatterPlot) -> Value {
+    match scatter.per_point_sizes.as_ref() {
+        Some(sizes) => tensor_from_vec(
+            sizes
+                .iter()
+                .map(|size| marker_diameter_px_to_area_points2(*size))
+                .collect(),
+        ),
+        None => Value::Num(marker_diameter_px_to_area_points2(scatter.marker_size)),
+    }
+}
+
+fn cartesian_theta(x: &[f64], y: &[f64]) -> Vec<f64> {
+    x.iter().zip(y.iter()).map(|(x, y)| y.atan2(*x)).collect()
+}
+
+fn cartesian_radius(x: &[f64], y: &[f64]) -> Vec<f64> {
+    x.iter().zip(y.iter()).map(|(x, y)| x.hypot(*y)).collect()
 }
 
 fn apply_bar_property(

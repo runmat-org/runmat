@@ -430,6 +430,33 @@ fn polarplot_dispatches_and_sets_equal_axes() {
 }
 
 #[test]
+fn polarscatter_dispatches_and_preserves_polar_data() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        theta = [0 pi/2]; \
+        rho = [1 2]; \
+        h = polarscatter(theta, rho, [36 64], 'filled'); \
+        if ~ishandle(h); \
+            error('polarscatter did not return a scatter handle'); \
+        end; \
+        if ~get(gca, 'AxisEqual'); \
+            error('polarscatter did not enable equal axes'); \
+        end; \
+        th = get(h, 'ThetaData'); \
+        r = get(h, 'RData'); \
+        if abs(th(2) - pi/2) > 1e-12 || r(2) ~= 2; \
+            error('polarscatter polar data did not round-trip'); \
+        end; \
+        set(h, 'ThetaData', pi/2, 'RData', 3); \
+        x = get(h, 'XData'); \
+        y = get(h, 'YData'); \
+        if abs(x(1)) > 1e-12 || abs(y(1) - 3) > 1e-12; \
+            error('polarscatter cartesian data did not update'); \
+        end;";
+    execute_source(input).expect("execute polarscatter script");
+}
+
+#[test]
 fn line_dispatches_and_round_trips_properties() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

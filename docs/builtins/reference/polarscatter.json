@@ -1,0 +1,96 @@
+{
+  "title": "polarscatter",
+  "category": "plotting",
+  "keywords": [
+    "polarscatter",
+    "polar scatter",
+    "polar coordinates",
+    "theta rho",
+    "matlab polarscatter",
+    "marker plot"
+  ],
+  "summary": "Create scatter charts in polar coordinates.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "polarscatter is a rendering sink. Real GPU inputs are gathered before polar-to-cartesian conversion; the resulting scatter objects use the normal plotting renderer."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::polarscatter::tests",
+    "integration": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`polarscatter` converts angular/radial point data to cartesian scatter coordinates, marks the active axes as polar, and preserves the original `ThetaData` and `RData` on returned scatter handles.",
+  "behaviors": [
+    "`polarscatter(theta, rho)` interprets theta values as radians and requires theta and rho to have compatible element counts.",
+    "Vector theta with matrix rho, matrix theta with vector rho, and matching theta/rho matrices create one scatter object per matrix column.",
+    "`polarscatter(theta, rho, sz)` accepts scalar, vector, or matrix marker-size data. Matrix sizes are sliced by series when theta/rho expands to multiple scatter objects.",
+    "`polarscatter(theta, rho, sz, c)` accepts the same positional color forms as `scatter`, including color names, RGB triplets, scalar color values, and RGB matrices.",
+    "Marker strings, the `filled` flag, and common scatter name/value options share the parser used by `scatter`.",
+    "The returned value is a scalar scatter handle for one series or a row-vector of scatter handles for multiple series.",
+    "`get(h, 'ThetaData')` and `get(h, 'RData')` return the stored polar source coordinates. Setting either property recomputes the cartesian `XData` and `YData` used by the renderer.",
+    "The target axes are switched to polar mode with equal x/y scaling and symmetric cartesian limits based on the largest radius."
+  ],
+  "options": [
+    "Use `polarscatter(ax, theta, rho, ...)` to target existing axes.",
+    "Use marker symbols such as `'o'`, `'+'`, and `'x'` after the size/color arguments.",
+    "Use `hold on` before additional `polarscatter` calls to overlay more polar scatter objects on the same axes.",
+    "Use `set(h, ...)` on returned handles to update scatter properties after plotting."
+  ],
+  "examples": [
+    {
+      "description": "Create a polar scatter chart",
+      "input": "theta = linspace(0, 2*pi, 20);\nrho = abs(sin(theta));\nh = polarscatter(theta, rho);",
+      "output": "% h is a scatter handle with ThetaData and RData"
+    },
+    {
+      "description": "Use filled markers with sizes and colors",
+      "input": "theta = pi/4:pi/4:2*pi;\nrho = [19 6 12 18 16 11 15 15];\nsz = 100*[6 15 20 3 15 3 6 40];\nc = [1 2 2 2 1 1 2 1];\npolarscatter(theta, rho, sz, c, 'filled');"
+    },
+    {
+      "description": "Create multiple scatter series from a matrix",
+      "input": "theta = [0 pi/6 pi/2];\nrho = [1 2; 2 4; 5 6];\nps = polarscatter(theta, rho, [50 100; 75 125; 100 150]);",
+      "output": "% ps is a row-vector with one handle for each rho column"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does polarscatter keep the original polar data?",
+      "answer": "Yes. The renderer uses cartesian `XData` and `YData`, but the scatter handle also stores `ThetaData` and `RData` for MATLAB-style inspection and updates."
+    },
+    {
+      "question": "Are table-based polarscatter forms supported?",
+      "answer": "The numeric and axes-targeted plotting forms are supported. Table variable forms depend on the broader table plotting surface and are not treated as complete by this builtin alone."
+    }
+  ],
+  "links": [
+    {
+      "label": "scatter",
+      "url": "./scatter"
+    },
+    {
+      "label": "polarplot",
+      "url": "./polarplot"
+    },
+    {
+      "label": "hold",
+      "url": "./hold"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ]
+}

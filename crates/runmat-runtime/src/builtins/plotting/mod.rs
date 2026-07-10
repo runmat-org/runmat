@@ -142,6 +142,8 @@ pub(crate) mod plotmatrix;
 pub(crate) mod plotyy;
 #[path = "ops/polarplot.rs"]
 pub(crate) mod polarplot;
+#[path = "ops/polarscatter.rs"]
+pub(crate) mod polarscatter;
 #[path = "ops/print.rs"]
 pub(crate) mod print;
 #[path = "ops/quiver.rs"]

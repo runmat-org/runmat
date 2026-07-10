@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexTensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{AxesKind, LinePlot, LineStyle};
@@ -12,10 +12,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::common::{gather_tensor_from_gpu_async, numeric_pair};
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+use super::op_common::polar::{
+    complex_tensor_columns, evaluate_theta_rho_tensors, implicit_theta, is_real_numeric_value,
+    polar_to_cartesian, real_tensor_from_value, tensor_columns, EvaluatedPolarData,
+};
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plot::build_line_plot;
 use super::plotting_error;
@@ -226,7 +229,7 @@ pub async fn polarplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
                 .map(|v| v.abs())
                 .fold(0.0, f64::max),
         );
-        let (x, y) = polar_to_cartesian(&series.data.theta, &series.data.rho)?;
+        let (x, y) = polar_to_cartesian(&series.data.theta, &series.data.rho, BUILTIN_NAME)?;
         plots.push(build_line_plot(x, y, &label, &series.appearance)?);
     }
 
@@ -306,12 +309,6 @@ enum PolarSeriesInput {
 enum ComplexInput {
     Scalar(f64, f64),
     Tensor(ComplexTensor),
-}
-
-#[derive(Clone, Debug)]
-struct EvaluatedPolarData {
-    theta: Vec<f64>,
-    rho: Vec<f64>,
 }
 
 fn parse_polar_series_specs(
@@ -437,12 +434,12 @@ fn merge_group_style(target: &mut PolarSeriesPlan, source: &PolarSeriesPlan) {
 async fn evaluate_polar_data(input: PolarSeriesInput) -> BuiltinResult<Vec<EvaluatedPolarData>> {
     match input {
         PolarSeriesInput::ThetaRho(theta, rho) => {
-            let theta = real_tensor_from_value(theta).await?;
-            let rho = real_tensor_from_value(rho).await?;
-            evaluate_theta_rho_tensors(theta, rho)
+            let theta = real_tensor_from_value(theta, BUILTIN_NAME).await?;
+            let rho = real_tensor_from_value(rho, BUILTIN_NAME).await?;
+            evaluate_theta_rho_tensors(theta, rho, BUILTIN_NAME)
         }
         PolarSeriesInput::Rho(rho) => {
-            let rho = real_tensor_from_value(rho).await?;
+            let rho = real_tensor_from_value(rho, BUILTIN_NAME).await?;
             Ok(tensor_columns(&rho)
                 .into_iter()
                 .map(|rho| EvaluatedPolarData {
@@ -468,163 +465,6 @@ async fn evaluate_polar_data(input: PolarSeriesInput) -> BuiltinResult<Vec<Evalu
                 .collect())
         }
     }
-}
-
-fn evaluate_theta_rho_tensors(
-    theta: Tensor,
-    rho: Tensor,
-) -> BuiltinResult<Vec<EvaluatedPolarData>> {
-    if tensor_is_vector(&theta) && tensor_is_vector(&rho) {
-        let (theta, rho) = numeric_pair(theta, rho, BUILTIN_NAME)?;
-        return Ok(vec![EvaluatedPolarData { theta, rho }]);
-    }
-
-    if tensor_is_vector(&theta) {
-        let theta_vec = theta.data;
-        let rho_rows = tensor_rows(&rho);
-        if theta_vec.len() != rho_rows {
-            return Err(polarplot_err(
-                "theta vector length must match each rho matrix column",
-            ));
-        }
-        return Ok(tensor_columns(&rho)
-            .into_iter()
-            .map(|rho| EvaluatedPolarData {
-                theta: theta_vec.clone(),
-                rho,
-            })
-            .collect());
-    }
-
-    if tensor_is_vector(&rho) {
-        let rho_vec = rho.data;
-        let theta_rows = tensor_rows(&theta);
-        if rho_vec.len() != theta_rows {
-            return Err(polarplot_err(
-                "rho vector length must match each theta matrix column",
-            ));
-        }
-        return Ok(tensor_columns(&theta)
-            .into_iter()
-            .map(|theta| EvaluatedPolarData {
-                theta,
-                rho: rho_vec.clone(),
-            })
-            .collect());
-    }
-
-    if tensor_rows(&theta) != tensor_rows(&rho) || tensor_cols(&theta) != tensor_cols(&rho) {
-        return Err(polarplot_err(
-            "theta and rho matrices must have matching row and column counts",
-        ));
-    }
-
-    Ok(tensor_columns(&theta)
-        .into_iter()
-        .zip(tensor_columns(&rho))
-        .map(|(theta, rho)| EvaluatedPolarData { theta, rho })
-        .collect())
-}
-
-fn tensor_is_vector(tensor: &Tensor) -> bool {
-    tensor.rows <= 1 || tensor.cols <= 1 || tensor.shape.len() <= 1
-}
-
-fn tensor_rows(tensor: &Tensor) -> usize {
-    if tensor_is_vector(tensor) {
-        tensor.data.len()
-    } else {
-        tensor.rows
-    }
-}
-
-fn tensor_cols(tensor: &Tensor) -> usize {
-    if tensor_is_vector(tensor) {
-        1
-    } else {
-        tensor.cols
-    }
-}
-
-fn tensor_columns(tensor: &Tensor) -> Vec<Vec<f64>> {
-    if tensor_is_vector(tensor) {
-        return vec![tensor.data.clone()];
-    }
-    (0..tensor.cols)
-        .map(|col| {
-            let start = col * tensor.rows;
-            tensor.data[start..start + tensor.rows].to_vec()
-        })
-        .collect()
-}
-
-fn complex_tensor_columns(tensor: &ComplexTensor) -> Vec<Vec<(f64, f64)>> {
-    if tensor.rows <= 1 || tensor.cols <= 1 || tensor.shape.len() <= 1 {
-        return vec![tensor.data.clone()];
-    }
-    (0..tensor.cols)
-        .map(|col| {
-            let start = col * tensor.rows;
-            tensor.data[start..start + tensor.rows].to_vec()
-        })
-        .collect()
-}
-
-async fn real_tensor_from_value(value: Value) -> BuiltinResult<Tensor> {
-    match value {
-        Value::GpuTensor(handle) => gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await,
-        Value::Num(value) => Ok(scalar_tensor(value)),
-        Value::Int(value) => Ok(scalar_tensor(value.to_f64())),
-        Value::Bool(value) => Ok(scalar_tensor(if value { 1.0 } else { 0.0 })),
-        other => Tensor::try_from(&other)
-            .map_err(|err| polarplot_err(format!("expected real numeric data: {err}"))),
-    }
-}
-
-fn scalar_tensor(value: f64) -> Tensor {
-    Tensor {
-        data: vec![value],
-        shape: vec![1],
-        rows: 1,
-        cols: 1,
-        dtype: runmat_builtins::NumericDType::F64,
-    }
-}
-
-fn implicit_theta(len: usize) -> Vec<f64> {
-    match len {
-        0 => Vec::new(),
-        1 => vec![0.0],
-        n => (0..n)
-            .map(|idx| idx as f64 * std::f64::consts::TAU / (n - 1) as f64)
-            .collect(),
-    }
-}
-
-fn polar_to_cartesian(theta: &[f64], rho: &[f64]) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
-    if theta.len() != rho.len() {
-        return Err(polarplot_err(
-            "theta and rho inputs must have the same number of elements",
-        ));
-    }
-    let x = theta
-        .iter()
-        .zip(rho.iter())
-        .map(|(theta, rho)| rho * theta.cos())
-        .collect();
-    let y = theta
-        .iter()
-        .zip(rho.iter())
-        .map(|(theta, rho)| rho * theta.sin())
-        .collect();
-    Ok((x, y))
-}
-
-fn is_real_numeric_value(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Tensor(_) | Value::GpuTensor(_) | Value::Num(_) | Value::Int(_) | Value::Bool(_)
-    )
 }
 
 fn apply_polar_line_style_order(plans: &mut [PolarSeriesPlan], order: &[LineStyle]) {
@@ -677,7 +517,7 @@ mod tests {
     use crate::builtins::plotting::{
         clone_figure, current_figure_handle, reset_hold_state_for_run, reset_plot_state,
     };
-    use runmat_builtins::NumericDType;
+    use runmat_builtins::{NumericDType, Tensor};
 
     fn tensor(data: &[f64]) -> Value {
         Value::Tensor(Tensor {
@@ -694,6 +534,7 @@ mod tests {
         let (x, y) = polar_to_cartesian(
             &[0.0, std::f64::consts::FRAC_PI_2, std::f64::consts::PI],
             &[1.0, 2.0, 3.0],
+            BUILTIN_NAME,
         )
         .unwrap();
         assert!((x[0] - 1.0).abs() < 1e-12);
