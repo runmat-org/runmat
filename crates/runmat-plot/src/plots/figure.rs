@@ -1255,6 +1255,11 @@ impl Figure {
         self.plots.len() - 1
     }
 
+    /// Add an already-built plot element to the figure.
+    pub fn add_plot_element_on_axes(&mut self, element: PlotElement, axes_index: usize) -> usize {
+        self.push_plot(element, axes_index)
+    }
+
     /// Add a line plot to the figure
     pub fn add_line_plot(&mut self, plot: LinePlot) -> usize {
         self.add_line_plot_on_axes(plot, 0)

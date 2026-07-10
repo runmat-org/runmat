@@ -700,6 +700,192 @@ impl PlotChildHandleState {
         }
     }
 
+    pub fn plot_index(&self) -> Option<usize> {
+        Some(match self {
+            Self::Histogram(state) => state.plot_index,
+            Self::Line(state)
+            | Self::Scatter(state)
+            | Self::Bar(state)
+            | Self::Stairs(state)
+            | Self::Surface(state)
+            | Self::Patch(state)
+            | Self::Line3(state)
+            | Self::Scatter3(state)
+            | Self::Contour(state)
+            | Self::ContourFill(state)
+            | Self::ReferenceLine(state)
+            | Self::Pie(state) => state.plot_index,
+            Self::AnimatedLine(state) => state.plot_index,
+            Self::Stem(state) => state.plot_index,
+            Self::ErrorBar(state) => state.plot_index,
+            Self::Quiver(state) => state.plot_index,
+            Self::Image(state) => state.plot_index,
+            Self::Heatmap(state) => state.plot_index,
+            Self::Binscatter(state) => state.plot_index,
+            Self::FunctionSurface(state) => state.plot_index,
+            Self::FunctionContour(state) => state.plot_index,
+            Self::Area(state) => state.plot_index,
+            Self::Text(_) => return None,
+        })
+    }
+
+    pub fn with_plot_location(
+        &self,
+        figure: FigureHandle,
+        axes_index: usize,
+        plot_index: usize,
+    ) -> Option<Self> {
+        Some(match self {
+            Self::Histogram(state) => Self::Histogram(HistogramHandleState {
+                figure,
+                axes_index,
+                plot_index,
+                bin_edges: state.bin_edges.clone(),
+                raw_counts: state.raw_counts.clone(),
+                normalization: state.normalization.clone(),
+                display_name: state.display_name.clone(),
+            }),
+            Self::Line(_) => Self::Line(SimplePlotHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::Scatter(_) => Self::Scatter(SimplePlotHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::Bar(_) => Self::Bar(SimplePlotHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::Stairs(_) => Self::Stairs(SimplePlotHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::Surface(_) => Self::Surface(SimplePlotHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::Patch(_) => Self::Patch(SimplePlotHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::Line3(_) => Self::Line3(SimplePlotHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::Scatter3(_) => Self::Scatter3(SimplePlotHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::Contour(_) => Self::Contour(SimplePlotHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::ContourFill(_) => Self::ContourFill(SimplePlotHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::ReferenceLine(_) => Self::ReferenceLine(SimplePlotHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::Pie(_) => Self::Pie(SimplePlotHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::AnimatedLine(state) => Self::AnimatedLine(AnimatedLineHandleState {
+                figure,
+                axes_index,
+                plot_index,
+                is_3d: state.is_3d,
+                maximum_num_points: state.maximum_num_points,
+            }),
+            Self::Stem(_) => Self::Stem(StemHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::ErrorBar(_) => Self::ErrorBar(ErrorBarHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::Quiver(_) => Self::Quiver(QuiverHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::Image(_) => Self::Image(ImageHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::Heatmap(state) => Self::Heatmap(HeatmapHandleState {
+                figure,
+                axes_index,
+                plot_index,
+                x_labels: state.x_labels.clone(),
+                y_labels: state.y_labels.clone(),
+                color_data: state.color_data.clone(),
+            }),
+            Self::Binscatter(state) => Self::Binscatter(BinscatterHandleState {
+                figure,
+                axes_index,
+                plot_index,
+                values: state.values.clone(),
+                x_bin_edges: state.x_bin_edges.clone(),
+                y_bin_edges: state.y_bin_edges.clone(),
+                x_data: state.x_data.clone(),
+                y_data: state.y_data.clone(),
+                num_bins: state.num_bins,
+                auto_bins: state.auto_bins,
+                x_limits_option: state.x_limits_option,
+                y_limits_option: state.y_limits_option,
+                x_limits: state.x_limits,
+                y_limits: state.y_limits,
+                show_empty_bins: state.show_empty_bins,
+                face_alpha: state.face_alpha,
+                display_name: state.display_name.clone(),
+            }),
+            Self::FunctionSurface(state) => Self::FunctionSurface(FunctionSurfaceHandleState {
+                figure,
+                axes_index,
+                plot_index,
+                mesh_density: state.mesh_density,
+                x_range: state.x_range,
+                y_range: state.y_range,
+                function: state.function.clone(),
+            }),
+            Self::FunctionContour(state) => Self::FunctionContour(FunctionContourHandleState {
+                figure,
+                axes_index,
+                plot_index,
+                mesh_density: state.mesh_density,
+                x_range: state.x_range,
+                y_range: state.y_range,
+                function: state.function.clone(),
+            }),
+            Self::Area(_) => Self::Area(AreaHandleState {
+                figure,
+                axes_index,
+                plot_index,
+            }),
+            Self::Text(_) => return None,
+        })
+    }
+
     pub fn type_name(&self) -> &'static str {
         match self {
             Self::Histogram(_) => "histogram",
@@ -3628,6 +3814,12 @@ pub fn register_text_annotation_handle(
     id as f64
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum CopyParentTarget {
+    Figure(FigureHandle),
+    Axes(FigureHandle, usize),
+}
+
 pub fn plot_child_handle_snapshot(handle: f64) -> Result<PlotChildHandleState, FigureError> {
     if !handle.is_finite() || handle <= 0.0 {
         return Err(FigureError::InvalidPlotObjectHandle);
@@ -3637,6 +3829,87 @@ pub fn plot_child_handle_snapshot(handle: f64) -> Result<PlotChildHandleState, F
         .get(&(handle.round() as u64))
         .cloned()
         .ok_or(FigureError::InvalidPlotObjectHandle)
+}
+
+pub fn validate_plot_child_copy_source(source_handle: f64) -> Result<(), FigureError> {
+    if !source_handle.is_finite() || source_handle <= 0.0 {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+    let reg = registry();
+    let source_state = reg
+        .plot_children
+        .get(&(source_handle.round() as u64))
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    let source_plot_index = source_state
+        .plot_index()
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    let (source_figure, _) = source_state.figure_axes();
+    reg.figures
+        .get(&source_figure)
+        .and_then(|state| state.figure.plots().nth(source_plot_index))
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    Ok(())
+}
+
+pub fn copy_plot_child_to_parent(
+    source_handle: f64,
+    target: CopyParentTarget,
+) -> Result<f64, FigureError> {
+    if !source_handle.is_finite() || source_handle <= 0.0 {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+
+    let (new_handle, target_figure, figure_clone) = {
+        let mut reg = registry();
+        let source_key = source_handle.round() as u64;
+        let source_state = reg
+            .plot_children
+            .get(&source_key)
+            .cloned()
+            .ok_or(FigureError::InvalidPlotObjectHandle)?;
+        let source_plot_index = source_state
+            .plot_index()
+            .ok_or(FigureError::InvalidPlotObjectHandle)?;
+        let (source_figure, _) = source_state.figure_axes();
+        let plot = reg
+            .figures
+            .get(&source_figure)
+            .and_then(|state| state.figure.plots().nth(source_plot_index))
+            .cloned()
+            .ok_or(FigureError::InvalidPlotObjectHandle)?;
+
+        let (target_figure, target_axes) = match target {
+            CopyParentTarget::Figure(figure) => {
+                let axes_index = get_state_mut(&mut reg, figure).active_axes;
+                (figure, axes_index)
+            }
+            CopyParentTarget::Axes(figure, axes_index) => (figure, axes_index),
+        };
+
+        let (new_plot_index, figure_clone) = {
+            let target_state = get_state_mut(&mut reg, target_figure);
+            target_state.figure.ensure_axes(target_axes);
+            target_state.figure.set_active_axes_index(target_axes);
+            target_state.active_axes = target_axes;
+            let new_plot_index = target_state
+                .figure
+                .add_plot_element_on_axes(plot, target_axes);
+            target_state.revision = target_state.revision.wrapping_add(1);
+            (new_plot_index, target_state.figure.clone())
+        };
+
+        let remapped_state = source_state
+            .with_plot_location(target_figure, target_axes, new_plot_index)
+            .ok_or(FigureError::InvalidPlotObjectHandle)?;
+        let new_key = reg.next_plot_child_handle;
+        reg.next_plot_child_handle += 1;
+        reg.plot_children.insert(new_key, remapped_state);
+
+        (new_key as f64, target_figure, figure_clone)
+    };
+
+    notify_with_figure(target_figure, &figure_clone, FigureEventKind::Updated);
+    Ok(new_handle)
 }
 
 pub fn set_heatmap_display_labels(

@@ -94,6 +94,26 @@ fn gobjects_preallocates_assignable_graphics_handle_arrays() {
 }
 
 #[test]
+fn copyobj_dispatches_plot_child_copies() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        h = plot(1:3, [1 4 9], 'DisplayName', 'source'); \
+        ax2 = subplot(1,2,2); \
+        h2 = copyobj(h, ax2); \
+        if h2 == h; error('copy should receive a fresh handle'); end; \
+        if ~isgraphics(h2); error('copy should be a graphics object'); end; \
+        if ~strcmp(get(h2, 'Type'), 'line'); error('copy type mismatch'); end; \
+        if get(h2, 'Parent') ~= ax2; error('copy parent mismatch'); end; \
+        if ~strcmp(get(h2, 'DisplayName'), 'source'); error('copy property mismatch'); end; \
+        set(h2, 'DisplayName', 'copy'); \
+        if ~strcmp(get(h, 'DisplayName'), 'source'); error('source property should remain independent'); end; \
+        hv = copyobj([h h2], ax2); \
+        if numel(hv) ~= 2; error('copy array shape mismatch'); end; \
+        if ~isgraphics(hv(1)) || ~isgraphics(hv(2)); error('copy array handles invalid'); end;";
+    execute_source(input).expect("execute copyobj script");
+}
+
+#[test]
 fn barh_dispatches_and_sets_horizontal_bars() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\
