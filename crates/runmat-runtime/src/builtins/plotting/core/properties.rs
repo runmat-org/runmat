@@ -2275,6 +2275,9 @@ fn get_plot_child_property(
         super::state::PlotChildHandleState::Binscatter(binscatter) => {
             get_binscatter_property(binscatter, property, builtin)
         }
+        super::state::PlotChildHandleState::FunctionSurface(function_surface) => {
+            get_function_surface_property(function_surface, property, builtin)
+        }
         super::state::PlotChildHandleState::Area(area) => {
             get_area_property(area, property, builtin)
         }
@@ -2348,6 +2351,9 @@ fn apply_plot_child_property(
         }
         super::state::PlotChildHandleState::Binscatter(binscatter) => {
             apply_binscatter_property(binscatter, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::FunctionSurface(function_surface) => {
+            apply_function_surface_property(function_surface, key, value, builtin)
         }
         super::state::PlotChildHandleState::Area(area) => {
             apply_area_property(area, key, value, builtin)
@@ -3075,6 +3081,170 @@ fn get_surface_property(
             builtin,
             format!("{builtin}: unsupported surface property `{other}`"),
         )),
+    }
+}
+
+fn get_function_surface_property(
+    function_surface: &super::state::FunctionSurfaceHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let surface_handle = super::state::SimplePlotHandleState {
+        figure: function_surface.figure,
+        axes_index: function_surface.axes_index,
+        plot_index: function_surface.plot_index,
+    };
+    let plot = get_simple_plot(&surface_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid function surface handle"),
+        ));
+    };
+    match property.map(canonical_property_name).as_deref() {
+        None => {
+            let mut st = child_base_struct(
+                "functionsurface",
+                function_surface.figure,
+                function_surface.axes_index,
+            );
+            insert_function_surface_metadata(&mut st, function_surface);
+            st.insert("XData", tensor_from_vec(surface.x_data.clone()));
+            st.insert("YData", tensor_from_vec(surface.y_data.clone()));
+            if let Some(z) = surface.z_data.clone() {
+                st.insert("ZData", tensor_from_matrix(z));
+            }
+            st.insert("FaceAlpha", Value::Num(surface.alpha as f64));
+            st.insert(
+                "DisplayName",
+                Value::String(surface.label.clone().unwrap_or_default()),
+            );
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("functionsurface".into())),
+        Some("parent") => Ok(child_parent_handle(
+            function_surface.figure,
+            function_surface.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("function") => match &function_surface.function {
+            super::state::FunctionSurfaceFunctionState::Explicit(function) => {
+                Ok(function_surface_function_value(function))
+            }
+            super::state::FunctionSurfaceFunctionState::Parametric { .. } => Err(plotting_error(
+                builtin,
+                format!(
+                    "{builtin}: parametric function surfaces use XFunction/YFunction/ZFunction"
+                ),
+            )),
+        },
+        Some("xfunction") => match &function_surface.function {
+            super::state::FunctionSurfaceFunctionState::Parametric { x, .. } => {
+                Ok(function_surface_function_value(x))
+            }
+            super::state::FunctionSurfaceFunctionState::Explicit(_) => Err(plotting_error(
+                builtin,
+                format!("{builtin}: non-parametric function surfaces use Function"),
+            )),
+        },
+        Some("yfunction") => match &function_surface.function {
+            super::state::FunctionSurfaceFunctionState::Parametric { y, .. } => {
+                Ok(function_surface_function_value(y))
+            }
+            super::state::FunctionSurfaceFunctionState::Explicit(_) => Err(plotting_error(
+                builtin,
+                format!("{builtin}: non-parametric function surfaces use Function"),
+            )),
+        },
+        Some("zfunction") => match &function_surface.function {
+            super::state::FunctionSurfaceFunctionState::Parametric { z, .. } => {
+                Ok(function_surface_function_value(z))
+            }
+            super::state::FunctionSurfaceFunctionState::Explicit(_) => Err(plotting_error(
+                builtin,
+                format!("{builtin}: non-parametric function surfaces use Function"),
+            )),
+        },
+        Some("meshdensity") => Ok(Value::Num(function_surface.mesh_density as f64)),
+        Some("xrange") => Ok(tensor_from_vec(vec![
+            function_surface.x_range.0,
+            function_surface.x_range.1,
+        ])),
+        Some("yrange") => Ok(tensor_from_vec(vec![
+            function_surface.y_range.0,
+            function_surface.y_range.1,
+        ])),
+        Some("xdata") => Ok(tensor_from_vec(surface.x_data.clone())),
+        Some("ydata") => Ok(tensor_from_vec(surface.y_data.clone())),
+        Some("zdata") => Ok(surface
+            .z_data
+            .clone()
+            .map(tensor_from_matrix)
+            .unwrap_or_else(|| tensor_from_vec(Vec::new()))),
+        Some("facealpha") => Ok(Value::Num(surface.alpha as f64)),
+        Some("displayname") => Ok(Value::String(surface.label.unwrap_or_default())),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported functionsurface property `{other}`"),
+        )),
+    }
+}
+
+fn insert_function_surface_metadata(
+    st: &mut StructValue,
+    function_surface: &super::state::FunctionSurfaceHandleState,
+) {
+    st.insert(
+        "MeshDensity",
+        Value::Num(function_surface.mesh_density as f64),
+    );
+    st.insert(
+        "XRange",
+        tensor_from_vec(vec![function_surface.x_range.0, function_surface.x_range.1]),
+    );
+    st.insert(
+        "YRange",
+        tensor_from_vec(vec![function_surface.y_range.0, function_surface.y_range.1]),
+    );
+    match &function_surface.function {
+        super::state::FunctionSurfaceFunctionState::Explicit(function) => {
+            st.insert("Function", function_surface_function_value(function));
+        }
+        super::state::FunctionSurfaceFunctionState::Parametric { x, y, z } => {
+            st.insert("XFunction", function_surface_function_value(x));
+            st.insert("YFunction", function_surface_function_value(y));
+            st.insert("ZFunction", function_surface_function_value(z));
+        }
+    }
+}
+
+fn function_surface_function_value(function: &super::state::FunctionSurfaceFunctionRef) -> Value {
+    match function {
+        super::state::FunctionSurfaceFunctionRef::FunctionHandle(name) => {
+            Value::FunctionHandle(name.clone())
+        }
+        super::state::FunctionSurfaceFunctionRef::ExternalFunctionHandle(name) => {
+            Value::ExternalFunctionHandle(name.clone())
+        }
+        super::state::FunctionSurfaceFunctionRef::MethodFunctionHandle(name) => {
+            Value::MethodFunctionHandle(name.clone())
+        }
+        super::state::FunctionSurfaceFunctionRef::BoundFunctionHandle { name, function } => {
+            Value::BoundFunctionHandle {
+                name: name.clone(),
+                function: *function,
+            }
+        }
+        super::state::FunctionSurfaceFunctionRef::ClosureSummary {
+            function_name,
+            bound_function,
+        } => match bound_function {
+            Some(function) => Value::BoundFunctionHandle {
+                name: function_name.clone(),
+                function: *function,
+            },
+            None => Value::String(function_name.clone()),
+        },
     }
 }
 
@@ -4659,6 +4829,30 @@ fn apply_surface_property(
     })
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
+}
+
+fn apply_function_surface_property(
+    function_surface: &super::state::FunctionSurfaceHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    match key {
+        "facealpha" | "displayname" => {
+            let surface_handle = super::state::SimplePlotHandleState {
+                figure: function_surface.figure,
+                axes_index: function_surface.axes_index,
+                plot_index: function_surface.plot_index,
+            };
+            apply_surface_property(&surface_handle, key, value, builtin)
+        }
+        "meshdensity" | "xrange" | "yrange" | "function" | "xfunction" | "yfunction"
+        | "zfunction" => Err(plotting_error(
+            builtin,
+            format!("{builtin}: changing {key} after fsurf sampling is not supported yet"),
+        )),
+        _ => Ok(()),
+    }
 }
 
 fn apply_binscatter_property(

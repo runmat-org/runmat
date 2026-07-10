@@ -82,6 +82,8 @@ pub(crate) mod figure;
 pub(crate) mod figure_persistence;
 #[path = "ops/fill3.rs"]
 pub(crate) mod fill3;
+#[path = "ops/fsurf.rs"]
+pub(crate) mod fsurf;
 #[path = "ops/gca.rs"]
 pub(crate) mod gca;
 #[path = "ops/gcf.rs"]

@@ -582,6 +582,42 @@ pub struct BinscatterHandleState {
 }
 
 #[derive(Clone, Debug)]
+pub struct FunctionSurfaceHandleState {
+    pub figure: FigureHandle,
+    pub axes_index: usize,
+    pub plot_index: usize,
+    pub mesh_density: usize,
+    pub x_range: (f64, f64),
+    pub y_range: (f64, f64),
+    pub function: FunctionSurfaceFunctionState,
+}
+
+#[derive(Clone, Debug)]
+pub enum FunctionSurfaceFunctionState {
+    Explicit(FunctionSurfaceFunctionRef),
+    Parametric {
+        x: FunctionSurfaceFunctionRef,
+        y: FunctionSurfaceFunctionRef,
+        z: FunctionSurfaceFunctionRef,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub enum FunctionSurfaceFunctionRef {
+    FunctionHandle(String),
+    ExternalFunctionHandle(String),
+    MethodFunctionHandle(String),
+    BoundFunctionHandle {
+        name: String,
+        function: usize,
+    },
+    ClosureSummary {
+        function_name: String,
+        bound_function: Option<usize>,
+    },
+}
+
+#[derive(Clone, Debug)]
 pub struct AreaHandleState {
     pub figure: FigureHandle,
     pub axes_index: usize,
@@ -609,6 +645,7 @@ pub enum PlotChildHandleState {
     Image(ImageHandleState),
     Heatmap(HeatmapHandleState),
     Binscatter(BinscatterHandleState),
+    FunctionSurface(FunctionSurfaceHandleState),
     Area(AreaHandleState),
     Surface(SimplePlotHandleState),
     Patch(SimplePlotHandleState),
@@ -644,6 +681,7 @@ impl PlotChildHandleState {
             Self::Image(state) => (state.figure, state.axes_index),
             Self::Heatmap(state) => (state.figure, state.axes_index),
             Self::Binscatter(state) => (state.figure, state.axes_index),
+            Self::FunctionSurface(state) => (state.figure, state.axes_index),
             Self::Area(state) => (state.figure, state.axes_index),
             Self::Text(state) => (state.figure, state.axes_index),
         }
@@ -663,6 +701,7 @@ impl PlotChildHandleState {
             Self::Image(_) => "image",
             Self::Heatmap(_) => "heatmap",
             Self::Binscatter(_) => "binscatter",
+            Self::FunctionSurface(_) => "functionsurface",
             Self::Area(_) => "area",
             Self::Surface(_) => "surface",
             Self::Patch(_) => "patch",
@@ -3419,6 +3458,33 @@ pub fn register_binscatter_handle(
     id as f64
 }
 
+pub fn register_function_surface_handle(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    mesh_density: usize,
+    x_range: (f64, f64),
+    y_range: (f64, f64),
+    function: FunctionSurfaceFunctionState,
+) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children.insert(
+        id,
+        PlotChildHandleState::FunctionSurface(FunctionSurfaceHandleState {
+            figure,
+            axes_index,
+            plot_index,
+            mesh_density,
+            x_range,
+            y_range,
+            function,
+        }),
+    );
+    id as f64
+}
+
 pub fn update_binscatter_handle_for_plot(
     figure: FigureHandle,
     plot_index: usize,
@@ -3974,6 +4040,9 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         PlotChildHandleState::Image(image) => image.figure != handle,
         PlotChildHandleState::Heatmap(heatmap) => heatmap.figure != handle,
         PlotChildHandleState::Binscatter(binscatter) => binscatter.figure != handle,
+        PlotChildHandleState::FunctionSurface(function_surface) => {
+            function_surface.figure != handle
+        }
         PlotChildHandleState::Area(area) => area.figure != handle,
         PlotChildHandleState::Text(text) => text.figure != handle,
     });
@@ -4018,6 +4087,9 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
         }
         PlotChildHandleState::Binscatter(binscatter) => {
             !(binscatter.figure == handle && binscatter.axes_index == axes_index)
+        }
+        PlotChildHandleState::FunctionSurface(function_surface) => {
+            !(function_surface.figure == handle && function_surface.axes_index == axes_index)
         }
         PlotChildHandleState::Area(area) => {
             !(area.figure == handle && area.axes_index == axes_index)

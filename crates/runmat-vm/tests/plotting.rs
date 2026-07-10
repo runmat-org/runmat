@@ -508,6 +508,23 @@ fn triplot_dispatches_and_returns_line_handle() {
 }
 
 #[test]
+fn fsurf_dispatches_function_handle_surface_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        f1 = figure(201); \
+        ax1 = gca; \
+        f2 = figure(202); \
+        h = fsurf(ax1, @(x,y) x.^2 + y, [0 1 0 2], 'MeshDensity', 3, 'DisplayName', 'surface'); \
+        if ~ishandle(h); error('fsurf did not return a handle'); end; \
+        if ~strcmp(get(h, 'Type'), 'functionsurface'); error('fsurf did not create function surface graphics'); end; \
+        if get(h, 'Parent') ~= ax1; error('fsurf parent axes mismatch'); end; \
+        if gcf() ~= f1; error('fsurf did not select target figure'); end; \
+        if get(h, 'MeshDensity') ~= 3; error('fsurf mesh density mismatch'); end; \
+        if ~strcmp(get(h, 'DisplayName'), 'surface'); error('fsurf display name mismatch'); end;";
+    execute_source(input).expect("execute fsurf script");
+}
+
+#[test]
 fn animatedline_and_addpoints_dispatch_through_vm() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\
