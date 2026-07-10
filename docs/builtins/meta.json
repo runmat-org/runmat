@@ -2459,6 +2459,88 @@
       ]
     },
     {
+      "name": "addpoints",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "addpoints(an, x, y)",
+          "inputs": [
+            {
+              "name": "an",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Animated line handle."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "addpoints(an, x, y, z)",
+          "inputs": [
+            {
+              "name": "an",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Animated line handle."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates."
+            },
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Z coordinates for 3-D animated lines."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ADDPOINTS.INVALID_ARGUMENT",
+          "identifier": "RunMat:addpoints:InvalidArgument",
+          "when": "The handle is not an animated line, coordinates are invalid, or vector lengths differ.",
+          "message": "addpoints: invalid argument"
+        },
+        {
+          "code": "RM.ADDPOINTS.INTERNAL",
+          "identifier": "RunMat:addpoints:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "addpoints: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "all",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -2868,6 +2950,124 @@
           "identifier": "RunMat:angle:Internal",
           "when": "Internal tensor conversion/allocation/provider interaction failed.",
           "message": "angle: internal error"
+        }
+      ]
+    },
+    {
+      "name": "animatedline",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "an = animatedline()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "an",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Animated line graphics handle."
+            }
+          ]
+        },
+        {
+          "label": "an = animatedline(x, y)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional X/Y[/Z] vectors, axes target, and Name/Value properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "an",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Animated line graphics handle."
+            }
+          ]
+        },
+        {
+          "label": "an = animatedline(x, y, z)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional X/Y[/Z] vectors, axes target, and Name/Value properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "an",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Animated line graphics handle."
+            }
+          ]
+        },
+        {
+          "label": "an = animatedline(..., Name, Value)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional X/Y[/Z] vectors, axes target, and Name/Value properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "an",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Animated line graphics handle."
+            }
+          ]
+        },
+        {
+          "label": "an = animatedline(ax, ...)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional X/Y[/Z] vectors, axes target, and Name/Value properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "an",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Animated line graphics handle."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ANIMATEDLINE.INVALID_ARGUMENT",
+          "identifier": "RunMat:animatedline:InvalidArgument",
+          "when": "Coordinates, axes target, or Name/Value pairs are invalid.",
+          "message": "animatedline: invalid argument"
+        },
+        {
+          "code": "RM.ANIMATEDLINE.INTERNAL",
+          "identifier": "RunMat:animatedline:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "animatedline: internal operation failed"
         }
       ]
     },
@@ -5074,6 +5274,69 @@
           ]
         },
         {
+          "label": "h = bar(Y, width)",
+          "inputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            },
+            {
+              "name": "width",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "0.75",
+              "description": "Fraction of available category space occupied by each bar."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        },
+        {
+          "label": "h = bar(Y, width, color)",
+          "inputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            },
+            {
+              "name": "width",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "0.75",
+              "description": "Fraction of available category space occupied by each bar."
+            },
+            {
+              "name": "color",
+              "ty": "StyleSpec",
+              "arity": "Required",
+              "default": null,
+              "description": "Color shorthand or color name for all bars."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        },
+        {
           "label": "h = bar(Y, style)",
           "inputs": [
             {
@@ -5145,6 +5408,83 @@
               "arity": "Required",
               "default": null,
               "description": "Bar heights as a vector or matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        },
+        {
+          "label": "h = bar(X, Y, width)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Category positions for bars."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            },
+            {
+              "name": "width",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "0.75",
+              "description": "Fraction of available category space occupied by each bar."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        },
+        {
+          "label": "h = bar(X, Y, width, color)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Category positions for bars."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            },
+            {
+              "name": "width",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "0.75",
+              "description": "Fraction of available category space occupied by each bar."
+            },
+            {
+              "name": "color",
+              "ty": "StyleSpec",
+              "arity": "Required",
+              "default": null,
+              "description": "Color shorthand or color name for all bars."
             }
           ],
           "outputs": [
@@ -5240,6 +5580,342 @@
           "identifier": "RunMat:bar:Internal",
           "when": "Renderer/GPU conversion fails while building bar geometry.",
           "message": "bar: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "barh",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = barh(Y)",
+          "inputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        },
+        {
+          "label": "h = barh(Y, width)",
+          "inputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            },
+            {
+              "name": "width",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "0.75",
+              "description": "Fraction of available category space occupied by each bar."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        },
+        {
+          "label": "h = barh(Y, width, color)",
+          "inputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            },
+            {
+              "name": "width",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "0.75",
+              "description": "Fraction of available category space occupied by each bar."
+            },
+            {
+              "name": "color",
+              "ty": "StyleSpec",
+              "arity": "Required",
+              "default": null,
+              "description": "Color shorthand or color name for all bars."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        },
+        {
+          "label": "h = barh(Y, style)",
+          "inputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            },
+            {
+              "name": "style",
+              "ty": "StyleSpec",
+              "arity": "Required",
+              "default": null,
+              "description": "Layout/style token such as 'stacked' or color shorthand."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        },
+        {
+          "label": "h = barh(Y, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            },
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name/value style arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        },
+        {
+          "label": "h = barh(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Category positions for bars."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        },
+        {
+          "label": "h = barh(X, Y, width)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Category positions for bars."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            },
+            {
+              "name": "width",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "0.75",
+              "description": "Fraction of available category space occupied by each bar."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        },
+        {
+          "label": "h = barh(X, Y, width, color)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Category positions for bars."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            },
+            {
+              "name": "width",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "0.75",
+              "description": "Fraction of available category space occupied by each bar."
+            },
+            {
+              "name": "color",
+              "ty": "StyleSpec",
+              "arity": "Required",
+              "default": null,
+              "description": "Color shorthand or color name for all bars."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        },
+        {
+          "label": "h = barh(X, Y, style)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Category positions for bars."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            },
+            {
+              "name": "style",
+              "ty": "StyleSpec",
+              "arity": "Required",
+              "default": null,
+              "description": "Layout/style token such as 'stacked' or color shorthand."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        },
+        {
+          "label": "h = barh(X, Y, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Category positions for bars."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bar heights as a vector or matrix."
+            },
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name/value style arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the first rendered bar series."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.BARH.INVALID_ARGUMENT",
+          "identifier": "RunMat:barh:InvalidArgument",
+          "when": "Horizontal bar input arrays, style tokens, or name/value arguments are invalid.",
+          "message": "barh: invalid argument"
+        },
+        {
+          "code": "RM.BARH.INTERNAL",
+          "identifier": "RunMat:barh:Internal",
+          "when": "Renderer/GPU conversion fails while building horizontal bar geometry.",
+          "message": "barh: internal operation failed"
         }
       ]
     },
@@ -10579,6 +11255,55 @@
       ]
     },
     {
+      "name": "colorcube",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "c = colorcube()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "c",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "m-by-3 RGB colormap array with values in [0, 1]."
+            }
+          ]
+        },
+        {
+          "label": "c = colorcube(m)",
+          "inputs": [
+            {
+              "name": "m",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "current colormap length or 256",
+              "description": "Number of colors as a nonnegative integer."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "c",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "m-by-3 RGB colormap array with values in [0, 1]."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.COLORMAP_ARRAY.INVALID_ARGUMENT",
+          "identifier": "RunMat:colormapArray:InvalidArgument",
+          "when": "The requested colormap length or RGB colormap array is invalid.",
+          "message": "colormap array: invalid argument"
+        }
+      ]
+    },
+    {
       "name": "colormap",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -10603,13 +11328,34 @@
               "description": "True on successful colormap update."
             }
           ]
+        },
+        {
+          "label": "ok = colormap(map)",
+          "inputs": [
+            {
+              "name": "map",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "m-by-3 RGB colormap array with values in [0, 1]."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ok",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True on successful colormap update."
+            }
+          ]
         }
       ],
       "errors": [
         {
           "code": "RM.COLORMAP.INVALID_ARGUMENT",
           "identifier": "RunMat:colormap:InvalidArgument",
-          "when": "Colormap name is missing, non-string, or unknown.",
+          "when": "Colormap input is missing, unknown, or not a valid m-by-3 RGB array.",
           "message": "colormap: invalid argument"
         }
       ]
@@ -13170,6 +13916,55 @@
           "identifier": "RunMat:copyfile:SourceEqualsDestination",
           "when": "Source and destination resolve to the same path.",
           "message": "copyfile: source and destination are the same"
+        }
+      ]
+    },
+    {
+      "name": "copyobj",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "hnew = copyobj(h, parent)",
+          "inputs": [
+            {
+              "name": "h",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Graphics object handle or handle array to copy."
+            },
+            {
+              "name": "parent",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Destination axes or figure handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "hnew",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Copied graphics object handle or handle array."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.COPYOBJ.INVALID_ARGUMENT",
+          "identifier": "RunMat:copyobj:InvalidArgument",
+          "when": "Argument count, source handle, or target parent handle is invalid or unsupported.",
+          "message": "copyobj: invalid argument"
+        },
+        {
+          "code": "RM.COPYOBJ.INTERNAL",
+          "identifier": "RunMat:copyobj:Internal",
+          "when": "Internal graphics state lookup or copy registration fails.",
+          "message": "copyobj: internal operation failed"
         }
       ]
     },
@@ -19027,6 +19822,131 @@
       ]
     },
     {
+      "name": "daspect",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "ratio = daspect()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "ratio",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current data aspect ratio [dx dy dz]."
+            }
+          ]
+        },
+        {
+          "label": "ratio = daspect(ratio)",
+          "inputs": [
+            {
+              "name": "ratio",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Three-element positive numeric data aspect ratio."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ratio",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current data aspect ratio [dx dy dz]."
+            }
+          ]
+        },
+        {
+          "label": "mode = daspect(mode)",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Mode string: 'auto', 'manual', or 'mode'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current data aspect ratio mode, 'auto' or 'manual'."
+            }
+          ]
+        },
+        {
+          "label": "ratio = daspect(ax)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ratio",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current data aspect ratio [dx dy dz]."
+            }
+          ]
+        },
+        {
+          "label": "ratio = daspect(ax, ratio_or_mode)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "ratio_or_mode",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Ratio vector or mode string."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ratio",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current data aspect ratio [dx dy dz]."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DASPECT.INVALID_ARGUMENT",
+          "identifier": "RunMat:daspect:InvalidArgument",
+          "when": "Argument count, axes handle, ratio vector, or mode string is invalid.",
+          "message": "daspect: invalid argument"
+        },
+        {
+          "code": "RM.DASPECT.INTERNAL",
+          "identifier": "RunMat:daspect:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "daspect: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "data.copy",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -19706,6 +20626,115 @@
           "identifier": "RunMat:dataTipTextRow:Internal",
           "when": "Internal data-tip row object construction fails.",
           "message": "dataTipTextRow: internal error"
+        }
+      ]
+    },
+    {
+      "name": "datacursormode",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "dcm = datacursormode()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "dcm",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Data cursor mode object for the current or specified figure."
+            }
+          ]
+        },
+        {
+          "label": "datacursormode()",
+          "inputs": [],
+          "outputs": []
+        },
+        {
+          "label": "status = datacursormode(option)",
+          "inputs": [
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Mode option: on, off, or toggle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Returns \"ok\" when the command succeeds."
+            }
+          ]
+        },
+        {
+          "label": "dcm = datacursormode(fig)",
+          "inputs": [
+            {
+              "name": "fig",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Target figure handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dcm",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Data cursor mode object for the current or specified figure."
+            }
+          ]
+        },
+        {
+          "label": "status = datacursormode(fig, option)",
+          "inputs": [
+            {
+              "name": "fig",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Target figure handle."
+            },
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Mode option: on, off, or toggle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Returns \"ok\" when the command succeeds."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DATACURSORMODE.INVALID_ARGUMENT",
+          "identifier": "RunMat:datacursormode:InvalidArgument",
+          "when": "Argument count, figure handle, option, or property is invalid.",
+          "message": "datacursormode: invalid argument"
+        },
+        {
+          "code": "RM.DATACURSORMODE.INTERNAL",
+          "identifier": "RunMat:datacursormode:Internal",
+          "when": "Internal data cursor state or handle-object update fails.",
+          "message": "datacursormode: internal operation failed"
         }
       ]
     },
@@ -26616,6 +27645,145 @@
           "identifier": null,
           "when": "Internal runtime control-flow or conversion failed.",
           "message": "fclose: internal error"
+        }
+      ]
+    },
+    {
+      "name": "fcontour",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = fcontour(f)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function of two variables, z = f(x,y)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered function contour."
+            }
+          ]
+        },
+        {
+          "label": "h = fcontour(f, xyinterval)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function of two variables, z = f(x,y)."
+            },
+            {
+              "name": "xyinterval",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[-5 5 -5 5]",
+              "description": "Two- or four-element domain vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered function contour."
+            }
+          ]
+        },
+        {
+          "label": "h = fcontour(___, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function-handle and optional domain arguments."
+            },
+            {
+              "name": "name_value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MeshDensity and contour name/value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered function contour."
+            }
+          ]
+        },
+        {
+          "label": "h = fcontour(ax, ___)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function-handle and optional domain arguments."
+            },
+            {
+              "name": "name_value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MeshDensity and contour name/value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered function contour."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FCONTOUR.INVALID_ARGUMENT",
+          "identifier": "RunMat:fcontour:InvalidArgument",
+          "when": "Function handle, domain, mesh density, axes target, levels, or contour properties are invalid.",
+          "message": "fcontour: invalid argument"
+        },
+        {
+          "code": "RM.FCONTOUR.EVALUATION",
+          "identifier": "RunMat:fcontour:EvaluationFailed",
+          "when": "A sampled function handle fails or does not return a scalar numeric value.",
+          "message": "fcontour: function evaluation failed"
+        },
+        {
+          "code": "RM.FCONTOUR.INTERNAL",
+          "identifier": "RunMat:fcontour:Internal",
+          "when": "Contour construction or rendering fails unexpectedly.",
+          "message": "fcontour: internal operation failed"
         }
       ]
     },
@@ -34396,6 +35564,208 @@
       ]
     },
     {
+      "name": "fsurf",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = fsurf(f)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function of two variables, z = f(x,y)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered function surface."
+            }
+          ]
+        },
+        {
+          "label": "h = fsurf(f, xyinterval)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function of two variables, z = f(x,y)."
+            },
+            {
+              "name": "xyinterval",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[-5 5 -5 5]",
+              "description": "Two- or four-element domain vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered function surface."
+            }
+          ]
+        },
+        {
+          "label": "h = fsurf(fx, fy, fz)",
+          "inputs": [
+            {
+              "name": "fx",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Parametric x-coordinate function."
+            },
+            {
+              "name": "fy",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Parametric y-coordinate function."
+            },
+            {
+              "name": "fz",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Parametric z-coordinate function."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered function surface."
+            }
+          ]
+        },
+        {
+          "label": "h = fsurf(fx, fy, fz, uvinterval)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function-handle and optional domain arguments."
+            },
+            {
+              "name": "name_value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MeshDensity and surface style name/value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered function surface."
+            }
+          ]
+        },
+        {
+          "label": "h = fsurf(___, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function-handle and optional domain arguments."
+            },
+            {
+              "name": "name_value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MeshDensity and surface style name/value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered function surface."
+            }
+          ]
+        },
+        {
+          "label": "h = fsurf(ax, ___)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function-handle and optional domain arguments."
+            },
+            {
+              "name": "name_value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MeshDensity and surface style name/value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered function surface."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FSURF.INVALID_ARGUMENT",
+          "identifier": "RunMat:fsurf:InvalidArgument",
+          "when": "Function handles, domains, mesh density, axes target, or surface properties are invalid.",
+          "message": "fsurf: invalid argument"
+        },
+        {
+          "code": "RM.FSURF.EVALUATION",
+          "identifier": "RunMat:fsurf:EvaluationFailed",
+          "when": "A sampled function handle fails or does not return a scalar numeric value.",
+          "message": "fsurf: function evaluation failed"
+        },
+        {
+          "code": "RM.FSURF.INTERNAL",
+          "identifier": "RunMat:fsurf:Internal",
+          "when": "Surface construction or rendering fails unexpectedly.",
+          "message": "fsurf: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "full",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -38608,6 +39978,208 @@
       ]
     },
     {
+      "name": "hgload",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = hgload(filename)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "fig",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure handle or array of figure handles."
+            }
+          ]
+        },
+        {
+          "label": "[h, old_prop_values] = hgload(filename, property_structure)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Top-level graphics handles loaded from the file."
+            },
+            {
+              "name": "old_prop_values",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array of previous top-level property values overridden by hgload."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FIGURE_PERSISTENCE.INVALID_ARGUMENT",
+          "identifier": "RunMat:figurePersistence:InvalidArgument",
+          "when": "Arguments are missing, malformed, or incompatible with the requested figure persistence operation.",
+          "message": "figure persistence: invalid argument"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.UNSUPPORTED_FORMAT",
+          "identifier": "RunMat:figurePersistence:UnsupportedFormat",
+          "when": "The requested save/load format is recognized but not supported by RunMat's active plotting exporter.",
+          "message": "figure persistence: unsupported format"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.IO",
+          "identifier": "RunMat:figurePersistence:IoFailure",
+          "when": "The target file cannot be read, written, flushed, synced, or atomically replaced.",
+          "message": "figure persistence: file I/O failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.RENDER",
+          "identifier": "RunMat:figurePersistence:RenderFailed",
+          "when": "The plotting renderer or scene exporter cannot serialize the requested figure.",
+          "message": "figure persistence: export failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.IMPORT",
+          "identifier": "RunMat:figurePersistence:ImportFailed",
+          "when": "The figure file is missing, corrupt, unsupported, or incompatible with RunMat's scene importer.",
+          "message": "figure persistence: import failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.INTERNAL",
+          "identifier": "RunMat:figurePersistence:Internal",
+          "when": "Internal runtime control-flow or conversion fails.",
+          "message": "figure persistence: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "hgsave",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "ok = hgsave(filename)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ok",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the save operation completed."
+            }
+          ]
+        },
+        {
+          "label": "ok = hgsave(h, filename)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ok",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the save operation completed."
+            }
+          ]
+        },
+        {
+          "label": "ok = hgsave(..., version)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ok",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the save operation completed."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FIGURE_PERSISTENCE.INVALID_ARGUMENT",
+          "identifier": "RunMat:figurePersistence:InvalidArgument",
+          "when": "Arguments are missing, malformed, or incompatible with the requested figure persistence operation.",
+          "message": "figure persistence: invalid argument"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.UNSUPPORTED_FORMAT",
+          "identifier": "RunMat:figurePersistence:UnsupportedFormat",
+          "when": "The requested save/load format is recognized but not supported by RunMat's active plotting exporter.",
+          "message": "figure persistence: unsupported format"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.IO",
+          "identifier": "RunMat:figurePersistence:IoFailure",
+          "when": "The target file cannot be read, written, flushed, synced, or atomically replaced.",
+          "message": "figure persistence: file I/O failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.RENDER",
+          "identifier": "RunMat:figurePersistence:RenderFailed",
+          "when": "The plotting renderer or scene exporter cannot serialize the requested figure.",
+          "message": "figure persistence: export failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.IMPORT",
+          "identifier": "RunMat:figurePersistence:ImportFailed",
+          "when": "The figure file is missing, corrupt, unsupported, or incompatible with RunMat's scene importer.",
+          "message": "figure persistence: import failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.INTERNAL",
+          "identifier": "RunMat:figurePersistence:Internal",
+          "when": "Internal runtime control-flow or conversion fails.",
+          "message": "figure persistence: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "hilbert",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -39963,6 +41535,443 @@
           "identifier": "RunMat:histogram:Internal",
           "when": "Internal render preparation or histogram state registration fails.",
           "message": "histogram: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "histogram2",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = histogram2(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input samples."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input samples."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created histogram2 chart."
+            }
+          ]
+        },
+        {
+          "label": "h = histogram2(X, Y, bins)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input samples."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input samples."
+            },
+            {
+              "name": "bins",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar/two-element bin count or edge specification."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created histogram2 chart."
+            }
+          ]
+        },
+        {
+          "label": "h = histogram2(X, Y, binsX, binsY)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input samples."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input samples."
+            },
+            {
+              "name": "binsX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis bin count scalar or edge vector."
+            },
+            {
+              "name": "binsY",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis bin count scalar or edge vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created histogram2 chart."
+            }
+          ]
+        },
+        {
+          "label": "h = histogram2(X, Y, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input samples."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input samples."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Binning and chart name/value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created histogram2 chart."
+            }
+          ]
+        },
+        {
+          "label": "h = histogram2(ax, X, Y)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input samples."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input samples."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created histogram2 chart."
+            }
+          ]
+        },
+        {
+          "label": "h = histogram2(ax, X, Y, bins)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input samples."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input samples."
+            },
+            {
+              "name": "bins",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar/two-element bin count or edge specification."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created histogram2 chart."
+            }
+          ]
+        },
+        {
+          "label": "h = histogram2(ax, X, Y, binsX, binsY)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input samples."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input samples."
+            },
+            {
+              "name": "binsX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis bin count scalar or edge vector."
+            },
+            {
+              "name": "binsY",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis bin count scalar or edge vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created histogram2 chart."
+            }
+          ]
+        },
+        {
+          "label": "h = histogram2(ax, X, Y, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input samples."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input samples."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Binning and chart name/value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created histogram2 chart."
+            }
+          ]
+        },
+        {
+          "label": "histogram2(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input samples."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input samples."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "histogram2(X, Y, bins)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input samples."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input samples."
+            },
+            {
+              "name": "bins",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar/two-element bin count or edge specification."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "histogram2(ax, X, Y)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input samples."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input samples."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "histogram2(ax, X, Y, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input samples."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input samples."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Binning and chart name/value options."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.HISTOGRAM2.INVALID_ARGUMENT",
+          "identifier": "RunMat:histogram2:InvalidArgument",
+          "when": "Input arrays, bin controls, or chart options are malformed.",
+          "message": "histogram2: invalid argument"
+        },
+        {
+          "code": "RM.HISTOGRAM2.INTERNAL",
+          "identifier": "RunMat:histogram2:Internal",
+          "when": "RunMat cannot compute bins, register state, or render the chart.",
+          "message": "histogram2: internal error"
         }
       ]
     },
@@ -52593,6 +54602,79 @@
           "identifier": null,
           "when": "Name argument is not a character vector or string scalar.",
           "message": "ls: name must be a character vector or string scalar"
+        }
+      ]
+    },
+    {
+      "name": "lsline",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "lsline()",
+          "inputs": [],
+          "outputs": []
+        },
+        {
+          "label": "lsline(ax)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "h = lsline()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line graphics handle or vector of line handles."
+            }
+          ]
+        },
+        {
+          "label": "h = lsline(ax)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line graphics handle or vector of line handles."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LSLINE.INVALID_ARGUMENT",
+          "identifier": "RunMat:lsline:InvalidArgument",
+          "when": "The optional axes handle is malformed or extra arguments are supplied.",
+          "message": "lsline: invalid argument"
+        },
+        {
+          "code": "RM.LSLINE.INTERNAL",
+          "identifier": "RunMat:lsline:Internal",
+          "when": "RunMat cannot construct or register the least-squares line.",
+          "message": "lsline: internal error"
         }
       ]
     },
@@ -67584,6 +69666,331 @@
       ]
     },
     {
+      "name": "openfig",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "fig = openfig(filename)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "fig",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure handle or array of figure handles."
+            }
+          ]
+        },
+        {
+          "label": "fig = openfig(filename, copies)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "fig",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure handle or array of figure handles."
+            }
+          ]
+        },
+        {
+          "label": "fig = openfig(filename, visibility)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "fig",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure handle or array of figure handles."
+            }
+          ]
+        },
+        {
+          "label": "fig = openfig(filename, copies, visibility)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "fig",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure handle or array of figure handles."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FIGURE_PERSISTENCE.INVALID_ARGUMENT",
+          "identifier": "RunMat:figurePersistence:InvalidArgument",
+          "when": "Arguments are missing, malformed, or incompatible with the requested figure persistence operation.",
+          "message": "figure persistence: invalid argument"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.UNSUPPORTED_FORMAT",
+          "identifier": "RunMat:figurePersistence:UnsupportedFormat",
+          "when": "The requested save/load format is recognized but not supported by RunMat's active plotting exporter.",
+          "message": "figure persistence: unsupported format"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.IO",
+          "identifier": "RunMat:figurePersistence:IoFailure",
+          "when": "The target file cannot be read, written, flushed, synced, or atomically replaced.",
+          "message": "figure persistence: file I/O failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.RENDER",
+          "identifier": "RunMat:figurePersistence:RenderFailed",
+          "when": "The plotting renderer or scene exporter cannot serialize the requested figure.",
+          "message": "figure persistence: export failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.IMPORT",
+          "identifier": "RunMat:figurePersistence:ImportFailed",
+          "when": "The figure file is missing, corrupt, unsupported, or incompatible with RunMat's scene importer.",
+          "message": "figure persistence: import failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.INTERNAL",
+          "identifier": "RunMat:figurePersistence:Internal",
+          "when": "Internal runtime control-flow or conversion fails.",
+          "message": "figure persistence: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "opengl",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "status = opengl()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Renderer status string or information struct."
+            }
+          ]
+        },
+        {
+          "label": "info = opengl('info')",
+          "inputs": [
+            {
+              "name": "commands",
+              "ty": "StringScalar",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Commands such as info, data, hardware, hardwarebasic, software, save, autoselect, or neverselect."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Renderer status string or information struct."
+            }
+          ]
+        },
+        {
+          "label": "status = opengl(command, ...)",
+          "inputs": [
+            {
+              "name": "commands",
+              "ty": "StringScalar",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Commands such as info, data, hardware, hardwarebasic, software, save, autoselect, or neverselect."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Renderer status string or information struct."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.OPENGL.INVALID_ARGUMENT",
+          "identifier": "RunMat:opengl:InvalidArgument",
+          "when": "Command text or command combination is invalid.",
+          "message": "opengl: invalid argument"
+        }
+      ]
+    },
+    {
+      "name": "opentoline",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "opentoline(filename, line)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "File to open in the editor."
+            },
+            {
+              "name": "line",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based line number."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "opentoline(filename, line, column)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "File to open in the editor."
+            },
+            {
+              "name": "line",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based line number."
+            },
+            {
+              "name": "column",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "1",
+              "description": "One-based column number."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "opentoline(filename, line, column, option)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "File to open in the editor."
+            },
+            {
+              "name": "line",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based line number."
+            },
+            {
+              "name": "column",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "1",
+              "description": "One-based column number."
+            },
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Editor navigation option such as 'select'."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.OPENTOLINE.ARG_COUNT",
+          "identifier": "RunMat:opentoline:ArgumentCount",
+          "when": "The call does not provide two to four input arguments.",
+          "message": "opentoline: expected filename, line, optional column, and optional option"
+        },
+        {
+          "code": "RM.OPENTOLINE.FILENAME",
+          "identifier": "RunMat:opentoline:InvalidFilename",
+          "when": "The filename is not a string scalar or row character vector.",
+          "message": "opentoline: filename must be a character vector or string scalar"
+        },
+        {
+          "code": "RM.OPENTOLINE.POSITION",
+          "identifier": "RunMat:opentoline:InvalidPosition",
+          "when": "The line or column argument is not a positive integer scalar.",
+          "message": "opentoline: line and column must be positive integer scalars"
+        },
+        {
+          "code": "RM.OPENTOLINE.OPTION",
+          "identifier": "RunMat:opentoline:InvalidOption",
+          "when": "The optional editor behavior argument is unsupported.",
+          "message": "opentoline: option must be 'select' when provided"
+        },
+        {
+          "code": "RM.OPENTOLINE.NOT_FOUND",
+          "identifier": "RunMat:opentoline:FileNotFound",
+          "when": "No file matching the supplied name can be resolved.",
+          "message": "opentoline: file was not found"
+        },
+        {
+          "code": "RM.OPENTOLINE.OUTPUT_COUNT",
+          "identifier": "RunMat:opentoline:TooManyOutputs",
+          "when": "The call requests one or more output arguments.",
+          "message": "opentoline: expected no output arguments"
+        }
+      ]
+    },
+    {
       "name": "optimoptions",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -68778,6 +71185,115 @@
       ]
     },
     {
+      "name": "pan",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "p = pan()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Pan mode object for the current or specified figure."
+            }
+          ]
+        },
+        {
+          "label": "pan()",
+          "inputs": [],
+          "outputs": []
+        },
+        {
+          "label": "status = pan(option)",
+          "inputs": [
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Pan option: on, off, toggle, xon, or yon."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Returns \"ok\" when the pan command succeeds."
+            }
+          ]
+        },
+        {
+          "label": "status = pan(target, option)",
+          "inputs": [
+            {
+              "name": "target",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure or axes handle."
+            },
+            {
+              "name": "option",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Pan option."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Returns \"ok\" when the pan command succeeds."
+            }
+          ]
+        },
+        {
+          "label": "p = pan(fig)",
+          "inputs": [
+            {
+              "name": "fig",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Target figure handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Pan mode object for the current or specified figure."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PAN.INVALID_ARGUMENT",
+          "identifier": "RunMat:pan:InvalidArgument",
+          "when": "Argument count, target handle, option, or pan property is invalid.",
+          "message": "pan: invalid argument"
+        },
+        {
+          "code": "RM.PAN.INTERNAL",
+          "identifier": "RunMat:pan:Internal",
+          "when": "Internal pan state or handle-object update fails.",
+          "message": "pan: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "parquetDatastore",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -68834,6 +71350,55 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
+      "name": "parula",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "c = parula()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "c",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "m-by-3 RGB colormap array with values in [0, 1]."
+            }
+          ]
+        },
+        {
+          "label": "c = parula(m)",
+          "inputs": [
+            {
+              "name": "m",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "current colormap length or 256",
+              "description": "Number of colors as a nonnegative integer."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "c",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "m-by-3 RGB colormap array with values in [0, 1]."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.COLORMAP_ARRAY.INVALID_ARGUMENT",
+          "identifier": "RunMat:colormapArray:InvalidArgument",
+          "when": "The requested colormap length or RGB colormap array is invalid.",
+          "message": "colormap array: invalid argument"
         }
       ]
     },
@@ -71346,6 +73911,314 @@
       ]
     },
     {
+      "name": "plotmatrix",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "S = plotmatrix(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose columns are variables and rows are observations."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix of scatter graphics handles for off-diagonal plots."
+            }
+          ]
+        },
+        {
+          "label": "S = plotmatrix(X, LineSpec)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose columns are variables and rows are observations."
+            },
+            {
+              "name": "lineSpec",
+              "ty": "StyleSpec",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional marker/color style applied to scatter plots."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix of scatter graphics handles for off-diagonal plots."
+            }
+          ]
+        },
+        {
+          "label": "S = plotmatrix(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose columns are variables and rows are observations."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose columns are variables and rows are observations."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix of scatter graphics handles for off-diagonal plots."
+            }
+          ]
+        },
+        {
+          "label": "S = plotmatrix(X, Y, LineSpec)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose columns are variables and rows are observations."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose columns are variables and rows are observations."
+            },
+            {
+              "name": "lineSpec",
+              "ty": "StyleSpec",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional marker/color style applied to scatter plots."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix of scatter graphics handles for off-diagonal plots."
+            }
+          ]
+        },
+        {
+          "label": "S = plotmatrix(ax, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose columns are variables and rows are observations."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose columns are variables and rows are observations."
+            },
+            {
+              "name": "lineSpec",
+              "ty": "StyleSpec",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional marker/color style applied to scatter plots."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix of scatter graphics handles for off-diagonal plots."
+            }
+          ]
+        },
+        {
+          "label": "[S, AX] = plotmatrix(...)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose columns are variables and rows are observations."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose columns are variables and rows are observations."
+            },
+            {
+              "name": "lineSpec",
+              "ty": "StyleSpec",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional marker/color style applied to scatter plots."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix of scatter graphics handles for off-diagonal plots."
+            },
+            {
+              "name": "AX",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix of axes handles used by the plot matrix."
+            }
+          ]
+        },
+        {
+          "label": "[S, AX, BigAx] = plotmatrix(...)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose columns are variables and rows are observations."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose columns are variables and rows are observations."
+            },
+            {
+              "name": "lineSpec",
+              "ty": "StyleSpec",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional marker/color style applied to scatter plots."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix of scatter graphics handles for off-diagonal plots."
+            },
+            {
+              "name": "AX",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix of axes handles used by the plot matrix."
+            },
+            {
+              "name": "BigAx",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Compatibility axes handle for labels spanning the plot matrix."
+            }
+          ]
+        },
+        {
+          "label": "[S, AX, BigAx, H, HAx] = plotmatrix(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose columns are variables and rows are observations."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix of scatter graphics handles for off-diagonal plots."
+            },
+            {
+              "name": "AX",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix of axes handles used by the plot matrix."
+            },
+            {
+              "name": "BigAx",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Compatibility axes handle for labels spanning the plot matrix."
+            },
+            {
+              "name": "H",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector of diagonal histogram handles for the one-input form."
+            },
+            {
+              "name": "HAx",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector of diagonal histogram axes handles for the one-input form."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PLOTMATRIX.INVALID_ARGUMENT",
+          "identifier": "RunMat:plotmatrix:InvalidArgument",
+          "when": "Inputs are nonnumeric, observation counts differ, or style arguments are malformed.",
+          "message": "plotmatrix: invalid argument"
+        },
+        {
+          "code": "RM.PLOTMATRIX.INTERNAL",
+          "identifier": "RunMat:plotmatrix:Internal",
+          "when": "Internal subplot, scatter, or histogram rendering fails.",
+          "message": "plotmatrix: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "plotyy",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -71872,6 +74745,195 @@
           "identifier": "RunMat:polarplot:Internal",
           "when": "Internal polar line construction or rendering fails unexpectedly.",
           "message": "polarplot: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "polarscatter",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "ps = polarscatter(theta, rho)",
+          "inputs": [
+            {
+              "name": "theta",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Angular coordinates in radians."
+            },
+            {
+              "name": "rho",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Radial coordinates."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ps",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scatter handle or row-vector of scatter handles."
+            }
+          ]
+        },
+        {
+          "label": "ps = polarscatter(theta, rho, sz)",
+          "inputs": [
+            {
+              "name": "theta",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Angular coordinates in radians."
+            },
+            {
+              "name": "rho",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Radial coordinates."
+            },
+            {
+              "name": "sz",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "36",
+              "description": "Marker area in points squared, as scalar, vector, or matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ps",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scatter handle or row-vector of scatter handles."
+            }
+          ]
+        },
+        {
+          "label": "ps = polarscatter(theta, rho, sz, c)",
+          "inputs": [
+            {
+              "name": "theta",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Angular coordinates in radians."
+            },
+            {
+              "name": "rho",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Radial coordinates."
+            },
+            {
+              "name": "sz",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "36",
+              "description": "Marker area in points squared, as scalar, vector, or matrix."
+            },
+            {
+              "name": "c",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Marker color as color name, RGB triplet, scalar vector, or RGB matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ps",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scatter handle or row-vector of scatter handles."
+            }
+          ]
+        },
+        {
+          "label": "ps = polarscatter(___, mkr)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional marker, filled flag, axes handle, and name/value properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ps",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scatter handle or row-vector of scatter handles."
+            }
+          ]
+        },
+        {
+          "label": "ps = polarscatter(___, 'filled', Name, Value)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional marker, filled flag, axes handle, and name/value properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ps",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scatter handle or row-vector of scatter handles."
+            }
+          ]
+        },
+        {
+          "label": "ps = polarscatter(pax, ___)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional marker, filled flag, axes handle, and name/value properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ps",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scatter handle or row-vector of scatter handles."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.POLARSCATTER.INVALID_ARGUMENT",
+          "identifier": "RunMat:polarscatter:InvalidArgument",
+          "when": "Input data, size/color/style arguments, or axes targeting are invalid.",
+          "message": "polarscatter: invalid argument"
+        },
+        {
+          "code": "RM.POLARSCATTER.INTERNAL",
+          "identifier": "RunMat:polarscatter:Internal",
+          "when": "Internal polar scatter construction or rendering fails unexpectedly.",
+          "message": "polarscatter: internal operation failed"
         }
       ]
     },
@@ -82390,6 +85452,201 @@
           "identifier": "RunMat:save:Workspace",
           "when": "Workspace state is unavailable.",
           "message": "save: workspace state unavailable"
+        }
+      ]
+    },
+    {
+      "name": "saveas",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "ok = saveas(fig, filename)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ok",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the save operation completed."
+            }
+          ]
+        },
+        {
+          "label": "ok = saveas(fig, filename, formattype)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ok",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the save operation completed."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FIGURE_PERSISTENCE.INVALID_ARGUMENT",
+          "identifier": "RunMat:figurePersistence:InvalidArgument",
+          "when": "Arguments are missing, malformed, or incompatible with the requested figure persistence operation.",
+          "message": "figure persistence: invalid argument"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.UNSUPPORTED_FORMAT",
+          "identifier": "RunMat:figurePersistence:UnsupportedFormat",
+          "when": "The requested save/load format is recognized but not supported by RunMat's active plotting exporter.",
+          "message": "figure persistence: unsupported format"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.IO",
+          "identifier": "RunMat:figurePersistence:IoFailure",
+          "when": "The target file cannot be read, written, flushed, synced, or atomically replaced.",
+          "message": "figure persistence: file I/O failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.RENDER",
+          "identifier": "RunMat:figurePersistence:RenderFailed",
+          "when": "The plotting renderer or scene exporter cannot serialize the requested figure.",
+          "message": "figure persistence: export failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.IMPORT",
+          "identifier": "RunMat:figurePersistence:ImportFailed",
+          "when": "The figure file is missing, corrupt, unsupported, or incompatible with RunMat's scene importer.",
+          "message": "figure persistence: import failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.INTERNAL",
+          "identifier": "RunMat:figurePersistence:Internal",
+          "when": "Internal runtime control-flow or conversion fails.",
+          "message": "figure persistence: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "savefig",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "ok = savefig(filename)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ok",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the save operation completed."
+            }
+          ]
+        },
+        {
+          "label": "ok = savefig(fig, filename)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ok",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the save operation completed."
+            }
+          ]
+        },
+        {
+          "label": "ok = savefig(fig, filename, version)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible figure persistence arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ok",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the save operation completed."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FIGURE_PERSISTENCE.INVALID_ARGUMENT",
+          "identifier": "RunMat:figurePersistence:InvalidArgument",
+          "when": "Arguments are missing, malformed, or incompatible with the requested figure persistence operation.",
+          "message": "figure persistence: invalid argument"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.UNSUPPORTED_FORMAT",
+          "identifier": "RunMat:figurePersistence:UnsupportedFormat",
+          "when": "The requested save/load format is recognized but not supported by RunMat's active plotting exporter.",
+          "message": "figure persistence: unsupported format"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.IO",
+          "identifier": "RunMat:figurePersistence:IoFailure",
+          "when": "The target file cannot be read, written, flushed, synced, or atomically replaced.",
+          "message": "figure persistence: file I/O failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.RENDER",
+          "identifier": "RunMat:figurePersistence:RenderFailed",
+          "when": "The plotting renderer or scene exporter cannot serialize the requested figure.",
+          "message": "figure persistence: export failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.IMPORT",
+          "identifier": "RunMat:figurePersistence:ImportFailed",
+          "when": "The figure file is missing, corrupt, unsupported, or incompatible with RunMat's scene importer.",
+          "message": "figure persistence: import failed"
+        },
+        {
+          "code": "RM.FIGURE_PERSISTENCE.INTERNAL",
+          "identifier": "RunMat:figurePersistence:Internal",
+          "when": "Internal runtime control-flow or conversion fails.",
+          "message": "figure persistence: internal operation failed"
         }
       ]
     },
@@ -97062,6 +100319,272 @@
       ]
     },
     {
+      "name": "triplot",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = triplot(TRI, X, Y)",
+          "inputs": [
+            {
+              "name": "TRI",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "M-by-3 triangle connectivity list using MATLAB one-based vertex indices."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vertex X coordinates."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vertex Y coordinates."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the line object containing the triangulation edges."
+            }
+          ]
+        },
+        {
+          "label": "h = triplot(TRI, X, Y, LineSpec)",
+          "inputs": [
+            {
+              "name": "TRI",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "M-by-3 triangle connectivity list using MATLAB one-based vertex indices."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vertex X coordinates."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vertex Y coordinates."
+            },
+            {
+              "name": "lineSpec",
+              "ty": "StyleSpec",
+              "arity": "Optional",
+              "default": null,
+              "description": "Line style, marker, and color shorthand."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the line object containing the triangulation edges."
+            }
+          ]
+        },
+        {
+          "label": "h = triplot(TRI, X, Y, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "TRI",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "M-by-3 triangle connectivity list using MATLAB one-based vertex indices."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vertex X coordinates."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vertex Y coordinates."
+            },
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name/value line style properties such as Color, LineWidth, and DisplayName."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the line object containing the triangulation edges."
+            }
+          ]
+        },
+        {
+          "label": "h = triplot(ax, TRI, X, Y)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "TRI",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "M-by-3 triangle connectivity list using MATLAB one-based vertex indices."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vertex X coordinates."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vertex Y coordinates."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the line object containing the triangulation edges."
+            }
+          ]
+        },
+        {
+          "label": "h = triplot(TR)",
+          "inputs": [
+            {
+              "name": "TR",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Triangulation-like struct with ConnectivityList and Points fields."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the line object containing the triangulation edges."
+            }
+          ]
+        },
+        {
+          "label": "h = triplot(TR, LineSpec)",
+          "inputs": [
+            {
+              "name": "TR",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Triangulation-like struct with ConnectivityList and Points fields."
+            },
+            {
+              "name": "lineSpec",
+              "ty": "StyleSpec",
+              "arity": "Optional",
+              "default": null,
+              "description": "Line style, marker, and color shorthand."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the line object containing the triangulation edges."
+            }
+          ]
+        },
+        {
+          "label": "h = triplot(ax, TR, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "TR",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Triangulation-like struct with ConnectivityList and Points fields."
+            },
+            {
+              "name": "lineSpec",
+              "ty": "StyleSpec",
+              "arity": "Optional",
+              "default": null,
+              "description": "Line style, marker, and color shorthand."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the line object containing the triangulation edges."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TRIPLOT.INVALID_ARGUMENT",
+          "identifier": "RunMat:triplot:InvalidArgument",
+          "when": "Connectivity, coordinate, axes, or style inputs are malformed.",
+          "message": "triplot: invalid argument"
+        },
+        {
+          "code": "RM.TRIPLOT.INTERNAL",
+          "identifier": "RunMat:triplot:Internal",
+          "when": "Internal line construction or plotting state update fails.",
+          "message": "triplot: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "tripuls",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -100804,6 +104327,126 @@
           "identifier": "RunMat:vpa:InvalidDigits",
           "when": "The requested precision is not an integer in the supported range.",
           "message": "vpa: expected a positive integer digit count"
+        }
+      ]
+    },
+    {
+      "name": "waitbar",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = waitbar(x)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Progress fraction. Finite values are clamped into [0, 1]."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Waitbar figure handle."
+            }
+          ]
+        },
+        {
+          "label": "h = waitbar(x, msg)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Progress fraction."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Message text, waitbar figure handle, and figure-style property/value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Waitbar figure handle."
+            }
+          ]
+        },
+        {
+          "label": "h = waitbar(x, h)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Progress fraction."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Message text, waitbar figure handle, and figure-style property/value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Waitbar figure handle."
+            }
+          ]
+        },
+        {
+          "label": "h = waitbar(x, h, msg, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Progress fraction."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Message text, waitbar figure handle, and figure-style property/value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Waitbar figure handle."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.WAITBAR.INVALID_ARGUMENT",
+          "identifier": "RunMat:waitbar:InvalidArgument",
+          "when": "Progress, handle, message, or property/value arguments are invalid.",
+          "message": "waitbar: invalid argument"
         }
       ]
     },

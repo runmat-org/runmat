@@ -24,6 +24,7 @@ use super::style::{
 use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::common::tensor;
 use crate::builtins::plotting::axis_scale::scale_mode_from_value;
+use crate::builtins::plotting::histogram2;
 use crate::builtins::plotting::op_common::limits::limit_value;
 use crate::builtins::plotting::op_common::value_as_text_string;
 use crate::builtins::stats::summary::binscatter;
@@ -2173,6 +2174,60 @@ fn get_histogram_property(
     }
 }
 
+fn get_histogram2_property(
+    hist: &super::state::Histogram2HandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    match property.map(canonical_property_name).as_deref() {
+        None => {
+            let mut st = child_base_struct("histogram2", hist.figure, hist.axes_index);
+            st.insert("Values", Value::Tensor(hist.values.clone()));
+            st.insert("BinCounts", Value::Tensor(hist.values.clone()));
+            st.insert("XBinEdges", tensor_from_vec(hist.x_bin_edges.clone()));
+            st.insert("YBinEdges", tensor_from_vec(hist.y_bin_edges.clone()));
+            st.insert("NumBins", tensor_from_vec(histogram2_num_bins(hist)));
+            st.insert("Normalization", Value::String(hist.normalization.clone()));
+            st.insert(
+                "DisplayStyle",
+                Value::String(hist.display_style.as_str().into()),
+            );
+            st.insert("ShowEmptyBins", Value::Bool(hist.show_empty_bins));
+            st.insert("FaceAlpha", Value::Num(hist.face_alpha));
+            st.insert(
+                "DisplayName",
+                Value::String(hist.display_name.clone().unwrap_or_default()),
+            );
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("histogram2".into())),
+        Some("parent") => Ok(child_parent_handle(hist.figure, hist.axes_index)),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("values") | Some("bincounts") | Some("bindata") => {
+            Ok(Value::Tensor(hist.values.clone()))
+        }
+        Some("xbinedges") => Ok(tensor_from_vec(hist.x_bin_edges.clone())),
+        Some("ybinedges") => Ok(tensor_from_vec(hist.y_bin_edges.clone())),
+        Some("numbins") => Ok(tensor_from_vec(histogram2_num_bins(hist))),
+        Some("normalization") => Ok(Value::String(hist.normalization.clone())),
+        Some("displaystyle") => Ok(Value::String(hist.display_style.as_str().into())),
+        Some("showemptybins") => Ok(Value::Bool(hist.show_empty_bins)),
+        Some("facealpha") => Ok(Value::Num(hist.face_alpha)),
+        Some("displayname") => Ok(Value::String(hist.display_name.clone().unwrap_or_default())),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported histogram2 property `{other}`"),
+        )),
+    }
+}
+
+fn histogram2_num_bins(hist: &super::state::Histogram2HandleState) -> Vec<f64> {
+    vec![
+        hist.x_bin_edges.len().saturating_sub(1) as f64,
+        hist.y_bin_edges.len().saturating_sub(1) as f64,
+    ]
+}
+
 fn get_binscatter_property(
     binscatter: &super::state::BinscatterHandleState,
     property: Option<&str>,
@@ -2243,6 +2298,9 @@ fn get_plot_child_property(
     match state {
         super::state::PlotChildHandleState::Histogram(hist) => {
             get_histogram_property(hist, property, builtin)
+        }
+        super::state::PlotChildHandleState::Histogram2(hist) => {
+            get_histogram2_property(hist, property, builtin)
         }
         super::state::PlotChildHandleState::Line(plot) => {
             get_line_property(plot, property, builtin)
@@ -2321,6 +2379,9 @@ fn apply_plot_child_property(
     match state {
         super::state::PlotChildHandleState::Histogram(hist) => {
             apply_histogram_property(hist, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Histogram2(hist) => {
+            apply_histogram2_property(hist, key, value, builtin)
         }
         super::state::PlotChildHandleState::Line(plot) => {
             apply_line_property(plot, key, value, builtin)
@@ -2412,6 +2473,9 @@ fn apply_plot_child_properties(
         }
         super::state::PlotChildHandleState::Line3(plot) => {
             apply_line3_properties(plot, &pairs, builtin)
+        }
+        super::state::PlotChildHandleState::Histogram2(hist) => {
+            apply_histogram2_properties(hist, &pairs, builtin)
         }
         super::state::PlotChildHandleState::Scatter(plot) => {
             apply_scatter_properties(plot, &pairs, builtin)
@@ -4141,6 +4205,135 @@ fn apply_histogram_property(
             format!("{builtin}: unsupported histogram property `{other}`"),
         )),
     }
+}
+
+fn apply_histogram2_property(
+    hist: &super::state::Histogram2HandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let mut next = hist.clone();
+    apply_histogram2_property_to_state(&mut next, key, value, builtin)?;
+    refresh_histogram2_chart(next, builtin)
+}
+
+fn apply_histogram2_properties(
+    hist: &super::state::Histogram2HandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let mut next = hist.clone();
+    for (key, value) in pairs {
+        apply_histogram2_property_to_state(&mut next, key, value, builtin)?;
+    }
+    refresh_histogram2_chart(next, builtin)
+}
+
+fn apply_histogram2_property_to_state(
+    next: &mut super::state::Histogram2HandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    match key {
+        "normalization" => {
+            next.normalization = value_as_string(value)
+                .ok_or_else(|| {
+                    plotting_error(
+                        builtin,
+                        format!("{builtin}: Normalization must be a string"),
+                    )
+                })?
+                .trim()
+                .to_ascii_lowercase();
+            next.values = histogram2::apply_normalization_2d(
+                &next.raw_counts,
+                &next.x_bin_edges,
+                &next.y_bin_edges,
+                &next.normalization,
+            )?;
+        }
+        "displaystyle" => {
+            next.display_style = histogram2::parse_display_style(value)?;
+        }
+        "showemptybins" => {
+            next.show_empty_bins = histogram2::option_bool(value, "ShowEmptyBins")?;
+        }
+        "facealpha" => {
+            let alpha = histogram2::option_scalar(value, "FaceAlpha")?;
+            histogram2::validate_face_alpha(alpha)?;
+            next.face_alpha = alpha;
+        }
+        "displayname" => {
+            next.display_name = value_as_string(value).map(|s| s.to_string());
+        }
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported histogram2 property `{other}`"),
+        ))?,
+    }
+    Ok(())
+}
+
+fn refresh_histogram2_chart(
+    next: super::state::Histogram2HandleState,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let color_limits = current_histogram2_color_limits(&next, builtin)?;
+    let surface = histogram2::build_surface_from_values(
+        &next.values,
+        &next.x_bin_edges,
+        &next.y_bin_edges,
+        next.display_style,
+        next.show_empty_bins,
+        next.face_alpha,
+        next.display_name.as_deref(),
+        color_limits,
+    )?;
+    super::state::update_plot_element(next.figure, next.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::Surface(existing) = plot {
+            *existing = surface;
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    super::state::update_histogram2_handle_for_plot(
+        next.figure,
+        next.axes_index,
+        next.plot_index,
+        |state| {
+            state.values = next.values;
+            state.raw_counts = next.raw_counts;
+            state.x_bin_edges = next.x_bin_edges;
+            state.y_bin_edges = next.y_bin_edges;
+            state.normalization = next.normalization;
+            state.display_style = next.display_style;
+            state.show_empty_bins = next.show_empty_bins;
+            state.face_alpha = next.face_alpha;
+            state.display_name = next.display_name;
+        },
+    )
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn current_histogram2_color_limits(
+    hist: &super::state::Histogram2HandleState,
+    builtin: &'static str,
+) -> BuiltinResult<Option<(f64, f64)>> {
+    let figure = super::state::clone_figure(hist.figure)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid histogram2 figure")))?;
+    let plot = figure
+        .plots()
+        .nth(hist.plot_index)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid histogram2 handle")))?;
+    let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid histogram2 handle"),
+        ));
+    };
+    Ok(surface.color_limits)
 }
 
 fn apply_stem_property(

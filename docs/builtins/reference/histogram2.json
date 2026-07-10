@@ -1,0 +1,95 @@
+{
+  "title": "histogram2",
+  "category": "plotting",
+  "keywords": [
+    "histogram2",
+    "histcounts2",
+    "2d histogram",
+    "density plot",
+    "bivariate histogram",
+    "plotting"
+  ],
+  "summary": "Create two-dimensional histogram chart objects in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`histogram2` is a plotting sink built on `histcounts2`; current builds materialize the bin grid before rendering."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::histogram2::tests",
+    "vm": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`histogram2(X,Y)` bins paired observations with MATLAB-compatible `histcounts2` semantics and creates a handle-backed 2-D histogram chart. RunMat renders the chart as a colormapped surface: `DisplayStyle` `\"bar3\"` uses bin counts as surface height, while `\"tile\"` renders a flattened heatmap-style view.",
+  "behaviors": [
+    "`histogram2(X,Y)` requires `X` and `Y` to contain the same number of elements and ignores pairs containing `NaN`.",
+    "Positional bin arguments and name/value bin controls are forwarded through the same implementation as `histcounts2`, including `NumBins`, explicit `XBinEdges`/`YBinEdges`, `BinWidth`, `BinLimits`, `BinMethod`, axis-specific bin controls, and normalization modes.",
+    "Returned handles have type `histogram2` and expose `Values`, `BinCounts`, `XBinEdges`, `YBinEdges`, `NumBins`, `Normalization`, `DisplayStyle`, `ShowEmptyBins`, `FaceAlpha`, and `DisplayName` through `get`.",
+    "`set` supports updating `Normalization`, `DisplayStyle`, `ShowEmptyBins`, `FaceAlpha`, and `DisplayName`, rebuilding the rendered surface and handle state.",
+    "Common styling name/value pairs `FaceColor`, `EdgeColor`, `EdgeAlpha`, and `LineStyle` are accepted for MATLAB script compatibility, but RunMat currently maps the chart through a colormapped surface backend rather than per-bin bar primitives."
+  ],
+  "examples": [
+    {
+      "description": "Create a 2-D histogram with two bins per axis",
+      "input": "h = histogram2([0; 0.2; 0.8; 1], [0; 0.1; 0.9; 1], [2 2]);\nget(h, 'Values')",
+      "output": "ans =\n     2     0\n     0     2"
+    },
+    {
+      "description": "Use probability normalization and tile display",
+      "input": "h = histogram2(x, y, 'NumBins', [20 10], 'Normalization', 'probability', 'DisplayStyle', 'tile');\nget(h, 'Normalization')",
+      "output": "ans =\n    'probability'"
+    },
+    {
+      "description": "Inspect and update chart properties",
+      "input": "h = histogram2(x, y, 'XBinEdges', 0:0.1:1, 'YBinEdges', -1:0.2:1);\nset(h, 'DisplayStyle', 'tile', 'ShowEmptyBins', 'off');\nget(h, 'NumBins')",
+      "output": "ans = [10 10]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `histogram2` related to `histcounts2`?",
+      "answer": "`histogram2` uses the same binning and normalization logic as `histcounts2`, then wraps the resulting count matrix in a plotting object."
+    },
+    {
+      "question": "Which display styles are supported?",
+      "answer": "`'bar3'` and `'tile'` are supported. `bar3` is rendered as a raised colormapped count surface; `tile` is rendered as a flattened colormapped surface with image-mode camera behavior."
+    },
+    {
+      "question": "Can `histogram2` plot GPU arrays?",
+      "answer": "Yes, but today it follows the underlying `histcounts2` gather-immediate path and renders from the materialized bin grid. Future provider kernels can accelerate the binning stage without changing the plotting API."
+    }
+  ],
+  "links": [
+    {
+      "label": "histcounts2",
+      "url": "./histcounts2"
+    },
+    {
+      "label": "histogram",
+      "url": "./histogram"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/histogram2.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/histogram2.rs"
+  }
+}

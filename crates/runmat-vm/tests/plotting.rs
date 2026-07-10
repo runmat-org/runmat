@@ -603,6 +603,27 @@ fn plotmatrix_dispatches_multi_output_grid_through_vm() {
 }
 
 #[test]
+fn histogram2_dispatches_chart_handle_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        h = histogram2([0;0.2;0.8;1], [0;0.1;0.9;1], [2 2]); \
+        if ~ishandle(h); error('histogram2 did not return a handle'); end; \
+        if ~strcmp(get(h, 'Type'), 'histogram2'); error('histogram2 type mismatch'); end; \
+        vals = get(h, 'Values'); \
+        if vals(1) ~= 2 || vals(4) ~= 2; error('histogram2 bin values mismatch'); end; \
+        nb = get(h, 'NumBins'); \
+        if nb(1) ~= 2 || nb(2) ~= 2; error('histogram2 NumBins mismatch'); end; \
+        set(h, 'Normalization', 'cdf', 'DisplayStyle', 'tile', 'ShowEmptyBins', 'off', 'FaceAlpha', 0.5, 'DisplayName', 'density'); \
+        vals2 = get(h, 'Values'); \
+        if abs(vals2(1) - 0.5) > 1e-12 || vals2(4) ~= 1; error('histogram2 normalized values mismatch'); end; \
+        if ~strcmp(get(h, 'DisplayStyle'), 'tile'); error('histogram2 DisplayStyle mismatch'); end; \
+        if get(h, 'ShowEmptyBins'); error('histogram2 ShowEmptyBins mismatch'); end; \
+        if abs(get(h, 'FaceAlpha') - 0.5) > 1e-12; error('histogram2 FaceAlpha mismatch'); end; \
+        if ~strcmp(get(h, 'DisplayName'), 'density'); error('histogram2 DisplayName mismatch'); end;";
+    execute_source(input).expect("execute histogram2 script");
+}
+
+#[test]
 fn daspect_dispatches_and_updates_axes_properties() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

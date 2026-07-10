@@ -104,6 +104,8 @@ pub(crate) mod heatmap;
 pub mod hist;
 #[path = "ops/histogram.rs"]
 pub(crate) mod histogram;
+#[path = "ops/histogram2.rs"]
+pub(crate) mod histogram2;
 #[path = "ops/hold.rs"]
 pub(crate) mod hold;
 #[path = "ops/image.rs"]

@@ -507,6 +507,22 @@ pub struct HistogramHandleState {
 }
 
 #[derive(Clone, Debug)]
+pub struct Histogram2HandleState {
+    pub figure: FigureHandle,
+    pub axes_index: usize,
+    pub plot_index: usize,
+    pub values: Tensor,
+    pub raw_counts: Tensor,
+    pub x_bin_edges: Vec<f64>,
+    pub y_bin_edges: Vec<f64>,
+    pub normalization: String,
+    pub display_style: crate::builtins::plotting::histogram2::Histogram2DisplayStyle,
+    pub show_empty_bins: bool,
+    pub face_alpha: f64,
+    pub display_name: Option<String>,
+}
+
+#[derive(Clone, Debug)]
 pub struct StemHandleState {
     pub figure: FigureHandle,
     pub axes_index: usize,
@@ -645,6 +661,7 @@ pub struct TextAnnotationHandleState {
 #[derive(Clone, Debug)]
 pub enum PlotChildHandleState {
     Histogram(HistogramHandleState),
+    Histogram2(Histogram2HandleState),
     Line(SimplePlotHandleState),
     AnimatedLine(AnimatedLineHandleState),
     Scatter(SimplePlotHandleState),
@@ -674,6 +691,7 @@ impl PlotChildHandleState {
     pub fn figure_axes(&self) -> (FigureHandle, usize) {
         match self {
             Self::Histogram(state) => (state.figure, state.axes_index),
+            Self::Histogram2(state) => (state.figure, state.axes_index),
             Self::Line(state)
             | Self::Scatter(state)
             | Self::Bar(state)
@@ -703,6 +721,7 @@ impl PlotChildHandleState {
     pub fn plot_index(&self) -> Option<usize> {
         Some(match self {
             Self::Histogram(state) => state.plot_index,
+            Self::Histogram2(state) => state.plot_index,
             Self::Line(state)
             | Self::Scatter(state)
             | Self::Bar(state)
@@ -743,6 +762,20 @@ impl PlotChildHandleState {
                 bin_edges: state.bin_edges.clone(),
                 raw_counts: state.raw_counts.clone(),
                 normalization: state.normalization.clone(),
+                display_name: state.display_name.clone(),
+            }),
+            Self::Histogram2(state) => Self::Histogram2(Histogram2HandleState {
+                figure,
+                axes_index,
+                plot_index,
+                values: state.values.clone(),
+                raw_counts: state.raw_counts.clone(),
+                x_bin_edges: state.x_bin_edges.clone(),
+                y_bin_edges: state.y_bin_edges.clone(),
+                normalization: state.normalization.clone(),
+                display_style: state.display_style,
+                show_empty_bins: state.show_empty_bins,
+                face_alpha: state.face_alpha,
                 display_name: state.display_name.clone(),
             }),
             Self::Line(_) => Self::Line(SimplePlotHandleState {
@@ -889,6 +922,7 @@ impl PlotChildHandleState {
     pub fn type_name(&self) -> &'static str {
         match self {
             Self::Histogram(_) => "histogram",
+            Self::Histogram2(_) => "histogram2",
             Self::Line(_) | Self::Line3(_) => "line",
             Self::AnimatedLine(_) => "animatedline",
             Self::Scatter(_) | Self::Scatter3(_) => "scatter",
@@ -3463,6 +3497,44 @@ pub fn register_histogram_handle(
     id as f64
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn register_histogram2_handle(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    values: Tensor,
+    raw_counts: Tensor,
+    x_bin_edges: Vec<f64>,
+    y_bin_edges: Vec<f64>,
+    normalization: String,
+    display_style: crate::builtins::plotting::histogram2::Histogram2DisplayStyle,
+    show_empty_bins: bool,
+    face_alpha: f64,
+    display_name: Option<String>,
+) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children.insert(
+        id,
+        PlotChildHandleState::Histogram2(Histogram2HandleState {
+            figure,
+            axes_index,
+            plot_index,
+            values,
+            raw_counts,
+            x_bin_edges,
+            y_bin_edges,
+            normalization,
+            display_style,
+            show_empty_bins,
+            face_alpha,
+            display_name,
+        }),
+    );
+    id as f64
+}
+
 fn register_simple_plot_handle(
     figure: FigureHandle,
     axes_index: usize,
@@ -3991,6 +4063,28 @@ pub fn update_histogram_handle_for_plot(
     }
 }
 
+pub fn update_histogram2_handle_for_plot(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    updater: impl FnOnce(&mut Histogram2HandleState),
+) -> Result<(), FigureError> {
+    let mut reg = registry();
+    let state = reg.plot_children.values_mut().find(|state| match state {
+        PlotChildHandleState::Histogram2(hist) => {
+            hist.figure == figure && hist.axes_index == axes_index && hist.plot_index == plot_index
+        }
+        _ => false,
+    });
+    match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
+        PlotChildHandleState::Histogram2(hist) => {
+            updater(hist);
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
 pub fn set_histogram_handle_display_name(
     figure: FigureHandle,
     axes_index: usize,
@@ -4335,6 +4429,7 @@ fn trim_oldest_xyz(maximum: Option<usize>, x: &mut Vec<f64>, y: &mut Vec<f64>, z
 fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) {
     reg.plot_children.retain(|_, state| match state {
         PlotChildHandleState::Histogram(hist) => hist.figure != handle,
+        PlotChildHandleState::Histogram2(hist) => hist.figure != handle,
         PlotChildHandleState::Line(plot)
         | PlotChildHandleState::Scatter(plot)
         | PlotChildHandleState::Bar(plot)
@@ -4368,6 +4463,9 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
 fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, axes_index: usize) {
     reg.plot_children.retain(|_, state| match state {
         PlotChildHandleState::Histogram(hist) => {
+            !(hist.figure == handle && hist.axes_index == axes_index)
+        }
+        PlotChildHandleState::Histogram2(hist) => {
             !(hist.figure == handle && hist.axes_index == axes_index)
         }
         PlotChildHandleState::Line(plot)
