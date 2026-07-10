@@ -475,6 +475,21 @@ fn animatedline_and_addpoints_dispatch_through_vm() {
 }
 
 #[test]
+fn daspect_dispatches_and_updates_axes_properties() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        plot(0:10, 0:10); \
+        daspect([1 2 1]); \
+        r = daspect(); \
+        if numel(r) ~= 3 || r(1) ~= 1 || r(2) ~= 2 || r(3) ~= 1; error('daspect ratio mismatch'); end; \
+        if ~strcmp(daspect('mode'), 'manual'); error('daspect mode mismatch'); end; \
+        ax = gca; \
+        set(ax, 'DataAspectRatioMode', 'auto'); \
+        if ~strcmp(get(ax, 'DataAspectRatioMode'), 'auto'); error('daspect property mode mismatch'); end;";
+    execute_source(input).expect("execute daspect script");
+}
+
+#[test]
 fn plotyy_dispatches_and_returns_dual_axes_outputs() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

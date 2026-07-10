@@ -162,6 +162,8 @@ pub struct AxesMetadata {
     pub minor_grid_explicit: bool,
     pub box_enabled: bool,
     pub axis_equal: bool,
+    pub data_aspect_ratio: [f64; 3],
+    pub data_aspect_ratio_mode: String,
     pub legend_enabled: bool,
     pub colorbar_enabled: bool,
     pub colormap: ColorMap,
@@ -265,6 +267,8 @@ impl Figure {
             minor_grid_enabled: false,
             box_enabled: true,
             axis_equal: false,
+            data_aspect_ratio: [1.0, 1.0, 1.0],
+            data_aspect_ratio_mode: "auto".into(),
             legend_enabled: true,
             colorbar_enabled: false,
             colormap: ColorMap::Parula,
@@ -869,6 +873,28 @@ impl Figure {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
             meta.axis_equal = enabled;
+            meta.data_aspect_ratio_mode = if enabled { "manual" } else { "auto" }.into();
+            if enabled {
+                meta.data_aspect_ratio = [1.0, 1.0, 1.0];
+            }
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_data_aspect_ratio(
+        &mut self,
+        axes_index: usize,
+        ratio: [f64; 3],
+        mode: impl Into<String>,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.data_aspect_ratio = ratio;
+            meta.data_aspect_ratio_mode = mode.into();
+            meta.axis_equal = meta.data_aspect_ratio_mode == "manual" && ratio == [1.0, 1.0, 1.0];
         }
         if axes_index == self.active_axes_index {
             self.sync_legacy_fields_from_active_axes();

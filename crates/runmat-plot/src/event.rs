@@ -585,6 +585,14 @@ impl FigureScene {
             figure.x_label = self.metadata.x_label;
             figure.y_label = self.metadata.y_label;
             figure.legend_enabled = self.metadata.legend_enabled;
+            figure.set_axes_data_aspect_ratio(
+                figure.active_axes_index,
+                self.metadata.data_aspect_ratio,
+                self.metadata.data_aspect_ratio_mode.clone(),
+            );
+            if self.metadata.axis_equal {
+                figure.set_axes_axis_equal(figure.active_axes_index, true);
+            }
         }
         figure.name = self.metadata.name;
         figure.number_title = self.metadata.number_title;
@@ -897,6 +905,16 @@ pub struct FigureMetadata {
     pub legend_enabled: bool,
     pub colorbar_enabled: bool,
     pub axis_equal: bool,
+    #[serde(
+        default = "default_data_aspect_ratio",
+        skip_serializing_if = "is_default_data_aspect_ratio"
+    )]
+    pub data_aspect_ratio: [f64; 3],
+    #[serde(
+        default = "default_data_aspect_ratio_mode",
+        skip_serializing_if = "is_auto_data_aspect_ratio_mode"
+    )]
+    pub data_aspect_ratio_mode: String,
     pub background_rgba: [f32; 4],
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colormap: Option<String>,
@@ -937,6 +955,14 @@ impl FigureMetadata {
             legend_enabled: figure.legend_enabled,
             colorbar_enabled: figure.colorbar_enabled,
             axis_equal: figure.axis_equal,
+            data_aspect_ratio: figure
+                .axes_metadata(figure.active_axes_index)
+                .map(|meta| meta.data_aspect_ratio)
+                .unwrap_or([1.0, 1.0, 1.0]),
+            data_aspect_ratio_mode: figure
+                .axes_metadata(figure.active_axes_index)
+                .map(|meta| meta.data_aspect_ratio_mode.clone())
+                .unwrap_or_else(|| "auto".into()),
             background_rgba: vec4_to_rgba(figure.background_color),
             colormap: Some(figure.colormap.to_serialized_token()),
             color_limits: figure.color_limits.map(|(lo, hi)| [lo, hi]),
@@ -1143,6 +1169,16 @@ pub struct SerializedAxesMetadata {
     pub box_enabled: bool,
     #[serde(default)]
     pub axis_equal: bool,
+    #[serde(
+        default = "default_data_aspect_ratio",
+        skip_serializing_if = "is_default_data_aspect_ratio"
+    )]
+    pub data_aspect_ratio: [f64; 3],
+    #[serde(
+        default = "default_data_aspect_ratio_mode",
+        skip_serializing_if = "is_auto_data_aspect_ratio_mode"
+    )]
+    pub data_aspect_ratio_mode: String,
     pub legend_enabled: bool,
     #[serde(default)]
     pub colorbar_enabled: bool,
@@ -1190,6 +1226,22 @@ fn default_axes_position() -> [f64; 4] {
 
 fn is_default_axes_position(value: &[f64; 4]) -> bool {
     *value == default_axes_position()
+}
+
+fn default_data_aspect_ratio() -> [f64; 3] {
+    [1.0, 1.0, 1.0]
+}
+
+fn is_default_data_aspect_ratio(value: &[f64; 3]) -> bool {
+    *value == default_data_aspect_ratio()
+}
+
+fn default_data_aspect_ratio_mode() -> String {
+    "auto".into()
+}
+
+fn is_auto_data_aspect_ratio_mode(value: &str) -> bool {
+    value == "auto"
 }
 
 fn default_axes_units() -> String {
@@ -1319,6 +1371,8 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             minor_grid_explicit: value.minor_grid_explicit,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,
+            data_aspect_ratio: value.data_aspect_ratio,
+            data_aspect_ratio_mode: value.data_aspect_ratio_mode,
             legend_enabled: value.legend_enabled,
             colorbar_enabled: value.colorbar_enabled,
             colormap: value.colormap.to_serialized_token(),
@@ -1377,6 +1431,8 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             minor_grid_explicit: value.minor_grid_explicit || value.minor_grid_enabled,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,
+            data_aspect_ratio: value.data_aspect_ratio,
+            data_aspect_ratio_mode: value.data_aspect_ratio_mode,
             legend_enabled: value.legend_enabled,
             colorbar_enabled: value.colorbar_enabled,
             colormap: parse_colormap_name(&value.colormap),
@@ -4283,6 +4339,7 @@ mod tests {
         figure.set_axes_minor_grid_enabled(1, true);
         figure.set_axes_box_enabled(1, false);
         figure.set_axes_axis_equal(1, true);
+        figure.set_axes_data_aspect_ratio(1, [1.0, 2.0, 3.0], "manual");
         figure.set_axes_kind(1, AxesKind::Polar);
         figure.set_axes_colorbar_enabled(1, true);
         figure.set_axes_colormap(1, ColorMap::Hot);
@@ -4308,7 +4365,9 @@ mod tests {
         assert!(meta.minor_grid_enabled);
         assert!(meta.minor_grid_explicit);
         assert!(!meta.box_enabled);
-        assert!(meta.axis_equal);
+        assert!(!meta.axis_equal);
+        assert_eq!(meta.data_aspect_ratio, [1.0, 2.0, 3.0]);
+        assert_eq!(meta.data_aspect_ratio_mode, "manual");
         assert_eq!(meta.axes_kind, AxesKind::Polar);
         assert!(meta.colorbar_enabled);
         assert_eq!(format!("{:?}", meta.colormap), "Hot");

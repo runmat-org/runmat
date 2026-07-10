@@ -738,6 +738,14 @@ fn get_axes_property(
             st.insert("MinorGrid", Value::Bool(meta.minor_grid_enabled));
             st.insert("Box", Value::Bool(meta.box_enabled));
             st.insert("AxisEqual", Value::Bool(meta.axis_equal));
+            st.insert(
+                "DataAspectRatio",
+                tensor_from_vec(meta.data_aspect_ratio.to_vec()),
+            );
+            st.insert(
+                "DataAspectRatioMode",
+                Value::String(meta.data_aspect_ratio_mode.clone()),
+            );
             st.insert("Colorbar", Value::Bool(meta.colorbar_enabled));
             st.insert(
                 "Colormap",
@@ -875,6 +883,8 @@ fn get_axes_property(
         Some("minorgrid") => Ok(Value::Bool(meta.minor_grid_enabled)),
         Some("box") => Ok(Value::Bool(meta.box_enabled)),
         Some("axisequal") => Ok(Value::Bool(meta.axis_equal)),
+        Some("dataaspectratio") => Ok(tensor_from_vec(meta.data_aspect_ratio.to_vec())),
+        Some("dataaspectratiomode") => Ok(Value::String(meta.data_aspect_ratio_mode.clone())),
         Some("colorbar") => Ok(Value::Bool(meta.colorbar_enabled)),
         Some("colormap") => Ok(Value::String(
             format!("{:?}", meta.colormap).to_ascii_lowercase(),
@@ -1220,6 +1230,48 @@ fn property_name_text(value: &Value, builtin: &'static str) -> BuiltinResult<Str
         })
 }
 
+pub(crate) fn data_aspect_ratio_from_value(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<[f64; 3]> {
+    let tensor =
+        Tensor::try_from(value).map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
+    if tensor.data.len() != 3
+        || tensor
+            .data
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+    {
+        return Err(plotting_error(
+            builtin,
+            format!(
+                "{builtin}: DataAspectRatio must be a 3-element positive finite numeric vector"
+            ),
+        ));
+    }
+    Ok([tensor.data[0], tensor.data[1], tensor.data[2]])
+}
+
+pub(crate) fn data_aspect_ratio_mode_from_value(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<&'static str> {
+    let mode = value_as_string(value).ok_or_else(|| {
+        plotting_error(
+            builtin,
+            format!("{builtin}: DataAspectRatioMode must be text"),
+        )
+    })?;
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok("auto"),
+        "manual" => Ok("manual"),
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported DataAspectRatioMode `{other}`"),
+        )),
+    }
+}
+
 fn canonical_property_name(name: &str) -> Cow<'_, str> {
     match name.to_ascii_lowercase().as_str() {
         "textcolor" => Cow::Borrowed("textcolor"),
@@ -1527,6 +1579,26 @@ fn apply_axes_property(
             })?;
             crate::builtins::plotting::state::set_axis_equal_for_axes(handle, axes_index, enabled)
                 .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "dataaspectratio" => {
+            let ratio = data_aspect_ratio_from_value(value, builtin)?;
+            crate::builtins::plotting::state::set_data_aspect_ratio_for_axes(
+                handle, axes_index, ratio, "manual",
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "dataaspectratiomode" => {
+            let mode = data_aspect_ratio_mode_from_value(value, builtin)?;
+            let (ratio, _) = crate::builtins::plotting::state::data_aspect_ratio_snapshot_for_axes(
+                handle, axes_index,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            crate::builtins::plotting::state::set_data_aspect_ratio_for_axes(
+                handle, axes_index, ratio, mode,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "colorbar" => {

@@ -62,6 +62,21 @@ pub fn get_type(args: &[Type], _context: &ResolveContext) -> Type {
     Type::Unknown
 }
 
+pub fn daspect_type(args: &[Type], _context: &ResolveContext) -> Type {
+    let ratio = Type::Tensor {
+        shape: Some(vec![Some(1), Some(3)]),
+    };
+    match args {
+        [] => ratio,
+        [Type::String] => Type::String,
+        [Type::Num | Type::Int] => ratio,
+        [Type::Tensor { .. } | Type::Logical { .. }] => ratio,
+        [Type::Num | Type::Int, Type::String] => Type::String,
+        [Type::Num | Type::Int, Type::Tensor { .. } | Type::Logical { .. }] => ratio,
+        _ => Type::Unknown,
+    }
+}
+
 pub fn set_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Void
 }

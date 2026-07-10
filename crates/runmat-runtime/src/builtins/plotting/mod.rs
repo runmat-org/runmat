@@ -66,6 +66,8 @@ pub(crate) mod contour;
 pub(crate) mod contour3;
 #[path = "ops/contourf.rs"]
 pub(crate) mod contourf;
+#[path = "ops/daspect.rs"]
+pub(crate) mod daspect;
 #[path = "ops/data_tip_text_row.rs"]
 pub(crate) mod data_tip_text_row;
 #[path = "ops/datacursormode.rs"]

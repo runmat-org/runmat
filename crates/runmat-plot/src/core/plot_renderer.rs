@@ -990,14 +990,14 @@ impl PlotRenderer {
                     y_min = yl;
                     y_max = yr;
                 }
-                if meta.axis_equal {
-                    let cx = (x_min + x_max) * 0.5;
-                    let cy = (y_min + y_max) * 0.5;
-                    let size = (x_max - x_min).abs().max((y_max - y_min).abs()).max(0.1);
-                    x_min = cx - size * 0.5;
-                    x_max = cx + size * 0.5;
-                    y_min = cy - size * 0.5;
-                    y_max = cy + size * 0.5;
+                if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
+                    (x_min, x_max, y_min, y_max) = data_aspect_adjusted_bounds(
+                        x_min,
+                        x_max,
+                        y_min,
+                        y_max,
+                        meta.data_aspect_ratio,
+                    );
                 }
             }
         }
@@ -1057,6 +1057,9 @@ impl PlotRenderer {
         if let Some((lo, hi)) = meta.z_limits {
             min.z = lo as f32;
             max.z = hi as f32;
+        }
+        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
+            (min, max) = data_aspect_adjusted_bounds_3d(min, max, meta.data_aspect_ratio);
         }
         BoundingBox { min, max }
     }
@@ -4075,6 +4078,46 @@ impl PlotRenderer {
     }
 }
 
+fn data_aspect_adjusted_bounds(
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    ratio: [f64; 3],
+) -> (f64, f64, f64, f64) {
+    let x_ratio = ratio[0].abs().max(1.0e-12);
+    let y_ratio = ratio[1].abs().max(1.0e-12);
+    let cx = (x_min + x_max) * 0.5;
+    let cy = (y_min + y_max) * 0.5;
+    let x_span = (x_max - x_min).abs().max(0.1);
+    let y_span = (y_max - y_min).abs().max(0.1);
+    let units = (x_span / x_ratio).max(y_span / y_ratio).max(0.1);
+    let next_x = units * x_ratio;
+    let next_y = units * y_ratio;
+    (
+        cx - next_x * 0.5,
+        cx + next_x * 0.5,
+        cy - next_y * 0.5,
+        cy + next_y * 0.5,
+    )
+}
+
+fn data_aspect_adjusted_bounds_3d(min: Vec3, max: Vec3, ratio: [f64; 3]) -> (Vec3, Vec3) {
+    let aspect = Vec3::new(
+        ratio[0].abs().max(1.0e-12) as f32,
+        ratio[1].abs().max(1.0e-12) as f32,
+        ratio[2].abs().max(1.0e-12) as f32,
+    );
+    let center = (min + max) * 0.5;
+    let span = (max - min).abs().max(Vec3::splat(0.1));
+    let units = (span.x / aspect.x)
+        .max(span.y / aspect.y)
+        .max(span.z / aspect.z)
+        .max(0.1);
+    let next = aspect * units;
+    (center - next * 0.5, center + next * 0.5)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4118,6 +4161,18 @@ mod tests {
         assert_eq!(limited.max.z, 3.0);
         assert_eq!(limited.min.x, -1.0);
         assert_eq!(limited.max.x, 1.0);
+    }
+
+    #[test]
+    fn applies_data_aspect_ratio_to_3d_display_bounds() {
+        let mut figure = Figure::new();
+        figure.set_axes_data_aspect_ratio(0, [1.0, 2.0, 4.0], "manual");
+        let bounds = BoundingBox::new(Vec3::ZERO, Vec3::new(1.0, 2.0, 1.0));
+
+        let display = PlotRenderer::apply_3d_display_limits_to_bounds(bounds, Some(&figure), 0);
+
+        assert_eq!(display.min, Vec3::new(0.0, 0.0, -1.5));
+        assert_eq!(display.max, Vec3::new(1.0, 2.0, 2.5));
     }
 
     #[test]

@@ -610,21 +610,41 @@ fn choose_axes_bounds(
             min_y = b as f32;
             max_y = t as f32;
         }
-        if meta.axis_equal {
-            let cx = (min_x + max_x) * 0.5;
-            let cy = (min_y + max_y) * 0.5;
-            let size = (max_x - min_x).abs().max((max_y - min_y).abs()).max(0.1);
-            min_x = cx - size * 0.5;
-            max_x = cx + size * 0.5;
-            min_y = cy - size * 0.5;
-            max_y = cy + size * 0.5;
+        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
+            (min_x, max_x, min_y, max_y) =
+                data_aspect_adjusted_bounds(min_x, max_x, min_y, max_y, meta.data_aspect_ratio);
         }
     }
 
     (min_x, max_x, min_y, max_y)
 }
 
+fn data_aspect_adjusted_bounds(
+    x_min: f32,
+    x_max: f32,
+    y_min: f32,
+    y_max: f32,
+    ratio: [f64; 3],
+) -> (f32, f32, f32, f32) {
+    let x_ratio = (ratio[0].abs().max(1.0e-12)) as f32;
+    let y_ratio = (ratio[1].abs().max(1.0e-12)) as f32;
+    let cx = (x_min + x_max) * 0.5;
+    let cy = (y_min + y_max) * 0.5;
+    let x_span = (x_max - x_min).abs().max(0.1);
+    let y_span = (y_max - y_min).abs().max(0.1);
+    let units = (x_span / x_ratio).max(y_span / y_ratio).max(0.1);
+    let next_x = units * x_ratio;
+    let next_y = units * y_ratio;
+    (
+        cx - next_x * 0.5,
+        cx + next_x * 0.5,
+        cy - next_y * 0.5,
+        cy + next_y * 0.5,
+    )
+}
+
 fn choose_axes_bounds_3d(
+    figure: &Figure,
     axes_index: usize,
     render_data: &[(usize, RenderData)],
     bounds_2d: (f32, f32, f32, f32),
@@ -642,7 +662,7 @@ fn choose_axes_bounds_3d(
         }
     }
 
-    if !min.x.is_finite() || !max.x.is_finite() {
+    let (mut min, mut max) = if !min.x.is_finite() || !max.x.is_finite() {
         (
             Vec3::new(bounds_2d.0, bounds_2d.2, -1.0),
             Vec3::new(bounds_2d.1, bounds_2d.3, 1.0),
@@ -653,7 +673,42 @@ fn choose_axes_bounds_3d(
             max.z += 0.5;
         }
         (min, max)
+    };
+
+    if let Some(meta) = figure.axes_metadata(axes_index) {
+        if let Some((lo, hi)) = meta.x_limits {
+            min.x = lo as f32;
+            max.x = hi as f32;
+        }
+        if let Some((lo, hi)) = meta.y_limits {
+            min.y = lo as f32;
+            max.y = hi as f32;
+        }
+        if let Some((lo, hi)) = meta.z_limits {
+            min.z = lo as f32;
+            max.z = hi as f32;
+        }
+        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
+            (min, max) = data_aspect_adjusted_bounds_3d(min, max, meta.data_aspect_ratio);
+        }
     }
+    (min, max)
+}
+
+fn data_aspect_adjusted_bounds_3d(min: Vec3, max: Vec3, ratio: [f64; 3]) -> (Vec3, Vec3) {
+    let aspect = Vec3::new(
+        ratio[0].abs().max(1.0e-12) as f32,
+        ratio[1].abs().max(1.0e-12) as f32,
+        ratio[2].abs().max(1.0e-12) as f32,
+    );
+    let center = (min + max) * 0.5;
+    let span = (max - min).abs().max(Vec3::splat(0.1));
+    let units = (span.x / aspect.x)
+        .max(span.y / aspect.y)
+        .max(span.z / aspect.z)
+        .max(0.1);
+    let next = aspect * units;
+    (center - next * 0.5, center + next * 0.5)
 }
 
 fn default_3d_camera_for_bounds(min: Vec3, max: Vec3) -> Camera {
@@ -1742,7 +1797,7 @@ pub async fn render_figure_rgba_bytes(
             plot_rect = square_plot_rect(plot_rect);
         }
         let bounds_2d = choose_axes_bounds(&figure, axes_index, &render_items);
-        let (bmin, bmax) = choose_axes_bounds_3d(axes_index, &render_items, bounds_2d);
+        let (bmin, bmax) = choose_axes_bounds_3d(&figure, axes_index, &render_items, bounds_2d);
         let camera_3d = if has_3d {
             Some(if axes_count == 1 {
                 camera.cloned().unwrap_or_else(|| {

@@ -1421,6 +1421,67 @@ pub fn set_axis_equal_for_axes(
     Ok(())
 }
 
+pub fn data_aspect_ratio_snapshot() -> ([f64; 3], String) {
+    let mut reg = registry();
+    let handle = reg.current;
+    let state = get_state_mut(&mut reg, handle);
+    let axes = state.active_axes;
+    state
+        .figure
+        .axes_metadata(axes)
+        .map(|meta| (meta.data_aspect_ratio, meta.data_aspect_ratio_mode.clone()))
+        .unwrap_or(([1.0, 1.0, 1.0], "auto".into()))
+}
+
+pub fn data_aspect_ratio_snapshot_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+) -> Result<([f64; 3], String), FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    validate_axes_index(state, axes_index)?;
+    Ok(state
+        .figure
+        .axes_metadata(axes_index)
+        .map(|meta| (meta.data_aspect_ratio, meta.data_aspect_ratio_mode.clone()))
+        .unwrap_or(([1.0, 1.0, 1.0], "auto".into())))
+}
+
+pub fn set_data_aspect_ratio(ratio: [f64; 3], mode: &str) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let axes = state.active_axes;
+        state
+            .figure
+            .set_axes_data_aspect_ratio(axes, ratio, mode.to_string());
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_data_aspect_ratio_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    ratio: [f64; 3],
+    mode: &str,
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = get_state_mut(&mut reg, handle);
+        validate_axes_index(state, axes_index)?;
+        state
+            .figure
+            .set_axes_data_aspect_ratio(axes_index, ratio, mode.to_string());
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
 fn clone_touched_figures(
     registry: &mut PlotRegistry,
     touched: HashSet<FigureHandle>,
@@ -2122,18 +2183,37 @@ fn display_bounds_for_state_axes(
             y_min = lo;
             y_max = hi;
         }
-        if meta.axis_equal {
-            let cx = (x_min + x_max) * 0.5;
-            let cy = (y_min + y_max) * 0.5;
-            let size = (x_max - x_min).abs().max((y_max - y_min).abs()).max(0.1);
-            x_min = cx - size * 0.5;
-            x_max = cx + size * 0.5;
-            y_min = cy - size * 0.5;
-            y_max = cy + size * 0.5;
+        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
+            (x_min, x_max, y_min, y_max) =
+                data_aspect_adjusted_bounds(x_min, x_max, y_min, y_max, meta.data_aspect_ratio);
         }
     }
 
     Some((x_min, x_max, y_min, y_max))
+}
+
+fn data_aspect_adjusted_bounds(
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    ratio: [f64; 3],
+) -> (f64, f64, f64, f64) {
+    let x_ratio = ratio[0].abs().max(1.0e-12);
+    let y_ratio = ratio[1].abs().max(1.0e-12);
+    let cx = (x_min + x_max) * 0.5;
+    let cy = (y_min + y_max) * 0.5;
+    let x_span = (x_max - x_min).abs().max(0.1);
+    let y_span = (y_max - y_min).abs().max(0.1);
+    let units = (x_span / x_ratio).max(y_span / y_ratio).max(0.1);
+    let next_x = units * x_ratio;
+    let next_y = units * y_ratio;
+    (
+        cx - next_x * 0.5,
+        cx + next_x * 0.5,
+        cy - next_y * 0.5,
+        cy + next_y * 0.5,
+    )
 }
 
 fn axes_count(state: &FigureState) -> usize {
