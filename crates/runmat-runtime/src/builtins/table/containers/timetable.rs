@@ -128,9 +128,7 @@ pub(in crate::builtins::table) fn set_timetable_row_times(
     Ok(())
 }
 
-pub(in crate::builtins::table) fn timetable_row_times(
-    object: &ObjectInstance,
-) -> BuiltinResult<Option<Value>> {
+pub(crate) fn timetable_row_times(object: &ObjectInstance) -> BuiltinResult<Option<Value>> {
     if !object.is_class(TIMETABLE_CLASS) {
         return Ok(None);
     }

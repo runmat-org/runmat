@@ -113,7 +113,7 @@ pub(in crate::builtins::table) fn parse_variable_selector(
     }
 }
 
-pub(in crate::builtins::table) fn parse_variable_selector_for_object(
+pub(crate) fn parse_variable_selector_for_object(
     selector: Option<&Value>,
     object: &ObjectInstance,
     names: &[String],

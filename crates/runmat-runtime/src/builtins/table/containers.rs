@@ -12,4 +12,5 @@ pub(crate) use categorical::*;
 pub(in crate::builtins::table) use columns::*;
 pub(in crate::builtins::table) use dictionary::*;
 pub(in crate::builtins::table) use rows::*;
+pub(crate) use timetable::timetable_row_times;
 pub(in crate::builtins::table) use timetable::*;

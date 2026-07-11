@@ -722,6 +722,33 @@ pub enum TextScatterMarkerColor {
 }
 
 #[derive(Clone, Debug)]
+pub struct StackedSourceTableSnapshot {
+    pub classes: Vec<String>,
+    pub variable_names: Vec<Vec<String>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct StackedPlotHandleState {
+    pub figure: FigureHandle,
+    pub axes_indices: Vec<usize>,
+    pub line_plot_indices: Vec<usize>,
+    pub line_group_counts: Vec<usize>,
+    pub line_labels: Vec<String>,
+    pub x_data: Vec<f64>,
+    pub y_data: Vec<Vec<f64>>,
+    pub display_variables: Vec<String>,
+    pub source_table: Option<StackedSourceTableSnapshot>,
+    pub x_variable: Vec<String>,
+    pub combine_matching_names: bool,
+    pub x_label: String,
+    pub title: String,
+    pub appearance: crate::builtins::plotting::style::LineAppearance,
+    pub visible: bool,
+    pub grid_visible: bool,
+    pub x_limits: Option<(f64, f64)>,
+}
+
+#[derive(Clone, Debug)]
 pub enum PlotChildHandleState {
     Histogram(HistogramHandleState),
     Histogram2(Histogram2HandleState),
@@ -749,6 +776,7 @@ pub enum PlotChildHandleState {
     Pie(SimplePlotHandleState),
     Text(TextAnnotationHandleState),
     TextScatter(TextScatterHandleState),
+    StackedPlot(StackedPlotHandleState),
 }
 
 impl PlotChildHandleState {
@@ -780,6 +808,10 @@ impl PlotChildHandleState {
             Self::Area(state) => (state.figure, state.axes_index),
             Self::Text(state) => (state.figure, state.axes_index),
             Self::TextScatter(state) => (state.figure, state.axes_index),
+            Self::StackedPlot(state) => (
+                state.figure,
+                state.axes_indices.first().copied().unwrap_or(0),
+            ),
         }
     }
 
@@ -811,6 +843,7 @@ impl PlotChildHandleState {
             Self::Area(state) => state.plot_index,
             Self::Text(_) => return None,
             Self::TextScatter(state) => return state.marker_plot_index,
+            Self::StackedPlot(state) => return state.line_plot_indices.first().copied(),
         })
     }
 
@@ -985,6 +1018,7 @@ impl PlotChildHandleState {
             }),
             Self::Text(_) => return None,
             Self::TextScatter(_) => return None,
+            Self::StackedPlot(_) => return None,
         })
     }
 
@@ -1013,6 +1047,7 @@ impl PlotChildHandleState {
             Self::Pie(_) => "pie",
             Self::Text(_) => "text",
             Self::TextScatter(_) => "textscatter",
+            Self::StackedPlot(_) => "stackedplot",
         }
     }
 }
@@ -4024,6 +4059,112 @@ pub fn update_textscatter_figure(
     Ok(())
 }
 
+pub fn register_stackedplot_handle(state: StackedPlotHandleState) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children
+        .insert(id, PlotChildHandleState::StackedPlot(state));
+    id as f64
+}
+
+pub fn update_stackedplot_handle_state(
+    handle: f64,
+    state: StackedPlotHandleState,
+) -> Result<(), FigureError> {
+    if !handle.is_finite() || handle <= 0.0 {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+    let mut reg = registry();
+    let id = handle.round() as u64;
+    match reg.plot_children.get_mut(&id) {
+        Some(PlotChildHandleState::StackedPlot(slot)) => {
+            *slot = state;
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
+pub fn update_stackedplot_figure(
+    state: &StackedPlotHandleState,
+    mut apply: impl FnMut(&mut Figure) -> Result<(), FigureError>,
+) -> Result<(), FigureError> {
+    let axes_index = state.axes_indices.first().copied().unwrap_or(0);
+    let (result, figure_clone) = with_axes_target_mut(state.figure, axes_index, |figure_state| {
+        apply(&mut figure_state.figure)
+    })?;
+    result?;
+    notify_with_figure(state.figure, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn render_stackedplot_chart<F>(
+    builtin: &'static str,
+    target: Option<FigureHandle>,
+    axes_count: usize,
+    mut apply: F,
+) -> BuiltinResult<(FigureHandle, Vec<usize>, String)>
+where
+    F: FnMut(&mut Figure, &[usize]) -> BuiltinResult<()>,
+{
+    if axes_count == 0 {
+        return Err(crate::builtins::plotting::plotting_error(
+            builtin,
+            format!("{builtin}: expected at least one plotted variable"),
+        ));
+    }
+    let rendering_disabled = interactive_rendering_disabled();
+    let host_managed_rendering = host_managed_rendering_enabled();
+    let (handle, axes_indices, figure_clone) = {
+        let mut reg = registry();
+        let handle = target.unwrap_or(reg.current);
+        let axes_indices = (0..axes_count).collect::<Vec<_>>();
+        {
+            let state = get_state_mut(&mut reg, handle);
+            state.figure.set_subplot_grid(axes_count, 1);
+            for axes_index in &axes_indices {
+                state.figure.clear_axes(*axes_index);
+                state.figure.set_axes_kind(*axes_index, AxesKind::Cartesian);
+                state.figure.set_axes_limits(*axes_index, None, None);
+                state.figure.set_axes_z_limits(*axes_index, None);
+                state.figure.set_axes_grid_enabled(*axes_index, true);
+                state.figure.set_axes_minor_grid_enabled(*axes_index, false);
+                state.figure.set_axes_legend_enabled(*axes_index, false);
+                state.reset_cycle(*axes_index);
+            }
+            state.active_axes = *axes_indices.last().unwrap_or(&0);
+            state.figure.set_active_axes_index(state.active_axes);
+        }
+        for axes_index in &axes_indices {
+            purge_plot_children_for_axes(&mut reg, handle, *axes_index);
+        }
+        {
+            let state = get_state_mut(&mut reg, handle);
+            apply(&mut state.figure, &axes_indices)
+                .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
+            state.revision = state.revision.wrapping_add(1);
+        }
+        reg.current = handle;
+        let figure_clone = reg
+            .figures
+            .get(&handle)
+            .expect("figure exists")
+            .figure
+            .clone();
+        (handle, axes_indices, figure_clone)
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    let presentation = present_figure_update_with_options(
+        builtin,
+        handle,
+        figure_clone,
+        rendering_disabled,
+        host_managed_rendering,
+    )?;
+    Ok((handle, axes_indices, presentation))
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum CopyParentTarget {
     Figure(FigureHandle),
@@ -4618,6 +4759,7 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         PlotChildHandleState::Area(area) => area.figure != handle,
         PlotChildHandleState::Text(text) => text.figure != handle,
         PlotChildHandleState::TextScatter(textscatter) => textscatter.figure != handle,
+        PlotChildHandleState::StackedPlot(stacked) => stacked.figure != handle,
     });
 }
 
@@ -4678,6 +4820,9 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
         }
         PlotChildHandleState::TextScatter(textscatter) => {
             !(textscatter.figure == handle && textscatter.axes_index == axes_index)
+        }
+        PlotChildHandleState::StackedPlot(stacked) => {
+            !(stacked.figure == handle && stacked.axes_indices.contains(&axes_index))
         }
     });
 }

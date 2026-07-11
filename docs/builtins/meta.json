@@ -92432,6 +92432,181 @@
       "errors": []
     },
     {
+      "name": "stackedplot",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = stackedplot(Y)",
+          "inputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector or matrix data. Matrix columns are plotted in separate stacked axes."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "s",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the StackedLineChart object."
+            }
+          ]
+        },
+        {
+          "label": "s = stackedplot(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Common x-axis vector."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector or matrix y data."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "s",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the StackedLineChart object."
+            }
+          ]
+        },
+        {
+          "label": "s = stackedplot(tbl)",
+          "inputs": [
+            {
+              "name": "tbl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Table or timetable data."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "s",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the StackedLineChart object."
+            }
+          ]
+        },
+        {
+          "label": "s = stackedplot(tbl, vars)",
+          "inputs": [
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Variable selectors, line style, and StackedLineChart name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "s",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the StackedLineChart object."
+            }
+          ]
+        },
+        {
+          "label": "s = stackedplot(..., LineSpec)",
+          "inputs": [
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Variable selectors, line style, and StackedLineChart name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "s",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the StackedLineChart object."
+            }
+          ]
+        },
+        {
+          "label": "s = stackedplot(..., Name, Value)",
+          "inputs": [
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Variable selectors, line style, and StackedLineChart name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "s",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the StackedLineChart object."
+            }
+          ]
+        },
+        {
+          "label": "s = stackedplot(parent, ...)",
+          "inputs": [
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Variable selectors, line style, and StackedLineChart name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "s",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the StackedLineChart object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.STACKEDPLOT.INVALID_ARGUMENT",
+          "identifier": "RunMat:stackedplot:InvalidArgument",
+          "when": "Input data, table selectors, line style, parent, or StackedLineChart properties are invalid.",
+          "message": "stackedplot: invalid argument"
+        },
+        {
+          "code": "RM.STACKEDPLOT.INTERNAL",
+          "identifier": "RunMat:stackedplot:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "stackedplot: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "stairs",
       "output_mode": "Fixed",
       "completion_policy": "Public",

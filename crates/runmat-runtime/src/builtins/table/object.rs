@@ -18,6 +18,7 @@ pub(super) use indexing::*;
 pub(super) use properties::*;
 use rows::{assign_rows, concatenate_numeric_columns, selected_row_times};
 pub(crate) use rows::{select_rows, selected_row_names, value_row_count};
+pub(crate) use selectors::parse_variable_selector_for_object;
 pub(super) use selectors::*;
 pub(crate) use structure::table_from_columns_like;
 pub(super) use structure::{

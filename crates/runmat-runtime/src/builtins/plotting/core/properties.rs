@@ -2438,6 +2438,11 @@ fn get_plot_child_property(
                 builtin,
             )
         }
+        super::state::PlotChildHandleState::StackedPlot(stacked) => {
+            crate::builtins::plotting::stackedplot::get_stackedplot_property(
+                stacked, property, builtin,
+            )
+        }
     }
 }
 
@@ -2531,6 +2536,11 @@ fn apply_plot_child_property(
                 key,
                 value,
                 builtin,
+            )
+        }
+        super::state::PlotChildHandleState::StackedPlot(stacked) => {
+            crate::builtins::plotting::stackedplot::apply_stackedplot_property(
+                handle, stacked, key, value, builtin,
             )
         }
     }

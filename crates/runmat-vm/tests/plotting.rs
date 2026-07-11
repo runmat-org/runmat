@@ -963,3 +963,57 @@ fn textscatter3_dispatches_zdata_through_vm() {
         if z(1) ~= 5 || z(2) ~= 6; error('zdata mismatch'); end;";
     execute_source(input).expect("execute textscatter3 script");
 }
+
+#[test]
+fn stackedplot_dispatches_matrix_chart_properties_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        s = stackedplot([1 10; 2 20; 3 30], '--o', 'LineWidth', 1.5, 'Title', 'Stacked'); \
+        if ~isgraphics(s); error('stackedplot handle should be graphics'); end; \
+        if ~strcmp(get(s, 'Type'), 'stackedplot'); error('type mismatch'); end; \
+        y = get(s, 'YData'); \
+        if y(1,1) ~= 1 || y(3,2) ~= 30; error('ydata mismatch'); end; \
+        set(s, 'DisplayLabels', [\"A\" \"B\"], 'Visible', 'off'); \
+        labels = get(s, 'DisplayVariables'); \
+        if ~strcmp(labels(1), 'A') || ~strcmp(get(s, 'Visible'), 'off'); error('set mismatch'); end;";
+    execute_source(input).expect("execute stackedplot matrix script");
+}
+
+#[test]
+fn stackedplot_dispatches_table_xvariable_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        T = table([10;20;30], [1;2;3], [4;5;6], 'VariableNames', {'Time','A','B'}); \
+        s = stackedplot(T, {'A','B'}, 'XVariable', 'Time'); \
+        x = get(s, 'XData'); \
+        if x(1) ~= 10 || x(3) ~= 30; error('xdata mismatch'); end; \
+        labels = get(s, 'DisplayVariables'); \
+        if ~strcmp(labels(1), 'A') || ~strcmp(labels(2), 'B'); error('labels mismatch'); end;";
+    execute_source(input).expect("execute stackedplot table script");
+}
+
+#[test]
+fn stackedplot_dispatches_row_vector_as_one_series_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        s = stackedplot([1 4 9]); \
+        y = get(s, 'YData'); \
+        if size(y, 2) ~= 1; error('row vector should produce one series'); end; \
+        if y(1) ~= 1 || y(3) ~= 9; error('row vector ydata mismatch'); end;";
+    execute_source(input).expect("execute stackedplot row-vector script");
+}
+
+#[test]
+fn stackedplot_dispatches_multiple_tables_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        T1 = table([1;2], 'VariableNames', {'A'}); \
+        T2 = table([3;4], 'VariableNames', {'A'}); \
+        s = stackedplot(T1, T2, 'A'); \
+        labels = get(s, 'DisplayVariables'); \
+        if numel(labels) ~= 1 || ~strcmp(labels(1), 'A'); error('combined label mismatch'); end; \
+        s2 = stackedplot(T1, T2, 'A', 'CombineMatchingNames', false); \
+        labels2 = get(s2, 'DisplayVariables'); \
+        if numel(labels2) ~= 2; error('separated label count mismatch'); end;";
+    execute_source(input).expect("execute stackedplot multiple-table script");
+}

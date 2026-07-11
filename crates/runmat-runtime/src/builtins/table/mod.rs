@@ -21,7 +21,7 @@ use containers::*;
 pub(crate) use containers::{
     categorical_categories, categorical_compare, categorical_extrema_to_value,
     categorical_from_args, categorical_labels, categorical_max_evaluate, categorical_min_evaluate,
-    CategoricalComparison,
+    timetable_row_times, CategoricalComparison,
 };
 pub(crate) use display::categorical_label_at;
 use display::format_key_number;
@@ -34,7 +34,8 @@ pub use object::{
     table_variable_names_from_object, table_variables, table_width,
 };
 pub(crate) use object::{
-    select_rows, selected_row_names, table_from_columns_like, value_row_count,
+    parse_variable_selector_for_object, select_rows, selected_row_names, table_from_columns_like,
+    value_row_count,
 };
 use parsing::*;
 pub(in crate::builtins::table) use prelude::*;

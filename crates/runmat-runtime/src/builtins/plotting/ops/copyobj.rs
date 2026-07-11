@@ -213,11 +213,12 @@ fn validate_copy_source(source_handle: f64) -> BuiltinResult<()> {
             if matches!(
                 *state,
                 crate::builtins::plotting::state::PlotChildHandleState::TextScatter(_)
+                    | crate::builtins::plotting::state::PlotChildHandleState::StackedPlot(_)
             ) =>
         {
             Err(copyobj_error(
                 &COPYOBJ_ERROR_INVALID_ARGUMENT,
-                "TextScatter chart handles cannot be copied in this release",
+                "Composite chart handles cannot be copied in this release",
             ))
         }
         PlotHandle::PlotChild(_, _) => validate_plot_child_copy_source(source_handle)
@@ -237,11 +238,12 @@ fn copy_plot_child(source_handle: f64, target: CopyParentTarget) -> BuiltinResul
             if matches!(
                 *state,
                 crate::builtins::plotting::state::PlotChildHandleState::TextScatter(_)
+                    | crate::builtins::plotting::state::PlotChildHandleState::StackedPlot(_)
             ) =>
         {
             Err(copyobj_error(
                 &COPYOBJ_ERROR_INVALID_ARGUMENT,
-                "TextScatter chart handles cannot be copied in this release",
+                "Composite chart handles cannot be copied in this release",
             ))
         }
         PlotHandle::PlotChild(_, _) => copy_plot_child_to_parent(source_handle, target)
