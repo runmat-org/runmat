@@ -504,6 +504,43 @@ pub struct HistogramHandleState {
     pub raw_counts: Vec<f64>,
     pub normalization: String,
     pub display_name: Option<String>,
+    pub metadata: HistogramHandleMetadata,
+}
+
+#[derive(Clone, Debug)]
+pub struct HistogramHandleMetadata {
+    pub data: Option<Vec<f64>>,
+    pub display_style: String,
+    pub face_color: String,
+    pub face_alpha: f64,
+    pub edge_color: String,
+    pub bin_width: f64,
+    pub bin_limits: (f64, f64),
+    pub is_polar: bool,
+}
+
+impl HistogramHandleMetadata {
+    pub fn new(bin_edges: &[f64]) -> Self {
+        let bin_width = bin_edges
+            .windows(2)
+            .next()
+            .map(|pair| pair[1] - pair[0])
+            .unwrap_or(0.0);
+        let bin_limits = (
+            bin_edges.first().copied().unwrap_or(0.0),
+            bin_edges.last().copied().unwrap_or(0.0),
+        );
+        Self {
+            data: None,
+            display_style: "bar".into(),
+            face_color: "auto".into(),
+            face_alpha: 1.0,
+            edge_color: "auto".into(),
+            bin_width,
+            bin_limits,
+            is_polar: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -764,6 +801,7 @@ impl PlotChildHandleState {
                 raw_counts: state.raw_counts.clone(),
                 normalization: state.normalization.clone(),
                 display_name: state.display_name.clone(),
+                metadata: state.metadata.clone(),
             }),
             Self::Histogram2(state) => Self::Histogram2(Histogram2HandleState {
                 figure,
@@ -3494,6 +3532,7 @@ pub fn register_histogram_handle(
     bin_edges: Vec<f64>,
     raw_counts: Vec<f64>,
     normalization: String,
+    metadata: HistogramHandleMetadata,
 ) -> f64 {
     let mut reg = registry();
     let id = reg.next_plot_child_handle;
@@ -3508,6 +3547,7 @@ pub fn register_histogram_handle(
             raw_counts,
             normalization,
             display_name: None,
+            metadata,
         }),
     );
     id as f64
@@ -4129,6 +4169,28 @@ pub fn set_histogram_handle_display_name(
     match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
         PlotChildHandleState::Histogram(hist) => {
             hist.display_name = display_name;
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
+pub fn update_histogram_handle_metadata_for_plot(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    updater: impl FnOnce(&mut HistogramHandleMetadata),
+) -> Result<(), FigureError> {
+    let mut reg = registry();
+    let state = reg.plot_children.values_mut().find(|state| match state {
+        PlotChildHandleState::Histogram(hist) => {
+            hist.figure == figure && hist.axes_index == axes_index && hist.plot_index == plot_index
+        }
+        _ => false,
+    });
+    match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
+        PlotChildHandleState::Histogram(hist) => {
+            updater(&mut hist.metadata);
             Ok(())
         }
         _ => Err(FigureError::InvalidPlotObjectHandle),

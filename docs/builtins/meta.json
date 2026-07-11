@@ -74714,6 +74714,167 @@
       ]
     },
     {
+      "name": "polarhistogram",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = polarhistogram(theta)",
+          "inputs": [
+            {
+              "name": "theta",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Angular sample data in radians."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created polar histogram chart."
+            }
+          ]
+        },
+        {
+          "label": "h = polarhistogram(theta, nbins)",
+          "inputs": [
+            {
+              "name": "theta",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Angular sample data in radians."
+            },
+            {
+              "name": "bins",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bin count scalar or explicit edge vector in radians."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created polar histogram chart."
+            }
+          ]
+        },
+        {
+          "label": "h = polarhistogram(theta, edges)",
+          "inputs": [
+            {
+              "name": "theta",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Angular sample data in radians."
+            },
+            {
+              "name": "bins",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bin count scalar or explicit edge vector in radians."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created polar histogram chart."
+            }
+          ]
+        },
+        {
+          "label": "h = polarhistogram(theta, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional axes handle, bin specification, and name/value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created polar histogram chart."
+            }
+          ]
+        },
+        {
+          "label": "h = polarhistogram(pax, ___)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional axes handle, bin specification, and name/value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created polar histogram chart."
+            }
+          ]
+        },
+        {
+          "label": "h = polarhistogram('BinEdges', edges, 'BinCounts', counts)",
+          "inputs": [
+            {
+              "name": "name_value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "BinEdges/BinCounts pairs and optional style properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created polar histogram chart."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.POLARHISTOGRAM.INVALID_ARGUMENT",
+          "identifier": "RunMat:polarhistogram:InvalidArgument",
+          "when": "Input data, bin specification, axes targeting, or style arguments are invalid.",
+          "message": "polarhistogram: invalid argument"
+        },
+        {
+          "code": "RM.POLARHISTOGRAM.INTERNAL",
+          "identifier": "RunMat:polarhistogram:Internal",
+          "when": "Internal polar histogram construction or rendering fails.",
+          "message": "polarhistogram: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "polarplot",
       "output_mode": "Fixed",
       "completion_policy": "Public",

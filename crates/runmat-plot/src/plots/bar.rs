@@ -16,6 +16,12 @@ pub enum Orientation {
     Horizontal,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolarHistogramDisplayStyle {
+    Bar,
+    Stairs,
+}
+
 /// High-performance GPU-accelerated bar chart
 #[derive(Debug, Clone)]
 pub struct BarChart {
@@ -47,6 +53,8 @@ pub struct BarChart {
     pub label: Option<String>,
     pub visible: bool,
     histogram_bin_edges: Option<Vec<f64>>,
+    polar_histogram: bool,
+    polar_histogram_display_style: PolarHistogramDisplayStyle,
 
     /// Generated rendering data (cached)
     vertices: Option<Vec<Vertex>>,
@@ -166,6 +174,8 @@ impl BarChart {
             label: None,
             visible: true,
             histogram_bin_edges: None,
+            polar_histogram: false,
+            polar_histogram_display_style: PolarHistogramDisplayStyle::Bar,
             vertices: None,
             indices: None,
             bounds: None,
@@ -203,6 +213,8 @@ impl BarChart {
             label: None,
             visible: true,
             histogram_bin_edges: None,
+            polar_histogram: false,
+            polar_histogram_display_style: PolarHistogramDisplayStyle::Bar,
             vertices: None,
             indices: None,
             bounds: Some(bounds),
@@ -314,7 +326,33 @@ impl BarChart {
     pub fn set_histogram_bin_edges(&mut self, edges: Vec<f64>) {
         if edges.len() == self.value_count + 1 {
             self.histogram_bin_edges = Some(edges);
+            self.dirty = true;
+            self.invalidate_gpu_render_cache();
         }
+    }
+
+    pub fn set_polar_histogram(&mut self, enabled: bool) {
+        if self.polar_histogram != enabled {
+            self.polar_histogram = enabled;
+            self.dirty = true;
+            self.invalidate_gpu_render_cache();
+        }
+    }
+
+    pub fn is_polar_histogram(&self) -> bool {
+        self.polar_histogram
+    }
+
+    pub fn set_polar_histogram_display_style(&mut self, style: PolarHistogramDisplayStyle) {
+        if self.polar_histogram_display_style != style {
+            self.polar_histogram_display_style = style;
+            self.dirty = true;
+            self.invalidate_gpu_render_cache();
+        }
+    }
+
+    pub fn polar_histogram_display_style(&self) -> PolarHistogramDisplayStyle {
+        self.polar_histogram_display_style
     }
 
     pub fn set_per_bar_colors(&mut self, colors: Vec<Vec4>) {
@@ -496,6 +534,10 @@ impl BarChart {
 
     /// Create the geometry for all bars
     fn create_bar_geometry(&self) -> (Vec<Vertex>, Vec<u32>) {
+        if self.polar_histogram {
+            return self.create_polar_histogram_geometry();
+        }
+
         let values = self
             .values
             .as_ref()
@@ -588,6 +630,108 @@ impl BarChart {
         (vertices, indices)
     }
 
+    fn create_polar_histogram_geometry(&self) -> (Vec<Vertex>, Vec<u32>) {
+        let values = self
+            .values
+            .as_ref()
+            .expect("CPU bar geometry requested without host values");
+        if self.polar_histogram_display_style == PolarHistogramDisplayStyle::Stairs {
+            return self.create_polar_histogram_stairs_geometry(values);
+        }
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        for (i, &value) in values.iter().enumerate() {
+            if !value.is_finite() || value <= 0.0 {
+                continue;
+            }
+            let Some((theta_start, theta_end)) = self.histogram_slot_geometry(i) else {
+                continue;
+            };
+            if (theta_end - theta_start).abs() <= f32::EPSILON {
+                continue;
+            }
+
+            let radius = value as f32;
+            let color = self.color_for_bar(i);
+            let span = theta_end - theta_start;
+            let segments =
+                ((span.abs() / (std::f32::consts::PI / 32.0)).ceil() as usize).clamp(2, 96);
+            let center_index = vertices.len() as u32;
+            vertices.push(Vertex::new(Vec3::new(0.0, 0.0, 0.0), color));
+
+            for step in 0..=segments {
+                let theta = theta_start + span * (step as f32 / segments as f32);
+                vertices.push(Vertex::new(
+                    Vec3::new(radius * theta.cos(), radius * theta.sin(), 0.0),
+                    color,
+                ));
+            }
+
+            for step in 0..segments {
+                indices.push(center_index);
+                indices.push(center_index + step as u32 + 1);
+                indices.push(center_index + step as u32 + 2);
+            }
+        }
+
+        (vertices, indices)
+    }
+
+    fn create_polar_histogram_stairs_geometry(&self, values: &[f64]) -> (Vec<Vertex>, Vec<u32>) {
+        let max_radius = values
+            .iter()
+            .filter(|value| value.is_finite() && **value > 0.0)
+            .fold(0.0f32, |acc, value| acc.max(*value as f32))
+            .max(1.0);
+        let stroke = (max_radius * 0.015).max(0.02);
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        for (i, &value) in values.iter().enumerate() {
+            if !value.is_finite() || value <= 0.0 {
+                continue;
+            }
+            let Some((theta_start, theta_end)) = self.histogram_slot_geometry(i) else {
+                continue;
+            };
+            let radius = value as f32;
+            let inner_radius = (radius - stroke).max(0.0);
+            let color = self.color_for_bar(i);
+            let span = theta_end - theta_start;
+            let segments =
+                ((span.abs() / (std::f32::consts::PI / 32.0)).ceil() as usize).clamp(2, 96);
+            let base = vertices.len() as u32;
+
+            for step in 0..=segments {
+                let theta = theta_start + span * (step as f32 / segments as f32);
+                let (sin, cos) = theta.sin_cos();
+                vertices.push(Vertex::new(
+                    Vec3::new(radius * cos, radius * sin, 0.0),
+                    color,
+                ));
+                vertices.push(Vertex::new(
+                    Vec3::new(inner_radius * cos, inner_radius * sin, 0.0),
+                    color,
+                ));
+            }
+
+            for step in 0..segments {
+                let left = base + (step * 2) as u32;
+                indices.extend_from_slice(&[
+                    left,
+                    left + 1,
+                    left + 2,
+                    left + 1,
+                    left + 3,
+                    left + 2,
+                ]);
+            }
+        }
+
+        (vertices, indices)
+    }
+
     fn color_for_bar(&self, index: usize) -> Vec4 {
         if let Some(colors) = &self.per_bar_colors {
             if let Some(color) = colors.get(index) {
@@ -611,6 +755,19 @@ impl BarChart {
             let num_bars = values.len();
             if num_bars == 0 {
                 self.bounds = Some(BoundingBox::default());
+                return self.bounds.unwrap();
+            }
+
+            if self.polar_histogram {
+                let max_radius = values
+                    .iter()
+                    .filter(|value| value.is_finite() && **value > 0.0)
+                    .fold(0.0f32, |acc, value| acc.max(*value as f32))
+                    .max(1.0);
+                self.bounds = Some(BoundingBox::new(
+                    Vec3::new(-max_radius, -max_radius, 0.0),
+                    Vec3::new(max_radius, max_radius, 0.0),
+                ));
                 return self.bounds.unwrap();
             }
 
@@ -993,6 +1150,53 @@ mod tests {
         assert_eq!(vertices[1].position[0], 0.5);
         assert_eq!(vertices[4].position[0], 0.5);
         assert_eq!(vertices[5].position[0], 1.0);
+    }
+
+    #[test]
+    fn polar_histogram_generates_wedge_geometry_and_symmetric_bounds() {
+        let labels = vec!["bin1".to_string(), "bin2".to_string()];
+        let values = vec![2.0, 3.0];
+
+        let mut chart = BarChart::new(labels, values).unwrap();
+        chart.set_histogram_bin_edges(vec![0.0, std::f64::consts::PI, std::f64::consts::TAU]);
+        chart.set_polar_histogram(true);
+
+        let (vertices, indices) = chart.generate_vertices();
+        assert!(vertices.len() > 8);
+        assert!(indices.len() > 6);
+        assert!(vertices.iter().all(|vertex| vertex.position[2] == 0.0));
+
+        let bounds = chart.bounds();
+        assert_eq!(bounds.min.x, -3.0);
+        assert_eq!(bounds.max.x, 3.0);
+        assert_eq!(bounds.min.y, -3.0);
+        assert_eq!(bounds.max.y, 3.0);
+    }
+
+    #[test]
+    fn polar_histogram_stairs_uses_open_arc_geometry() {
+        let labels = vec!["bin1".to_string(), "bin2".to_string()];
+        let values = vec![2.0, 3.0];
+
+        let mut chart = BarChart::new(labels, values).unwrap();
+        chart.set_histogram_bin_edges(vec![0.0, std::f64::consts::PI, std::f64::consts::TAU]);
+        chart.set_polar_histogram(true);
+        chart.set_polar_histogram_display_style(PolarHistogramDisplayStyle::Stairs);
+
+        let (vertices, indices) = chart.generate_vertices();
+        assert!(vertices.len() > 8);
+        assert!(indices.len() > 6);
+        assert!(vertices.iter().all(|vertex| vertex.position[2] == 0.0));
+        assert_eq!(
+            chart.polar_histogram_display_style(),
+            PolarHistogramDisplayStyle::Stairs
+        );
+
+        let bounds = chart.bounds();
+        assert_eq!(bounds.min.x, -3.0);
+        assert_eq!(bounds.max.x, 3.0);
+        assert_eq!(bounds.min.y, -3.0);
+        assert_eq!(bounds.max.y, 3.0);
     }
 
     #[test]

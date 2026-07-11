@@ -148,6 +148,8 @@ pub(crate) mod plot3;
 pub(crate) mod plotmatrix;
 #[path = "ops/plotyy.rs"]
 pub(crate) mod plotyy;
+#[path = "ops/polarhistogram.rs"]
+pub(crate) mod polarhistogram;
 #[path = "ops/polarplot.rs"]
 pub(crate) mod polarplot;
 #[path = "ops/polarscatter.rs"]

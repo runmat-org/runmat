@@ -210,6 +210,10 @@ pub enum ScenePlot {
         values: Vec<f64>,
         #[serde(default, deserialize_with = "deserialize_option_vec_f64_lossy")]
         histogram_bin_edges: Option<Vec<f64>>,
+        #[serde(default)]
+        polar_histogram: bool,
+        #[serde(default)]
+        polar_histogram_display_style: Option<String>,
         color_rgba: [f32; 4],
         #[serde(default)]
         outline_color_rgba: Option<[f32; 4]>,
@@ -1863,6 +1867,11 @@ impl ScenePlot {
                     labels: bar.labels.clone(),
                     values,
                     histogram_bin_edges: bar.histogram_bin_edges().map(|edges| edges.to_vec()),
+                    polar_histogram: bar.is_polar_histogram(),
+                    polar_histogram_display_style: Some(format!(
+                        "{:?}",
+                        bar.polar_histogram_display_style()
+                    )),
                     color_rgba: vec4_to_rgba(bar.color),
                     outline_color_rgba: bar.outline_color.map(vec4_to_rgba),
                     bar_width: bar.bar_width,
@@ -2387,6 +2396,11 @@ impl ScenePlot {
                 group_index: bar.group_index as u32,
                 group_count: bar.group_count as u32,
                 stack_offsets: bar.stack_offsets().map(|offsets| offsets.to_vec()),
+                polar_histogram: bar.is_polar_histogram(),
+                polar_histogram_display_style: Some(format!(
+                    "{:?}",
+                    bar.polar_histogram_display_style()
+                )),
                 axes_index,
                 label: bar.label.clone(),
                 visible: bar.visible,
@@ -2686,6 +2700,8 @@ impl ScenePlot {
                 labels,
                 values,
                 histogram_bin_edges,
+                polar_histogram,
+                polar_histogram_display_style,
                 color_rgba,
                 outline_color_rgba,
                 bar_width,
@@ -2704,6 +2720,16 @@ impl ScenePlot {
                     .with_group(group_index as usize, group_count as usize);
                 if let Some(edges) = histogram_bin_edges {
                     bar.set_histogram_bin_edges(edges);
+                }
+                if polar_histogram {
+                    bar.set_polar_histogram(true);
+                    if let Some(style) = polar_histogram_display_style {
+                        if style.eq_ignore_ascii_case("stairs") {
+                            bar.set_polar_histogram_display_style(
+                                crate::plots::PolarHistogramDisplayStyle::Stairs,
+                            );
+                        }
+                    }
                 }
                 if let Some(offsets) = stack_offsets {
                     bar = bar.with_stack_offsets(offsets);
@@ -3439,8 +3465,8 @@ mod tests {
     use super::*;
     use crate::plots::{
         AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Figure, Line3Plot, LinePlot,
-        MeshPlot, PatchPlot, PieChart, QuiverPlot, ReferenceLine, ReferenceLineOrientation,
-        Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
+        MeshPlot, PatchPlot, PieChart, PolarHistogramDisplayStyle, QuiverPlot, ReferenceLine,
+        ReferenceLineOrientation, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
     };
     use glam::{Vec3, Vec4};
 
@@ -4189,6 +4215,32 @@ mod tests {
             panic!("expected bar")
         };
         assert_eq!(bar.histogram_bin_edges().unwrap_or(&[]), &[0.0, 0.5, 1.0]);
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_polar_histogram_state() {
+        let mut figure = Figure::new();
+        let mut bar = BarChart::new(vec!["bin1".into(), "bin2".into()], vec![4.0, 5.0]).unwrap();
+        bar.set_histogram_bin_edges(vec![0.0, std::f64::consts::PI, std::f64::consts::TAU]);
+        bar.set_polar_histogram(true);
+        bar.set_polar_histogram_display_style(PolarHistogramDisplayStyle::Stairs);
+        figure.add_bar_chart(bar);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::Bar(bar) = rebuilt.plots().next().unwrap() else {
+            panic!("expected bar")
+        };
+        assert!(bar.is_polar_histogram());
+        assert_eq!(
+            bar.polar_histogram_display_style(),
+            PolarHistogramDisplayStyle::Stairs
+        );
+        assert_eq!(
+            bar.histogram_bin_edges().unwrap_or(&[]),
+            &[0.0, std::f64::consts::PI, std::f64::consts::TAU]
+        );
     }
 
     #[test]

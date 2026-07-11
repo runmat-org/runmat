@@ -495,6 +495,31 @@ fn polarscatter_dispatches_and_preserves_polar_data() {
 }
 
 #[test]
+fn polarhistogram_dispatches_chart_handle_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        theta = [0 0.2 1.0 2.0]; \
+        h = polarhistogram(theta, [0 1 2 3], 'DisplayName', 'angles'); \
+        if ~ishandle(h); \
+            error('polarhistogram did not return a handle'); \
+        end; \
+        if ~strcmp(get(h, 'Type'), 'histogram'); \
+            error('polarhistogram type mismatch'); \
+        end; \
+        if ~get(gca, 'AxisEqual'); \
+            error('polarhistogram did not enable equal axes'); \
+        end; \
+        vals = get(h, 'BinCounts'); \
+        if vals(1) ~= 2 || vals(2) ~= 1 || vals(3) ~= 1; \
+            error('polarhistogram bin values mismatch'); \
+        end; \
+        if ~strcmp(get(h, 'DisplayName'), 'angles'); \
+            error('polarhistogram display name mismatch'); \
+        end;";
+    execute_source(input).expect("execute polarhistogram script");
+}
+
+#[test]
 fn line_dispatches_and_round_trips_properties() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

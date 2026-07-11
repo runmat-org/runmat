@@ -1,5 +1,5 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, StructValue, Tensor, Value};
-use runmat_plot::plots::{LegendStyle, TextStyle};
+use runmat_plot::plots::{LegendStyle, PolarHistogramDisplayStyle, TextStyle};
 use std::borrow::Cow;
 
 use super::point::{marker_area_points2_to_diameter_px, marker_diameter_px_to_area_points2};
@@ -19,7 +19,8 @@ use super::state::{
     set_text_properties_for_axes, FigureHandle, PlotObjectKind, RootPropertyValue,
 };
 use super::style::{
-    parse_color_value, value_as_bool, value_as_f64, value_as_string, LineStyleParseOptions,
+    color_from_name_or_token, parse_color_value, value_as_bool, value_as_f64, value_as_string,
+    LineStyleParseOptions,
 };
 use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::common::tensor;
@@ -2167,8 +2168,31 @@ fn get_histogram_property(
             st.insert("Children", handles_value(Vec::new()));
             st.insert("BinEdges", tensor_from_vec(hist.bin_edges.clone()));
             st.insert("BinCounts", tensor_from_vec(normalized));
+            st.insert(
+                "Values",
+                tensor_from_vec(apply_histogram_normalization(
+                    &hist.raw_counts,
+                    &hist.bin_edges,
+                    &hist.normalization,
+                )),
+            );
+            if let Some(data) = &hist.metadata.data {
+                st.insert("Data", tensor_from_vec(data.clone()));
+            }
             st.insert("Normalization", Value::String(hist.normalization.clone()));
             st.insert("NumBins", Value::Num(hist.raw_counts.len() as f64));
+            st.insert("BinWidth", Value::Num(hist.metadata.bin_width));
+            st.insert(
+                "BinLimits",
+                tensor_from_vec(vec![hist.metadata.bin_limits.0, hist.metadata.bin_limits.1]),
+            );
+            st.insert("FaceColor", Value::String(hist.metadata.face_color.clone()));
+            st.insert("FaceAlpha", Value::Num(hist.metadata.face_alpha));
+            st.insert("EdgeColor", Value::String(hist.metadata.edge_color.clone()));
+            st.insert(
+                "DisplayStyle",
+                Value::String(hist.metadata.display_style.clone()),
+            );
             st.insert(
                 "DisplayName",
                 Value::String(hist.display_name.clone().unwrap_or_default()),
@@ -2183,8 +2207,25 @@ fn get_histogram_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("binedges") => Ok(tensor_from_vec(hist.bin_edges.clone())),
         Some("bincounts") => Ok(tensor_from_vec(normalized)),
+        Some("values") => Ok(tensor_from_vec(apply_histogram_normalization(
+            &hist.raw_counts,
+            &hist.bin_edges,
+            &hist.normalization,
+        ))),
+        Some("data") => Ok(tensor_from_vec(
+            hist.metadata.data.clone().unwrap_or_default(),
+        )),
         Some("normalization") => Ok(Value::String(hist.normalization.clone())),
         Some("numbins") => Ok(Value::Num(hist.raw_counts.len() as f64)),
+        Some("binwidth") => Ok(Value::Num(hist.metadata.bin_width)),
+        Some("binlimits") => Ok(tensor_from_vec(vec![
+            hist.metadata.bin_limits.0,
+            hist.metadata.bin_limits.1,
+        ])),
+        Some("facecolor") => Ok(Value::String(hist.metadata.face_color.clone())),
+        Some("facealpha") => Ok(Value::Num(hist.metadata.face_alpha)),
+        Some("edgecolor") => Ok(Value::String(hist.metadata.edge_color.clone())),
+        Some("displaystyle") => Ok(Value::String(hist.metadata.display_style.clone())),
         Some("displayname") => Ok(Value::String(hist.display_name.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
@@ -4260,6 +4301,113 @@ fn apply_histogram_property(
                 hist.axes_index,
                 hist.plot_index,
                 display_name,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "displaystyle" => {
+            let display_style = value_as_string(value)
+                .ok_or_else(|| {
+                    plotting_error(builtin, format!("{builtin}: DisplayStyle must be a string"))
+                })?
+                .trim()
+                .to_ascii_lowercase();
+            let style = match display_style.as_str() {
+                "bar" => PolarHistogramDisplayStyle::Bar,
+                "stairs" => PolarHistogramDisplayStyle::Stairs,
+                other => {
+                    return Err(plotting_error(
+                        builtin,
+                        format!("{builtin}: unsupported histogram DisplayStyle `{other}`"),
+                    ));
+                }
+            };
+            if !hist.metadata.is_polar && display_style == "stairs" {
+                return Err(plotting_error(
+                    builtin,
+                    format!(
+                        "{builtin}: DisplayStyle 'stairs' is only supported for polar histograms"
+                    ),
+                ));
+            }
+            super::state::update_plot_element(hist.figure, hist.plot_index, |plot| {
+                if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
+                    if bar.is_polar_histogram() {
+                        bar.set_polar_histogram_display_style(style);
+                    }
+                }
+            })
+            .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::update_histogram_handle_metadata_for_plot(
+                hist.figure,
+                hist.axes_index,
+                hist.plot_index,
+                |metadata| metadata.display_style = display_style.clone(),
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "facealpha" => {
+            let alpha = value_as_f64(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: FaceAlpha must be numeric"))
+            })?;
+            let alpha = alpha.clamp(0.0, 1.0);
+            super::state::update_plot_element(hist.figure, hist.plot_index, |plot| {
+                if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
+                    let mut color = bar.color;
+                    color.w = alpha as f32;
+                    bar.apply_face_style(color, bar.bar_width);
+                }
+            })
+            .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::update_histogram_handle_metadata_for_plot(
+                hist.figure,
+                hist.axes_index,
+                hist.plot_index,
+                |metadata| metadata.face_alpha = alpha,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "facecolor" | "edgecolor" => {
+            let Some(color_text) = value_as_string(value) else {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: color property must be a string"),
+                ));
+            };
+            let lower = color_text.trim().to_ascii_lowercase();
+            let color = match lower.as_str() {
+                "auto" => None,
+                "none" if key == "edgecolor" => None,
+                _ => Some(color_from_name_or_token(&lower).ok_or_else(|| {
+                    plotting_error(builtin, format!("{builtin}: unsupported color `{lower}`"))
+                })?),
+            };
+            super::state::update_plot_element(hist.figure, hist.plot_index, |plot| {
+                if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
+                    if key == "facecolor" {
+                        if let Some(mut color) = color {
+                            color.w = hist.metadata.face_alpha as f32;
+                            bar.apply_face_style(color, bar.bar_width);
+                        }
+                    } else {
+                        bar.apply_outline_style(color, bar.outline_width);
+                    }
+                }
+            })
+            .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::update_histogram_handle_metadata_for_plot(
+                hist.figure,
+                hist.axes_index,
+                hist.plot_index,
+                |metadata| {
+                    if key == "facecolor" {
+                        metadata.face_color = lower.clone();
+                    } else {
+                        metadata.edge_color = lower.clone();
+                    }
+                },
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
@@ -6403,7 +6551,10 @@ fn histogram_labels_from_edges(edges: &[f64]) -> Vec<String> {
         .collect()
 }
 
-fn validate_histogram_normalization(norm: &str, builtin: &'static str) -> BuiltinResult<()> {
+pub(crate) fn validate_histogram_normalization(
+    norm: &str,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
     match norm {
         "count" | "probability" | "countdensity" | "pdf" | "cumcount" | "cdf" => Ok(()),
         other => Err(plotting_error(
@@ -6413,7 +6564,11 @@ fn validate_histogram_normalization(norm: &str, builtin: &'static str) -> Builti
     }
 }
 
-fn apply_histogram_normalization(raw_counts: &[f64], edges: &[f64], norm: &str) -> Vec<f64> {
+pub(crate) fn apply_histogram_normalization(
+    raw_counts: &[f64],
+    edges: &[f64],
+    norm: &str,
+) -> Vec<f64> {
     let widths: Vec<f64> = edges.windows(2).map(|pair| pair[1] - pair[0]).collect();
     let total: f64 = raw_counts.iter().sum();
     match norm {

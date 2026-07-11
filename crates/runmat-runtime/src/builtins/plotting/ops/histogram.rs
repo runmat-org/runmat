@@ -16,7 +16,7 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
 use super::bar::apply_bar_style;
-use super::state::{render_active_plot, PlotRenderOptions};
+use super::state::{render_active_plot, HistogramHandleMetadata, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarStyleDefaults};
 
 const BUILTIN_NAME: &str = "histogram";
@@ -348,6 +348,7 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let defaults = BarStyleDefaults::new(HIST_DEFAULT_COLOR, HIST_BAR_WIDTH);
     let style = parse_bar_style_args(BUILTIN_NAME, &style_args, defaults)
         .map_err(map_histogram_invalid_argument)?;
+    let explicit_display_name = style.label.clone();
     let labels = histogram_labels_from_edges(&edges.data);
     let mut chart = BarChart::new(labels, counts.data.clone())
         .map_err(|e| histogram_internal(format!("chart construction failed: {e}")))?;
@@ -397,7 +398,19 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         edges.data.clone(),
         counts.data.clone(),
         normalization.clone(),
+        histogram_metadata(&edges.data, &style, None, false, "bar"),
     );
+    if let Some(display_name) = explicit_display_name {
+        crate::builtins::plotting::state::set_histogram_handle_display_name(
+            figure_handle,
+            axes,
+            plot_index,
+            Some(display_name),
+        )
+        .map_err(|err| {
+            histogram_internal(format!("failed to update histogram display name: {err}"))
+        })?;
+    }
     if let Err(err) = render_result {
         let lower = err.to_string().to_lowercase();
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
@@ -433,7 +446,12 @@ fn split_histogram_args(args: &[Value]) -> (Vec<Value>, Vec<Value>) {
     let mut idx = 0usize;
     while idx < args.len() {
         let Some(key) = value_as_string(&args[idx]) else {
-            hist_args.extend_from_slice(&args[idx..]);
+            if idx == 0 {
+                hist_args.push(args[idx].clone());
+                idx += 1;
+                continue;
+            }
+            style_args.extend_from_slice(&args[idx..]);
             break;
         };
         if idx + 1 >= args.len() {
@@ -474,6 +492,49 @@ fn infer_normalization(args: &[Value]) -> String {
         idx += 2;
     }
     "count".to_string()
+}
+
+pub(crate) fn histogram_metadata(
+    edges: &[f64],
+    style: &super::style::BarStyle,
+    data: Option<Vec<f64>>,
+    is_polar: bool,
+    display_style: &str,
+) -> HistogramHandleMetadata {
+    let mut metadata = HistogramHandleMetadata::new(edges);
+    metadata.data = data;
+    metadata.display_style = display_style.to_string();
+    metadata.face_color = color_to_property_string(style.face_rgba());
+    metadata.face_alpha = if (style.face_alpha - 1.0).abs() > f32::EPSILON {
+        style.face_alpha as f64
+    } else {
+        style.face_rgba().w as f64
+    };
+    metadata.edge_color = style
+        .edge_rgba()
+        .map(color_to_property_string)
+        .unwrap_or_else(|| "auto".to_string());
+    metadata.is_polar = is_polar;
+    metadata
+}
+
+pub(crate) fn color_to_property_string(color: glam::Vec4) -> String {
+    let candidates = [
+        (glam::Vec4::new(1.0, 0.0, 0.0, color.w), "r"),
+        (glam::Vec4::new(0.0, 1.0, 0.0, color.w), "g"),
+        (glam::Vec4::new(0.0, 0.0, 1.0, color.w), "b"),
+        (glam::Vec4::new(0.0, 0.0, 0.0, color.w), "k"),
+        (glam::Vec4::new(1.0, 1.0, 1.0, color.w), "w"),
+        (glam::Vec4::new(1.0, 1.0, 0.0, color.w), "y"),
+        (glam::Vec4::new(1.0, 0.0, 1.0, color.w), "m"),
+        (glam::Vec4::new(0.0, 1.0, 1.0, color.w), "c"),
+    ];
+    for (candidate, name) in candidates {
+        if (candidate - color).abs().max_element() < 1e-6 {
+            return name.to_string();
+        }
+    }
+    format!("[{:.3},{:.3},{:.3}]", color.x, color.y, color.z)
 }
 
 fn value_as_string(value: &Value) -> Option<String> {
@@ -590,6 +651,39 @@ mod tests {
         assert_eq!(counts.data, vec![1.0, 1.0, 1.0]);
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.plot_axes_indices()[0], 1);
+    }
+
+    #[test]
+    fn histogram_keeps_style_args_after_positional_edges() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let handle = futures::executor::block_on(histogram_builtin(vec![
+            Value::Tensor(tensor_from(&[0.0, 0.2, 1.0, 2.0])),
+            Value::Tensor(Tensor {
+                data: vec![0.0, 1.0, 2.0, 3.0],
+                shape: vec![1, 4],
+                rows: 1,
+                cols: 4,
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+            Value::String("DisplayName".into()),
+            Value::String("angles".into()),
+        ]))
+        .unwrap();
+
+        let display_name = get_builtin(vec![
+            Value::Num(handle),
+            Value::String("DisplayName".into()),
+        ])
+        .unwrap();
+        assert_eq!(display_name, Value::String("angles".into()));
+        let counts = Tensor::try_from(
+            &get_builtin(vec![Value::Num(handle), Value::String("BinCounts".into())]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(counts.data, vec![2.0, 1.0, 1.0]);
     }
 
     #[test]
