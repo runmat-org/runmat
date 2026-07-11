@@ -236,6 +236,7 @@ pub fn marker_shape_code(style: crate::plots::scatter::MarkerStyle) -> u32 {
 pub enum PipelineType {
     Points,
     Lines,
+    LinesNoDepth,
     Triangles,
     Scatter3,
     Textured,
@@ -253,6 +254,7 @@ pub struct WgpuRenderer {
     // Rendering pipelines (traditional camera-based)
     point_pipeline: Option<wgpu::RenderPipeline>,
     line_pipeline: Option<wgpu::RenderPipeline>,
+    line_no_depth_pipeline: Option<wgpu::RenderPipeline>,
     triangle_pipeline: Option<wgpu::RenderPipeline>,
 
     // Direct rendering pipelines (optimized coordinate transformation)
@@ -648,6 +650,7 @@ impl WgpuRenderer {
             msaa_sample_count: 1,
             point_pipeline: None,
             line_pipeline: None,
+            line_no_depth_pipeline: None,
             triangle_pipeline: None,
             direct_line_pipeline: None,
             direct_triangle_pipeline: None,
@@ -724,6 +727,7 @@ impl WgpuRenderer {
             // Pipelines depend on depth compare; rebuild.
             self.point_pipeline = None;
             self.line_pipeline = None;
+            self.line_no_depth_pipeline = None;
             self.triangle_pipeline = None;
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;
@@ -749,6 +753,7 @@ impl WgpuRenderer {
             // Drop pipelines so they are recreated with new MSAA count
             self.point_pipeline = None;
             self.line_pipeline = None;
+            self.line_no_depth_pipeline = None;
             self.triangle_pipeline = None;
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;
@@ -1061,6 +1066,11 @@ impl WgpuRenderer {
                     self.line_pipeline = Some(self.create_line_pipeline());
                 }
             }
+            PipelineType::LinesNoDepth => {
+                if self.line_no_depth_pipeline.is_none() {
+                    self.line_no_depth_pipeline = Some(self.create_line_no_depth_pipeline());
+                }
+            }
             PipelineType::Triangles => {
                 if self.triangle_pipeline.is_none() {
                     self.triangle_pipeline = Some(self.create_triangle_pipeline());
@@ -1083,6 +1093,7 @@ impl WgpuRenderer {
         match pipeline_type {
             PipelineType::Points => self.point_pipeline.as_ref().unwrap(),
             PipelineType::Lines => self.line_pipeline.as_ref().unwrap(),
+            PipelineType::LinesNoDepth => self.line_no_depth_pipeline.as_ref().unwrap(),
             PipelineType::Triangles => self.triangle_pipeline.as_ref().unwrap(),
             PipelineType::Scatter3 => self.get_pipeline(PipelineType::Points),
             PipelineType::Textured => self.image_pipeline.as_ref().unwrap(),
@@ -1157,24 +1168,41 @@ impl WgpuRenderer {
 
     /// Create line rendering pipeline
     fn create_line_pipeline(&self) -> wgpu::RenderPipeline {
+        self.create_camera_line_pipeline("Line Pipeline", true, self.depth_compare())
+    }
+
+    fn create_line_no_depth_pipeline(&self) -> wgpu::RenderPipeline {
+        self.create_camera_line_pipeline(
+            "Line No Depth Pipeline",
+            false,
+            wgpu::CompareFunction::Always,
+        )
+    }
+
+    fn create_camera_line_pipeline(
+        &self,
+        label: &'static str,
+        depth_write_enabled: bool,
+        depth_compare: wgpu::CompareFunction,
+    ) -> wgpu::RenderPipeline {
         let shader = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Line Shader"),
+                label: Some(label),
                 source: wgpu::ShaderSource::Wgsl(shaders::vertex::LINE.into()),
             });
 
         let pipeline_layout = self
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Line Pipeline Layout"),
+                label: Some(label),
                 bind_group_layouts: &[&self.uniform_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
         self.device
             .create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
-                label: Some("Line Pipeline"),
+                label: Some(label),
                 layout: Some(&pipeline_layout),
                 vertex: crate::wgpu_compat::wgpu_vertex_state!(&shader, "vs_main", &[Vertex::desc()]),
                 fragment: Some(crate::wgpu_compat::wgpu_fragment_state!(&shader, "fs_main", &[Some(wgpu::ColorTargetState {
@@ -1193,8 +1221,8 @@ impl WgpuRenderer {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: Self::depth_format(),
-                    depth_write_enabled: true,
-                    depth_compare: self.depth_compare(),
+                    depth_write_enabled,
+                    depth_compare,
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),

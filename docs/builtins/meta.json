@@ -40180,6 +40180,104 @@
       ]
     },
     {
+      "name": "hidden",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "enabled = hidden()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "enabled",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hidden-line-removal state after command execution."
+            }
+          ]
+        },
+        {
+          "label": "enabled = hidden(mode)",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"toggle\"",
+              "description": "Hidden-line-removal mode token ('on'|'off')."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "enabled",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hidden-line-removal state after command execution."
+            }
+          ]
+        },
+        {
+          "label": "enabled = hidden(ax)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "enabled",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hidden-line-removal state after command execution."
+            }
+          ]
+        },
+        {
+          "label": "enabled = hidden(ax, mode)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"toggle\"",
+              "description": "Hidden-line-removal mode token ('on'|'off')."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "enabled",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hidden-line-removal state after command execution."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.HIDDEN.INVALID_ARGUMENT",
+          "identifier": "RunMat:hidden:InvalidArgument",
+          "when": "Hidden-line-removal mode or axes target is unsupported.",
+          "message": "hidden: invalid argument"
+        }
+      ]
+    },
+    {
       "name": "hilbert",
       "output_mode": "Fixed",
       "completion_policy": "Public",

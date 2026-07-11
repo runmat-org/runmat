@@ -160,6 +160,7 @@ pub struct AxesMetadata {
     pub grid_enabled: bool,
     pub minor_grid_enabled: bool,
     pub minor_grid_explicit: bool,
+    pub hidden_line_removal: bool,
     pub box_enabled: bool,
     pub axis_equal: bool,
     pub data_aspect_ratio: [f64; 3],
@@ -265,6 +266,7 @@ impl Figure {
             z_limits: None,
             grid_enabled: true,
             minor_grid_enabled: false,
+            hidden_line_removal: true,
             box_enabled: true,
             axis_equal: false,
             data_aspect_ratio: [1.0, 1.0, 1.0],
@@ -1110,6 +1112,14 @@ impl Figure {
         self.dirty = true;
     }
 
+    pub fn set_axes_hidden_line_removal(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.hidden_line_removal = enabled;
+        }
+        self.dirty = true;
+    }
+
     pub fn set_axes_colorbar_enabled(&mut self, axes_index: usize, enabled: bool) {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
@@ -1613,6 +1623,11 @@ impl Figure {
             let axes_view_bounds = axes_view_bounds
                 .and_then(|bounds| bounds.get(axes_index).copied())
                 .flatten();
+            let hidden_line_removal = self
+                .axes_metadata
+                .get(axes_index)
+                .map(|meta| meta.hidden_line_removal)
+                .unwrap_or(true);
             if let PlotElement::Surface(s) = p {
                 if let Some(meta) = self.axes_metadata.get(axes_index) {
                     s.set_color_limits(meta.color_limits);
@@ -1719,7 +1734,10 @@ impl Figure {
                 }
                 PlotElement::Mesh(plot) => {
                     out.push((axes_index, plot.render_data()));
-                    if let Some(edge_data) = plot.edge_render_data() {
+                    if let Some(mut edge_data) = plot.edge_render_data() {
+                        if !hidden_line_removal {
+                            edge_data.pipeline_type = crate::core::PipelineType::LinesNoDepth;
+                        }
                         out.push((axes_index, edge_data));
                     }
                     if let Some(vector_data) = plot.vector_render_data() {
@@ -1741,6 +1759,15 @@ impl Figure {
                         gpu,
                     ),
                 )),
+                PlotElement::Surface(plot) => {
+                    let mut render_data = plot.render_data();
+                    if !hidden_line_removal
+                        && render_data.pipeline_type == crate::core::PipelineType::Lines
+                    {
+                        render_data.pipeline_type = crate::core::PipelineType::LinesNoDepth;
+                    }
+                    out.push((axes_index, render_data));
+                }
                 _ => out.push((axes_index, p.render_data())),
             }
         }
@@ -2335,6 +2362,7 @@ pub mod matlab_compat {
 mod tests {
     use super::*;
     use crate::plots::line::LineStyle;
+    use glam::Vec3;
 
     #[test]
     fn test_figure_creation() {
@@ -2765,6 +2793,54 @@ mod tests {
         assert_eq!(bounds.max.z, 4.0);
         let entries = figure.legend_entries_for_axes(0);
         assert_eq!(entries[0].plot_type, PlotType::Line3);
+    }
+
+    #[test]
+    fn hidden_line_removal_off_uses_no_depth_pipeline_for_mesh_edges() {
+        let mut figure = Figure::new();
+        let mesh = MeshPlot::new(
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 1.0),
+            ],
+            vec![[0, 1, 2]],
+        )
+        .unwrap();
+        figure.add_mesh_plot(mesh);
+        figure.set_axes_hidden_line_removal(0, false);
+
+        let render_data = figure.render_data();
+        assert_eq!(render_data.len(), 2);
+        assert_eq!(
+            render_data[0].pipeline_type,
+            crate::core::PipelineType::Triangles
+        );
+        assert_eq!(
+            render_data[1].pipeline_type,
+            crate::core::PipelineType::LinesNoDepth
+        );
+    }
+
+    #[test]
+    fn hidden_line_removal_off_uses_no_depth_pipeline_for_wireframe_surfaces() {
+        let mut figure = Figure::new();
+        let surface = SurfacePlot::new(
+            vec![0.0, 1.0],
+            vec![0.0, 1.0],
+            vec![vec![0.0, 1.0], vec![1.0, 0.0]],
+        )
+        .unwrap()
+        .with_wireframe(true);
+        figure.add_surface_plot(surface);
+        figure.set_axes_hidden_line_removal(0, false);
+
+        let render_data = figure.render_data();
+        assert_eq!(render_data.len(), 1);
+        assert_eq!(
+            render_data[0].pipeline_type,
+            crate::core::PipelineType::LinesNoDepth
+        );
     }
 
     #[test]

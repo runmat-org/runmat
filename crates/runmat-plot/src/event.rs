@@ -1169,6 +1169,8 @@ pub struct SerializedAxesMetadata {
     pub minor_grid_enabled: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub minor_grid_explicit: bool,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub hidden_line_removal: bool,
     #[serde(default)]
     pub box_enabled: bool,
     #[serde(default)]
@@ -1373,6 +1375,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             grid_enabled: value.grid_enabled,
             minor_grid_enabled: value.minor_grid_enabled,
             minor_grid_explicit: value.minor_grid_explicit,
+            hidden_line_removal: value.hidden_line_removal,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,
             data_aspect_ratio: value.data_aspect_ratio,
@@ -1433,6 +1436,7 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             grid_enabled: value.grid_enabled,
             minor_grid_enabled: value.minor_grid_enabled,
             minor_grid_explicit: value.minor_grid_explicit || value.minor_grid_enabled,
+            hidden_line_removal: value.hidden_line_removal,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,
             data_aspect_ratio: value.data_aspect_ratio,
@@ -4397,6 +4401,7 @@ mod tests {
         figure.set_axes_z_limits(1, Some((5.0, 6.0)));
         figure.set_axes_grid_enabled(1, false);
         figure.set_axes_minor_grid_enabled(1, true);
+        figure.set_axes_hidden_line_removal(1, false);
         figure.set_axes_box_enabled(1, false);
         figure.set_axes_axis_equal(1, true);
         figure.set_axes_data_aspect_ratio(1, [1.0, 2.0, 3.0], "manual");
@@ -4424,6 +4429,7 @@ mod tests {
         assert!(!meta.grid_enabled);
         assert!(meta.minor_grid_enabled);
         assert!(meta.minor_grid_explicit);
+        assert!(!meta.hidden_line_removal);
         assert!(!meta.box_enabled);
         assert!(!meta.axis_equal);
         assert_eq!(meta.data_aspect_ratio, [1.0, 2.0, 3.0]);

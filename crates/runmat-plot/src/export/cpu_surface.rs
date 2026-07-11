@@ -1897,7 +1897,9 @@ fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesVi
     let style_code = render_data.material.metallic as i32;
 
     match render_data.pipeline_type {
-        PipelineType::Lines => {
+        PipelineType::Lines | PipelineType::LinesNoDepth => {
+            let depth_test =
+                axes.has_3d_content && render_data.pipeline_type != PipelineType::LinesNoDepth;
             for segment in render_data.vertices.chunks_exact(2) {
                 let Some(a) = project_vertex(&segment[0], axes) else {
                     continue;
@@ -1905,7 +1907,7 @@ fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesVi
                 let Some(b) = project_vertex(&segment[1], axes) else {
                     continue;
                 };
-                canvas.draw_line(a, b, width_px, style_code, axes.has_3d_content);
+                canvas.draw_line(a, b, width_px, style_code, depth_test);
             }
         }
         PipelineType::Points | PipelineType::Scatter3 => {

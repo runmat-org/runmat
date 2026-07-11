@@ -2757,6 +2757,8 @@ impl PlotRenderer {
             self.wgpu_renderer
                 .ensure_pipeline(crate::core::PipelineType::Lines);
             self.wgpu_renderer
+                .ensure_pipeline(crate::core::PipelineType::LinesNoDepth);
+            self.wgpu_renderer
                 .ensure_pipeline(crate::core::PipelineType::Points);
         }
         self.wgpu_renderer.update_marker_screen_uniforms_for_axes(
@@ -2895,8 +2897,10 @@ impl PlotRenderer {
                     render_data.pipeline_type,
                     crate::core::PipelineType::Triangles
                 );
-                let is_lines =
-                    matches!(render_data.pipeline_type, crate::core::PipelineType::Lines);
+                let is_lines = matches!(
+                    render_data.pipeline_type,
+                    crate::core::PipelineType::Lines | crate::core::PipelineType::LinesNoDepth
+                );
                 let is_points = matches!(
                     render_data.pipeline_type,
                     crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3

@@ -737,6 +737,10 @@ fn get_axes_property(
             );
             st.insert("Grid", Value::Bool(meta.grid_enabled));
             st.insert("MinorGrid", Value::Bool(meta.minor_grid_enabled));
+            st.insert(
+                "HiddenLineRemoval",
+                Value::String(on_off(meta.hidden_line_removal).into()),
+            );
             st.insert("Box", Value::Bool(meta.box_enabled));
             st.insert("AxisEqual", Value::Bool(meta.axis_equal));
             st.insert(
@@ -882,6 +886,7 @@ fn get_axes_property(
         }
         Some("grid") => Ok(Value::Bool(meta.grid_enabled)),
         Some("minorgrid") => Ok(Value::Bool(meta.minor_grid_enabled)),
+        Some("hiddenlineremoval") => Ok(Value::String(on_off(meta.hidden_line_removal).into())),
         Some("box") => Ok(Value::Bool(meta.box_enabled)),
         Some("axisequal") => Ok(Value::Bool(meta.axis_equal)),
         Some("dataaspectratio") => Ok(tensor_from_vec(meta.data_aspect_ratio.to_vec())),
@@ -1321,6 +1326,7 @@ fn canonical_property_name(name: &str) -> Cow<'_, str> {
         "xticklabelrotation" => Cow::Borrowed("xticklabelrotation"),
         "yticklabelrotation" => Cow::Borrowed("yticklabelrotation"),
         "ticklabelrotation" => Cow::Borrowed("ticklabelrotation"),
+        "hiddenlineremoval" => Cow::Borrowed("hiddenlineremoval"),
         "xscale" => Cow::Borrowed("xscale"),
         "yscale" => Cow::Borrowed("yscale"),
         "yaxislocation" => Cow::Borrowed("yaxislocation"),
@@ -1572,6 +1578,19 @@ fn apply_axes_property(
             })?;
             crate::builtins::plotting::state::set_box_enabled_for_axes(handle, axes_index, enabled)
                 .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "hiddenlineremoval" => {
+            let enabled = value_as_bool(value).ok_or_else(|| {
+                plotting_error(
+                    builtin,
+                    format!("{builtin}: HiddenLineRemoval must be 'on' or 'off'"),
+                )
+            })?;
+            crate::builtins::plotting::state::set_hidden_line_removal_for_axes(
+                handle, axes_index, enabled,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "axisequal" => {

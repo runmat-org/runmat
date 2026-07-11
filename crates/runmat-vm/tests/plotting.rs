@@ -330,6 +330,24 @@ fn grid_minor_command_form_sets_minor_grid_property() {
 }
 
 #[test]
+fn hidden_command_form_sets_hidden_line_removal_property() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        figure; \
+        surf([1 2; 3 4]); \
+        hidden off; \
+        ax = gca(); \
+        if ~strcmp(get(ax, 'HiddenLineRemoval'), 'off'); \
+            error('hidden off did not update axes state'); \
+        end; \
+        hidden on; \
+        if ~strcmp(get(ax, 'HiddenLineRemoval'), 'on'); \
+            error('hidden on did not update axes state'); \
+        end;";
+    execute_source(input).expect("execute hidden command-form script");
+}
+
+#[test]
 fn axis_image_command_form_enables_equal_aspect() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\
