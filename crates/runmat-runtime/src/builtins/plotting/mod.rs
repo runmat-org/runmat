@@ -160,6 +160,8 @@ pub(crate) mod print;
 pub(crate) mod quiver;
 #[path = "ops/quiver3.rs"]
 pub(crate) mod quiver3;
+#[path = "ops/ribbon.rs"]
+pub(crate) mod ribbon;
 #[path = "ops/scatter.rs"]
 pub(crate) mod scatter;
 #[path = "ops/scatter3.rs"]

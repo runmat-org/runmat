@@ -84243,6 +84243,181 @@
       ]
     },
     {
+      "name": "ribbon",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = ribbon(Y)",
+          "inputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Ribbon heights. Each matrix column becomes one ribbon."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Surface handle or row vector of surface handles for the rendered ribbons."
+            }
+          ]
+        },
+        {
+          "label": "h = ribbon(Y, width)",
+          "inputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Ribbon heights. Each matrix column becomes one ribbon."
+            },
+            {
+              "name": "width",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "0.75",
+              "description": "Ribbon width around each column center."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Surface handle or row vector of surface handles for the rendered ribbons."
+            }
+          ]
+        },
+        {
+          "label": "h = ribbon(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates for the rows of Y."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Ribbon heights. Each matrix column becomes one ribbon."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Surface handle or row vector of surface handles for the rendered ribbons."
+            }
+          ]
+        },
+        {
+          "label": "h = ribbon(X, Y, width)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates for the rows of Y."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Ribbon heights. Each matrix column becomes one ribbon."
+            },
+            {
+              "name": "width",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "0.75",
+              "description": "Ribbon width around each column center."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Surface handle or row vector of surface handles for the rendered ribbons."
+            }
+          ]
+        },
+        {
+          "label": "h = ribbon(___, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional axes target and surface style name/value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Surface handle or row vector of surface handles for the rendered ribbons."
+            }
+          ]
+        },
+        {
+          "label": "h = ribbon(ax, ___)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional axes target and surface style name/value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Surface handle or row vector of surface handles for the rendered ribbons."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.RIBBON.INVALID_ARGUMENT",
+          "identifier": "RunMat:ribbon:InvalidArgument",
+          "when": "Ribbon data, x coordinates, width, axes target, or style arguments are invalid.",
+          "message": "ribbon: invalid argument"
+        },
+        {
+          "code": "RM.RIBBON.INTERNAL",
+          "identifier": "RunMat:ribbon:Internal",
+          "when": "Internal ribbon surface construction or rendering fails.",
+          "message": "ribbon: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "ridge",
       "output_mode": "Fixed",
       "completion_policy": "Public",

@@ -520,6 +520,26 @@ fn polarhistogram_dispatches_chart_handle_through_vm() {
 }
 
 #[test]
+fn ribbon_dispatches_surface_handles_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        h = ribbon([1 4; 2 5; 3 6], 0.5, 'FaceAlpha', 0.25, 'DisplayName', 'bands'); \
+        if ~ishandle(h(1)) || ~ishandle(h(2)); \
+            error('ribbon did not return surface handles'); \
+        end; \
+        if ~strcmp(get(h(1), 'Type'), 'surface'); \
+            error('ribbon type mismatch'); \
+        end; \
+        if abs(get(h(1), 'FaceAlpha') - 0.25) > 1e-12; \
+            error('ribbon face alpha mismatch'); \
+        end; \
+        if ~strcmp(get(h(2), 'DisplayName'), 'bands'); \
+            error('ribbon display name mismatch'); \
+        end;";
+    execute_source(input).expect("execute ribbon script");
+}
+
+#[test]
 fn line_dispatches_and_round_trips_properties() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

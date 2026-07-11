@@ -545,10 +545,78 @@ impl SurfacePlot {
         self
     }
 
+    pub fn update_axis_data(
+        &mut self,
+        x_data: Vec<f64>,
+        y_data: Vec<f64>,
+        z_data: Vec<Vec<f64>>,
+    ) -> Result<(), String> {
+        if z_data.len() != x_data.len() {
+            return Err(format!(
+                "Z data rows ({}) must match X data length ({})",
+                z_data.len(),
+                x_data.len()
+            ));
+        }
+        for (idx, row) in z_data.iter().enumerate() {
+            if row.len() != y_data.len() {
+                return Err(format!(
+                    "Z data row {idx} length ({}) must match Y data length ({})",
+                    row.len(),
+                    y_data.len()
+                ));
+            }
+        }
+
+        self.x_len = x_data.len();
+        self.y_len = y_data.len();
+        self.x_data = x_data;
+        self.y_data = y_data;
+        self.z_data = Some(z_data);
+        self.x_grid = None;
+        self.y_grid = None;
+        self.reset_source_data();
+        Ok(())
+    }
+
+    pub fn update_coordinate_grids(
+        &mut self,
+        x_grid: Vec<Vec<f64>>,
+        y_grid: Vec<Vec<f64>>,
+        z_grid: Vec<Vec<f64>>,
+    ) -> Result<(), String> {
+        validate_coordinate_grids(&x_grid, &y_grid, &z_grid)?;
+        let x_len = z_grid.len();
+        let y_len = z_grid.first().map_or(0, Vec::len);
+        self.x_data = (0..x_len).map(|i| i as f64 + 1.0).collect();
+        self.y_data = (0..y_len).map(|i| i as f64 + 1.0).collect();
+        self.z_data = Some(z_grid);
+        self.x_grid = Some(x_grid);
+        self.y_grid = Some(y_grid);
+        self.x_len = x_len;
+        self.y_len = y_len;
+        self.reset_source_data();
+        Ok(())
+    }
+
     fn drop_gpu_if_possible(&mut self) {
         if self.gpu_vertices.is_some() && self.z_data.is_some() {
             self.invalidate_gpu_data();
         }
+    }
+
+    fn reset_source_data(&mut self) {
+        self.vertices = None;
+        self.indices = None;
+        self.bounds = None;
+        self.gpu_color_grid_source = None;
+        self.invalidate_gpu_data();
+        if self.color_grid.as_ref().is_some_and(|grid| {
+            grid.len() != self.x_len || grid.iter().any(|row| row.len() != self.y_len)
+        }) {
+            self.color_grid = None;
+        }
+        self.dirty = true;
     }
 
     /// Create surface from a function
@@ -1151,10 +1219,9 @@ fn validate_coordinate_grids(
         if x_row
             .iter()
             .chain(y_row.iter())
-            .chain(z_row.iter())
             .any(|value| !value.is_finite())
         {
-            return Err("X, Y, and Z coordinate grids must contain finite values".to_string());
+            return Err("X and Y coordinate grids must contain finite values".to_string());
         }
     }
     Ok(())

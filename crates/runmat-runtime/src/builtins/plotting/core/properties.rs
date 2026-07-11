@@ -1,5 +1,7 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, StructValue, Tensor, Value};
-use runmat_plot::plots::{LegendStyle, PolarHistogramDisplayStyle, TextStyle};
+use runmat_plot::plots::{
+    ColorMap, LegendStyle, PolarHistogramDisplayStyle, ShadingMode, TextStyle,
+};
 use std::borrow::Cow;
 
 use super::point::{marker_area_points2_to_diameter_px, marker_diameter_px_to_area_points2};
@@ -3181,15 +3183,25 @@ fn get_surface_property(
         None => {
             let mut st =
                 child_base_struct("surface", surface_handle.figure, surface_handle.axes_index);
-            st.insert("XData", tensor_from_vec(surface.x_data.clone()));
-            st.insert("YData", tensor_from_vec(surface.y_data.clone()));
-            if let Some(z) = surface.z_data.clone() {
-                st.insert("ZData", tensor_from_matrix(z));
-            }
+            st.insert("XData", surface_x_data_value(&surface));
+            st.insert("YData", surface_y_data_value(&surface));
+            st.insert("ZData", surface_z_data_value(&surface));
             st.insert("FaceAlpha", Value::Num(surface.alpha as f64));
-            if let Some(label) = surface.label.clone() {
-                st.insert("DisplayName", Value::String(label));
-            }
+            st.insert("FaceColor", surface_face_color_value(&surface));
+            st.insert("EdgeColor", surface_edge_color_value(&surface));
+            st.insert(
+                "Shading",
+                Value::String(surface_shading_name(surface.shading_mode).into()),
+            );
+            st.insert(
+                "Lighting",
+                Value::String(surface_lighting_name(surface.lighting_enabled).into()),
+            );
+            st.insert("Visible", Value::Bool(surface.visible));
+            st.insert(
+                "DisplayName",
+                Value::String(surface.label.clone().unwrap_or_default()),
+            );
             Ok(Value::Struct(st))
         }
         Some("type") => Ok(Value::String("surface".into())),
@@ -3198,14 +3210,19 @@ fn get_surface_property(
             surface_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("xdata") => Ok(tensor_from_vec(surface.x_data.clone())),
-        Some("ydata") => Ok(tensor_from_vec(surface.y_data.clone())),
-        Some("zdata") => Ok(surface
-            .z_data
-            .clone()
-            .map(tensor_from_matrix)
-            .unwrap_or_else(|| tensor_from_vec(Vec::new()))),
+        Some("xdata") => Ok(surface_x_data_value(&surface)),
+        Some("ydata") => Ok(surface_y_data_value(&surface)),
+        Some("zdata") => Ok(surface_z_data_value(&surface)),
         Some("facealpha") => Ok(Value::Num(surface.alpha as f64)),
+        Some("facecolor") | Some("color") => Ok(surface_face_color_value(&surface)),
+        Some("edgecolor") => Ok(surface_edge_color_value(&surface)),
+        Some("shading") => Ok(Value::String(
+            surface_shading_name(surface.shading_mode).into(),
+        )),
+        Some("lighting") => Ok(Value::String(
+            surface_lighting_name(surface.lighting_enabled).into(),
+        )),
+        Some("visible") => Ok(Value::Bool(surface.visible)),
         Some("displayname") => Ok(Value::String(surface.label.unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
@@ -3239,12 +3256,21 @@ fn get_function_surface_property(
                 function_surface.axes_index,
             );
             insert_function_surface_metadata(&mut st, function_surface);
-            st.insert("XData", tensor_from_vec(surface.x_data.clone()));
-            st.insert("YData", tensor_from_vec(surface.y_data.clone()));
-            if let Some(z) = surface.z_data.clone() {
-                st.insert("ZData", tensor_from_matrix(z));
-            }
+            st.insert("XData", surface_x_data_value(&surface));
+            st.insert("YData", surface_y_data_value(&surface));
+            st.insert("ZData", surface_z_data_value(&surface));
             st.insert("FaceAlpha", Value::Num(surface.alpha as f64));
+            st.insert("FaceColor", surface_face_color_value(&surface));
+            st.insert("EdgeColor", surface_edge_color_value(&surface));
+            st.insert(
+                "Shading",
+                Value::String(surface_shading_name(surface.shading_mode).into()),
+            );
+            st.insert(
+                "Lighting",
+                Value::String(surface_lighting_name(surface.lighting_enabled).into()),
+            );
+            st.insert("Visible", Value::Bool(surface.visible));
             st.insert(
                 "DisplayName",
                 Value::String(surface.label.clone().unwrap_or_default()),
@@ -5352,29 +5378,281 @@ fn apply_bar_property(
     Ok(())
 }
 
+#[derive(Clone, Debug)]
+enum SurfacePropertyUpdate {
+    FaceAlpha(f32),
+    DisplayName(Option<String>),
+    Visible(bool),
+    Colormap(ColorMap),
+    Shading(ShadingMode),
+    Wireframe(bool),
+    FlattenZ(bool),
+    Lighting(bool),
+    FaceColor(glam::Vec4),
+    FaceNone,
+}
+
 fn apply_surface_property(
     surface_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    if matches!(key, "xdata" | "ydata" | "zdata") {
+        return apply_surface_data_property(surface_handle, key, value, builtin);
+    }
+
+    let update = surface_property_update(key, value, builtin)?;
     super::state::update_plot_element(surface_handle.figure, surface_handle.plot_index, |plot| {
         if let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot {
-            match key {
-                "facealpha" => {
-                    if let Some(v) = value_as_f64(value) {
-                        surface.alpha = v as f32;
-                    }
+            match &update {
+                SurfacePropertyUpdate::FaceAlpha(alpha) => surface.alpha = *alpha,
+                SurfacePropertyUpdate::DisplayName(label) => surface.label = label.clone(),
+                SurfacePropertyUpdate::Visible(visible) => surface.visible = *visible,
+                SurfacePropertyUpdate::Colormap(colormap) => surface.colormap = colormap.clone(),
+                SurfacePropertyUpdate::Shading(shading) => surface.shading_mode = *shading,
+                SurfacePropertyUpdate::Wireframe(wireframe) => surface.wireframe = *wireframe,
+                SurfacePropertyUpdate::FlattenZ(flatten_z) => surface.flatten_z = *flatten_z,
+                SurfacePropertyUpdate::Lighting(enabled) => surface.lighting_enabled = *enabled,
+                SurfacePropertyUpdate::FaceColor(color) => {
+                    surface.colormap = ColorMap::Custom(*color, *color);
+                    surface.shading_mode = ShadingMode::None;
+                    surface.lighting_enabled = false;
                 }
-                "displayname" => {
-                    surface.label = value_as_string(value).map(|s| s.to_string());
-                }
-                _ => {}
+                SurfacePropertyUpdate::FaceNone => surface.alpha = 0.0,
             }
         }
     })
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
+}
+
+fn apply_surface_data_property(
+    surface_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let current = get_simple_plot(surface_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Surface(current_surface) = current else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid surface handle"),
+        ));
+    };
+    let z_grid = current_surface.z_data.clone().ok_or_else(|| {
+        plotting_error(
+            builtin,
+            format!("{builtin}: changing {key} for GPU-only surface data is not supported yet"),
+        )
+    })?;
+    let (x_len, y_len) = surface_grid_size(&z_grid)?;
+
+    let next = match key {
+        "xdata" => {
+            let data = surface_coordinate_data_from_value(value, "XData", builtin)?;
+            let (x_grid, y_grid, z_grid) = match data {
+                SurfaceCoordinateData::Vector(axis) => {
+                    if axis.len() != x_len {
+                        return Err(plotting_error(
+                            builtin,
+                            format!("{builtin}: XData vector length must match surface column count {x_len}"),
+                        ));
+                    }
+                    let y_grid = current_surface
+                        .y_grid
+                        .clone()
+                        .unwrap_or_else(|| axis_to_y_grid(&current_surface.y_data, x_len));
+                    (axis_to_x_grid(&axis, y_len), y_grid, z_grid)
+                }
+                SurfaceCoordinateData::Grid(grid) => {
+                    validate_surface_grid_shape(&grid, x_len, y_len, "XData", builtin)?;
+                    let y_grid = current_surface
+                        .y_grid
+                        .clone()
+                        .unwrap_or_else(|| axis_to_y_grid(&current_surface.y_data, x_len));
+                    (grid, y_grid, z_grid)
+                }
+            };
+            SurfaceDataUpdate::CoordinateGrids {
+                x_grid,
+                y_grid,
+                z_grid,
+            }
+        }
+        "ydata" => {
+            let data = surface_coordinate_data_from_value(value, "YData", builtin)?;
+            let (x_grid, y_grid, z_grid) = match data {
+                SurfaceCoordinateData::Vector(axis) => {
+                    if axis.len() != y_len {
+                        return Err(plotting_error(
+                            builtin,
+                            format!("{builtin}: YData vector length must match surface row count {y_len}"),
+                        ));
+                    }
+                    let x_grid = current_surface
+                        .x_grid
+                        .clone()
+                        .unwrap_or_else(|| axis_to_x_grid(&current_surface.x_data, y_len));
+                    (x_grid, axis_to_y_grid(&axis, x_len), z_grid)
+                }
+                SurfaceCoordinateData::Grid(grid) => {
+                    validate_surface_grid_shape(&grid, x_len, y_len, "YData", builtin)?;
+                    let x_grid = current_surface
+                        .x_grid
+                        .clone()
+                        .unwrap_or_else(|| axis_to_x_grid(&current_surface.x_data, y_len));
+                    (x_grid, grid, z_grid)
+                }
+            };
+            SurfaceDataUpdate::CoordinateGrids {
+                x_grid,
+                y_grid,
+                z_grid,
+            }
+        }
+        "zdata" => {
+            let z_grid = surface_z_grid_from_value(value, y_len, x_len, builtin)?;
+            if let (Some(x_grid), Some(y_grid)) = (
+                current_surface.x_grid.clone(),
+                current_surface.y_grid.clone(),
+            ) {
+                SurfaceDataUpdate::CoordinateGrids {
+                    x_grid,
+                    y_grid,
+                    z_grid,
+                }
+            } else {
+                SurfaceDataUpdate::AxisData {
+                    x_data: current_surface.x_data.clone(),
+                    y_data: current_surface.y_data.clone(),
+                    z_grid,
+                }
+            }
+        }
+        other => {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: unsupported surface property `{other}`"),
+            ))
+        }
+    };
+
+    super::state::update_plot_element(surface_handle.figure, surface_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot {
+            match &next {
+                SurfaceDataUpdate::AxisData {
+                    x_data,
+                    y_data,
+                    z_grid,
+                } => {
+                    let _ =
+                        surface.update_axis_data(x_data.clone(), y_data.clone(), z_grid.clone());
+                }
+                SurfaceDataUpdate::CoordinateGrids {
+                    x_grid,
+                    y_grid,
+                    z_grid,
+                } => {
+                    let _ = surface.update_coordinate_grids(
+                        x_grid.clone(),
+                        y_grid.clone(),
+                        z_grid.clone(),
+                    );
+                }
+            }
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+enum SurfaceDataUpdate {
+    AxisData {
+        x_data: Vec<f64>,
+        y_data: Vec<f64>,
+        z_grid: Vec<Vec<f64>>,
+    },
+    CoordinateGrids {
+        x_grid: Vec<Vec<f64>>,
+        y_grid: Vec<Vec<f64>>,
+        z_grid: Vec<Vec<f64>>,
+    },
+}
+
+enum SurfaceCoordinateData {
+    Vector(Vec<f64>),
+    Grid(Vec<Vec<f64>>),
+}
+
+fn surface_property_update(
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<SurfacePropertyUpdate> {
+    match key {
+        "facealpha" | "alpha" => {
+            let alpha = value_as_f64(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: FaceAlpha must be numeric"))
+            })?;
+            Ok(SurfacePropertyUpdate::FaceAlpha(
+                alpha.clamp(0.0, 1.0) as f32
+            ))
+        }
+        "displayname" | "label" => Ok(SurfacePropertyUpdate::DisplayName(
+            value_as_string(value).map(|s| s.to_string()),
+        )),
+        "visible" => {
+            let visible = value_as_bool(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: Visible must be logical"))
+            })?;
+            Ok(SurfacePropertyUpdate::Visible(visible))
+        }
+        "colormap" => {
+            if let Some(name) = value_as_string(value) {
+                return Ok(SurfacePropertyUpdate::Colormap(parse_colormap_name(
+                    &name, builtin,
+                )?));
+            }
+            let color = parse_color_value(&LineStyleParseOptions::generic(builtin), value)?;
+            Ok(SurfacePropertyUpdate::Colormap(ColorMap::Custom(
+                color, color,
+            )))
+        }
+        "shading" => Ok(SurfacePropertyUpdate::Shading(surface_shading_from_value(
+            value, builtin,
+        )?)),
+        "edgecolor" => {
+            let text = value_as_string(value).ok_or_else(|| {
+                plotting_error(
+                    builtin,
+                    format!("{builtin}: EdgeColor must be 'auto', 'flat', 'interp', or 'none'"),
+                )
+            })?;
+            match text.trim().to_ascii_lowercase().as_str() {
+                "none" => Ok(SurfacePropertyUpdate::Wireframe(false)),
+                "auto" | "flat" | "interp" => Ok(SurfacePropertyUpdate::Wireframe(true)),
+                other => Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: unsupported EdgeColor `{other}`"),
+                )),
+            }
+        }
+        "facecolor" | "color" => surface_face_color_update(value, builtin),
+        "flattenz" => {
+            let flatten_z = value_as_bool(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: FlattenZ must be logical"))
+            })?;
+            Ok(SurfacePropertyUpdate::FlattenZ(flatten_z))
+        }
+        "lighting" => Ok(SurfacePropertyUpdate::Lighting(
+            surface_lighting_from_value(value, builtin)?,
+        )),
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported surface property `{other}`"),
+        )),
+    }
 }
 
 fn apply_function_surface_property(
@@ -6421,6 +6699,226 @@ fn tensor_from_matrix(data: Vec<Vec<f64>>) -> Value {
         data: flat,
         dtype: runmat_builtins::NumericDType::F64,
     })
+}
+
+fn surface_x_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
+    surface
+        .x_grid
+        .as_ref()
+        .map(|grid| surface_grid_to_tensor(grid))
+        .unwrap_or_else(|| tensor_from_vec(surface.x_data.clone()))
+}
+
+fn surface_y_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
+    surface
+        .y_grid
+        .as_ref()
+        .map(|grid| surface_grid_to_tensor(grid))
+        .unwrap_or_else(|| tensor_from_vec(surface.y_data.clone()))
+}
+
+fn surface_z_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
+    surface
+        .z_data
+        .as_ref()
+        .map(|grid| surface_grid_to_tensor(grid))
+        .unwrap_or_else(|| tensor_from_vec(Vec::new()))
+}
+
+fn surface_grid_to_tensor(grid: &[Vec<f64>]) -> Value {
+    let cols = grid.len();
+    let rows = grid.first().map_or(0, Vec::len);
+    let mut data = Vec::with_capacity(rows * cols);
+    for column in grid {
+        data.extend(column.iter().copied());
+    }
+    Value::Tensor(runmat_builtins::Tensor {
+        rows,
+        cols,
+        shape: vec![rows, cols],
+        data,
+        dtype: runmat_builtins::NumericDType::F64,
+    })
+}
+
+fn surface_coordinate_data_from_value(
+    value: &Value,
+    name: &str,
+    builtin: &'static str,
+) -> BuiltinResult<SurfaceCoordinateData> {
+    let tensor = Tensor::try_from(value)
+        .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
+    if tensor.data.is_empty() {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: {name} must be non-empty"),
+        ));
+    }
+    if tensor.shape.len() > 2 {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: {name} must be a vector or 2-D matrix"),
+        ));
+    }
+    if tensor.data.iter().any(|value| !value.is_finite()) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: {name} must contain finite coordinates"),
+        ));
+    }
+    if tensor.rows == 1 || tensor.cols == 1 {
+        return Ok(SurfaceCoordinateData::Vector(tensor.data));
+    }
+    let rows = tensor.rows;
+    let cols = tensor.cols;
+    let grid = super::common::tensor_to_surface_grid_matlab_xy(tensor, rows, cols, builtin)?;
+    Ok(SurfaceCoordinateData::Grid(grid))
+}
+
+fn surface_z_grid_from_value(
+    value: &Value,
+    rows: usize,
+    cols: usize,
+    builtin: &'static str,
+) -> BuiltinResult<Vec<Vec<f64>>> {
+    let mut tensor = Tensor::try_from(value)
+        .map_err(|_| plotting_error(builtin, format!("{builtin}: ZData must be numeric")))?;
+    let expected = rows
+        .checked_mul(cols)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: grid dimensions overflowed")))?;
+    if tensor.data.len() != expected {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: ZData must contain exactly {expected} values"),
+        ));
+    }
+    if tensor.rows == rows && tensor.cols == cols {
+        return super::common::tensor_to_surface_grid_matlab_xy(tensor, rows, cols, builtin);
+    }
+    if tensor.rows == 1 || tensor.cols == 1 {
+        tensor.rows = rows;
+        tensor.cols = cols;
+        tensor.shape = vec![rows, cols];
+        return super::common::tensor_to_surface_grid_matlab_xy(tensor, rows, cols, builtin);
+    }
+    Err(plotting_error(
+        builtin,
+        format!("{builtin}: ZData must have shape {rows}x{cols}"),
+    ))
+}
+
+fn surface_grid_size(grid: &[Vec<f64>]) -> BuiltinResult<(usize, usize)> {
+    let x_len = grid.len();
+    let y_len = grid.first().map_or(0, Vec::len);
+    if x_len == 0 || y_len == 0 || grid.iter().any(|row| row.len() != y_len) {
+        return Err(plotting_error(
+            "set",
+            "set: surface source data is internally inconsistent",
+        ));
+    }
+    Ok((x_len, y_len))
+}
+
+fn validate_surface_grid_shape(
+    grid: &[Vec<f64>],
+    x_len: usize,
+    y_len: usize,
+    name: &str,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if grid.len() != x_len || grid.iter().any(|row| row.len() != y_len) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: {name} matrix must have shape {y_len}x{x_len}"),
+        ));
+    }
+    Ok(())
+}
+
+fn axis_to_x_grid(axis: &[f64], y_len: usize) -> Vec<Vec<f64>> {
+    axis.iter().map(|&x| vec![x; y_len]).collect()
+}
+
+fn axis_to_y_grid(axis: &[f64], x_len: usize) -> Vec<Vec<f64>> {
+    vec![axis.to_vec(); x_len]
+}
+
+fn surface_face_color_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
+    match &surface.colormap {
+        ColorMap::Custom(min, max) if (*min - *max).abs().max_element() < 1e-6 => {
+            Value::String(color_to_short_name(*min))
+        }
+        _ => Value::String("flat".into()),
+    }
+}
+
+fn surface_edge_color_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
+    Value::String(if surface.wireframe { "flat" } else { "none" }.into())
+}
+
+fn surface_shading_name(shading: ShadingMode) -> &'static str {
+    match shading {
+        ShadingMode::Flat => "flat",
+        ShadingMode::Smooth => "interp",
+        ShadingMode::Faceted => "faceted",
+        ShadingMode::None => "none",
+    }
+}
+
+fn surface_shading_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<ShadingMode> {
+    let text = value_as_string(value)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Shading must be text")))?;
+    match text.trim().to_ascii_lowercase().as_str() {
+        "flat" => Ok(ShadingMode::Flat),
+        "interp" | "gouraud" => Ok(ShadingMode::Smooth),
+        "faceted" => Ok(ShadingMode::Faceted),
+        "none" => Ok(ShadingMode::None),
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported Shading `{other}`"),
+        )),
+    }
+}
+
+fn surface_lighting_name(enabled: bool) -> &'static str {
+    if enabled {
+        "gouraud"
+    } else {
+        "none"
+    }
+}
+
+fn surface_lighting_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<bool> {
+    if let Some(text) = value_as_string(value) {
+        return match text.trim().to_ascii_lowercase().as_str() {
+            "none" | "off" => Ok(false),
+            "flat" | "gouraud" | "phong" | "auto" | "on" => Ok(true),
+            other => Err(plotting_error(
+                builtin,
+                format!("{builtin}: unsupported Lighting `{other}`"),
+            )),
+        };
+    }
+    value_as_bool(value)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Lighting must be logical")))
+}
+
+fn surface_face_color_update(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<SurfacePropertyUpdate> {
+    if let Some(text) = value_as_string(value) {
+        return match text.trim().to_ascii_lowercase().as_str() {
+            "none" => Ok(SurfacePropertyUpdate::FaceNone),
+            "flat" => Ok(SurfacePropertyUpdate::Shading(ShadingMode::Flat)),
+            "interp" => Ok(SurfacePropertyUpdate::Shading(ShadingMode::Smooth)),
+            "texturemap" => Ok(SurfacePropertyUpdate::FlattenZ(true)),
+            _ => parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                .map(SurfacePropertyUpdate::FaceColor),
+        };
+    }
+    parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+        .map(SurfacePropertyUpdate::FaceColor)
 }
 
 fn vertices_tensor(vertices: &[glam::Vec3]) -> Value {
