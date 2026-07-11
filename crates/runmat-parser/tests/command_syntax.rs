@@ -226,6 +226,39 @@ fn runtests_command_forms_rewrite_to_string_args() {
 }
 
 #[test]
+fn debugger_command_forms_rewrite_to_string_args() {
+    let program = parse_with_options(
+        "dbtype demo.m 2:4\ndbstack -completenames\ndbclear all\ndbstatus demo -completenames\nkeyboard\nmlock\nmunlock demo\nmislocked demo",
+        ParserOptions::new(CompatMode::Matlab),
+    )
+    .unwrap();
+    assert_eq!(program.body.len(), 8);
+
+    let expected = [
+        ("dbtype", vec!["\"demo.m\"", "\"2:4\""]),
+        ("dbstack", vec!["\"-completenames\""]),
+        ("dbclear", vec!["\"all\""]),
+        ("dbstatus", vec!["\"demo\"", "\"-completenames\""]),
+        ("keyboard", vec![]),
+        ("mlock", vec![]),
+        ("munlock", vec!["\"demo\""]),
+        ("mislocked", vec!["\"demo\""]),
+    ];
+    for (stmt, (expected_name, expected_args)) in program.body.iter().zip(expected) {
+        match stmt {
+            Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+                assert_eq!(name, expected_name);
+                assert_eq!(args.len(), expected_args.len());
+                for (arg, expected_text) in args.iter().zip(expected_args) {
+                    assert!(matches!(arg, Expr::String(s, _) if s == expected_text));
+                }
+            }
+            _ => panic!("expected debugger command form"),
+        }
+    }
+}
+
+#[test]
 fn grid_command_forms_rewrite_to_string_args() {
     for src in ["grid on", "grid off", "grid minor"] {
         let program = parse_with_options(src, ParserOptions::new(CompatMode::Matlab)).unwrap();

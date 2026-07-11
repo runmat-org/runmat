@@ -852,6 +852,11 @@ async fn interpret_with_vars_inner(
     initial_vars: &mut Vec<Value>,
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
+    let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
+        current_function_name.unwrap_or("<main>"),
+        bytecode.source_id,
+        bytecode_frame_span(bytecode),
+    );
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
     let state = Box::new(InterpreterState::new(
         bytecode.clone(),
@@ -867,6 +872,13 @@ async fn interpret_with_vars_inner(
             Err(attach_call_frames(bytecode, current_name, err))
         }
     }
+}
+
+fn bytecode_frame_span(bytecode: &Bytecode) -> Option<(usize, usize)> {
+    bytecode
+        .instr_spans
+        .first()
+        .map(|span| (span.start, span.end))
 }
 
 async fn run_interpreter(
@@ -1395,6 +1407,11 @@ pub async fn interpret_function_with_counts(
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
     let mut state = InterpreterState::new(bytecode.clone(), &mut vars, Some(name), call_counts);
     state.missing_input_slots = missing_input_slots;
+    let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
+        name,
+        bytecode.source_id,
+        bytecode_frame_span(bytecode),
+    );
     let res = Box::pin(run_interpreter(Box::new(state), &mut vars)).await;
     CALL_COUNTS.with(|cc| {
         cc.borrow_mut().pop();

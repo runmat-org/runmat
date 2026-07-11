@@ -21599,6 +21599,310 @@
       ]
     },
     {
+      "name": "dbclear",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "dbclear all | dbclear in file at location | dbclear if condition",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Function, script, file, command, or option text."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DEBUG.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "A debugger compatibility helper receives more inputs than it supports.",
+          "message": "debugger helper: too many input arguments"
+        },
+        {
+          "code": "RM.DEBUG.INVALID_INPUT",
+          "identifier": "RunMat:InvalidInput",
+          "when": "An input is not a supported text, scalar, or option value.",
+          "message": "debugger helper: invalid input"
+        },
+        {
+          "code": "RM.DEBUG.NO_CURRENT_FILE",
+          "identifier": "RunMat:NoCurrentFile",
+          "when": "`mlock`, `munlock`, or `mislocked` is called without a current function or script.",
+          "message": "debugger helper: no current function or script is available"
+        },
+        {
+          "code": "RM.DEBUG.FILE_NOT_FOUND",
+          "identifier": "RunMat:FileNotFound",
+          "when": "`dbtype` cannot resolve a MATLAB source file.",
+          "message": "dbtype: file not found"
+        },
+        {
+          "code": "RM.DEBUG.FILE_READ",
+          "identifier": "RunMat:FileReadFailed",
+          "when": "`dbtype` cannot read the resolved source file.",
+          "message": "dbtype: failed to read file"
+        }
+      ]
+    },
+    {
+      "name": "dbstack",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "dbstack",
+          "inputs": [],
+          "outputs": []
+        },
+        {
+          "label": "ST = dbstack(n, '-completenames')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Number of leading stack entries to omit."
+            },
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "`-completenames` is accepted for MATLAB command compatibility."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ST",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Call-stack entries as a 1-by-N cell row of scalar structs."
+            }
+          ]
+        },
+        {
+          "label": "[ST,I] = dbstack(...)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Number of leading stack entries to omit."
+            },
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "`-completenames` is accepted for MATLAB command compatibility."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ST",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Call-stack entries as a 1-by-N cell row of scalar structs."
+            },
+            {
+              "name": "I",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Current workspace index within the returned stack."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DEBUG.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "A debugger compatibility helper receives more inputs than it supports.",
+          "message": "debugger helper: too many input arguments"
+        },
+        {
+          "code": "RM.DEBUG.INVALID_INPUT",
+          "identifier": "RunMat:InvalidInput",
+          "when": "An input is not a supported text, scalar, or option value.",
+          "message": "debugger helper: invalid input"
+        },
+        {
+          "code": "RM.DEBUG.NO_CURRENT_FILE",
+          "identifier": "RunMat:NoCurrentFile",
+          "when": "`mlock`, `munlock`, or `mislocked` is called without a current function or script.",
+          "message": "debugger helper: no current function or script is available"
+        },
+        {
+          "code": "RM.DEBUG.FILE_NOT_FOUND",
+          "identifier": "RunMat:FileNotFound",
+          "when": "`dbtype` cannot resolve a MATLAB source file.",
+          "message": "dbtype: file not found"
+        },
+        {
+          "code": "RM.DEBUG.FILE_READ",
+          "identifier": "RunMat:FileReadFailed",
+          "when": "`dbtype` cannot read the resolved source file.",
+          "message": "dbtype: failed to read file"
+        }
+      ]
+    },
+    {
+      "name": "dbstatus",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "dbstatus",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Function, script, file, command, or option text."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "b = dbstatus(file, '-completenames')",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Function, script, file, command, or option text."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Breakpoint entries as a 1-by-N cell row; currently empty until execution breakpoints are implemented."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DEBUG.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "A debugger compatibility helper receives more inputs than it supports.",
+          "message": "debugger helper: too many input arguments"
+        },
+        {
+          "code": "RM.DEBUG.INVALID_INPUT",
+          "identifier": "RunMat:InvalidInput",
+          "when": "An input is not a supported text, scalar, or option value.",
+          "message": "debugger helper: invalid input"
+        },
+        {
+          "code": "RM.DEBUG.NO_CURRENT_FILE",
+          "identifier": "RunMat:NoCurrentFile",
+          "when": "`mlock`, `munlock`, or `mislocked` is called without a current function or script.",
+          "message": "debugger helper: no current function or script is available"
+        },
+        {
+          "code": "RM.DEBUG.FILE_NOT_FOUND",
+          "identifier": "RunMat:FileNotFound",
+          "when": "`dbtype` cannot resolve a MATLAB source file.",
+          "message": "dbtype: file not found"
+        },
+        {
+          "code": "RM.DEBUG.FILE_READ",
+          "identifier": "RunMat:FileReadFailed",
+          "when": "`dbtype` cannot read the resolved source file.",
+          "message": "dbtype: failed to read file"
+        }
+      ]
+    },
+    {
+      "name": "dbtype",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "dbtype file",
+          "inputs": [
+            {
+              "name": "file",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "MATLAB source file, path, or function name."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "dbtype file start:end",
+          "inputs": [
+            {
+              "name": "file",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "MATLAB source file, path, or function name."
+            },
+            {
+              "name": "range",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional line range such as `3:8`."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DEBUG.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "A debugger compatibility helper receives more inputs than it supports.",
+          "message": "debugger helper: too many input arguments"
+        },
+        {
+          "code": "RM.DEBUG.INVALID_INPUT",
+          "identifier": "RunMat:InvalidInput",
+          "when": "An input is not a supported text, scalar, or option value.",
+          "message": "debugger helper: invalid input"
+        },
+        {
+          "code": "RM.DEBUG.NO_CURRENT_FILE",
+          "identifier": "RunMat:NoCurrentFile",
+          "when": "`mlock`, `munlock`, or `mislocked` is called without a current function or script.",
+          "message": "debugger helper: no current function or script is available"
+        },
+        {
+          "code": "RM.DEBUG.FILE_NOT_FOUND",
+          "identifier": "RunMat:FileNotFound",
+          "when": "`dbtype` cannot resolve a MATLAB source file.",
+          "message": "dbtype: file not found"
+        },
+        {
+          "code": "RM.DEBUG.FILE_READ",
+          "identifier": "RunMat:FileReadFailed",
+          "when": "`dbtype` cannot read the resolved source file.",
+          "message": "dbtype: failed to read file"
+        }
+      ]
+    },
+    {
       "name": "dcgain",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -37890,6 +38194,58 @@
       ]
     },
     {
+      "name": "getcallinfo",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "info = getcallinfo",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "info",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar struct describing the current call context and stack."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DEBUG.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "A debugger compatibility helper receives more inputs than it supports.",
+          "message": "debugger helper: too many input arguments"
+        },
+        {
+          "code": "RM.DEBUG.INVALID_INPUT",
+          "identifier": "RunMat:InvalidInput",
+          "when": "An input is not a supported text, scalar, or option value.",
+          "message": "debugger helper: invalid input"
+        },
+        {
+          "code": "RM.DEBUG.NO_CURRENT_FILE",
+          "identifier": "RunMat:NoCurrentFile",
+          "when": "`mlock`, `munlock`, or `mislocked` is called without a current function or script.",
+          "message": "debugger helper: no current function or script is available"
+        },
+        {
+          "code": "RM.DEBUG.FILE_NOT_FOUND",
+          "identifier": "RunMat:FileNotFound",
+          "when": "`dbtype` cannot resolve a MATLAB source file.",
+          "message": "dbtype: file not found"
+        },
+        {
+          "code": "RM.DEBUG.FILE_READ",
+          "identifier": "RunMat:FileReadFailed",
+          "when": "`dbtype` cannot read the resolved source file.",
+          "message": "dbtype: failed to read file"
+        }
+      ]
+    },
+    {
       "name": "getenv",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -51083,6 +51439,19 @@
       ]
     },
     {
+      "name": "keyboard",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "keyboard",
+          "inputs": [],
+          "outputs": []
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "kmeans",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -60382,6 +60751,79 @@
       ]
     },
     {
+      "name": "mislocked",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = mislocked",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical scalar indicating whether the function or script is locked."
+            }
+          ]
+        },
+        {
+          "label": "tf = mislocked(fun)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Function, script, file, command, or option text."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical scalar indicating whether the function or script is locked."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DEBUG.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "A debugger compatibility helper receives more inputs than it supports.",
+          "message": "debugger helper: too many input arguments"
+        },
+        {
+          "code": "RM.DEBUG.INVALID_INPUT",
+          "identifier": "RunMat:InvalidInput",
+          "when": "An input is not a supported text, scalar, or option value.",
+          "message": "debugger helper: invalid input"
+        },
+        {
+          "code": "RM.DEBUG.NO_CURRENT_FILE",
+          "identifier": "RunMat:NoCurrentFile",
+          "when": "`mlock`, `munlock`, or `mislocked` is called without a current function or script.",
+          "message": "debugger helper: no current function or script is available"
+        },
+        {
+          "code": "RM.DEBUG.FILE_NOT_FOUND",
+          "identifier": "RunMat:FileNotFound",
+          "when": "`dbtype` cannot resolve a MATLAB source file.",
+          "message": "dbtype: file not found"
+        },
+        {
+          "code": "RM.DEBUG.FILE_READ",
+          "identifier": "RunMat:FileReadFailed",
+          "when": "`dbtype` cannot read the resolved source file.",
+          "message": "dbtype: failed to read file"
+        }
+      ]
+    },
+    {
       "name": "missing",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -60677,6 +61119,50 @@
           "identifier": "RunMat:mldivide:Internal",
           "when": "Runtime cannot materialize left-division outputs.",
           "message": "mldivide: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "mlock",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "mlock",
+          "inputs": [],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DEBUG.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "A debugger compatibility helper receives more inputs than it supports.",
+          "message": "debugger helper: too many input arguments"
+        },
+        {
+          "code": "RM.DEBUG.INVALID_INPUT",
+          "identifier": "RunMat:InvalidInput",
+          "when": "An input is not a supported text, scalar, or option value.",
+          "message": "debugger helper: invalid input"
+        },
+        {
+          "code": "RM.DEBUG.NO_CURRENT_FILE",
+          "identifier": "RunMat:NoCurrentFile",
+          "when": "`mlock`, `munlock`, or `mislocked` is called without a current function or script.",
+          "message": "debugger helper: no current function or script is available"
+        },
+        {
+          "code": "RM.DEBUG.FILE_NOT_FOUND",
+          "identifier": "RunMat:FileNotFound",
+          "when": "`dbtype` cannot resolve a MATLAB source file.",
+          "message": "dbtype: file not found"
+        },
+        {
+          "code": "RM.DEBUG.FILE_READ",
+          "identifier": "RunMat:FileReadFailed",
+          "when": "`dbtype` cannot read the resolved source file.",
+          "message": "dbtype: failed to read file"
         }
       ]
     },
@@ -64080,6 +64566,63 @@
           "identifier": "RunMat:mtimes:Internal",
           "when": "Runtime cannot materialize matrix product outputs.",
           "message": "mtimes: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "munlock",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "munlock",
+          "inputs": [],
+          "outputs": []
+        },
+        {
+          "label": "munlock(fun)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Function, script, file, command, or option text."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DEBUG.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "A debugger compatibility helper receives more inputs than it supports.",
+          "message": "debugger helper: too many input arguments"
+        },
+        {
+          "code": "RM.DEBUG.INVALID_INPUT",
+          "identifier": "RunMat:InvalidInput",
+          "when": "An input is not a supported text, scalar, or option value.",
+          "message": "debugger helper: invalid input"
+        },
+        {
+          "code": "RM.DEBUG.NO_CURRENT_FILE",
+          "identifier": "RunMat:NoCurrentFile",
+          "when": "`mlock`, `munlock`, or `mislocked` is called without a current function or script.",
+          "message": "debugger helper: no current function or script is available"
+        },
+        {
+          "code": "RM.DEBUG.FILE_NOT_FOUND",
+          "identifier": "RunMat:FileNotFound",
+          "when": "`dbtype` cannot resolve a MATLAB source file.",
+          "message": "dbtype: file not found"
+        },
+        {
+          "code": "RM.DEBUG.FILE_READ",
+          "identifier": "RunMat:FileReadFailed",
+          "when": "`dbtype` cannot read the resolved source file.",
+          "message": "dbtype: failed to read file"
         }
       ]
     },

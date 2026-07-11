@@ -1,0 +1,54 @@
+{
+  "title": "munlock",
+  "category": "introspection",
+  "keywords": ["munlock", "persistent", "lock", "function"],
+  "summary": "Remove a function or script from RunMat's lock compatibility registry.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side function-state compatibility only."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::debugging::tests::mlock_mislocked_munlock_current_function",
+    "integration": "debugger_compat_commands_execute_through_core"
+  },
+  "description": "`munlock` clears lock state recorded by `mlock`.",
+  "behaviors": [
+    "`munlock` with no input unlocks the active function or script.",
+    "`munlock(fun)` unlocks the named function or script.",
+    "Unlocking an unlocked name is allowed and has no effect."
+  ],
+  "examples": [
+    {
+      "description": "Unlock a named function",
+      "input": "munlock('myFunction')"
+    }
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "mlock",
+      "url": "./mlock"
+    },
+    {
+      "label": "mislocked",
+      "url": "./mislocked"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/debugging.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/debugging.rs"
+  },
+  "gpu_behavior": [
+    "`munlock` is host-side execution-state bookkeeping and has no GPU/provider behavior."
+  ]
+}

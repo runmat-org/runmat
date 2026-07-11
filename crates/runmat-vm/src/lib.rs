@@ -44,6 +44,8 @@ pub use runtime::workspace::{
 #[doc(hidden)]
 pub fn reset_thread_state_for_tests() {
     runtime::call_stack::reset_thread_state_for_tests();
+    runmat_runtime::debug_context::reset_for_tests();
+    runmat_runtime::builtins::introspection::debugging::reset_lock_registry_for_tests();
     runtime::globals::reset_thread_state_for_tests();
     runtime::workspace::reset_thread_state_for_tests();
 }

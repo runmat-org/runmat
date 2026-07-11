@@ -350,6 +350,8 @@ pub use runtime_error::{
     ReplayErrorKind, RuntimeError, RuntimeErrorBuilder,
 };
 
+pub mod debug_context;
+
 #[cfg(feature = "blas-lapack")]
 pub mod blas;
 #[cfg(feature = "blas-lapack")]

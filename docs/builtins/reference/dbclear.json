@@ -1,0 +1,55 @@
+{
+  "title": "dbclear",
+  "category": "introspection",
+  "keywords": ["dbclear", "debug", "breakpoints"],
+  "summary": "Clear RunMat debugger breakpoint status entries.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side debugger state only."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 8,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": null,
+    "integration": "debugger_compat_commands_execute_through_core"
+  },
+  "description": "`dbclear` accepts MATLAB-style breakpoint-clear commands.",
+  "behaviors": [
+    "`dbclear all`, `dbclear in file`, `dbclear in file at location`, and `dbclear if condition` command text is accepted.",
+    "RunMat does not yet implement execution breakpoints or `dbstop`, so clearing the current empty registry is a no-op.",
+    "`dbclear` is a sink and returns no output."
+  ],
+  "examples": [
+    {
+      "description": "Clear all breakpoint state",
+      "input": "dbclear all"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `dbclear` remove active execution breakpoints?",
+      "answer": "RunMat does not yet have active execution breakpoints. The command is accepted and clears the currently empty registry."
+    }
+  ],
+  "links": [
+    {
+      "label": "dbstatus",
+      "url": "./dbstatus"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/debugging.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/debugging.rs"
+  },
+  "gpu_behavior": [
+    "`dbclear` is host-side debugger state and has no GPU/provider behavior."
+  ]
+}

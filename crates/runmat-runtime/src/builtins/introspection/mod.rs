@@ -11,6 +11,7 @@ pub mod class;
 pub mod classref;
 pub mod clear;
 pub mod clearvars;
+pub mod debugging;
 pub mod dependent_property;
 pub mod dynamic_workspace;
 pub mod feval;

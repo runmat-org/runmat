@@ -1,0 +1,54 @@
+{
+  "title": "mislocked",
+  "category": "introspection",
+  "keywords": ["mislocked", "mlock", "function", "lock"],
+  "summary": "Return whether a function or script is in RunMat's lock compatibility registry.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side function-state compatibility only."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::debugging::tests::mlock_mislocked_munlock_current_function",
+    "integration": "debugger_compat_commands_execute_through_core"
+  },
+  "description": "`mislocked` queries the lock state recorded by `mlock`.",
+  "behaviors": [
+    "`mislocked` with no input checks the active function or script.",
+    "`mislocked(fun)` checks the named function or script.",
+    "The result is a logical scalar."
+  ],
+  "examples": [
+    {
+      "description": "Check a named function",
+      "input": "tf = mislocked('myFunction')"
+    }
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "mlock",
+      "url": "./mlock"
+    },
+    {
+      "label": "munlock",
+      "url": "./munlock"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/debugging.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/debugging.rs"
+  },
+  "gpu_behavior": [
+    "`mislocked` is host-side execution-state bookkeeping and has no GPU/provider behavior."
+  ]
+}

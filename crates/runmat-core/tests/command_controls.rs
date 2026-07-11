@@ -3,6 +3,7 @@
 // runmat-runtime wasm binary per test file with zero executable tests.
 #![cfg(not(target_arch = "wasm32"))]
 
+use runmat_builtins::Value;
 use runmat_core::{ExecutionStreamKind, RunError, RunMatSession};
 use runmat_gc::gc_test_context;
 
@@ -414,6 +415,90 @@ fn plotting_command_gap_repros_execute() {
     if let Some(error) = result.error {
         assert_eq!(error.identifier(), Some("RunMat:plot:EngineError"));
     }
+}
+
+#[test]
+fn debugger_compat_commands_execute_through_core() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut engine,
+        "keyboard; mlock; locked = mislocked; munlock; unlocked = mislocked; dbclear all; status = dbstatus; info = getcallinfo;",
+    )
+    .unwrap();
+    assert!(
+        result.error.is_none(),
+        "unexpected debugger compatibility error: {:?}",
+        result.error
+    );
+    let locked = runmat_core::execute_text_request_for_testing(&mut engine, "locked").unwrap();
+    assert_eq!(locked.value.as_ref(), Some(&Value::Bool(true)));
+    let unlocked = runmat_core::execute_text_request_for_testing(&mut engine, "unlocked").unwrap();
+    assert_eq!(unlocked.value.as_ref(), Some(&Value::Bool(false)));
+    let status = runmat_core::execute_text_request_for_testing(&mut engine, "status").unwrap();
+    assert!(matches!(status.value.as_ref(), Some(Value::Cell(cell)) if cell.data.is_empty()));
+    let info = runmat_core::execute_text_request_for_testing(&mut engine, "info").unwrap();
+    assert!(matches!(info.value.as_ref(), Some(Value::Struct(_))));
+
+    runmat_vm::reset_thread_state_for_tests();
+    let reset_locked =
+        runmat_core::execute_text_request_for_testing(&mut engine, "resetLocked = mislocked;")
+            .unwrap();
+    assert!(
+        reset_locked.error.is_none(),
+        "mislocked after reset failed: {:?}",
+        reset_locked.error
+    );
+    let reset_locked =
+        runmat_core::execute_text_request_for_testing(&mut engine, "resetLocked").unwrap();
+    assert_eq!(reset_locked.value.as_ref(), Some(&Value::Bool(false)));
+}
+
+#[test]
+fn dbstack_reports_user_function_frame_through_core() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let define = runmat_core::execute_text_request_for_testing(
+        &mut engine,
+        "function st = stack_probe(); st = dbstack; end",
+    )
+    .unwrap();
+    assert!(
+        define.error.is_none(),
+        "function definition failed: {:?}",
+        define.error
+    );
+
+    let result =
+        runmat_core::execute_text_request_for_testing(&mut engine, "frames = stack_probe();")
+            .unwrap();
+    assert!(
+        result.error.is_none(),
+        "stack probe failed: {:?}",
+        result.error
+    );
+    let frames = runmat_core::execute_text_request_for_testing(&mut engine, "frames").unwrap();
+    let Some(Value::Cell(cell)) = frames.value.as_ref() else {
+        panic!("dbstack should return a cell row of frame structs");
+    };
+    assert!(
+        !cell.data.is_empty(),
+        "dbstack should include at least one frame"
+    );
+    let Value::Struct(first) = &cell.data[0] else {
+        panic!("first frame should be a struct");
+    };
+    assert_eq!(
+        first.fields.get("name"),
+        Some(&Value::String("stack_probe".to_string()))
+    );
+    let Some(Value::Num(line)) = first.fields.get("line") else {
+        panic!("first frame should include a numeric line");
+    };
+    assert!(
+        *line >= 1.0,
+        "VM-backed dbstack frame should report a source line, got {line}"
+    );
 }
 
 #[test]
