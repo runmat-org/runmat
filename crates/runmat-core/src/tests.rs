@@ -3,6 +3,7 @@ use futures::executor::block_on;
 use std::path::{Path, PathBuf};
 
 const DEEP_SEMANTIC_TEST_STACK_BYTES: usize = 32 * 1024 * 1024;
+static TIMER_CORE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 struct CwdGuard {
     original: PathBuf,
@@ -10026,6 +10027,103 @@ fn runtests_rejects_parallel_execution_option() {
         diagnostic.code == "RunMat:runtests:UnsupportedOption"
             && diagnostic.message.contains("UseParallel=true")
     }));
+}
+
+#[test]
+fn timer_constructs_finds_starts_and_deletes_through_vm() {
+    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        t = timer('Name', 'clientTimer', 'Tag', 'clientBatch', 'TimerFcn', @(src, evt) 0);
+        f = timerfind('Tag', 'clientBatch');
+        foundName = f.Name;
+        start(t);
+        tasks = t.TasksExecuted;
+        running = t.Running;
+        delete(t);
+        validAfterDelete = isvalid(t);
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("timer workflow succeeds");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "timer workflow diagnostics: {:?}; upserts: {:?}",
+        outcome.diagnostics,
+        outcome.workspace_delta.upserts
+    );
+
+    assert_eq!(
+        outcome_named_upsert_value(&outcome, "foundName"),
+        Some(&runmat_builtins::Value::String("clientTimer".into()))
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "tasks",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "running",
+        &runmat_builtins::Value::String("off".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "validAfterDelete",
+        &runmat_builtins::Value::Bool(false)
+    ));
+}
+
+#[test]
+fn timer_member_method_start_works_through_vm() {
+    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        t = timer('TimerFcn', @(src, evt) 0);
+        t.start();
+        tasks = t.TasksExecuted;
+        running = t.Running;
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("timer member start succeeds");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "timer member workflow diagnostics: {:?}; upserts: {:?}",
+        outcome.diagnostics,
+        outcome.workspace_delta.upserts
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "tasks",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "running",
+        &runmat_builtins::Value::String("off".into())
+    ));
+}
+
+#[test]
+fn timer_rejects_invalid_post_construction_assignments_through_vm() {
+    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
+    for (source, expected) in [
+        ("t = timer; t.Period = 0;", "Period must be a finite scalar"),
+        (
+            "t = timer; t.TimerFcn = 42;",
+            "TimerFcn must be text, a function handle, or a callback cell array",
+        ),
+    ] {
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let outcome =
+            execute_text_request(&mut session, source).expect("assignment failure is diagnostic");
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(expected)),
+            "missing timer assignment diagnostic containing {expected:?}; diagnostics: {:?}",
+            outcome.diagnostics
+        );
+    }
 }
 
 #[test]

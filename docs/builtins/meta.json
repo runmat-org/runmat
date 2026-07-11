@@ -100826,6 +100826,79 @@
       ]
     },
     {
+      "name": "timer",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "t = timer",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Timer handle object."
+            }
+          ]
+        },
+        {
+          "label": "t = timer(Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "Name,Value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Timer properties such as TimerFcn, StartDelay, Period, ExecutionMode, Name, Tag, and UserData."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Timer handle object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TIMER.INVALID_INPUT",
+          "identifier": "RunMat:timer:InvalidInput",
+          "when": "A timer argument, property, or callback value has an unsupported type.",
+          "message": "timer: invalid input"
+        },
+        {
+          "code": "RM.TIMER.INVALID_PROPERTY",
+          "identifier": "RunMat:timer:InvalidProperty",
+          "when": "A timer property name is unknown, read-only, or has an invalid value.",
+          "message": "timer: invalid property"
+        },
+        {
+          "code": "RM.TIMER.INVALID_HANDLE",
+          "identifier": "RunMat:timer:InvalidHandle",
+          "when": "A lifecycle method receives a non-timer or invalid timer handle.",
+          "message": "timer: invalid timer handle"
+        },
+        {
+          "code": "RM.TIMER.CALLBACK",
+          "identifier": "RunMat:timer:CallbackFailed",
+          "when": "A timer callback fails.",
+          "message": "timer: callback failed"
+        },
+        {
+          "code": "RM.TIMER.GC",
+          "identifier": "RunMat:timer:GcFailure",
+          "when": "A timer object cannot be allocated, rooted, read, or mutated.",
+          "message": "timer: object storage failed"
+        }
+      ]
+    },
+    {
       "name": "timerange",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -100882,6 +100955,152 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
+      "name": "timerfind",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "timers = timerfind",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "timers",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matching timer handle, empty cell row, or cell row of timer handles."
+            }
+          ]
+        },
+        {
+          "label": "timers = timerfind(Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "Name,Value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Property filters matched by exact value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "timers",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matching timer handle, empty cell row, or cell row of timer handles."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TIMER.INVALID_INPUT",
+          "identifier": "RunMat:timer:InvalidInput",
+          "when": "A timer argument, property, or callback value has an unsupported type.",
+          "message": "timer: invalid input"
+        },
+        {
+          "code": "RM.TIMER.INVALID_PROPERTY",
+          "identifier": "RunMat:timer:InvalidProperty",
+          "when": "A timer property name is unknown, read-only, or has an invalid value.",
+          "message": "timer: invalid property"
+        },
+        {
+          "code": "RM.TIMER.INVALID_HANDLE",
+          "identifier": "RunMat:timer:InvalidHandle",
+          "when": "A lifecycle method receives a non-timer or invalid timer handle.",
+          "message": "timer: invalid timer handle"
+        },
+        {
+          "code": "RM.TIMER.CALLBACK",
+          "identifier": "RunMat:timer:CallbackFailed",
+          "when": "A timer callback fails.",
+          "message": "timer: callback failed"
+        },
+        {
+          "code": "RM.TIMER.GC",
+          "identifier": "RunMat:timer:GcFailure",
+          "when": "A timer object cannot be allocated, rooted, read, or mutated.",
+          "message": "timer: object storage failed"
+        }
+      ]
+    },
+    {
+      "name": "timerfindall",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "timers = timerfindall",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "timers",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matching timer handle, empty cell row, or cell row of timer handles."
+            }
+          ]
+        },
+        {
+          "label": "timers = timerfindall(Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "Name,Value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Property filters matched by exact value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "timers",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matching timer handle, empty cell row, or cell row of timer handles."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TIMER.INVALID_INPUT",
+          "identifier": "RunMat:timer:InvalidInput",
+          "when": "A timer argument, property, or callback value has an unsupported type.",
+          "message": "timer: invalid input"
+        },
+        {
+          "code": "RM.TIMER.INVALID_PROPERTY",
+          "identifier": "RunMat:timer:InvalidProperty",
+          "when": "A timer property name is unknown, read-only, or has an invalid value.",
+          "message": "timer: invalid property"
+        },
+        {
+          "code": "RM.TIMER.INVALID_HANDLE",
+          "identifier": "RunMat:timer:InvalidHandle",
+          "when": "A lifecycle method receives a non-timer or invalid timer handle.",
+          "message": "timer: invalid timer handle"
+        },
+        {
+          "code": "RM.TIMER.CALLBACK",
+          "identifier": "RunMat:timer:CallbackFailed",
+          "when": "A timer callback fails.",
+          "message": "timer: callback failed"
+        },
+        {
+          "code": "RM.TIMER.GC",
+          "identifier": "RunMat:timer:GcFailure",
+          "when": "A timer object cannot be allocated, rooted, read, or mutated.",
+          "message": "timer: object storage failed"
         }
       ]
     },

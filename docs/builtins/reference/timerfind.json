@@ -1,0 +1,62 @@
+{
+  "title": "timerfind",
+  "category": "timing",
+  "keywords": [
+    "timerfind",
+    "timer",
+    "callback",
+    "handle"
+  ],
+  "summary": "Find visible timer objects by exact property value.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`timerfind` queries host-side timer handles and does not use acceleration providers."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::timing::timer::tests::timerfind_filters_visible_timers",
+    "integration": [
+      "timer_constructs_finds_starts_and_deletes_through_vm"
+    ]
+  },
+  "description": "`timerfind` returns valid timer handles whose `ObjectVisibility` is `on` and whose properties exactly match the supplied name-value filters.",
+  "behaviors": [
+    "`timerfind` returns all visible valid timers in the current runtime thread.",
+    "`timerfind(Name, Value, ...)` applies exact property matches. Character rows are normalized to strings for matching.",
+    "A single match returns a scalar timer handle. Zero or multiple matches return a 1-by-N cell row because RunMat does not yet have first-class MATLAB object arrays.",
+    "Deleted timers are removed from discovery. Timers with `ObjectVisibility='off'` are omitted; use `timerfindall` to include invisible timers."
+  ],
+  "examples": [
+    {
+      "description": "Find timers by tag",
+      "input": "t = timer('Tag', 'batch', 'TimerFcn', @tick);\nfound = timerfind('Tag', 'batch')"
+    }
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "timer",
+      "url": "./timer"
+    },
+    {
+      "label": "timerfindall",
+      "url": "./timerfindall"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/timing/timer.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/timer.rs"
+  },
+  "gpu_behavior": [
+    "`timerfind` is host-side handle registry lookup and has no GPU behavior."
+  ]
+}
