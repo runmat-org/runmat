@@ -76,7 +76,7 @@
     },
     {
       "question": "Does RunMat support 3-D quiver plots?",
-      "answer": "Not yet. `quiver` currently handles 2-D vector fields only. For 3-D direction visualization, consider using `plot3` to draw line segments manually, or combine `scatter3` with custom arrow geometry."
+      "answer": "Yes. Use `quiver3` for 3-D vector fields.\n\n```matlab\nquiver3(X, Y, Z, U, V, W);\n```"
     }
   ],
   "links": [

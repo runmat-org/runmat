@@ -624,6 +624,23 @@ fn histogram2_dispatches_chart_handle_through_vm() {
 }
 
 #[test]
+fn quiver3_dispatches_3d_handle_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        h = quiver3([0 1], [2 3], [4 5], [0.25 0.5], [0.75 1], [1.25 1.5], 2, 'r'); \
+        if ~isgraphics(h); error('quiver3 did not return a graphics handle'); end; \
+        if ~strcmp(get(h, 'Type'), 'quiver'); error('quiver3 handle type mismatch'); end; \
+        z = get(h, 'ZData'); \
+        w = get(h, 'WData'); \
+        if z(1) ~= 4 || z(2) ~= 5; error('quiver3 zdata mismatch'); end; \
+        if w(1) ~= 1.25 || w(2) ~= 1.5; error('quiver3 wdata mismatch'); end; \
+        if abs(get(h, 'AutoScaleFactor') - 2) > 1e-12; error('quiver3 scale mismatch'); end; \
+        set(h, 'MaxHeadSize', 0.25); \
+        if abs(get(h, 'MaxHeadSize') - 0.25) > 1e-12; error('quiver3 head size mismatch'); end;";
+    execute_source(input).expect("execute quiver3 script");
+}
+
+#[test]
 fn daspect_dispatches_and_updates_axes_properties() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

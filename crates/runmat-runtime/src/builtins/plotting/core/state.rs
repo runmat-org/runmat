@@ -557,6 +557,7 @@ pub struct QuiverHandleState {
     pub figure: FigureHandle,
     pub axes_index: usize,
     pub plot_index: usize,
+    pub is_3d: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -855,10 +856,11 @@ impl PlotChildHandleState {
                 axes_index,
                 plot_index,
             }),
-            Self::Quiver(_) => Self::Quiver(QuiverHandleState {
+            Self::Quiver(state) => Self::Quiver(QuiverHandleState {
                 figure,
                 axes_index,
                 plot_index,
+                is_3d: state.is_3d,
             }),
             Self::Image(_) => Self::Image(ImageHandleState {
                 figure,
@@ -3638,6 +3640,18 @@ pub fn register_quiver_handle(figure: FigureHandle, axes_index: usize, plot_inde
             figure: state.figure,
             axes_index: state.axes_index,
             plot_index: state.plot_index,
+            is_3d: false,
+        })
+    })
+}
+
+pub fn register_quiver3_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
+    register_simple_plot_handle(figure, axes_index, plot_index, |state| {
+        PlotChildHandleState::Quiver(QuiverHandleState {
+            figure: state.figure,
+            axes_index: state.axes_index,
+            plot_index: state.plot_index,
+            is_3d: true,
         })
     })
 }

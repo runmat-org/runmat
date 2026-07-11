@@ -78511,6 +78511,475 @@
       ]
     },
     {
+      "name": "quiver3",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = quiver3(Z, U, V, W)",
+          "inputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base z-coordinates."
+            },
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field x-components."
+            },
+            {
+              "name": "V",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field y-components."
+            },
+            {
+              "name": "W",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field z-components."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered 3-D quiver plot."
+            }
+          ]
+        },
+        {
+          "label": "h = quiver3(X, Y, Z, U, V, W)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base x-coordinates."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base y-coordinates."
+            },
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base z-coordinates."
+            },
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field x-components."
+            },
+            {
+              "name": "V",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field y-components."
+            },
+            {
+              "name": "W",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field z-components."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered 3-D quiver plot."
+            }
+          ]
+        },
+        {
+          "label": "h = quiver3(Z, U, V, W, scaleOrStyleOrNameValue...)",
+          "inputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base z-coordinates."
+            },
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field x-components."
+            },
+            {
+              "name": "V",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field y-components."
+            },
+            {
+              "name": "W",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field z-components."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional scale, line-style shorthand, or name/value style arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered 3-D quiver plot."
+            }
+          ]
+        },
+        {
+          "label": "h = quiver3(X, Y, Z, U, V, W, scaleOrStyleOrNameValue...)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base x-coordinates."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base y-coordinates."
+            },
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base z-coordinates."
+            },
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field x-components."
+            },
+            {
+              "name": "V",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field y-components."
+            },
+            {
+              "name": "W",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field z-components."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional scale, line-style shorthand, or name/value style arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered 3-D quiver plot."
+            }
+          ]
+        },
+        {
+          "label": "h = quiver3(ax, Z, U, V, W)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base z-coordinates."
+            },
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field x-components."
+            },
+            {
+              "name": "V",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field y-components."
+            },
+            {
+              "name": "W",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field z-components."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered 3-D quiver plot."
+            }
+          ]
+        },
+        {
+          "label": "h = quiver3(ax, X, Y, Z, U, V, W)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base x-coordinates."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base y-coordinates."
+            },
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base z-coordinates."
+            },
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field x-components."
+            },
+            {
+              "name": "V",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field y-components."
+            },
+            {
+              "name": "W",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field z-components."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered 3-D quiver plot."
+            }
+          ]
+        },
+        {
+          "label": "h = quiver3(ax, Z, U, V, W, scaleOrStyleOrNameValue...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base z-coordinates."
+            },
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field x-components."
+            },
+            {
+              "name": "V",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field y-components."
+            },
+            {
+              "name": "W",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field z-components."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional scale, line-style shorthand, or name/value style arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered 3-D quiver plot."
+            }
+          ]
+        },
+        {
+          "label": "h = quiver3(ax, X, Y, Z, U, V, W, scaleOrStyleOrNameValue...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base x-coordinates."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base y-coordinates."
+            },
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Arrow base z-coordinates."
+            },
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field x-components."
+            },
+            {
+              "name": "V",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field y-components."
+            },
+            {
+              "name": "W",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector field z-components."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional scale, line-style shorthand, or name/value style arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered 3-D quiver plot."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.QUIVER3.INVALID_ARGUMENT",
+          "identifier": "RunMat:quiver3:InvalidArgument",
+          "when": "Input data, axes targeting, scale, or style arguments are invalid.",
+          "message": "quiver3: invalid argument"
+        },
+        {
+          "code": "RM.QUIVER3.INTERNAL",
+          "identifier": "RunMat:quiver3:Internal",
+          "when": "Internal quiver3 construction or rendering fails unexpectedly.",
+          "message": "quiver3: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "rad2deg",
       "output_mode": "Fixed",
       "completion_policy": "Public",

@@ -3899,6 +3899,7 @@ fn get_quiver_property(
             format!("{builtin}: invalid quiver handle"),
         ));
     };
+    let has_cpu_data = quiver.has_cpu_vector_data();
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
@@ -3915,6 +3916,22 @@ fn get_quiver_property(
             st.insert("LineWidth", Value::Num(quiver.line_width as f64));
             st.insert("AutoScaleFactor", Value::Num(quiver.scale as f64));
             st.insert("MaxHeadSize", Value::Num(quiver.head_size as f64));
+            if has_cpu_data {
+                st.insert("XData", tensor_from_vec(quiver.x.clone()));
+                st.insert("YData", tensor_from_vec(quiver.y.clone()));
+                if quiver_handle.is_3d {
+                    st.insert(
+                        "ZData",
+                        tensor_from_vec(quiver.z.clone().unwrap_or_default()),
+                    );
+                    st.insert(
+                        "WData",
+                        tensor_from_vec(quiver.w.clone().unwrap_or_default()),
+                    );
+                }
+                st.insert("UData", tensor_from_vec(quiver.u.clone()));
+                st.insert("VData", tensor_from_vec(quiver.v.clone()));
+            }
             Ok(Value::Struct(st))
         }
         Some("type") => Ok(Value::String("quiver".into())),
@@ -3927,11 +3944,39 @@ fn get_quiver_property(
         Some("linewidth") => Ok(Value::Num(quiver.line_width as f64)),
         Some("autoscalefactor") => Ok(Value::Num(quiver.scale as f64)),
         Some("maxheadsize") => Ok(Value::Num(quiver.head_size as f64)),
+        Some("xdata") if has_cpu_data => Ok(tensor_from_vec(quiver.x.clone())),
+        Some("ydata") if has_cpu_data => Ok(tensor_from_vec(quiver.y.clone())),
+        Some("zdata") if quiver_handle.is_3d => {
+            if has_cpu_data {
+                Ok(tensor_from_vec(quiver.z.clone().unwrap_or_default()))
+            } else {
+                Err(quiver_data_unavailable_error(builtin))
+            }
+        }
+        Some("udata") if has_cpu_data => Ok(tensor_from_vec(quiver.u.clone())),
+        Some("vdata") if has_cpu_data => Ok(tensor_from_vec(quiver.v.clone())),
+        Some("wdata") if quiver_handle.is_3d => {
+            if has_cpu_data {
+                Ok(tensor_from_vec(quiver.w.clone().unwrap_or_default()))
+            } else {
+                Err(quiver_data_unavailable_error(builtin))
+            }
+        }
+        Some("xdata") | Some("ydata") | Some("udata") | Some("vdata") => {
+            Err(quiver_data_unavailable_error(builtin))
+        }
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported quiver property `{other}`"),
         )),
     }
+}
+
+fn quiver_data_unavailable_error(builtin: &'static str) -> crate::RuntimeError {
+    plotting_error(
+        builtin,
+        format!("{builtin}: quiver data properties are unavailable for GPU-backed quiver handles"),
+    )
 }
 
 fn get_image_property(
@@ -4464,11 +4509,18 @@ fn apply_quiver_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    if matches!(
+        key,
+        "xdata" | "ydata" | "zdata" | "udata" | "vdata" | "wdata"
+    ) {
+        return apply_quiver_data_property(quiver_handle, key, value, builtin);
+    }
     super::state::update_quiver_plot(quiver_handle.figure, quiver_handle.plot_index, |quiver| {
         match key {
             "color" => {
                 if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
                     quiver.color = c;
+                    quiver.mark_dirty();
                 }
             }
             "linewidth" => {
@@ -4479,15 +4531,70 @@ fn apply_quiver_property(
             "autoscalefactor" => {
                 if let Some(v) = value_as_f64(value) {
                     quiver.scale = v as f32;
+                    quiver.mark_dirty();
                 }
             }
             "maxheadsize" => {
                 if let Some(v) = value_as_f64(value) {
                     quiver.head_size = v as f32;
+                    quiver.mark_dirty();
                 }
             }
             _ => {}
         }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_quiver_data_property(
+    quiver_handle: &super::state::QuiverHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if matches!(key, "zdata" | "wdata") && !quiver_handle.is_3d {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported quiver property `{key}`"),
+        ));
+    }
+    let figure = super::state::clone_figure(quiver_handle.figure)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid quiver figure")))?;
+    let plot = figure
+        .plots()
+        .nth(quiver_handle.plot_index)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid quiver handle")))?;
+    let runmat_plot::plots::figure::PlotElement::Quiver(quiver) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid quiver handle"),
+        ));
+    };
+    let expected_len = quiver
+        .cpu_vector_data_len()
+        .ok_or_else(|| quiver_data_unavailable_error(builtin))?;
+    let tensor = Tensor::try_from(value).map_err(|err| {
+        plotting_error(builtin, format!("{builtin}: {key} must be numeric: {err}"))
+    })?;
+    if tensor.data.len() != expected_len {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: {key} length must match existing quiver data length"),
+        ));
+    }
+    let data = tensor.data;
+    super::state::update_quiver_plot(quiver_handle.figure, quiver_handle.plot_index, |quiver| {
+        match key {
+            "xdata" => quiver.x = data,
+            "ydata" => quiver.y = data,
+            "zdata" => quiver.z = Some(data),
+            "udata" => quiver.u = data,
+            "vdata" => quiver.v = data,
+            "wdata" => quiver.w = Some(data),
+            _ => {}
+        }
+        quiver.mark_dirty();
     })
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())

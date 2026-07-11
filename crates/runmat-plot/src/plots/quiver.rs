@@ -13,8 +13,10 @@ use std::sync::Arc;
 pub struct QuiverPlot {
     pub x: Vec<f64>,
     pub y: Vec<f64>,
+    pub z: Option<Vec<f64>>,
     pub u: Vec<f64>,
     pub v: Vec<f64>,
+    pub w: Option<Vec<f64>>,
 
     pub color: Vec4,
     pub line_width: f32,
@@ -75,17 +77,31 @@ fn validate_gpu_source_metadata(
 impl QuiverPlot {
     pub async fn export_scene_vector_data(
         &self,
-    ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>), String> {
+    ) -> Result<
+        (
+            Vec<f64>,
+            Vec<f64>,
+            Option<Vec<f64>>,
+            Vec<f64>,
+            Vec<f64>,
+            Option<Vec<f64>>,
+        ),
+        String,
+    > {
         if !self.x.is_empty()
             && self.x.len() == self.y.len()
             && self.x.len() == self.u.len()
             && self.x.len() == self.v.len()
+            && self.z.as_ref().is_none_or(|z| z.len() == self.x.len())
+            && self.w.as_ref().is_none_or(|w| w.len() == self.x.len())
         {
             return Ok((
                 self.x.clone(),
                 self.y.clone(),
+                self.z.clone(),
                 self.u.clone(),
                 self.v.clone(),
+                self.w.clone(),
             ));
         }
         if !self.x.is_empty() || !self.y.is_empty() || !self.u.is_empty() || !self.v.is_empty() {
@@ -172,7 +188,7 @@ impl QuiverPlot {
                 }
                 _ => unreachable!("xy_mode was validated before GPU readback"),
             };
-            return Ok((x, y, u, v));
+            return Ok((x, y, None, u, v, None));
         }
 
         if self.gpu_vertices.is_some() {
@@ -181,7 +197,7 @@ impl QuiverPlot {
             );
         }
 
-        Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()))
+        Ok((Vec::new(), Vec::new(), None, Vec::new(), Vec::new(), None))
     }
 
     pub fn new(x: Vec<f64>, y: Vec<f64>, u: Vec<f64>, v: Vec<f64>) -> Result<Self, String> {
@@ -192,8 +208,44 @@ impl QuiverPlot {
         Ok(Self {
             x,
             y,
+            z: None,
             u,
             v,
+            w: None,
+            color: Vec4::new(0.0, 0.0, 0.0, 1.0),
+            line_width: 1.0,
+            scale: 1.0,
+            head_size: 0.1,
+            label: None,
+            visible: true,
+            vertices: None,
+            bounds: None,
+            dirty: true,
+            gpu_vertices: None,
+            gpu_vertex_count: None,
+            gpu_bounds: None,
+            gpu_source: None,
+        })
+    }
+    pub fn new3d(
+        x: Vec<f64>,
+        y: Vec<f64>,
+        z: Vec<f64>,
+        u: Vec<f64>,
+        v: Vec<f64>,
+        w: Vec<f64>,
+    ) -> Result<Self, String> {
+        let n = x.len();
+        if n == 0 || y.len() != n || z.len() != n || u.len() != n || v.len() != n || w.len() != n {
+            return Err("quiver3: X,Y,Z,U,V,W must have same non-zero length".to_string());
+        }
+        Ok(Self {
+            x,
+            y,
+            z: Some(z),
+            u,
+            v,
+            w: Some(w),
             color: Vec4::new(0.0, 0.0, 0.0, 1.0),
             line_width: 1.0,
             scale: 1.0,
@@ -221,8 +273,10 @@ impl QuiverPlot {
         Self {
             x: Vec::new(),
             y: Vec::new(),
+            z: None,
             u: Vec::new(),
             v: Vec::new(),
+            w: None,
             color,
             line_width,
             scale,
@@ -257,44 +311,68 @@ impl QuiverPlot {
     pub fn set_visible(&mut self, v: bool) {
         self.visible = v;
     }
+    pub fn has_cpu_vector_data(&self) -> bool {
+        !self.x.is_empty()
+            && self.x.len() == self.y.len()
+            && self.x.len() == self.u.len()
+            && self.x.len() == self.v.len()
+            && self.z.as_ref().is_none_or(|z| z.len() == self.x.len())
+            && self.w.as_ref().is_none_or(|w| w.len() == self.x.len())
+    }
+    pub fn cpu_vector_data_len(&self) -> Option<usize> {
+        self.has_cpu_vector_data().then_some(self.x.len())
+    }
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+        self.bounds = None;
+    }
 
     pub fn generate_vertices(&mut self) -> &Vec<Vertex> {
         if self.dirty || self.vertices.is_none() {
             let mut verts = Vec::new();
             for i in 0..self.x.len() {
+                let z = self.z.as_ref().map_or(0.0, |values| values[i]) as f32;
+                let w = self.w.as_ref().map_or(0.0, |values| values[i]) as f32;
                 let (x, y, u, v) = (
                     self.x[i] as f32,
                     self.y[i] as f32,
                     self.u[i] as f32,
                     self.v[i] as f32,
                 );
-                if !x.is_finite() || !y.is_finite() || !u.is_finite() || !v.is_finite() {
+                if !x.is_finite()
+                    || !y.is_finite()
+                    || !z.is_finite()
+                    || !u.is_finite()
+                    || !v.is_finite()
+                    || !w.is_finite()
+                {
                     continue;
                 }
                 let dx = u * self.scale;
                 let dy = v * self.scale;
+                let dz = w * self.scale;
                 // Main shaft
-                verts.push(Vertex::new(Vec3::new(x, y, 0.0), self.color));
-                verts.push(Vertex::new(Vec3::new(x + dx, y + dy, 0.0), self.color));
-                // Arrowhead as two short lines forming a V
-                let len = (dx * dx + dy * dy).sqrt();
+                let base = Vec3::new(x, y, z);
+                let tip = Vec3::new(x + dx, y + dy, z + dz);
+                verts.push(Vertex::new(base, self.color));
+                verts.push(Vertex::new(tip, self.color));
+                // Arrowhead as two short lines forming a V in a plane perpendicular to the arrow.
+                let len = (dx * dx + dy * dy + dz * dz).sqrt();
                 if len > 0.0 && self.head_size > 0.0 {
-                    let hx = dx / len;
-                    let hy = dy / len;
-                    // Perpendicular
-                    let px = -hy;
-                    let py = hx;
+                    let dir = Vec3::new(dx / len, dy / len, dz / len);
+                    let reference = if dir.z.abs() > 0.9 { Vec3::Y } else { Vec3::Z };
+                    let mut perp = dir.cross(reference);
+                    if perp.length_squared() <= f32::EPSILON {
+                        perp = dir.cross(Vec3::X);
+                    }
+                    let perp = perp.normalize_or_zero();
                     let h = self.head_size.min(len * 0.5);
-                    let tipx = x + dx;
-                    let tipy = y + dy;
-                    let leftx = tipx - h * hx + 0.5 * h * px;
-                    let lefty = tipy - h * hy + 0.5 * h * py;
-                    let rightx = tipx - h * hx - 0.5 * h * px;
-                    let righty = tipy - h * hy - 0.5 * h * py;
-                    verts.push(Vertex::new(Vec3::new(tipx, tipy, 0.0), self.color));
-                    verts.push(Vertex::new(Vec3::new(leftx, lefty, 0.0), self.color));
-                    verts.push(Vertex::new(Vec3::new(tipx, tipy, 0.0), self.color));
-                    verts.push(Vertex::new(Vec3::new(rightx, righty, 0.0), self.color));
+                    let left = tip - h * dir + 0.5 * h * perp;
+                    let right = tip - h * dir - 0.5 * h * perp;
+                    verts.push(Vertex::new(tip, self.color));
+                    verts.push(Vertex::new(left, self.color));
+                    verts.push(Vertex::new(tip, self.color));
+                    verts.push(Vertex::new(right, self.color));
                 }
             }
             self.vertices = Some(verts);
@@ -308,20 +386,33 @@ impl QuiverPlot {
             return bounds;
         }
         if self.dirty || self.bounds.is_none() {
-            let mut min = Vec3::new(f32::INFINITY, f32::INFINITY, 0.0);
-            let mut max = Vec3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, 0.0);
+            let mut min = Vec3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
+            let mut max = Vec3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
             for i in 0..self.x.len() {
                 let x = self.x[i] as f32;
                 let y = self.y[i] as f32;
+                let z = self.z.as_ref().map_or(0.0, |values| values[i]) as f32;
                 let dx = (self.u[i] as f32) * self.scale;
                 let dy = (self.v[i] as f32) * self.scale;
-                if !x.is_finite() || !y.is_finite() || !dx.is_finite() || !dy.is_finite() {
+                let dz = self
+                    .w
+                    .as_ref()
+                    .map_or(0.0, |values| values[i] as f32 * self.scale);
+                if !x.is_finite()
+                    || !y.is_finite()
+                    || !z.is_finite()
+                    || !dx.is_finite()
+                    || !dy.is_finite()
+                    || !dz.is_finite()
+                {
                     continue;
                 }
                 min.x = min.x.min(x.min(x + dx));
                 max.x = max.x.max(x.max(x + dx));
                 min.y = min.y.min(y.min(y + dy));
                 max.y = max.y.max(y.max(y + dy));
+                min.z = min.z.min(z.min(z + dz));
+                max.z = max.z.max(z.max(z + dz));
             }
             if !min.x.is_finite() {
                 min = Vec3::ZERO;

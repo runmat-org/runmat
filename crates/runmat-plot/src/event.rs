@@ -300,10 +300,14 @@ pub enum ScenePlot {
         x: Vec<f64>,
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(default, deserialize_with = "deserialize_option_vec_f64_lossy")]
+        z: Option<Vec<f64>>,
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         u: Vec<f64>,
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         v: Vec<f64>,
+        #[serde(default, deserialize_with = "deserialize_option_vec_f64_lossy")]
+        w: Option<Vec<f64>>,
         color_rgba: [f32; 4],
         line_width: f32,
         scale: f32,
@@ -1974,7 +1978,7 @@ impl ScenePlot {
                 }
             }
             PlotElement::Quiver(quiver) => {
-                let (x, y, u, v) = quiver
+                let (x, y, z, u, v, w) = quiver
                     .export_scene_vector_data()
                     .await
                     .map_err(SceneExportError::readback)?;
@@ -1986,8 +1990,10 @@ impl ScenePlot {
                 Self::Quiver {
                     x,
                     y,
+                    z,
                     u,
                     v,
+                    w,
                     color_rgba: vec4_to_rgba(quiver.color),
                     line_width: quiver.line_width,
                     scale: quiver.scale,
@@ -2162,7 +2168,9 @@ impl ScenePlot {
                     ],
                 )?;
             }
-            ScenePlot::Quiver { x, y, u, v, .. } => {
+            ScenePlot::Quiver {
+                x, y, z, u, v, w, ..
+            } => {
                 validate_required_equal_lengths(
                     "quiver vector field scene data",
                     &[
@@ -2172,6 +2180,23 @@ impl ScenePlot {
                         ("v", v.len()),
                     ],
                 )?;
+                if let Some(z) = z {
+                    validate_required_equal_lengths(
+                        "quiver3 position scene data",
+                        &[("x", x.len()), ("z", z.len())],
+                    )?;
+                }
+                if let Some(w) = w {
+                    validate_required_equal_lengths(
+                        "quiver3 vector scene data",
+                        &[("u", u.len()), ("w", w.len())],
+                    )?;
+                }
+                if z.is_some() != w.is_some() {
+                    return Err(SceneExportError::unexportable(
+                        "quiver3 scene data requires both z and w arrays",
+                    ));
+                }
             }
             ScenePlot::Bar {
                 labels,
@@ -2426,8 +2451,10 @@ impl ScenePlot {
             PlotElement::Quiver(quiver) => Self::Quiver {
                 x: quiver.x.clone(),
                 y: quiver.y.clone(),
+                z: quiver.z.clone(),
                 u: quiver.u.clone(),
                 v: quiver.v.clone(),
+                w: quiver.w.clone(),
                 color_rgba: vec4_to_rgba(quiver.color),
                 line_width: quiver.line_width,
                 scale: quiver.scale,
@@ -2810,8 +2837,10 @@ impl ScenePlot {
             ScenePlot::Quiver {
                 x,
                 y,
+                z,
                 u,
                 v,
+                w,
                 color_rgba,
                 line_width,
                 scale,
@@ -2820,9 +2849,13 @@ impl ScenePlot {
                 label,
                 visible,
             } => {
-                let mut quiver = QuiverPlot::new(x, y, u, v)?
-                    .with_style(rgba_to_vec4(color_rgba), line_width, scale, head_size)
-                    .with_label(label.unwrap_or_else(|| "Data".to_string()));
+                let mut quiver = if let (Some(z), Some(w)) = (z, w) {
+                    QuiverPlot::new3d(x, y, z, u, v, w)?
+                } else {
+                    QuiverPlot::new(x, y, u, v)?
+                }
+                .with_style(rgba_to_vec4(color_rgba), line_width, scale, head_size)
+                .with_label(label.unwrap_or_else(|| "Data".to_string()));
                 quiver.set_visible(visible);
                 figure.add_quiver_plot_on_axes(quiver, axes_index as usize);
             }
@@ -4246,6 +4279,33 @@ mod tests {
         assert_eq!(quiver.scale, 1.5);
         assert_eq!(quiver.head_size, 0.2);
         assert_eq!(quiver.label.as_deref(), Some("Field"));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_quiver3_plot() {
+        let mut figure = Figure::new();
+        let quiver = QuiverPlot::new3d(
+            vec![0.0, 1.0],
+            vec![1.0, 2.0],
+            vec![3.0, 4.0],
+            vec![0.5, -0.5],
+            vec![1.0, 0.25],
+            vec![2.0, -1.0],
+        )
+        .unwrap()
+        .with_style(Vec4::new(0.2, 0.3, 0.4, 1.0), 2.0, 1.5, 0.2)
+        .with_label("Field3");
+        figure.add_quiver_plot(quiver);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::Quiver(quiver) = rebuilt.plots().next().unwrap() else {
+            panic!("expected quiver")
+        };
+        assert_eq!(quiver.z.as_ref().unwrap(), &vec![3.0, 4.0]);
+        assert_eq!(quiver.w.as_ref().unwrap(), &vec![2.0, -1.0]);
+        assert_eq!(quiver.label.as_deref(), Some("Field3"));
     }
 
     #[test]

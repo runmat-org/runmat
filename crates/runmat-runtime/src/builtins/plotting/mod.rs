@@ -156,6 +156,8 @@ pub(crate) mod polarscatter;
 pub(crate) mod print;
 #[path = "ops/quiver.rs"]
 pub(crate) mod quiver;
+#[path = "ops/quiver3.rs"]
+pub(crate) mod quiver3;
 #[path = "ops/scatter.rs"]
 pub(crate) mod scatter;
 #[path = "ops/scatter3.rs"]
