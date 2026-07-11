@@ -211,6 +211,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: REQUIRED_PATH_WORDS,
     },
     CommandVerb {
+        name: "runtests",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
         name: "save",
         arg_kind: OPTIONAL_PATH_WORDS,
     },

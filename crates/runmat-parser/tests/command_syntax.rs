@@ -200,6 +200,32 @@ fn axis_command_modes_rewrite_to_string_args() {
 }
 
 #[test]
+fn runtests_command_forms_rewrite_to_string_args() {
+    let program = parse_with_options(
+        "runtests testSmoke.m\nruntests",
+        ParserOptions::new(CompatMode::Matlab),
+    )
+    .unwrap();
+    assert_eq!(program.body.len(), 2);
+
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "runtests");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"testSmoke.m\""));
+        }
+        _ => panic!("expected runtests filename command"),
+    }
+    match &program.body[1] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "runtests");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected bare runtests command"),
+    }
+}
+
+#[test]
 fn grid_command_forms_rewrite_to_string_args() {
     for src in ["grid on", "grid off", "grid minor"] {
         let program = parse_with_options(src, ParserOptions::new(CompatMode::Matlab)).unwrap();

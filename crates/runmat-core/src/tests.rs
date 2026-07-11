@@ -9783,6 +9783,252 @@ fn dynamic_workspace_evalc_rejects_more_outputs_than_source_produces() {
 }
 
 #[test]
+fn runtests_runs_script_test_file_and_restores_workspace() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::write(
+        tmp.path().join("testSmoke.m"),
+        "assert(1); leaked_from_test = 99;",
+    )
+    .expect("write test");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "sentinel = 3; results = runtests('testSmoke.m'); leakVisible = exist('leaked_from_test','var'); after = sentinel + 4;",
+    )
+    .expect("exec succeeds");
+
+    let results =
+        outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
+    let runmat_builtins::Value::Object(obj) = results else {
+        panic!("expected scalar TestResult object, got {results:?}");
+    };
+    assert!(obj.is_class("matlab.unittest.TestResult"));
+    assert_eq!(
+        obj.properties.get("Passed"),
+        Some(&runmat_builtins::Value::Bool(true))
+    );
+    assert_eq!(
+        obj.properties.get("Failed"),
+        Some(&runmat_builtins::Value::Bool(false))
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "leakVisible",
+        &runmat_builtins::Value::Num(0.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "after",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+}
+
+#[test]
+fn runtests_records_failing_script_test_as_result() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::write(tmp.path().join("testFailure.m"), "assert(false, 'boom');").expect("write test");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(&mut session, "results = runtests('testFailure.m');")
+        .expect("exec succeeds");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "runtests should convert test failure into a result, got {:?}",
+        outcome.diagnostics
+    );
+
+    let results =
+        outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
+    let runmat_builtins::Value::Object(obj) = results else {
+        panic!("expected scalar TestResult object, got {results:?}");
+    };
+    assert_eq!(
+        obj.properties.get("Passed"),
+        Some(&runmat_builtins::Value::Bool(false))
+    );
+    assert_eq!(
+        obj.properties.get("Failed"),
+        Some(&runmat_builtins::Value::Bool(true))
+    );
+    let details = obj.properties.get("Details").expect("details").to_string();
+    assert!(details.contains("boom"), "details were {details:?}");
+}
+
+#[test]
+fn runtests_discovers_subfolder_tests_when_requested() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::create_dir_all(tmp.path().join("nested")).expect("create nested");
+    std::fs::write(tmp.path().join("testRoot.m"), "assert(1);").expect("write root test");
+    std::fs::write(tmp.path().join("nested").join("testChild.m"), "assert(1);")
+        .expect("write child test");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "results = runtests('.', 'IncludeSubfolders', true);",
+    )
+    .expect("exec succeeds");
+
+    let results =
+        outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
+    let runmat_builtins::Value::Cell(cell) = results else {
+        panic!("expected result cell array, got {results:?}");
+    };
+    assert_eq!((cell.rows, cell.cols), (1, 2));
+    for value in &cell.data {
+        let runmat_builtins::Value::Object(obj) = value else {
+            panic!("expected TestResult object, got {value:?}");
+        };
+        assert_eq!(
+            obj.properties.get("Passed"),
+            Some(&runmat_builtins::Value::Bool(true))
+        );
+    }
+}
+
+#[test]
+fn runtests_no_arg_discovers_current_folder_without_recursing() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::create_dir_all(tmp.path().join("nested")).expect("create nested");
+    std::fs::write(tmp.path().join("testRoot.m"), "assert(1);").expect("write root test");
+    std::fs::write(
+        tmp.path().join("nested").join("testChild.m"),
+        "assert(false);",
+    )
+    .expect("write child test");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(&mut session, "results = runtests;")
+        .expect("no-arg runtests succeeds");
+
+    let results =
+        outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
+    let runmat_builtins::Value::Object(obj) = results else {
+        panic!("expected only root TestResult object, got {results:?}");
+    };
+    assert_eq!(
+        obj.properties.get("Passed"),
+        Some(&runmat_builtins::Value::Bool(true))
+    );
+}
+
+#[test]
+fn runtests_basefolder_constrains_relative_target_resolution() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::create_dir_all(tmp.path().join("suite")).expect("create suite");
+    std::fs::write(tmp.path().join("testScoped.m"), "assert(false);").expect("write root test");
+    std::fs::write(tmp.path().join("suite").join("testScoped.m"), "assert(1);")
+        .expect("write suite test");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "results = runtests('testScoped', 'BaseFolder', 'suite');",
+    )
+    .expect("basefolder runtests succeeds");
+    let results =
+        outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
+    let runmat_builtins::Value::Object(obj) = results else {
+        panic!("expected suite TestResult object, got {results:?}");
+    };
+    assert_eq!(
+        obj.properties.get("Passed"),
+        Some(&runmat_builtins::Value::Bool(true))
+    );
+    let test_file = obj
+        .properties
+        .get("TestFile")
+        .expect("test file")
+        .to_string();
+    assert!(test_file.contains("suite"), "test file was {test_file:?}");
+}
+
+#[test]
+fn runtests_accepts_useparallel_false() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::write(tmp.path().join("testSerial.m"), "assert(1);").expect("write test");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "results = runtests('testSerial.m', 'UseParallel', false);",
+    )
+    .expect("exec succeeds");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "UseParallel=false should be accepted, got {:?}",
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn runtests_runs_zero_argument_function_tests() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::write(
+        tmp.path().join("functionTests.m"),
+        r#"
+function helper()
+end
+
+function testAlpha()
+  assert(1);
+end
+
+function out = betaTest()
+  out = 0;
+  assert(1);
+end
+"#,
+    )
+    .expect("write function test file");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(&mut session, "results = runtests('functionTests.m');")
+        .expect("exec succeeds");
+    let results =
+        outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
+    let runmat_builtins::Value::Cell(cell) = results else {
+        panic!("expected function test result cell, got {results:?}");
+    };
+    assert_eq!((cell.rows, cell.cols), (1, 2));
+    for value in &cell.data {
+        let runmat_builtins::Value::Object(obj) = value else {
+            panic!("expected TestResult object, got {value:?}");
+        };
+        assert_eq!(
+            obj.properties.get("Passed"),
+            Some(&runmat_builtins::Value::Bool(true))
+        );
+    }
+}
+
+#[test]
+fn runtests_rejects_parallel_execution_option() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(&mut session, "results = runtests('UseParallel', true);")
+        .expect("exec returns diagnostics");
+    assert!(outcome.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RunMat:runtests:UnsupportedOption"
+            && diagnostic.message.contains("UseParallel=true")
+    }));
+}
+
+#[test]
 fn dynamic_workspace_eval_error_does_not_commit_partial_mutations() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = r#"

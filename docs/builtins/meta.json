@@ -86317,6 +86317,92 @@
       ]
     },
     {
+      "name": "runtests",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "results = runtests",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "results",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Scalar TestResult object or cell row of TestResult objects."
+            }
+          ]
+        },
+        {
+          "label": "results = runtests(tests, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "tests",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "current folder",
+              "description": "Test file, folder, function name, string array, or cell array of targets."
+            },
+            {
+              "name": "Name,Value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Common options such as IncludeSubfolders, BaseFolder, Name, ProcedureName, and UseParallel."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "results",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Scalar TestResult object or cell row of TestResult objects."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.RUNTESTS.REQUIRES_VM",
+          "identifier": "RunMat:runtests:RequiresVm",
+          "when": "`runtests` is dispatched outside an active VM workspace frame.",
+          "message": "runtests: requires VM workspace context"
+        },
+        {
+          "code": "RM.RUNTESTS.INVALID_INPUT",
+          "identifier": "RunMat:runtests:InvalidInput",
+          "when": "A target or option value has an unsupported type or value.",
+          "message": "runtests: invalid input"
+        },
+        {
+          "code": "RM.RUNTESTS.UNSUPPORTED_OPTION",
+          "identifier": "RunMat:runtests:UnsupportedOption",
+          "when": "A documented option requires infrastructure not implemented by this slice.",
+          "message": "runtests: unsupported option"
+        },
+        {
+          "code": "RM.RUNTESTS.TARGET_NOT_FOUND",
+          "identifier": "RunMat:runtests:TargetNotFound",
+          "when": "A requested test target cannot be resolved to a file or folder.",
+          "message": "runtests: test target not found"
+        },
+        {
+          "code": "RM.RUNTESTS.FILE_READ",
+          "identifier": "RunMat:runtests:FileReadFailed",
+          "when": "A discovered test file cannot be read as source text.",
+          "message": "runtests: failed to read test file"
+        },
+        {
+          "code": "RM.RUNTESTS.WORKSPACE_STATE",
+          "identifier": "RunMat:runtests:WorkspaceStateFailed",
+          "when": "The VM cannot isolate or restore the caller workspace around a test case.",
+          "message": "runtests: workspace isolation failed"
+        }
+      ]
+    },
+    {
       "name": "save",
       "output_mode": "Fixed",
       "completion_policy": "Public",

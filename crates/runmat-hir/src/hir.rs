@@ -648,6 +648,7 @@ pub const EVALC_BUILTIN_NAME: &str = "evalc";
 pub const EVALIN_BUILTIN_NAME: &str = "evalin";
 pub const ASSIGNIN_BUILTIN_NAME: &str = "assignin";
 pub const RUN_BUILTIN_NAME: &str = "run";
+pub const RUNTESTS_BUILTIN_NAME: &str = "runtests";
 pub const NARGIN_BUILTIN_NAME: &str = "nargin";
 pub const NARGOUT_BUILTIN_NAME: &str = "nargout";
 pub const NARGINCHK_BUILTIN_NAME: &str = "narginchk";

@@ -13,6 +13,7 @@ use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_thread_local::runmat_thread_local;
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 #[cfg(feature = "native-accel")]
 fn map_prepare_builtin_args_error(err: impl std::fmt::Display) -> RuntimeError {
@@ -37,6 +38,7 @@ enum VmDynamicWorkspaceBuiltin {
     Evalin,
     Assignin,
     Run,
+    RunTests,
 }
 
 impl VmDynamicWorkspaceBuiltin {
@@ -47,6 +49,7 @@ impl VmDynamicWorkspaceBuiltin {
             runmat_hir::EVALIN_BUILTIN_NAME => Some(Self::Evalin),
             runmat_hir::ASSIGNIN_BUILTIN_NAME => Some(Self::Assignin),
             runmat_hir::RUN_BUILTIN_NAME => Some(Self::Run),
+            runmat_hir::RUNTESTS_BUILTIN_NAME => Some(Self::RunTests),
             _ => None,
         }
     }
@@ -58,6 +61,7 @@ impl VmDynamicWorkspaceBuiltin {
             Self::Evalin => runmat_hir::EVALIN_BUILTIN_NAME,
             Self::Assignin => runmat_hir::ASSIGNIN_BUILTIN_NAME,
             Self::Run => runmat_hir::RUN_BUILTIN_NAME,
+            Self::RunTests => runmat_hir::RUNTESTS_BUILTIN_NAME,
         }
     }
 }
@@ -511,7 +515,110 @@ pub async fn vm_dynamic_workspace_builtin(
             )
             .await
         }
+        VmDynamicWorkspaceBuiltin::RunTests => {
+            if requested_outputs > 1 {
+                return Err(mex(
+                    "RunTestsTooManyOutputs",
+                    "runtests: too many output arguments",
+                ));
+            }
+            let plan = runmat_runtime::builtins::diagnostics::runtests::resolve_runtests_plan(args)
+                .await?;
+            let mut outcomes = Vec::with_capacity(plan.cases.len());
+            for case in plan.cases {
+                outcomes.push(execute_runtests_case(case, function_registry, source_id).await?);
+            }
+            let result =
+                runmat_runtime::builtins::diagnostics::runtests::runtests_result_value(outcomes)?;
+            if requested_outputs == 0 {
+                Ok(Value::OutputList(Vec::new()))
+            } else {
+                Ok(result)
+            }
+        }
     }
+}
+
+async fn execute_runtests_case(
+    case: runmat_runtime::builtins::diagnostics::runtests::RunTestCase,
+    function_registry: &FunctionRegistry,
+    _source_id: Option<runmat_hir::SourceId>,
+) -> Result<runmat_runtime::builtins::diagnostics::runtests::RunTestOutcome, RuntimeError> {
+    let started = Instant::now();
+    let snapshot = workspace_target_snapshot(WorkspaceTarget::Current).map_err(|err| {
+        runmat_runtime::builtins::diagnostics::runtests::workspace_state_error(format!(
+            "workspace unavailable: {err}"
+        ))
+    })?;
+    let original_vars = unsafe { (*snapshot.vars_ptr).clone() };
+    let original_names = snapshot.names.clone();
+    let original_assigned = snapshot.assigned.clone();
+    replace_workspace_target_vars_and_state(
+        WorkspaceTarget::Current,
+        Vec::new(),
+        HashMap::new(),
+        HashSet::new(),
+    )
+    .map_err(|err| {
+        runmat_runtime::builtins::diagnostics::runtests::workspace_state_error(format!(
+            "workspace isolation failed: {err}"
+        ))
+    })?;
+
+    let dynamic_source_id = next_dynamic_source_id();
+    let source_context = DynamicSourceContext {
+        source_id: dynamic_source_id,
+        name: case.display_name.clone(),
+        text: case.source.clone(),
+    };
+    let eval_result = eval_workspace_source(
+        WorkspaceEvalRequest {
+            builtin: runmat_hir::RUNTESTS_BUILTIN_NAME,
+            target: WorkspaceTarget::Current,
+            source: case.source,
+            source_label: case.display_name,
+            requested_outputs: 0,
+            source_id: Some(source_context.source_id),
+            source_context: Some(source_context),
+            commit_workspace_on_error: false,
+            capture_display_output: false,
+            empty_value_when_no_result: false,
+        },
+        function_registry,
+    )
+    .await;
+
+    let restore_result = replace_workspace_target_vars_and_state(
+        WorkspaceTarget::Current,
+        original_vars,
+        original_names,
+        original_assigned,
+    );
+    let duration_seconds = started.elapsed().as_secs_f64();
+    if let Err(err) = restore_result {
+        return Err(
+            runmat_runtime::builtins::diagnostics::runtests::workspace_state_error(format!(
+                "workspace restore failed: {err}"
+            )),
+        );
+    }
+
+    Ok(match eval_result {
+        Ok(_) => runmat_runtime::builtins::diagnostics::runtests::RunTestOutcome {
+            name: case.name,
+            source_path: case.source_path,
+            passed: true,
+            duration_seconds,
+            details: String::new(),
+        },
+        Err(err) => runmat_runtime::builtins::diagnostics::runtests::RunTestOutcome {
+            name: case.name,
+            source_path: case.source_path,
+            passed: false,
+            duration_seconds,
+            details: err.message().to_string(),
+        },
+    })
 }
 
 fn evalc_output_value(
