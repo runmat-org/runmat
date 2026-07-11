@@ -162,7 +162,7 @@ pub async fn animatedline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             maximum_num_points: parsed.maximum_num_points,
         });
         set_properties(
-            PlotHandle::PlotChild(Box::new(state)),
+            PlotHandle::PlotChild(handle, Box::new(state)),
             &parsed.property_pairs,
             BUILTIN_NAME,
         )?;

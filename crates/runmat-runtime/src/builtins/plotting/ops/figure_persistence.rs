@@ -612,7 +612,7 @@ fn parent_figure_from_value(value: &Value, builtin: &'static str) -> BuiltinResu
         PlotHandle::Ruler(handle, _, _) => Ok(handle),
         PlotHandle::Text(handle, _, _) => Ok(handle),
         PlotHandle::Legend(handle, _) => Ok(handle),
-        PlotHandle::PlotChild(state) => Ok(state.figure_axes().0),
+        PlotHandle::PlotChild(_, state) => Ok(state.figure_axes().0),
         PlotHandle::Root => Err(persistence_error(
             &ERROR_INVALID_ARGUMENT,
             builtin,

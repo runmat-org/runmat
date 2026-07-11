@@ -227,7 +227,7 @@ fn ancestor_chain(raw_handle: f64, handle: PlotHandle) -> Vec<AncestorCandidate>
         PlotHandle::Legend(figure, axes_index) => {
             chain_from_axes("legend", raw_handle, figure, axes_index)
         }
-        PlotHandle::PlotChild(state) => {
+        PlotHandle::PlotChild(_, state) => {
             let (figure, axes_index) = state.figure_axes();
             chain_from_axes(state.type_name(), raw_handle, figure, axes_index)
         }

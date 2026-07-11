@@ -194,6 +194,8 @@ pub(crate) mod surf;
 pub(crate) mod surfc;
 #[path = "ops/text.rs"]
 pub(crate) mod text;
+#[path = "ops/textscatter.rs"]
+pub(crate) mod textscatter;
 #[path = "ops/title.rs"]
 pub(crate) mod title;
 #[path = "ops/triplot.rs"]

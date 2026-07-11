@@ -127,7 +127,7 @@ pub async fn addpoints_builtin(args: Vec<Value>) -> BuiltinResult<String> {
     }
 
     let state = match resolve_plot_handle(&args[0], BUILTIN_NAME)? {
-        PlotHandle::PlotChild(child) => match *child {
+        PlotHandle::PlotChild(_, child) => match *child {
             PlotChildHandleState::AnimatedLine(state) => state,
             _ => {
                 return Err(addpoints_err(

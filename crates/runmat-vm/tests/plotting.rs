@@ -936,3 +936,30 @@ fn invalid_axes_shaped_handle_member_access_reports_non_object() {
         "unexpected error: {err:?}"
     );
 }
+
+#[test]
+fn textscatter_dispatches_chart_properties_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        labels = [\"alphabet\" \"betatron\" \"gamma\"]; \
+        ts = textscatter([1 2 3], [4 5 6], labels, 'TextDensityPercentage', 100, 'MaxTextLength', 6); \
+        if ~isgraphics(ts); error('textscatter handle should be graphics'); end; \
+        if ~strcmp(get(ts, 'Type'), 'textscatter'); error('type mismatch'); end; \
+        x = get(ts, 'XData'); \
+        if x(1) ~= 1 || x(3) ~= 3; error('xdata mismatch'); end; \
+        set(ts, 'MaxTextLength', 5, 'TextDensityPercentage', 0); \
+        if get(ts, 'MaxTextLength') ~= 5; error('max text length mismatch'); end;";
+    execute_source(input).expect("execute textscatter script");
+}
+
+#[test]
+fn textscatter3_dispatches_zdata_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        labels = [\"one\" \"two\"]; \
+        ts = textscatter3([1 2], [3 4], [5 6], labels); \
+        if ~strcmp(get(ts, 'Type'), 'textscatter'); error('textscatter3 type mismatch'); end; \
+        z = get(ts, 'ZData'); \
+        if z(1) ~= 5 || z(2) ~= 6; error('zdata mismatch'); end;";
+    execute_source(input).expect("execute textscatter3 script");
+}

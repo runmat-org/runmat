@@ -209,7 +209,18 @@ fn validate_copy_source(source_handle: f64) -> BuiltinResult<()> {
     match resolve_plot_handle(&Value::Num(source_handle), BUILTIN_NAME)
         .map_err(|err| copyobj_error(&COPYOBJ_ERROR_INVALID_ARGUMENT, err.message))?
     {
-        PlotHandle::PlotChild(_) => validate_plot_child_copy_source(source_handle)
+        PlotHandle::PlotChild(_, state)
+            if matches!(
+                *state,
+                crate::builtins::plotting::state::PlotChildHandleState::TextScatter(_)
+            ) =>
+        {
+            Err(copyobj_error(
+                &COPYOBJ_ERROR_INVALID_ARGUMENT,
+                "TextScatter chart handles cannot be copied in this release",
+            ))
+        }
+        PlotHandle::PlotChild(_, _) => validate_plot_child_copy_source(source_handle)
             .map_err(|err| map_copy_error(&COPYOBJ_ERROR_INVALID_ARGUMENT, err)),
         _ => Err(copyobj_error(
             &COPYOBJ_ERROR_INVALID_ARGUMENT,
@@ -222,7 +233,18 @@ fn copy_plot_child(source_handle: f64, target: CopyParentTarget) -> BuiltinResul
     match resolve_plot_handle(&Value::Num(source_handle), BUILTIN_NAME)
         .map_err(|err| copyobj_error(&COPYOBJ_ERROR_INVALID_ARGUMENT, err.message))?
     {
-        PlotHandle::PlotChild(_) => copy_plot_child_to_parent(source_handle, target)
+        PlotHandle::PlotChild(_, state)
+            if matches!(
+                *state,
+                crate::builtins::plotting::state::PlotChildHandleState::TextScatter(_)
+            ) =>
+        {
+            Err(copyobj_error(
+                &COPYOBJ_ERROR_INVALID_ARGUMENT,
+                "TextScatter chart handles cannot be copied in this release",
+            ))
+        }
+        PlotHandle::PlotChild(_, _) => copy_plot_child_to_parent(source_handle, target)
             .map_err(|err| map_copy_error(&COPYOBJ_ERROR_INTERNAL, err)),
         _ => Err(copyobj_error(
             &COPYOBJ_ERROR_INVALID_ARGUMENT,
@@ -266,7 +288,7 @@ fn copy_parent_target(handle: f64) -> BuiltinResult<CopyParentTarget> {
     {
         PlotHandle::Figure(handle) => Ok(CopyParentTarget::Figure(handle)),
         PlotHandle::Axes(handle, axes_index) => Ok(CopyParentTarget::Axes(handle, axes_index)),
-        PlotHandle::PlotChild(_)
+        PlotHandle::PlotChild(_, _)
         | PlotHandle::Root
         | PlotHandle::Ruler(_, _, _)
         | PlotHandle::Text(_, _, _)

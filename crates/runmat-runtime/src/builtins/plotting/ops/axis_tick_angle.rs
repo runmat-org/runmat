@@ -54,7 +54,7 @@ fn split_optional_axes_target(
             PlotHandle::Ruler(..)
             | PlotHandle::Text(..)
             | PlotHandle::Legend(..)
-            | PlotHandle::PlotChild(_),
+            | PlotHandle::PlotChild(_, _),
         ) => {
             return Err(plotting_error(
                 builtin,

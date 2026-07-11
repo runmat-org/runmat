@@ -99708,6 +99708,265 @@
       ]
     },
     {
+      "name": "textscatter",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "ts = textscatter(x, y, str)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates."
+            },
+            {
+              "name": "str",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "String vector or cell array of character vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ts",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the TextScatter chart object."
+            }
+          ]
+        },
+        {
+          "label": "ts = textscatter(xy, str)",
+          "inputs": [
+            {
+              "name": "xy",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "N-by-2 coordinate matrix."
+            },
+            {
+              "name": "str",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "String vector or cell array of character vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ts",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the TextScatter chart object."
+            }
+          ]
+        },
+        {
+          "label": "ts = textscatter(ax, ...)",
+          "inputs": [
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name/value TextScatter properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ts",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the TextScatter chart object."
+            }
+          ]
+        },
+        {
+          "label": "ts = textscatter(..., Name, Value)",
+          "inputs": [
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name/value TextScatter properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ts",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the TextScatter chart object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TEXTSCATTER.INVALID_ARGUMENT",
+          "identifier": "RunMat:textscatter:InvalidArgument",
+          "when": "Coordinates, text labels, axes target, or TextScatter property values are invalid.",
+          "message": "textscatter: invalid argument"
+        },
+        {
+          "code": "RM.TEXTSCATTER.INTERNAL",
+          "identifier": "RunMat:textscatter:Internal",
+          "when": "Internal plotting state update fails while creating or mutating TextScatter.",
+          "message": "textscatter: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "textscatter3",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "ts = textscatter3(x, y, z, str)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates."
+            },
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Z coordinates."
+            },
+            {
+              "name": "str",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "String vector or cell array of character vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ts",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the TextScatter chart object."
+            }
+          ]
+        },
+        {
+          "label": "ts = textscatter3(xyz, str)",
+          "inputs": [
+            {
+              "name": "xyz",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "N-by-3 coordinate matrix."
+            },
+            {
+              "name": "str",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "String vector or cell array of character vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ts",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the TextScatter chart object."
+            }
+          ]
+        },
+        {
+          "label": "ts = textscatter3(ax, ...)",
+          "inputs": [
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name/value TextScatter properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ts",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the TextScatter chart object."
+            }
+          ]
+        },
+        {
+          "label": "ts = textscatter3(..., Name, Value)",
+          "inputs": [
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name/value TextScatter properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ts",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the TextScatter chart object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TEXTSCATTER.INVALID_ARGUMENT",
+          "identifier": "RunMat:textscatter:InvalidArgument",
+          "when": "Coordinates, text labels, axes target, or TextScatter property values are invalid.",
+          "message": "textscatter: invalid argument"
+        },
+        {
+          "code": "RM.TEXTSCATTER.INTERNAL",
+          "identifier": "RunMat:textscatter:Internal",
+          "when": "Internal plotting state update fails while creating or mutating TextScatter.",
+          "message": "textscatter: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "tf",
       "output_mode": "Fixed",
       "completion_policy": "Public",

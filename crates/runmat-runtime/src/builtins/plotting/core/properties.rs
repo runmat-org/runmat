@@ -43,7 +43,7 @@ pub enum PlotHandle {
     Ruler(FigureHandle, usize, PlotObjectKind),
     Text(FigureHandle, usize, PlotObjectKind),
     Legend(FigureHandle, usize),
-    PlotChild(Box<super::state::PlotChildHandleState>),
+    PlotChild(f64, Box<super::state::PlotChildHandleState>),
 }
 
 pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResult<PlotHandle> {
@@ -58,7 +58,7 @@ pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResul
         ));
     }
     if let Ok(state) = super::state::plot_child_handle_snapshot(scalar) {
-        return Ok(PlotHandle::PlotChild(Box::new(state)));
+        return Ok(PlotHandle::PlotChild(scalar.round(), Box::new(state)));
     }
     if let Ok((handle, axes_index, kind)) = decode_plot_object_handle(scalar) {
         if axes_handle_exists(handle, axes_index) {
@@ -110,7 +110,7 @@ pub fn get_properties(
             get_legend_property(handle, axes_index, property, builtin)
         }
         PlotHandle::Figure(handle) => get_figure_property(handle, property, builtin),
-        PlotHandle::PlotChild(state) => get_plot_child_property(&state, property, builtin),
+        PlotHandle::PlotChild(_, state) => get_plot_child_property(&state, property, builtin),
     }
 }
 
@@ -209,7 +209,9 @@ pub fn set_properties(
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
-        PlotHandle::PlotChild(state) => apply_plot_child_properties(&state, args, builtin),
+        PlotHandle::PlotChild(handle, state) => {
+            apply_plot_child_properties(handle, &state, args, builtin)
+        }
     }
 }
 
@@ -2429,10 +2431,18 @@ fn get_plot_child_property(
         super::state::PlotChildHandleState::Text(text) => {
             get_world_text_property(text, property, builtin)
         }
+        super::state::PlotChildHandleState::TextScatter(textscatter) => {
+            crate::builtins::plotting::textscatter::get_textscatter_property(
+                textscatter,
+                property,
+                builtin,
+            )
+        }
     }
 }
 
 fn apply_plot_child_property(
+    handle: f64,
     state: &super::state::PlotChildHandleState,
     key: &str,
     value: &Value,
@@ -2514,10 +2524,20 @@ fn apply_plot_child_property(
         super::state::PlotChildHandleState::Text(text) => {
             apply_world_text_property(text, key, value, builtin)
         }
+        super::state::PlotChildHandleState::TextScatter(textscatter) => {
+            crate::builtins::plotting::textscatter::apply_textscatter_property(
+                handle,
+                textscatter,
+                key,
+                value,
+                builtin,
+            )
+        }
     }
 }
 
 fn apply_plot_child_properties(
+    handle: f64,
     state: &super::state::PlotChildHandleState,
     args: &[Value],
     builtin: &'static str,
@@ -2544,7 +2564,7 @@ fn apply_plot_child_properties(
         }
         _ => {
             for (key, value) in pairs {
-                apply_plot_child_property(state, &key, value, builtin)?;
+                apply_plot_child_property(handle, state, &key, value, builtin)?;
             }
             Ok(())
         }

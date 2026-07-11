@@ -697,6 +697,31 @@ pub struct TextAnnotationHandleState {
 }
 
 #[derive(Clone, Debug)]
+pub struct TextScatterHandleState {
+    pub figure: FigureHandle,
+    pub axes_index: usize,
+    pub annotation_indices: Vec<usize>,
+    pub marker_plot_index: Option<usize>,
+    pub is_3d: bool,
+    pub text_data: Vec<String>,
+    pub text_density_percentage: f64,
+    pub max_text_length: usize,
+    pub marker_color: TextScatterMarkerColor,
+    pub marker_size: f64,
+    pub color_data: Option<Vec<glam::Vec4>>,
+    pub colors: Vec<glam::Vec4>,
+    pub visible: bool,
+    pub base_style: runmat_plot::plots::TextStyle,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TextScatterMarkerColor {
+    Auto,
+    None,
+    Color(glam::Vec4),
+}
+
+#[derive(Clone, Debug)]
 pub enum PlotChildHandleState {
     Histogram(HistogramHandleState),
     Histogram2(Histogram2HandleState),
@@ -723,6 +748,7 @@ pub enum PlotChildHandleState {
     ReferenceLine(SimplePlotHandleState),
     Pie(SimplePlotHandleState),
     Text(TextAnnotationHandleState),
+    TextScatter(TextScatterHandleState),
 }
 
 impl PlotChildHandleState {
@@ -753,6 +779,7 @@ impl PlotChildHandleState {
             Self::FunctionContour(state) => (state.figure, state.axes_index),
             Self::Area(state) => (state.figure, state.axes_index),
             Self::Text(state) => (state.figure, state.axes_index),
+            Self::TextScatter(state) => (state.figure, state.axes_index),
         }
     }
 
@@ -783,6 +810,7 @@ impl PlotChildHandleState {
             Self::FunctionContour(state) => state.plot_index,
             Self::Area(state) => state.plot_index,
             Self::Text(_) => return None,
+            Self::TextScatter(state) => return state.marker_plot_index,
         })
     }
 
@@ -956,6 +984,7 @@ impl PlotChildHandleState {
                 plot_index,
             }),
             Self::Text(_) => return None,
+            Self::TextScatter(_) => return None,
         })
     }
 
@@ -983,6 +1012,7 @@ impl PlotChildHandleState {
             Self::ReferenceLine(_) => "constantline",
             Self::Pie(_) => "pie",
             Self::Text(_) => "text",
+            Self::TextScatter(_) => "textscatter",
         }
     }
 }
@@ -3954,6 +3984,46 @@ pub fn register_text_annotation_handle(
     id as f64
 }
 
+pub fn register_textscatter_handle(state: TextScatterHandleState) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children
+        .insert(id, PlotChildHandleState::TextScatter(state));
+    id as f64
+}
+
+pub fn update_textscatter_handle_state(
+    handle: f64,
+    state: TextScatterHandleState,
+) -> Result<(), FigureError> {
+    if !handle.is_finite() || handle <= 0.0 {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+    let mut reg = registry();
+    let id = handle.round() as u64;
+    match reg.plot_children.get_mut(&id) {
+        Some(PlotChildHandleState::TextScatter(slot)) => {
+            *slot = state;
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
+pub fn update_textscatter_figure(
+    state: &TextScatterHandleState,
+    mut apply: impl FnMut(&mut Figure) -> Result<(), FigureError>,
+) -> Result<(), FigureError> {
+    let (result, figure_clone) =
+        with_axes_target_mut(state.figure, state.axes_index, |figure_state| {
+            apply(&mut figure_state.figure)
+        })?;
+    result?;
+    notify_with_figure(state.figure, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum CopyParentTarget {
     Figure(FigureHandle),
@@ -4547,6 +4617,7 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         }
         PlotChildHandleState::Area(area) => area.figure != handle,
         PlotChildHandleState::Text(text) => text.figure != handle,
+        PlotChildHandleState::TextScatter(textscatter) => textscatter.figure != handle,
     });
 }
 
@@ -4604,6 +4675,9 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
         }
         PlotChildHandleState::Text(text) => {
             !(text.figure == handle && text.axes_index == axes_index)
+        }
+        PlotChildHandleState::TextScatter(textscatter) => {
+            !(textscatter.figure == handle && textscatter.axes_index == axes_index)
         }
     });
 }
