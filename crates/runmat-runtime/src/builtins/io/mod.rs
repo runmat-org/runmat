@@ -2,6 +2,7 @@ pub mod archive;
 pub mod audio;
 pub mod clc;
 pub mod data;
+pub mod diary;
 pub mod disp;
 pub mod filetext;
 pub mod format;

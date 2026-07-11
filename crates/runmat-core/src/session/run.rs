@@ -157,6 +157,7 @@ impl RunMatSession {
                     .build(),
             )
         })?;
+        let _diary_state = SessionDiaryStateGuard::new(self);
         runmat_vm::set_call_stack_limit(self.callstack_limit);
         runmat_vm::set_error_namespace(&self.error_namespace);
         runmat_vm::set_dynamic_eval_options(
@@ -173,6 +174,7 @@ impl RunMatSession {
         );
         let _exec_guard = exec_span.enter();
         runmat_runtime::console::reset_thread_buffer();
+        runmat_runtime::console::record_diary_command(input);
         runmat_runtime::plotting_hooks::reset_recent_figures();
         runmat_runtime::warning_store::reset();
         runmat_builtins::set_display_format(self.format_mode);
@@ -1029,6 +1031,15 @@ impl RunMatSession {
             .unwrap_or_default();
 
         let warnings = runmat_runtime::warning_store::take_all();
+        if error.is_none() {
+            if let Some(diary_error) = runmat_runtime::console::take_diary_error() {
+                error = Some(
+                    build_runtime_error(diary_error)
+                        .with_identifier("RunMat:diary:IO")
+                        .build(),
+                );
+            }
+        }
 
         if let Some(runtime_error) = &mut error {
             self.normalize_error_namespace(runtime_error);

@@ -140,6 +140,40 @@ fn drawnow_without_arg_is_command_form() {
 }
 
 #[test]
+fn diary_command_forms_rewrite_to_string_args() {
+    let program = parse_with_options(
+        "diary runmat_session.log\ndiary off\ndiary",
+        ParserOptions::new(CompatMode::Matlab),
+    )
+    .unwrap();
+    assert_eq!(program.body.len(), 3);
+
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "diary");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"runmat_session.log\""));
+        }
+        _ => panic!("expected diary filename command"),
+    }
+    match &program.body[1] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "diary");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"off\""));
+        }
+        _ => panic!("expected diary off command"),
+    }
+    match &program.body[2] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "diary");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected bare diary command"),
+    }
+}
+
+#[test]
 fn axis_command_modes_rewrite_to_string_args() {
     for src in [
         "axis auto",

@@ -103,6 +103,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: CommandArgKind::Any,
     },
     CommandVerb {
+        name: "diary",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
         name: "pause",
         arg_kind: CommandArgKind::Any,
     },

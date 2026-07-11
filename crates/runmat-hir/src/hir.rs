@@ -644,6 +644,7 @@ impl CallableFallbackPolicy {
 
 pub const FEVAL_BUILTIN_NAME: &str = "feval";
 pub const EVAL_BUILTIN_NAME: &str = "eval";
+pub const EVALC_BUILTIN_NAME: &str = "evalc";
 pub const EVALIN_BUILTIN_NAME: &str = "evalin";
 pub const ASSIGNIN_BUILTIN_NAME: &str = "assignin";
 pub const RUN_BUILTIN_NAME: &str = "run";

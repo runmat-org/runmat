@@ -33,6 +33,7 @@ enum VmIntrinsicBuiltin {
 #[derive(Clone, Copy)]
 enum VmDynamicWorkspaceBuiltin {
     Eval,
+    Evalc,
     Evalin,
     Assignin,
     Run,
@@ -42,6 +43,7 @@ impl VmDynamicWorkspaceBuiltin {
     fn classify(name: &str) -> Option<Self> {
         match name {
             runmat_hir::EVAL_BUILTIN_NAME => Some(Self::Eval),
+            runmat_hir::EVALC_BUILTIN_NAME => Some(Self::Evalc),
             runmat_hir::EVALIN_BUILTIN_NAME => Some(Self::Evalin),
             runmat_hir::ASSIGNIN_BUILTIN_NAME => Some(Self::Assignin),
             runmat_hir::RUN_BUILTIN_NAME => Some(Self::Run),
@@ -52,6 +54,7 @@ impl VmDynamicWorkspaceBuiltin {
     fn name(self) -> &'static str {
         match self {
             Self::Eval => runmat_hir::EVAL_BUILTIN_NAME,
+            Self::Evalc => runmat_hir::EVALC_BUILTIN_NAME,
             Self::Evalin => runmat_hir::EVALIN_BUILTIN_NAME,
             Self::Assignin => runmat_hir::ASSIGNIN_BUILTIN_NAME,
             Self::Run => runmat_hir::RUN_BUILTIN_NAME,
@@ -400,10 +403,41 @@ pub async fn vm_dynamic_workspace_builtin(
                     source_id,
                     source_context: None,
                     commit_workspace_on_error: false,
+                    capture_display_output: false,
+                    empty_value_when_no_result: false,
                 },
                 function_registry,
             )
             .await
+        }
+        VmDynamicWorkspaceBuiltin::Evalc => {
+            validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
+            let source = workspace_text_arg(builtin.name(), &args[0])?;
+            let eval_requested_outputs = if requested_outputs == 1 {
+                1
+            } else {
+                requested_outputs.saturating_sub(1)
+            };
+            let capture = runmat_runtime::console::begin_capture();
+            let eval_result = eval_workspace_source(
+                WorkspaceEvalRequest {
+                    builtin: builtin.name(),
+                    target: WorkspaceTarget::Current,
+                    source,
+                    source_label: "<evalc>".to_string(),
+                    requested_outputs: eval_requested_outputs,
+                    source_id,
+                    source_context: None,
+                    commit_workspace_on_error: false,
+                    capture_display_output: requested_outputs == 1,
+                    empty_value_when_no_result: requested_outputs > 1,
+                },
+                function_registry,
+            )
+            .await;
+            let captured = capture.finish();
+            let result = eval_result?;
+            evalc_output_value(captured, result, requested_outputs)
         }
         VmDynamicWorkspaceBuiltin::Evalin => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 2)?;
@@ -419,6 +453,8 @@ pub async fn vm_dynamic_workspace_builtin(
                     source_id,
                     source_context: None,
                     commit_workspace_on_error: false,
+                    capture_display_output: false,
+                    empty_value_when_no_result: false,
                 },
                 function_registry,
             )
@@ -468,11 +504,50 @@ pub async fn vm_dynamic_workspace_builtin(
                     source_id: Some(source_context.source_id),
                     source_context: Some(source_context),
                     commit_workspace_on_error: true,
+                    capture_display_output: false,
+                    empty_value_when_no_result: false,
                 },
                 function_registry,
             )
             .await
         }
+    }
+}
+
+fn evalc_output_value(
+    captured: String,
+    result: Value,
+    requested_outputs: usize,
+) -> Result<Value, RuntimeError> {
+    if requested_outputs == 0 {
+        return Ok(Value::OutputList(Vec::new()));
+    }
+
+    let mut outputs = Vec::with_capacity(requested_outputs.max(1));
+    outputs.push(Value::String(captured));
+    if requested_outputs > 1 {
+        match result {
+            Value::OutputList(values) => {
+                outputs.extend(values.into_iter().take(requested_outputs - 1))
+            }
+            value => outputs.push(value),
+        }
+        if outputs.len() < requested_outputs {
+            return Err(mex(
+                "EvalcTooManyOutputs",
+                &format!(
+                    "evalc: requested {} output arguments, but evaluated source produced {}",
+                    requested_outputs,
+                    outputs.len()
+                ),
+            ));
+        }
+    }
+
+    if requested_outputs == 1 {
+        Ok(outputs.remove(0))
+    } else {
+        Ok(Value::OutputList(outputs))
     }
 }
 
@@ -518,6 +593,8 @@ struct WorkspaceEvalRequest {
     source_id: Option<runmat_hir::SourceId>,
     source_context: Option<DynamicSourceContext>,
     commit_workspace_on_error: bool,
+    capture_display_output: bool,
+    empty_value_when_no_result: bool,
 }
 
 async fn eval_workspace_source(
@@ -533,6 +610,8 @@ async fn eval_workspace_source(
         source_id,
         source_context,
         commit_workspace_on_error,
+        capture_display_output,
+        empty_value_when_no_result,
     } = request;
     if !current_dynamic_eval_options().dynamic_eval_enabled {
         return Err(mex(
@@ -605,7 +684,13 @@ async fn eval_workspace_source(
     let result = if requested_outputs == 0 {
         Value::OutputList(Vec::new())
     } else if let Some(slot) = result_slot {
-        vars.get(slot).cloned().unwrap_or(Value::Num(0.0))
+        let value = vars.get(slot).cloned().unwrap_or(Value::Num(0.0));
+        if capture_display_output {
+            runmat_runtime::console::record_value_output(None, &value);
+        }
+        value
+    } else if empty_value_when_no_result {
+        Value::OutputList(Vec::new())
     } else {
         Value::Num(0.0)
     };

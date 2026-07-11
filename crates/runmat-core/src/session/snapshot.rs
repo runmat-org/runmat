@@ -127,6 +127,7 @@ impl RunMatSession {
             top_level_await_enabled: true,
             dynamic_eval_enabled: true,
             format_mode: runmat_builtins::FormatMode::default(),
+            diary_state: runmat_runtime::console::DiaryStateSnapshot::default(),
             pending_companion_source_discovery: None,
         };
 

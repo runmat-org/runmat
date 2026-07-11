@@ -22924,6 +22924,83 @@
       ]
     },
     {
+      "name": "diary",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "diary",
+          "inputs": [],
+          "outputs": []
+        },
+        {
+          "label": "diary(filename)",
+          "inputs": [
+            {
+              "name": "filenameOrState",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Log filename, `on`, or `off`."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "diary off",
+          "inputs": [
+            {
+              "name": "filenameOrState",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Log filename, `on`, or `off`."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "diary on",
+          "inputs": [
+            {
+              "name": "filenameOrState",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Log filename, `on`, or `off`."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DIARY.ARG_COUNT",
+          "identifier": null,
+          "when": "More than one input argument is passed to diary.",
+          "message": "diary: expected zero or one input argument"
+        },
+        {
+          "code": "RM.DIARY.ARG_TYPE",
+          "identifier": null,
+          "when": "The diary filename/state argument is not a string scalar or character row.",
+          "message": "diary: expected filename, 'on', or 'off'"
+        },
+        {
+          "code": "RM.DIARY.IO",
+          "identifier": null,
+          "when": "The selected diary file cannot be opened for append through the active filesystem provider.",
+          "message": "diary: failed to open diary file"
+        },
+        {
+          "code": "RM.DIARY.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:diary:TooManyOutputs",
+          "when": "One or more output arguments are requested from diary.",
+          "message": "diary: expected no output arguments"
+        }
+      ]
+    },
+    {
       "name": "dictionary",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -26500,6 +26577,70 @@
             }
           ],
           "outputs": [
+            {
+              "name": "varargout",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Value(s) produced by evaluated source text."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DYNAMIC_WORKSPACE.REQUIRES_VM",
+          "identifier": "RunMat:DynamicWorkspaceRequiresVm",
+          "when": "A dynamic workspace builtin is dispatched outside the VM workspace frame.",
+          "message": "dynamic workspace builtin requires VM workspace context"
+        }
+      ]
+    },
+    {
+      "name": "evalc",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "results = evalc(expression)",
+          "inputs": [
+            {
+              "name": "source",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Source text to evaluate in the current workspace."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "results",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Captured Command Window text."
+            }
+          ]
+        },
+        {
+          "label": "[results,varargout] = evalc(expression)",
+          "inputs": [
+            {
+              "name": "source",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Source text to evaluate in the current workspace."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "results",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Captured Command Window text."
+            },
             {
               "name": "varargout",
               "ty": "Any",
