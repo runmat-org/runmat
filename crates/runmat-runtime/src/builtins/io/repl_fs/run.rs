@@ -22,7 +22,7 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const RUN_SCRIPT_EXTENSIONS: &[&str] = &[".m"];
+const RUN_SCRIPT_EXTENSIONS: &[&str] = &[".p", ".m"];
 
 const RUN_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "script",
@@ -187,7 +187,7 @@ pub fn too_many_outputs_error() -> RuntimeError {
     run_error(&RUN_ERROR_TOO_MANY_OUTPUTS)
 }
 
-fn bare_m_file_stem(script: &str) -> Option<&str> {
+fn bare_run_file_stem(script: &str) -> Option<&str> {
     if script.starts_with('~')
         || script.starts_with('@')
         || script.starts_with('+')
@@ -201,7 +201,7 @@ fn bare_m_file_stem(script: &str) -> Option<&str> {
         return None;
     }
     let extension = path.extension()?.to_str()?;
-    if !extension.eq_ignore_ascii_case("m") {
+    if !extension.eq_ignore_ascii_case("m") && !extension.eq_ignore_ascii_case("p") {
         return None;
     }
     path.file_stem()?.to_str().filter(|stem| !stem.is_empty())
@@ -211,19 +211,24 @@ async fn find_run_script(script: &str) -> Result<Option<PathBuf>, String> {
     if let Some(path) =
         find_file_with_extensions(script, RUN_SCRIPT_EXTENSIONS, RUN_BUILTIN_NAME).await?
     {
+        let path = crate::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&path).await;
         return Ok(Some(path));
     }
 
-    let Some(stem) = bare_m_file_stem(script) else {
+    let Some(stem) = bare_run_file_stem(script) else {
         return Ok(None);
     };
     for candidate in file_candidates(stem, RUN_SCRIPT_EXTENSIONS, RUN_BUILTIN_NAME)? {
         if candidate
             .extension()
             .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("m"))
+            .is_some_and(|extension| {
+                extension.eq_ignore_ascii_case("p") || extension.eq_ignore_ascii_case("m")
+            })
             && path_is_file(&candidate).await
         {
+            let candidate =
+                crate::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&candidate).await;
             return Ok(Some(candidate));
         }
     }
@@ -242,11 +247,23 @@ pub async fn resolve_run_source(value: &Value) -> BuiltinResult<RunScriptSource>
         .map_err(|err| run_error_with_detail(&RUN_ERROR_PATH_RESOLVE, err))?
         .ok_or_else(|| run_error_with_detail(&RUN_ERROR_FILE_NOT_FOUND, format!("'{script}'")))?;
 
-    let text = runmat_filesystem::read_to_string_async(&path)
-        .await
-        .map_err(|err| {
-            run_error_with_detail(&RUN_ERROR_FILE_READ, format!("{} ({err})", path.display()))
-        })?;
+    let text = match crate::builtins::io::repl_fs::pcode::read_source_text_async(&path).await {
+        Ok(text) => text,
+        Err(crate::builtins::io::repl_fs::pcode::PcodeSourceReadError::InvalidPcode(err)) => {
+            return Err(
+                crate::builtins::io::repl_fs::pcode::invalid_pcode_runtime_error(format!(
+                    "{} ({err})",
+                    path.display()
+                )),
+            );
+        }
+        Err(crate::builtins::io::repl_fs::pcode::PcodeSourceReadError::Io(err)) => {
+            return Err(run_error_with_detail(
+                &RUN_ERROR_FILE_READ,
+                format!("{} ({err})", path.display()),
+            ));
+        }
+    };
 
     let display_path = runmat_filesystem::canonicalize_async(&path)
         .await

@@ -35,9 +35,10 @@
       "run_missing_file_and_output_errors_are_catchable"
     ]
   },
-  "description": "`run` locates a `.m` script by file name, relative path, absolute path, or active MATLAB search path entry, then executes that script in the caller workspace. Variables assigned by the script are visible to following statements in the caller.",
+  "description": "`run` locates a `.p` or `.m` script by file name, relative path, absolute path, or active MATLAB search path entry, then executes that script in the caller workspace. Variables assigned by the script are visible to following statements in the caller.",
   "behaviors": [
-    "`run('script')` resolves `script.m` when no extension is supplied. Bare `.m` filenames also search the active MATLAB path. `run('folder/script.m')` executes the file at that path.",
+    "`run('script')` resolves `script.p` before `script.m` when no extension is supplied. Bare `.p` and `.m` filenames also search the active MATLAB path. `run('folder/script.m')` executes the file at that path.",
+    "RunMat-generated `.p` files are decoded before parsing. Proprietary or non-RunMat `.p` files report `RunMat:pcode:InvalidPcode`.",
     "Command syntax is supported: `run script_name` is equivalent to `run('script_name')`.",
     "The target file is executed as a script, not as a function. Assignments mutate the caller workspace and local functions in the script remain available to that script.",
     "`mfilename` inside the executed script reports the executed file name and full path, matching the script source context.",
@@ -70,7 +71,7 @@
     },
     {
       "question": "Where does `run` search?",
-      "answer": "RunMat first resolves the provided file or relative path, then searches the active MATLAB path. It appends `.m` when the supplied name has no extension, and a bare filename that already ends in `.m` is also searched on the active path."
+      "answer": "RunMat first resolves the provided file or relative path, then searches the active MATLAB path. It checks `.p` before `.m` when the supplied name has no extension, and a sibling `.p` takes precedence when the resolved source path names `.m`."
     },
     {
       "question": "What happens if the script creates variables?",

@@ -537,6 +537,11 @@ fn filesystem_path_command_forms_stringify_path_words() {
             &["./SourceCode/path_worker.m"],
         ),
         (
+            "pcode ./SourceCode/path_worker.m -R2022a -inplace",
+            "pcode",
+            &["./SourceCode/path_worker.m", "-R2022a", "-inplace"],
+        ),
+        (
             "save ./results/out.mat x -v7.3",
             "save",
             &["./results/out.mat", "x", "-v7.3"],

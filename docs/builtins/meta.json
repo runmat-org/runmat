@@ -72706,6 +72706,141 @@
       ]
     },
     {
+      "name": "pcode",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "pcode(item)",
+          "inputs": [
+            {
+              "name": "item",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "MATLAB source file, source name, folder, or wildcard pattern to encode."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "pcode(item, version)",
+          "inputs": [
+            {
+              "name": "item",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "MATLAB source file, source name, folder, or wildcard pattern to encode."
+            },
+            {
+              "name": "version",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "-R2007b",
+              "description": "Obfuscation compatibility selector, either -R2007b or -R2022a."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "pcode(item1, item2, ..., itemN, \"-inplace\")",
+          "inputs": [
+            {
+              "name": "item1",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "First MATLAB source file, source name, folder, or wildcard pattern."
+            },
+            {
+              "name": "itemN",
+              "ty": "StringScalar",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional source files, source names, folders, or wildcard patterns."
+            },
+            {
+              "name": "inplace",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Use -inplace to write each P-code file beside its source file."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PCODE.NOT_ENOUGH_INPUTS",
+          "identifier": "RunMat:pcode:NotEnoughInputs",
+          "when": "No source item is provided.",
+          "message": "pcode: not enough input arguments"
+        },
+        {
+          "code": "RM.PCODE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:pcode:TooManyOutputs",
+          "when": "`pcode` is called with requested output arguments.",
+          "message": "pcode: too many output arguments"
+        },
+        {
+          "code": "RM.PCODE.ARG_TYPE",
+          "identifier": "RunMat:pcode:InvalidArgument",
+          "when": "An argument is not a character row, string scalar, or scalar string array.",
+          "message": "pcode: arguments must be character vectors or string scalars"
+        },
+        {
+          "code": "RM.PCODE.EMPTY_ITEM",
+          "identifier": "RunMat:pcode:EmptyItem",
+          "when": "A source item is empty.",
+          "message": "pcode: source item must not be empty"
+        },
+        {
+          "code": "RM.PCODE.INVALID_OPTION",
+          "identifier": "RunMat:pcode:InvalidOption",
+          "when": "An option is not -inplace, -R2007b, or -R2022a.",
+          "message": "pcode: invalid option"
+        },
+        {
+          "code": "RM.PCODE.PATH_RESOLVE",
+          "identifier": "RunMat:pcode:PathResolveFailed",
+          "when": "RunMat cannot resolve a source item or destination path.",
+          "message": "pcode: failed to resolve path"
+        },
+        {
+          "code": "RM.PCODE.FILE_NOT_FOUND",
+          "identifier": "RunMat:pcode:FileNotFound",
+          "when": "No MATLAB `.m` source file matches the item.",
+          "message": "pcode: source file not found"
+        },
+        {
+          "code": "RM.PCODE.UNSUPPORTED_EXTENSION",
+          "identifier": "RunMat:pcode:UnsupportedExtension",
+          "when": "The source item names an unsupported file type, including `.mlx` live scripts.",
+          "message": "pcode: only MATLAB .m source files are supported"
+        },
+        {
+          "code": "RM.PCODE.FILE_READ",
+          "identifier": "RunMat:pcode:FileReadFailed",
+          "when": "A source file cannot be read as text.",
+          "message": "pcode: failed to read source file"
+        },
+        {
+          "code": "RM.PCODE.FILE_WRITE",
+          "identifier": "RunMat:pcode:FileWriteFailed",
+          "when": "The destination `.p` file cannot be written.",
+          "message": "pcode: failed to write P-code file"
+        },
+        {
+          "code": "RM.PCODE.INVALID_PCODE",
+          "identifier": "RunMat:pcode:InvalidPcode",
+          "when": "A `.p` file is not a RunMat-generated P-code container or fails integrity checks.",
+          "message": "pcode: invalid or unsupported P-code file"
+        }
+      ]
+    },
+    {
       "name": "pdf",
       "output_mode": "Fixed",
       "completion_policy": "Public",

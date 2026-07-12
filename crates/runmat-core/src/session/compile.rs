@@ -476,10 +476,19 @@ async fn discover_companion_from_composition_graph_async(
                         .project_root
                         .join(&source.source_root)
                         .join(&source.relative_path);
+                    let file_path =
+                        runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
+                            &file_path,
+                        )
+                        .await;
                     if source_paths_equivalent(&file_path, primary_source_path) {
                         continue;
                     }
-                    let Ok(contents) = runmat_filesystem::read_to_string_async(&file_path).await
+                    let Ok(contents) =
+                        runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(
+                            &file_path,
+                        )
+                        .await
                     else {
                         continue;
                     };
@@ -596,11 +605,25 @@ pub(super) async fn discover_companion_source_statements_async(
             if !path
                 .extension()
                 .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("m"))
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("m") || ext.eq_ignore_ascii_case("p"))
             {
                 continue;
             }
-            let Ok(contents) = runmat_filesystem::read_to_string_async(&path).await else {
+            if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("m"))
+            {
+                let pcode_path = path.with_extension("p");
+                if let Ok(metadata) = runmat_filesystem::metadata_async(&pcode_path).await {
+                    if metadata.is_file() {
+                        continue;
+                    }
+                }
+            }
+            let Ok(contents) =
+                runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(&path).await
+            else {
                 continue;
             };
             if !contents.contains("classdef") && !contents.contains("function") {

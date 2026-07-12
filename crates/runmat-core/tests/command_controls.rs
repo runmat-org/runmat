@@ -6,11 +6,84 @@
 use runmat_builtins::Value;
 use runmat_core::{ExecutionStreamKind, RunError, RunMatSession};
 use runmat_gc::gc_test_context;
+use std::path::{Path, PathBuf};
+
+struct CwdGuard {
+    original: PathBuf,
+}
+
+impl Drop for CwdGuard {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.original);
+    }
+}
+
+fn push_cwd(path: &Path) -> CwdGuard {
+    let original = std::env::current_dir().expect("current dir");
+    std::env::set_current_dir(path).expect("set current dir");
+    CwdGuard { original }
+}
 
 fn isolate_plot_test() -> runmat_runtime::builtins::plotting::PlotTestLockGuard {
     let guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
     runmat_runtime::builtins::plotting::reset_plot_state();
     guard
+}
+
+#[test]
+fn pcode_command_generates_p_file_and_run_prefers_it() {
+    let _fs_guard = runmat_filesystem::provider_override_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(temp.path().join("worker.m"), "pcodeValue = 10;\n").expect("write source");
+    let _cwd = push_cwd(temp.path());
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, "pcode worker;")
+        .expect("pcode command should execute");
+    assert!(result.error.is_none());
+    assert!(temp.path().join("worker.p").is_file());
+
+    std::fs::write(temp.path().join("worker.m"), "pcodeValue = 20;\n")
+        .expect("rewrite source after pcode");
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, "run worker;")
+        .expect("run command should execute P-code");
+    assert!(result.error.is_none());
+
+    let readback = runmat_core::execute_text_request_for_testing(&mut engine, "pcodeValue")
+        .expect("read P-code assigned variable");
+    assert_eq!(
+        readback.value.as_ref().map(|value| value.to_string()),
+        Some("10".to_string())
+    );
+
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, "pcodeValue = 0;")
+        .expect("reset value");
+    assert!(result.error.is_none());
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, "run worker.m;")
+        .expect("explicit .m run should still execute P-code sibling");
+    assert!(result.error.is_none());
+    let readback = runmat_core::execute_text_request_for_testing(&mut engine, "pcodeValue")
+        .expect("read explicit .m P-code assigned variable");
+    assert_eq!(
+        readback.value.as_ref().map(|value| value.to_string()),
+        Some("10".to_string())
+    );
+}
+
+#[test]
+fn run_invalid_pcode_reports_pcode_identifier() {
+    let _fs_guard = runmat_filesystem::provider_override_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(temp.path().join("bad.p"), "not runmat pcode").expect("write invalid pcode");
+    let _cwd = push_cwd(temp.path());
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, "run bad;")
+        .expect("run should report runtime error in response");
+    assert_eq!(
+        result.error.as_ref().and_then(|err| err.identifier()),
+        Some("RunMat:pcode:InvalidPcode")
+    );
 }
 
 #[test]

@@ -231,6 +231,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: OPTIONAL_PATH_WORDS,
     },
     CommandVerb {
+        name: "pcode",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
         name: "pwd",
         arg_kind: CommandArgKind::Any,
     },
