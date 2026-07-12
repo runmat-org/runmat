@@ -10,6 +10,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::identifiers::is_valid_varname;
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -838,43 +839,6 @@ fn chars_to_string(chars: &CharArray) -> String {
     chars.data.iter().collect()
 }
 
-pub fn is_valid_varname(name: &str) -> bool {
-    const MATLAB_KEYWORDS: &[&str] = &[
-        "break",
-        "case",
-        "catch",
-        "classdef",
-        "continue",
-        "else",
-        "elseif",
-        "end",
-        "for",
-        "function",
-        "global",
-        "if",
-        "otherwise",
-        "parfor",
-        "persistent",
-        "return",
-        "spmd",
-        "switch",
-        "try",
-        "while",
-    ];
-
-    if name.chars().count() > 63 || MATLAB_KEYWORDS.contains(&name) {
-        return false;
-    }
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !first.is_alphabetic() {
-        return false;
-    }
-    chars.all(|ch| ch == '_' || ch.is_alphanumeric())
-}
-
 pub fn isvarname_value(value: &Value) -> bool {
     value_texts(value)
         .map(|names| names.iter().all(|name| is_valid_varname(name)))
@@ -1015,6 +979,7 @@ validator_builtin!(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX;
     use runmat_builtins::{IntValue, LogicalArray, StringArray, StructValue, Tensor};
 
     fn ok(builtin: &str, args: Vec<Value>) {
@@ -1327,7 +1292,12 @@ mod tests {
         assert!(!isvarname_value(&Value::String("1alpha".into())));
         assert!(!isvarname_value(&Value::String("for".into())));
         assert!(!isvarname_value(&Value::String("end".into())));
-        assert!(!isvarname_value(&Value::String("a".repeat(64))));
+        assert!(isvarname_value(&Value::String(
+            "a".repeat(MATLAB_NAME_LENGTH_MAX)
+        )));
+        assert!(!isvarname_value(&Value::String(
+            "a".repeat(MATLAB_NAME_LENGTH_MAX + 1)
+        )));
     }
 
     #[test]

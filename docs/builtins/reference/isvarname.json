@@ -25,11 +25,11 @@
     "unit": "crates/runmat-runtime/src/builtins/common/validation.rs varname positive and negative tests",
     "integration": "crates/runmat-vm/tests/functions.rs::argument_validation_helpers_are_callable_builtins"
   },
-  "description": "`isvarname(S)` returns a logical scalar indicating whether text is a valid MATLAB variable name: nonempty, starts with a letter, is at most 63 characters, contains only letters, digits, and underscores after the first character, and is not a MATLAB keyword.",
+  "description": "`isvarname(S)` returns a logical scalar indicating whether text is a valid MATLAB variable name: nonempty, starts with a letter, is at most `namelengthmax` characters, contains only letters, digits, and underscores after the first character, and is not a MATLAB keyword.",
   "behaviors": [
     "Returns a normal logical value and does not mutate inputs.",
     "Accepts MATLAB text representations supported by RunMat.",
-    "Rejects names that start with underscores or digits, MATLAB keywords such as `for` and `end`, and names longer than `namelengthmax` 63 characters."
+    "Rejects names that start with underscores or digits, MATLAB keywords such as `for` and `end`, and names longer than `namelengthmax` characters."
   ],
   "examples": [
     {

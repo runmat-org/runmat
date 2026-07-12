@@ -49191,6 +49191,61 @@
       ]
     },
     {
+      "name": "iskeyword",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = iskeyword(s)",
+          "inputs": [
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "String scalar or character vector to test."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the text is a MATLAB keyword."
+            }
+          ]
+        },
+        {
+          "label": "k = iskeyword",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "k",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell column of MATLAB keyword character vectors."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ISKEYWORD.ARG_COUNT",
+          "identifier": "RunMat:iskeyword:InvalidArgument",
+          "when": "More than one input argument is supplied.",
+          "message": "iskeyword: expected zero or one input argument"
+        },
+        {
+          "code": "RM.ISKEYWORD.TEXT",
+          "identifier": "RunMat:iskeyword:InvalidText",
+          "when": "Input is not a string scalar or character vector.",
+          "message": "iskeyword: input must be a string scalar or character vector"
+        }
+      ]
+    },
+    {
       "name": "isletter",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -49775,6 +49830,35 @@
           "message": "isnumeric: internal error"
         }
       ]
+    },
+    {
+      "name": "isobject",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isobject(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input value to inspect."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when input is a MATLAB object."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "isordinal",
@@ -66102,6 +66186,34 @@
           "identifier": "RunMat:validators:InvalidArgument",
           "when": "A validator receives an unsupported argument count or argument type.",
           "message": "invalid argument validation input"
+        }
+      ]
+    },
+    {
+      "name": "namelengthmax",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "l = namelengthmax",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "l",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum supported MATLAB identifier length."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NAMELENGTHMAX.ARG_COUNT",
+          "identifier": "RunMat:namelengthmax:InvalidArgument",
+          "when": "Any input argument is supplied.",
+          "message": "namelengthmax: expected no input arguments"
         }
       ]
     },
@@ -97428,14 +97540,8 @@
         {
           "code": "RM.STRUCT.FIELD_NAME_START_CHAR",
           "identifier": "RunMat:struct:FieldNameStartChar",
-          "when": "Field name does not start with a letter or underscore.",
-          "message": "struct: field names must begin with a letter or underscore"
-        },
-        {
-          "code": "RM.STRUCT.FIELD_NAME_INVALID_CHAR",
-          "identifier": "RunMat:struct:FieldNameInvalidChar",
-          "when": "Field name includes unsupported characters.",
-          "message": "struct: invalid character in field name"
+          "when": "Field name is not a valid MATLAB identifier.",
+          "message": "struct: field names must be valid MATLAB identifiers"
         }
       ]
     },

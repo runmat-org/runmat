@@ -16,6 +16,10 @@ pub fn isstring_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
 
+pub fn isobject_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Bool
+}
+
 pub fn which_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::cell_of(Type::String)])
 }

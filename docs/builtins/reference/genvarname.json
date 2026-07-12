@@ -38,7 +38,7 @@
     "Whitespace is removed and the following alphabetic character is capitalized.",
     "Nonalphanumeric, non-underscore characters are replaced by their hexadecimal code.",
     "Names that do not start with a letter are prefixed with `x`, and MATLAB keywords are repaired with the legacy `xKeyword` form such as `xFor`.",
-    "Names are truncated to `namelengthmax` compatibility length, 63 characters.",
+    "Names are truncated to the current `namelengthmax` compatibility length.",
     "Duplicate generated names and names present in `exclusions` receive numeric suffixes."
   ],
   "examples": [

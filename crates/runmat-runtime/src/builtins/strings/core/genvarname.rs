@@ -9,12 +9,13 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::identifiers::{
+    is_matlab_keyword, is_valid_varname, MATLAB_NAME_LENGTH_MAX,
+};
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::builtins::common::validation::is_valid_varname;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "genvarname";
-const NAME_LENGTH_MAX: usize = 63;
 
 const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "varname",
@@ -275,16 +276,19 @@ fn normalize_base_name(input: &str) -> String {
     {
         out.insert(0, 'x');
     }
-    truncate_chars(&out, NAME_LENGTH_MAX)
+    truncate_chars(&out, MATLAB_NAME_LENGTH_MAX)
 }
 
 fn fit_with_suffix(base: &str, suffix: &str) -> String {
-    if suffix.chars().count() >= NAME_LENGTH_MAX {
+    if suffix.chars().count() >= MATLAB_NAME_LENGTH_MAX {
         let mut out = String::from("x");
-        out.push_str(&truncate_chars(suffix, NAME_LENGTH_MAX.saturating_sub(1)));
+        out.push_str(&truncate_chars(
+            suffix,
+            MATLAB_NAME_LENGTH_MAX.saturating_sub(1),
+        ));
         return out;
     }
-    let prefix_len = NAME_LENGTH_MAX - suffix.chars().count();
+    let prefix_len = MATLAB_NAME_LENGTH_MAX - suffix.chars().count();
     let mut out = truncate_chars(base, prefix_len);
     if out.is_empty() || !out.chars().next().is_some_and(|ch| ch.is_alphabetic()) {
         out.insert(0, 'x');
@@ -306,33 +310,7 @@ fn keyword_to_variable_name(keyword: &str) -> String {
     let mut out = String::from("x");
     out.extend(first.to_uppercase());
     out.extend(chars);
-    truncate_chars(&out, NAME_LENGTH_MAX)
-}
-
-fn is_matlab_keyword(name: &str) -> bool {
-    const MATLAB_KEYWORDS: &[&str] = &[
-        "break",
-        "case",
-        "catch",
-        "classdef",
-        "continue",
-        "else",
-        "elseif",
-        "end",
-        "for",
-        "function",
-        "global",
-        "if",
-        "otherwise",
-        "parfor",
-        "persistent",
-        "return",
-        "spmd",
-        "switch",
-        "try",
-        "while",
-    ];
-    MATLAB_KEYWORDS.contains(&name)
+    truncate_chars(&out, MATLAB_NAME_LENGTH_MAX)
 }
 
 fn genvarname_type(args: &[Type], _context: &ResolveContext) -> Type {
@@ -435,14 +413,14 @@ mod tests {
 
     #[test]
     fn truncates_to_name_length_max_and_keeps_suffix_inside_limit() {
-        let long = "a".repeat(NAME_LENGTH_MAX + 10);
+        let long = "a".repeat(MATLAB_NAME_LENGTH_MAX + 10);
         let input = StringArray::new(vec![long.clone(), long], vec![1, 2]).unwrap();
         let out = call(Value::StringArray(input), Vec::new());
         let Value::StringArray(array) = out else {
             panic!("expected string array")
         };
-        assert_eq!(array.data[0].chars().count(), NAME_LENGTH_MAX);
-        assert_eq!(array.data[1].chars().count(), NAME_LENGTH_MAX);
+        assert_eq!(array.data[0].chars().count(), MATLAB_NAME_LENGTH_MAX);
+        assert_eq!(array.data[1].chars().count(), MATLAB_NAME_LENGTH_MAX);
         assert_ne!(array.data[0], array.data[1]);
         assert!(array.data[1].ends_with('1'));
     }

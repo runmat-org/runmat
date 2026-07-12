@@ -32,7 +32,7 @@
     "Arguments-block validation uses the same shared runtime predicates for validators that RunMat can encode statically.",
     "Numeric validators check every element without materializing a cloned numeric array, including sparse stored values and implicit sparse zeros where relevant.",
     "Text validators accept string scalars/arrays, character row vectors, and compatible cell arrays of text where MATLAB commonly permits them.",
-    "Variable names must be nonempty, start with a letter, stay within `namelengthmax` 63 characters, contain only letters/digits/underscores after the first character, and not be MATLAB keywords."
+    "Variable names must be nonempty, start with a letter, stay within `namelengthmax`, contain only letters/digits/underscores after the first character, and not be MATLAB keywords."
   ],
   "examples": [
     {
