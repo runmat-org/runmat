@@ -12,6 +12,21 @@ import {
   resetPlotState,
   createWorkspaceHoverProvider,
   createFusionPlanAdapter,
+  FEA_ANALYSIS_PROFILES,
+  FEA_ANALYSIS_RUN_KINDS,
+  FEA_ARTIFACT_MANIFEST_KIND,
+  FEA_DATASET_ARTIFACT_KIND,
+  FEA_DIAGNOSTICS_ARTIFACT_KIND,
+  FEA_DIAGNOSTICS_SCHEMA_VERSION,
+  FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT,
+  FEA_FIELD_DEFAULT_PAGE_SIZE,
+  FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND,
+  FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION,
+  FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
+  FEA_RUN_DATASET_KIND,
+  FEA_RUN_DATASET_SCHEMA_VERSION,
+  FEA_STUDY_DOCUMENT_OPERATIONS,
+  FEA_SUPPORTED_PHYSICS_PROFILES,
   type RunMatSessionHandle,
   type RunMatFilesystemProvider,
   type RunMatSnapshotSource,
@@ -49,6 +64,98 @@ const defaultStats: SessionStats = {
   totalExecutionTimeMs: 0,
   averageExecutionTimeMs: 0
 };
+
+describe("FEA study document contracts", () => {
+  it("exports Rust-generated analysis artifact constants", () => {
+    expect(FEA_RUN_DATASET_SCHEMA_VERSION).toBe(1);
+    expect(FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION).toBe(1);
+    expect(FEA_DIAGNOSTICS_SCHEMA_VERSION).toBe(1);
+    expect(FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION).toBe(1);
+    expect(FEA_RUN_DATASET_KIND).toBe("finite_element_run_dataset");
+    expect(FEA_DATASET_ARTIFACT_KIND).toBe("finite_element_dataset");
+    expect(FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND).toBe("finite_element_field_descriptors");
+    expect(FEA_DIAGNOSTICS_ARTIFACT_KIND).toBe("finite_element_diagnostics");
+    expect(FEA_ARTIFACT_MANIFEST_KIND).toBe("finite_element_artifact_manifest");
+    expect(FEA_FIELD_DEFAULT_PAGE_SIZE).toBe(4096);
+    expect(FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT).toBe(256);
+  });
+
+  it("exports Rust-generated study operation names", () => {
+    expect(FEA_STUDY_DOCUMENT_OPERATIONS).toEqual([
+      "get_summary",
+      "create",
+      "add_region",
+      "update_region",
+      "remove_region",
+      "add_material",
+      "update_material",
+      "assign_material",
+      "add_constraint",
+      "update_constraint",
+      "remove_constraint",
+      "add_driving_condition",
+      "update_driving_condition",
+      "remove_driving_condition",
+      "set_mesh",
+      "set_outputs",
+    ]);
+  });
+
+  it("keeps the public FEA physics catalog aligned with Rust-supported profiles", () => {
+    expect(FEA_ANALYSIS_PROFILES).toEqual([
+      "linear_static_structural",
+      "thermo_mechanical_coupled",
+      "electro_thermal_coupled",
+      "thermal_standalone",
+      "modal_structural",
+      "acoustic_harmonic",
+      "transient_structural",
+      "nonlinear_structural",
+      "electromagnetic_static",
+      "cfd_steady_state",
+      "cfd_transient",
+      "cht_coupled",
+      "fsi_coupled",
+    ]);
+    expect(FEA_ANALYSIS_RUN_KINDS).toEqual([
+      "linear_static",
+      "modal",
+      "acoustic",
+      "thermal",
+      "transient",
+      "cfd",
+      "cht",
+      "fsi",
+      "nonlinear",
+      "electromagnetic",
+    ]);
+    const catalogProfiles = FEA_SUPPORTED_PHYSICS_PROFILES.map((profile) => profile.profile);
+    expect(catalogProfiles).toHaveLength(FEA_ANALYSIS_PROFILES.length);
+    expect(new Set(catalogProfiles)).toEqual(new Set(FEA_ANALYSIS_PROFILES));
+    expect(new Set(FEA_SUPPORTED_PHYSICS_PROFILES.map((profile) => profile.family))).toEqual(
+      new Set(["structural", "modal", "coupled physics", "thermal", "acoustic", "electromagnetic", "CFD"]),
+    );
+  });
+
+  it("exposes electro-thermal as a first-class coupled FEA profile", () => {
+    const profile = FEA_SUPPORTED_PHYSICS_PROFILES.find(
+      (entry) => entry.profile === "electro_thermal_coupled"
+    );
+
+    expect(profile).toMatchObject({
+      label: "Electro-thermal",
+      family: "coupled physics",
+      target: "coupled electromagnetics and heat transfer",
+      value: "resistive heating, temperature, and electrical fields",
+    });
+    expect(profile?.defaultOutputs.map((output) => output.field)).toEqual([
+      "electro_thermal.temperature",
+      "electro_thermal.joule_heat",
+      "electro_thermal.electric_potential",
+      "electro_thermal.current_density",
+    ]);
+  });
+});
 
 function createExecuteResult(overrides: Partial<ExecuteResult> = {}): ExecuteResult {
   return {

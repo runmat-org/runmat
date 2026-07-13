@@ -812,6 +812,7 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
         run_kind: AnalysisRunKind::LinearStatic,
         backend: ComputeBackend::Cpu,
         mesh_options: Some(runmat_meshing_core::VolumeMeshingOptions::default()),
+        outputs: Vec::new(),
         analysis_mesh_artifact_path: None,
         analysis_mesh_evidence_artifact_path: None,
         linear_static_run_options: None,
@@ -840,6 +841,7 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
         run_kind: AnalysisRunKind::Electromagnetic,
         backend: ComputeBackend::Cpu,
         mesh_options: None,
+        outputs: Vec::new(),
         analysis_mesh_artifact_path: None,
         analysis_mesh_evidence_artifact_path: None,
         linear_static_run_options: None,
@@ -876,6 +878,11 @@ run:
     precision_mode: fp64
     preconditioner_mode: jacobi
     quality_policy: strict
+outputs:
+  - id: displacement_view
+    field: structural.displacement
+    location: nodes
+    kind: vector
 "#;
 
     let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
@@ -894,6 +901,11 @@ run:
     assert_eq!(spec.create_model_intent.model_id, "bracket_static_model");
     assert_eq!(spec.run_kind, AnalysisRunKind::LinearStatic);
     assert_eq!(spec.backend, ComputeBackend::Cpu);
+    assert_eq!(spec.outputs.len(), 1);
+    assert_eq!(spec.outputs[0].id, "displacement_view");
+    assert_eq!(spec.outputs[0].field_id, "structural.displacement");
+    assert_eq!(spec.outputs[0].location.as_deref(), Some("nodes"));
+    assert_eq!(spec.outputs[0].kind.as_deref(), Some("vector"));
     assert!(spec.model.is_none());
     let mesh_options = spec
         .mesh_options
@@ -1648,6 +1660,49 @@ fn analysis_create_model_supports_electromagnetic_profile_template() {
 }
 
 #[test]
+fn analysis_create_model_supports_electro_thermal_profile_template() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let envelope = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "electro_thermal_profile_model".to_string(),
+            profile: AnalysisCreateModelProfile::ElectroThermalCoupled,
+            prep_context: None,
+        },
+        OperationContext::new(
+            Some("trace-create-electro-thermal-profile".to_string()),
+            None,
+        ),
+    )
+    .expect("electro-thermal profile model creation should succeed");
+
+    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Transient);
+    assert_eq!(
+        envelope.data.boundary_conditions[0].kind,
+        BoundaryConditionKind::VectorPotentialGround
+    );
+    assert_eq!(
+        envelope.data.loads[0].load_id,
+        "load_default_electro_thermal_current"
+    );
+    let domain = envelope
+        .data
+        .electro_thermal
+        .as_ref()
+        .expect("electro-thermal domain should be populated");
+    assert!(domain.enabled);
+    assert_eq!(domain.reference_temperature_k, 293.15);
+    assert_eq!(domain.applied_voltage_v, 24.0);
+    assert_eq!(domain.time_profile.len(), 2);
+    assert!(envelope
+        .data
+        .materials
+        .iter()
+        .all(|material| material.electrical.is_some()));
+}
+
+#[test]
 fn analysis_create_model_supports_cfd_steady_profile_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
@@ -2051,6 +2106,10 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(envelope.op_version, "fea.run_study/v1");
     assert_eq!(envelope.data.study_id, spec.study_id);
     assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
+    assert_eq!(
+        envelope.data.model_profile,
+        AnalysisCreateModelProfile::LinearStaticStructural
+    );
     assert_eq!(envelope.data.run_kind, AnalysisRunKind::LinearStatic);
     assert_eq!(envelope.data.backend, ComputeBackend::Cpu);
     assert!(envelope.data.electromagnetic_run_options.is_none());
@@ -2130,6 +2189,14 @@ fn analysis_run_study_executes_linear_static_path() {
         .field(FEA_FIELD_STRUCTURAL_VON_MISES)
         .expect("study run should persist von Mises field");
     assert_eq!(von_mises.shape, vec![solver_volume_element_count]);
+    let run_evidence_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(&envelope.data.evidence_artifact_path).expect("read run evidence artifact"),
+    )
+    .expect("parse run evidence artifact");
+    assert_eq!(
+        run_evidence_payload["model_profile"].as_str(),
+        Some("linear_static_structural")
+    );
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
 }
@@ -2540,9 +2607,9 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
             analysis_mesh_artifact_path: None,
             analysis_mesh_evidence_artifact_path: None,
             material_region_id: None,
-            fixed_boundary_region_id: None,
-            load_boundary_region_id: None,
-            force_n: Some([25.0, -50.0, 0.0]),
+            boundary_condition_region_id: None,
+            driving_condition_region_id: None,
+            structural_force_n: Some([25.0, -50.0, 0.0]),
             diagram_observation: None,
         },
         OperationContext::new(Some("trace-author-study".to_string()), None),
@@ -2570,12 +2637,32 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
         "solid".to_string()
     );
     assert_eq!(
-        authored.data.evidence.selected_fixed_boundary_region_id,
-        "root".to_string()
+        authored
+            .data
+            .evidence
+            .selected_boundary_condition_region_id
+            .as_deref(),
+        Some("root")
     );
     assert_eq!(
-        authored.data.evidence.selected_load_boundary_region_id,
-        "tip".to_string()
+        authored
+            .data
+            .evidence
+            .selected_driving_condition_region_id
+            .as_deref(),
+        Some("tip")
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_driving_condition_kind
+            .as_deref(),
+        Some("force")
+    );
+    assert_eq!(
+        authored.data.evidence.selected_structural_force_n,
+        Some([25.0, -50.0, 0.0])
     );
     assert_eq!(
         authored.data.evidence.tetrahedron_generation_family,
@@ -2630,7 +2717,7 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
         Some("fea_study_authoring_artifact/v1")
     );
     assert_eq!(
-        artifact["evidence"]["selected_load_boundary_region_id"].as_str(),
+        artifact["evidence"]["selected_driving_condition_region_id"].as_str(),
         Some("tip")
     );
     assert_eq!(
@@ -2657,6 +2744,172 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
         artifact["evidence"]["tetrahedron_generation_interior_support_accepted_count"].as_u64(),
         Some(1)
     );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_author_study_preserves_non_structural_profile_defaults() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("author-study-electromagnetic");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+
+    let mesh = analysis_mesh_with_boundary_regions(&["ground"], &["coil"]);
+    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
+        required_boundary_region_ids: vec!["ground".to_string(), "coil".to_string()],
+        required_material_region_ids: vec!["solid".to_string()],
+        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+    };
+    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
+    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+    summary.solve_ready = true;
+    summary.validation_error_code = None;
+    summary.validation_error_message = None;
+
+    let authored = analysis_author_study_op(
+        AnalysisStudyAuthoringIntent {
+            study_id: "authored_em".to_string(),
+            model_id: None,
+            geometry: closed_cube_geometry_asset(),
+            mesh_authoring_summary: summary,
+            profile: AnalysisCreateModelProfile::ElectromagneticStatic,
+            run_kind: AnalysisRunKind::Electromagnetic,
+            backend: ComputeBackend::Cpu,
+            analysis_mesh_artifact_path: None,
+            analysis_mesh_evidence_artifact_path: None,
+            material_region_id: Some("solid".to_string()),
+            boundary_condition_region_id: Some("ground".to_string()),
+            driving_condition_region_id: Some("coil".to_string()),
+            structural_force_n: Some([25.0, -50.0, 0.0]),
+            diagram_observation: None,
+        },
+        OperationContext::new(Some("trace-author-em".to_string()), None),
+    )
+    .expect("authoring should support non-structural physics profiles");
+
+    let study = &authored.data.study;
+    assert_eq!(study.run_kind, AnalysisRunKind::Electromagnetic);
+    let model = study
+        .model
+        .as_ref()
+        .expect("authored study should include model");
+    assert_eq!(model.material_assignments[0].region_id, "solid");
+    assert_eq!(model.boundary_conditions[0].region_id, "ground");
+    assert_eq!(
+        model.boundary_conditions[0].kind,
+        BoundaryConditionKind::VectorPotentialGround
+    );
+    assert_eq!(model.loads[0].region_id, "coil");
+    assert!(matches!(model.loads[0].kind, LoadKind::CoilCurrent { .. }));
+    assert!(matches!(
+        model.steps[0].kind,
+        AnalysisStepKind::Electromagnetic
+    ));
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_driving_condition_region_id
+            .as_deref(),
+        Some("coil")
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_driving_condition_kind
+            .as_deref(),
+        Some("coil_current")
+    );
+    assert_eq!(authored.data.evidence.selected_structural_force_n, None);
+
+    let validation = analysis_validate_study_op(study, OperationContext::new(None, None))
+        .expect("authored electromagnetic study should validate");
+    assert!(validation.data.valid);
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_author_study_records_modal_driver_without_structural_force_evidence() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("author-study-modal-generic-driver");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
+        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+        required_material_region_ids: vec!["solid".to_string()],
+        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+    };
+    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
+    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+    summary.solve_ready = true;
+    summary.validation_error_code = None;
+    summary.validation_error_message = None;
+
+    let authored = analysis_author_study_op(
+        AnalysisStudyAuthoringIntent {
+            study_id: "authored_modal".to_string(),
+            model_id: None,
+            geometry: closed_cube_geometry_asset(),
+            mesh_authoring_summary: summary,
+            profile: AnalysisCreateModelProfile::ModalStructural,
+            run_kind: AnalysisRunKind::Modal,
+            backend: ComputeBackend::Cpu,
+            analysis_mesh_artifact_path: None,
+            analysis_mesh_evidence_artifact_path: None,
+            material_region_id: Some("solid".to_string()),
+            boundary_condition_region_id: Some("root".to_string()),
+            driving_condition_region_id: Some("tip".to_string()),
+            structural_force_n: Some([99.0, 88.0, 77.0]),
+            diagram_observation: None,
+        },
+        OperationContext::new(Some("trace-author-modal".to_string()), None),
+    )
+    .expect("modal authoring should preserve generic driving-condition evidence");
+
+    let model = authored
+        .data
+        .study
+        .model
+        .as_ref()
+        .expect("authored modal study should include model");
+    assert_eq!(model.boundary_conditions[0].region_id, "root");
+    assert_eq!(model.loads[0].region_id, "tip");
+    assert!(matches!(model.loads[0].kind, LoadKind::BodyForce { .. }));
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_boundary_condition_region_id
+            .as_deref(),
+        Some("root")
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_driving_condition_region_id
+            .as_deref(),
+        Some("tip")
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_driving_condition_kind
+            .as_deref(),
+        Some("body_force")
+    );
+    assert_eq!(authored.data.evidence.selected_structural_force_n, None);
+
+    let validation =
+        analysis_validate_study_op(&authored.data.study, OperationContext::new(None, None))
+            .expect("authored modal study should validate");
+    assert!(validation.data.valid);
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -2702,9 +2955,9 @@ fn analysis_author_study_persists_nested_shell_generation_evidence() {
             analysis_mesh_artifact_path: None,
             analysis_mesh_evidence_artifact_path: None,
             material_region_id: Some("body".to_string()),
-            fixed_boundary_region_id: Some("root".to_string()),
-            load_boundary_region_id: Some("tip".to_string()),
-            force_n: Some([0.0, -125.0, 25.0]),
+            boundary_condition_region_id: Some("root".to_string()),
+            driving_condition_region_id: Some("tip".to_string()),
+            structural_force_n: Some([0.0, -125.0, 25.0]),
             diagram_observation: None,
         },
         OperationContext::new(Some("trace-author-nested-shell".to_string()), None),
@@ -2802,9 +3055,9 @@ fn analysis_author_study_run_consumes_supplied_generated_solid_artifact() {
             analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
             analysis_mesh_evidence_artifact_path: Some(evidence_path.display().to_string()),
             material_region_id: Some("body".to_string()),
-            fixed_boundary_region_id: Some("root".to_string()),
-            load_boundary_region_id: Some("tip".to_string()),
-            force_n: Some([0.0, -250.0, 25.0]),
+            boundary_condition_region_id: Some("root".to_string()),
+            driving_condition_region_id: Some("tip".to_string()),
+            structural_force_n: Some([0.0, -250.0, 25.0]),
             diagram_observation: None,
         },
         OperationContext::new(Some("trace-author-generated-solid".to_string()), None),
@@ -2912,17 +3165,19 @@ fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested
             analysis_mesh_artifact_path: None,
             analysis_mesh_evidence_artifact_path: None,
             material_region_id: None,
-            fixed_boundary_region_id: None,
-            load_boundary_region_id: None,
-            force_n: None,
+            boundary_condition_region_id: None,
+            driving_condition_region_id: None,
+            structural_force_n: None,
             diagram_observation: Some(AnalysisStudyDiagramObservation {
                 artifact_path: Some("diagram://fixture/free-body.png".to_string()),
                 source_mime_type: Some("image/png".to_string()),
-                summary: Some("fixed tip and loaded root".to_string()),
+                summary: Some(
+                    "boundary condition on tip and driving condition on root".to_string(),
+                ),
                 material_region_id: Some("solid".to_string()),
-                fixed_boundary_region_id: Some("tip".to_string()),
-                load_boundary_region_id: Some("root".to_string()),
-                force_n: Some([12.0, -3.0, 4.0]),
+                boundary_condition_region_id: Some("tip".to_string()),
+                driving_condition_region_id: Some("root".to_string()),
+                structural_force_n: Some([12.0, -3.0, 4.0]),
                 confidence: Some(0.82),
             }),
         },
@@ -2949,12 +3204,20 @@ fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested
     );
     assert_eq!(authored.data.evidence.material_region_source, "diagram");
     assert_eq!(
-        authored.data.evidence.fixed_boundary_region_source,
-        "diagram"
+        authored
+            .data
+            .evidence
+            .boundary_condition_region_source
+            .as_deref(),
+        Some("diagram")
     );
     assert_eq!(
-        authored.data.evidence.load_boundary_region_source,
-        "diagram"
+        authored
+            .data
+            .evidence
+            .driving_condition_region_source
+            .as_deref(),
+        Some("diagram")
     );
     assert_eq!(
         authored.data.evidence.diagram_artifact_path.as_deref(),
@@ -2966,7 +3229,7 @@ fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested
     );
     assert_eq!(
         authored.data.evidence.diagram_summary.as_deref(),
-        Some("fixed tip and loaded root")
+        Some("boundary condition on tip and driving condition on root")
     );
     assert_eq!(authored.data.evidence.diagram_confidence, Some(0.82));
 
@@ -2979,11 +3242,11 @@ fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested
         Some("diagram://fixture/free-body.png")
     );
     assert_eq!(
-        artifact["evidence"]["fixed_boundary_region_source"].as_str(),
+        artifact["evidence"]["boundary_condition_region_source"].as_str(),
         Some("diagram")
     );
     assert_eq!(
-        artifact["evidence"]["load_boundary_region_source"].as_str(),
+        artifact["evidence"]["driving_condition_region_source"].as_str(),
         Some("diagram")
     );
 
@@ -3015,9 +3278,9 @@ fn analysis_author_study_rejects_not_solve_ready_mesh_summary() {
             analysis_mesh_artifact_path: None,
             analysis_mesh_evidence_artifact_path: None,
             material_region_id: None,
-            fixed_boundary_region_id: None,
-            load_boundary_region_id: None,
-            force_n: None,
+            boundary_condition_region_id: None,
+            driving_condition_region_id: None,
+            structural_force_n: None,
             diagram_observation: None,
         },
         OperationContext::new(None, None),
@@ -6721,7 +6984,8 @@ fn solid_mesh_quality_reasons_require_renderable_volume_attributed_boundary() {
     unmapped.boundary_faces[0]
         .adjacent_volume_element_ids
         .clear();
-    unmapped.boundary_faces[1].adjacent_volume_element_ids = vec!["missing_tet".to_string()];
+    unmapped.boundary_faces[1].adjacent_volume_element_ids =
+        vec!["missing_tetrahedron".to_string()];
 
     let unmapped_reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&unmapped));
     let unmapped_reason = unmapped_reasons
@@ -6750,7 +7014,8 @@ fn analysis_mesh_render_topology_requires_solver_field_mapping() {
     assert_eq!(render_topology_from_analysis_mesh(Some(&stale_node)), None);
 
     let mut stale_element = mapped;
-    stale_element.boundary_faces[0].adjacent_volume_element_ids = vec!["missing_tet".to_string()];
+    stale_element.boundary_faces[0].adjacent_volume_element_ids =
+        vec!["missing_tetrahedron".to_string()];
     assert_eq!(
         render_topology_from_analysis_mesh(Some(&stale_element)),
         None
@@ -7037,6 +7302,8 @@ fn append_solved_adaptive_mesh_summary_uses_host_von_mises_fields() {
         &artifact_path,
         serde_json::to_vec_pretty(&serde_json::json!({
             "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
             "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
             "mesh": mesh,
         }))
@@ -7114,6 +7381,8 @@ fn append_solved_adaptive_mesh_summary_refreshes_adaptive_evidence() {
         serde_json::to_vec_pretty(&serde_json::json!({
             "schema_version": "fea_study_analysis_mesh_artifact/v1",
             "mesh_evidence_artifact_path": evidence_path.display().to_string(),
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
             "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
             "mesh": mesh,
         }))
@@ -7479,6 +7748,8 @@ fn append_solved_adaptive_mesh_summary_uses_strain_energy_density_fields() {
         &artifact_path,
         serde_json::to_vec_pretty(&serde_json::json!({
             "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
             "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
             "mesh": mesh,
         }))
@@ -8137,6 +8408,8 @@ fn append_solved_adaptive_mesh_summary_without_fields_remains_pending() {
         &artifact_path,
         serde_json::to_vec_pretty(&serde_json::json!({
             "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
             "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
             "mesh": mesh,
         }))
@@ -8166,6 +8439,56 @@ fn append_solved_adaptive_mesh_summary_without_fields_remains_pending() {
         .as_array()
         .expect("adaptive markers")
         .is_empty());
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_rejects_missing_analysis_profile() {
+    let root = temp_artifact_root("append-solved-adaptive-missing-profile");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "run_kind": "thermal",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": minimal_analysis_mesh(),
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    let err = append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect_err("missing analysis_profile should not fall back to structural");
+
+    assert!(err.contains("missing analysis_profile"));
+    assert!(err.contains("typed .fea study"));
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_rejects_missing_run_kind() {
+    let root = temp_artifact_root("append-solved-adaptive-missing-run-kind");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "thermal_standalone",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": minimal_analysis_mesh(),
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    let err = append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect_err("missing run_kind should not fall back to linear static");
+
+    assert!(err.contains("missing run_kind"));
+    assert!(err.contains("typed .fea study"));
 }
 
 #[test]
@@ -8234,6 +8557,8 @@ fn append_solved_adaptive_mesh_summary_enforces_element_budget() {
         &artifact_path,
         serde_json::to_vec_pretty(&serde_json::json!({
             "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
             "mesh_options": mesh_options,
             "mesh": mesh,
         }))
@@ -8299,6 +8624,8 @@ fn append_solved_adaptive_mesh_summary_uniform_strategy_marks_elements_without_f
         &artifact_path,
         serde_json::to_vec_pretty(&serde_json::json!({
             "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "thermal_standalone",
+            "run_kind": "thermal",
             "mesh_options": mesh_options,
             "mesh": mesh,
         }))
@@ -8609,13 +8936,21 @@ fn no_topology_growth_marks_latest_adaptive_iteration_converged() {
 }
 
 fn analysis_mesh_with_boundary_regions(
-    fixed_region_ids: &[&str],
-    load_region_ids: &[&str],
+    boundary_condition_region_ids: &[&str],
+    driving_condition_region_ids: &[&str],
 ) -> AnalysisMeshArtifact {
     let mut mesh = minimal_analysis_mesh();
     mesh.boundary_faces = vec![
-        analysis_boundary_face("face_fixed", vec![1, 2, 3], fixed_region_ids),
-        analysis_boundary_face("face_load", vec![1, 2, 4], load_region_ids),
+        analysis_boundary_face(
+            "face_boundary_condition",
+            vec![1, 2, 3],
+            boundary_condition_region_ids,
+        ),
+        analysis_boundary_face(
+            "face_driving_condition",
+            vec![1, 2, 4],
+            driving_condition_region_ids,
+        ),
     ];
     mesh.refresh_field_topology();
     mesh

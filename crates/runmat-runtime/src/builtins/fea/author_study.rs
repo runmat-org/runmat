@@ -33,14 +33,14 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
     let study_id = scalar_string(&args[0], AUTHOR_STUDY_NAME, &ERROR_INPUT)?;
     let geometry = geometry_asset_from_value_with_builtin(&args[1], AUTHOR_STUDY_NAME)?;
     let mesh_authoring_summary = mesh_authoring_summary_from_value(&args[2])?;
-    let mut profile = AnalysisCreateModelProfile::LinearStaticStructural;
-    let mut run_kind = AnalysisRunKind::LinearStatic;
+    let mut profile = None::<AnalysisCreateModelProfile>;
+    let mut run_kind = None::<AnalysisRunKind>;
     let mut backend = ComputeBackend::Cpu;
     let mut model_id = None::<String>;
     let mut material_region_id = None::<String>;
-    let mut fixed_boundary_region_id = None::<String>;
-    let mut load_boundary_region_id = None::<String>;
-    let mut force_n = None::<[f64; 3]>;
+    let mut boundary_condition_region_id = None::<String>;
+    let mut driving_condition_region_id = None::<String>;
+    let mut structural_force_n = None::<[f64; 3]>;
     let mut analysis_mesh_artifact_path = None::<String>;
     let mut analysis_mesh_evidence_artifact_path = None::<String>;
     let mut diagram_observation = None::<AnalysisStudyDiagramObservation>;
@@ -50,11 +50,11 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
         match key.as_str() {
             "profile" => {
                 let text = scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?;
-                profile = parse_scalar_enum(&text, "Profile")?;
+                profile = Some(parse_scalar_enum(&text, "Profile")?);
             }
             "runkind" | "kind" => {
                 let text = scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?;
-                run_kind = parse_scalar_enum(&text, "RunKind")?;
+                run_kind = Some(parse_scalar_enum(&text, "RunKind")?);
             }
             "backend" => {
                 let text = scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?;
@@ -67,16 +67,26 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
                 material_region_id =
                     Some(scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?);
             }
-            "fixedregion" | "fixedregionid" | "fixedboundaryregion" | "fixedboundaryregionid" => {
-                fixed_boundary_region_id =
+            "boundaryconditionregion"
+            | "boundaryconditionregionid"
+            | "boundaryregion"
+            | "boundaryregionid" => {
+                boundary_condition_region_id =
                     Some(scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?);
             }
-            "loadregion" | "loadregionid" | "loadboundaryregion" | "loadboundaryregionid" => {
-                load_boundary_region_id =
+            "drivingconditionregion"
+            | "drivingconditionregionid"
+            | "driverregion"
+            | "driverregionid" => {
+                driving_condition_region_id =
                     Some(scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?);
             }
-            "forcen" | "force" | "forcevector" => {
-                force_n = Some(vector3_from_value(AUTHOR_STUDY_NAME, &pair[1], "ForceN")?);
+            "structuralforcen" | "structuralforce" | "structuralforcevector" => {
+                structural_force_n = Some(vector3_from_value(
+                    AUTHOR_STUDY_NAME,
+                    &pair[1],
+                    "StructuralForceN",
+                )?);
             }
             "analysismeshartifactpath" | "meshartifactpath" => {
                 analysis_mesh_artifact_path =
@@ -98,6 +108,29 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
             }
         }
     }
+    let profile = profile.ok_or_else(|| {
+        builtin_error(
+            AUTHOR_STUDY_NAME,
+            &ERROR_INPUT,
+            "fea.authorStudy requires Profile; choose a physics profile from fea.capabilities().physicsProfiles",
+        )
+    })?;
+    let derived_run_kind = profile.derived_run_kind();
+    let run_kind = match run_kind {
+        Some(explicit_run_kind) if explicit_run_kind != derived_run_kind => {
+            return Err(builtin_error(
+                AUTHOR_STUDY_NAME,
+                &ERROR_INPUT,
+                format!(
+                    "explicit solver {} does not match Profile {}; omit RunKind or choose a matching Profile",
+                    explicit_run_kind.as_snake_case(),
+                    profile.as_snake_case()
+                ),
+            ));
+        }
+        Some(explicit_run_kind) => explicit_run_kind,
+        None => derived_run_kind,
+    };
 
     let authored = analysis_author_study_op(
         AnalysisStudyAuthoringIntent {
@@ -111,9 +144,9 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
             analysis_mesh_artifact_path,
             analysis_mesh_evidence_artifact_path,
             material_region_id,
-            fixed_boundary_region_id,
-            load_boundary_region_id,
-            force_n,
+            boundary_condition_region_id,
+            driving_condition_region_id,
+            structural_force_n,
             diagram_observation,
         },
         OperationContext::new(None, None),
@@ -418,11 +451,11 @@ mod tests {
         crate::builtins::io::json::jsondecode::value_from_json(&serde_json::json!({
             "artifact_path": "diagram://fixture/free-body.png",
             "source_mime_type": "image/png",
-            "summary": "fixed tip and loaded root",
+            "summary": "boundary condition on tip and driving condition on root",
             "material_region_id": "solid",
-            "fixed_boundary_region_id": "tip",
-            "load_boundary_region_id": "root",
-            "force_n": [12.0, -3.0, 4.0],
+            "boundary_condition_region_id": "tip",
+            "driving_condition_region_id": "root",
+            "structural_force_n": [12.0, -3.0, 4.0],
             "confidence": 0.82
         }))
         .expect("diagram observation should convert")
@@ -658,7 +691,9 @@ mod tests {
             Value::String("authored_static".to_string()),
             generic_authoring_geometry_value(),
             authoring_summary_value(),
-            Value::String("ForceN".to_string()),
+            Value::String("Profile".to_string()),
+            Value::String("linear_static_structural".to_string()),
+            Value::String("StructuralForceN".to_string()),
             Value::Tensor(
                 Tensor::new_2d(vec![25.0, -50.0, 0.0], 1, 3).expect("force tensor should build"),
             ),
@@ -700,11 +735,13 @@ mod tests {
             Value::String("authored_run_static".to_string()),
             generic_authoring_geometry_value(),
             summary,
+            Value::String("Profile".to_string()),
+            Value::String("linear_static_structural".to_string()),
             Value::String("AnalysisMeshArtifactPath".to_string()),
             Value::String(mesh_path.clone()),
             Value::String("AnalysisMeshEvidenceArtifactPath".to_string()),
             Value::String(evidence_path.clone()),
-            Value::String("ForceN".to_string()),
+            Value::String("StructuralForceN".to_string()),
             Value::Tensor(
                 Tensor::new_2d(vec![10.0, 0.0, -5.0], 1, 3).expect("force tensor should build"),
             ),
@@ -757,6 +794,8 @@ mod tests {
             Value::String("authored_diagram_static".to_string()),
             generic_authoring_geometry_value(),
             authoring_summary_value(),
+            Value::String("Profile".to_string()),
+            Value::String("linear_static_structural".to_string()),
             Value::String("DiagramObservation".to_string()),
             diagram_observation_value(),
         ])
@@ -790,6 +829,8 @@ mod tests {
             Value::String("authored_minimal_static".to_string()),
             generic_authoring_geometry_value(),
             summary,
+            Value::String("Profile".to_string()),
+            Value::String("linear_static_structural".to_string()),
             Value::String("AnalysisMeshArtifactPath".to_string()),
             Value::String(mesh_path.clone()),
             Value::String("AnalysisMeshEvidenceArtifactPath".to_string()),
@@ -852,6 +893,18 @@ mod tests {
             run_data.analysis_mesh_evidence_artifact_path.as_deref(),
             Some(evidence_path.as_str())
         );
+    }
+
+    #[test]
+    fn requires_profile() {
+        let err = create_author_study_object_from_args(vec![
+            Value::String("missing_profile".to_string()),
+            generic_authoring_geometry_value(),
+            authoring_summary_value(),
+        ])
+        .expect_err("missing profile should fail");
+        assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
+        assert!(err.message().contains("fea.authorStudy requires Profile"));
     }
 
     #[test]

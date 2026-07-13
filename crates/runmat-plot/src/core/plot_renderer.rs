@@ -10,6 +10,7 @@ use crate::core::{
 };
 use crate::geometry_scene::{
     GeometryScene, GeometrySceneCacheKey, GeometrySceneOverlay, GeometryScenePresentation,
+    GeometrySceneViewPreset,
 };
 use crate::plots::figure::{LegendEntry, TextStyle};
 use crate::plots::surface::ColorMap;
@@ -583,7 +584,7 @@ impl PlotRenderer {
     pub fn set_geometry_scene_with_presentation(
         &mut self,
         geometry_scene: GeometryScene,
-        presentation: GeometryScenePresentation,
+        mut presentation: GeometryScenePresentation,
     ) {
         let cache_key = geometry_scene.cache_key();
         let same_scene_identity = self
@@ -591,6 +592,9 @@ impl PlotRenderer {
             .as_ref()
             .map(|key| key.scene_id.as_str())
             == Some(cache_key.scene_id.as_str());
+        if same_scene_identity {
+            self.preserve_geometry_scene_state_when_unspecified(&mut presentation);
+        }
         let preserved_camera = same_scene_identity
             .then(|| self.axes_cameras.first().cloned())
             .flatten();
@@ -662,6 +666,7 @@ impl PlotRenderer {
                     .insert(node_id, chunk.owner_node_ids.clone());
             }
         }
+        self.apply_geometry_presentation_visibility();
 
         for node in geometry_scene.nodes_with_presentation(&self.geometry_presentation) {
             self.scene.add_node(node);
@@ -3407,11 +3412,17 @@ impl PlotRenderer {
     pub fn geometry_scene_presentation(&self) -> &GeometryScenePresentation {
         &self.geometry_presentation
     }
-    pub fn set_geometry_scene_presentation(&mut self, presentation: GeometryScenePresentation) {
+    pub fn set_geometry_scene_presentation(&mut self, mut presentation: GeometryScenePresentation) {
+        let requested_view_preset = presentation.view_preset.take();
+        self.preserve_geometry_scene_state_when_unspecified(&mut presentation);
+        if let Some(view_preset) = requested_view_preset {
+            self.set_camera_view_preset(geometry_scene_view_preset_to_camera(view_preset));
+        }
         if self.geometry_presentation == presentation {
             return;
         }
         self.geometry_presentation = presentation;
+        self.apply_geometry_presentation_visibility();
         if let Some(scene) = self.last_geometry_scene.clone() {
             self.refresh_geometry_scene_render_data(&scene);
         }
@@ -3431,6 +3442,13 @@ impl PlotRenderer {
         } else if !self.geometry_hidden_owner_node_ids.insert(owner_id) {
             return;
         }
+        self.geometry_presentation.hidden_owner_node_ids = Some(
+            self.geometry_hidden_owner_node_ids
+                .iter()
+                .cloned()
+                .collect(),
+        );
+        self.geometry_presentation.isolated_owner_node_ids = None;
         self.apply_geometry_visibility_filter();
         self.needs_update = true;
     }
@@ -3445,9 +3463,38 @@ impl PlotRenderer {
             }
         }
         self.apply_geometry_xray_to_nodes();
+        self.apply_geometry_presentation_visibility();
         self.apply_geometry_visibility_filter();
         self.scene_buffer_cache.borrow_mut().clear();
         self.needs_update = true;
+    }
+    fn preserve_geometry_scene_state_when_unspecified(
+        &self,
+        presentation: &mut GeometryScenePresentation,
+    ) {
+        if !presentation.resolves_owner_visibility() {
+            presentation.hidden_owner_node_ids =
+                self.geometry_presentation.hidden_owner_node_ids.clone();
+            presentation.isolated_owner_node_ids =
+                self.geometry_presentation.isolated_owner_node_ids.clone();
+        }
+        if !presentation.resolves_section() {
+            presentation.section = self.geometry_presentation.section.clone();
+        }
+    }
+    fn apply_geometry_presentation_visibility(&mut self) {
+        if !self.geometry_presentation.resolves_owner_visibility() {
+            return;
+        }
+        let all_owner_node_ids = self
+            .geometry_node_owner_ids
+            .values()
+            .flat_map(|owner_ids| owner_ids.iter().map(String::as_str));
+        self.geometry_hidden_owner_node_ids =
+            self.geometry_presentation.resolved_hidden_owner_node_ids(
+                all_owner_node_ids,
+                &self.geometry_hidden_owner_node_ids,
+            );
     }
     fn apply_geometry_visibility_filter(&mut self) {
         if self.geometry_node_owner_ids.is_empty() {
@@ -3856,6 +3903,20 @@ impl PlotRenderer {
     }
 }
 
+fn geometry_scene_view_preset_to_camera(preset: GeometrySceneViewPreset) -> CameraViewPreset {
+    match preset {
+        GeometrySceneViewPreset::Perspective | GeometrySceneViewPreset::Isometric => {
+            CameraViewPreset::Perspective
+        }
+        GeometrySceneViewPreset::Front => CameraViewPreset::Front,
+        GeometrySceneViewPreset::Back => CameraViewPreset::Back,
+        GeometrySceneViewPreset::Left => CameraViewPreset::Left,
+        GeometrySceneViewPreset::Right => CameraViewPreset::Right,
+        GeometrySceneViewPreset::Top => CameraViewPreset::Top,
+        GeometrySceneViewPreset::Bottom => CameraViewPreset::Bottom,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3911,6 +3972,22 @@ mod tests {
         assert!(PlotRenderer::bounds_are_finite(display));
         assert_eq!(display.min.z, 0.0);
         assert_eq!(display.max.z, 0.0);
+    }
+
+    #[test]
+    fn geometry_scene_view_presets_map_to_camera_presets() {
+        assert_eq!(
+            geometry_scene_view_preset_to_camera(GeometrySceneViewPreset::Isometric),
+            CameraViewPreset::Perspective
+        );
+        assert_eq!(
+            geometry_scene_view_preset_to_camera(GeometrySceneViewPreset::Front),
+            CameraViewPreset::Front
+        );
+        assert_eq!(
+            geometry_scene_view_preset_to_camera(GeometrySceneViewPreset::Top),
+            CameraViewPreset::Top
+        );
     }
 
     #[test]

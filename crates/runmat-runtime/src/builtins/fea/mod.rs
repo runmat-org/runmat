@@ -126,7 +126,7 @@ const IN_STUDY_ARGS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Profile, Backend, ModelId, and model setup options.",
+        description: "Required Profile plus Backend, ModelId, and model setup options.",
     },
 ];
 const IN_AUTHOR_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
@@ -157,7 +157,7 @@ const IN_AUTHOR_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
         arity: BuiltinParamArity::Variadic,
         default: None,
         description:
-            "Profile, Backend, region selectors, ForceN, and analysis mesh artifact paths.",
+            "Required Profile plus Backend, boundary/driving region selectors, structural force vector, and analysis mesh artifact paths.",
     },
 ];
 const IN_VARIADIC_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -393,7 +393,7 @@ pub async fn fea_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "fea.authorStudy",
     category = "fea",
-    summary = "Author a linear static FEA study from compact mesh authoring evidence.",
+    summary = "Author a typed FEA study from compact mesh authoring evidence.",
     keywords = "fea,study,author,mesh,evidence,agent",
     descriptor(crate::builtins::fea::FEA_AUTHOR_STUDY_DESCRIPTOR),
     builtin_path = "crate::builtins::fea"
@@ -799,6 +799,7 @@ fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         run_kind,
         backend: options.backend.unwrap_or(ComputeBackend::Cpu),
         mesh_options: None,
+        outputs: Vec::new(),
         analysis_mesh_artifact_path: None,
         analysis_mesh_evidence_artifact_path: None,
         linear_static_run_options: run_options.linear_static,
@@ -971,9 +972,13 @@ fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let model_id = scalar_string(&args[0], MODEL_NAME, &ERROR_INPUT)?;
     let geometry = geometry_asset_from_value(&args[1])?;
     let options = parse_model_constructor_options(MODEL_NAME, &args[2..])?;
-    let profile = options
-        .profile
-        .unwrap_or(AnalysisCreateModelProfile::LinearStaticStructural);
+    let profile = options.profile.ok_or_else(|| {
+        builtin_error(
+            MODEL_NAME,
+            &ERROR_INPUT,
+            "fea.model requires Profile; choose a physics profile from fea.capabilities().physicsProfiles",
+        )
+    })?;
     let model = build_model_from_parts(
         MODEL_NAME,
         &geometry,
@@ -2894,19 +2899,83 @@ fn select_generated_figure(
 fn default_generated_figure_index(
     figures: &[crate::analysis::AnalysisGeneratedFigure],
 ) -> Option<usize> {
-    const PREFERRED_FIELDS: &[&str] = &[
-        "structural.von_mises",
-        "structural.nodal_von_mises",
-        "structural.stress",
-    ];
-    PREFERRED_FIELDS.iter().find_map(|preferred| {
-        figures.iter().position(|figure| {
-            figure
-                .field_ids
-                .iter()
-                .any(|field_id| field_id == preferred)
-        })
-    })
+    let mut best: Option<(usize, u8)> = None;
+    for (index, figure) in figures.iter().enumerate() {
+        let score = default_generated_figure_score(figure);
+        if best
+            .map(|(_, best_score)| score > best_score)
+            .unwrap_or(true)
+        {
+            best = Some((index, score));
+        }
+    }
+    best.map(|(index, _)| index)
+}
+
+#[cfg(feature = "plot-core")]
+fn default_generated_figure_score(figure: &crate::analysis::AnalysisGeneratedFigure) -> u8 {
+    let kind_score = match figure.kind {
+        crate::analysis::AnalysisGeneratedFigureKind::MeshResult => 40,
+        crate::analysis::AnalysisGeneratedFigureKind::Modal
+        | crate::analysis::AnalysisGeneratedFigureKind::Electromagnetic => 35,
+        crate::analysis::AnalysisGeneratedFigureKind::Summary
+        | crate::analysis::AnalysisGeneratedFigureKind::Convergence => 20,
+        crate::analysis::AnalysisGeneratedFigureKind::Comparison
+        | crate::analysis::AnalysisGeneratedFigureKind::Trend => 15,
+    };
+    figure
+        .field_ids
+        .iter()
+        .map(|field_id| default_field_figure_score(field_id))
+        .max()
+        .unwrap_or(kind_score)
+        .max(kind_score)
+}
+
+#[cfg(feature = "plot-core")]
+fn default_field_figure_score(field_id: &str) -> u8 {
+    let normalized = field_id.to_ascii_lowercase();
+    if normalized.contains("residual")
+        || normalized.contains("iteration")
+        || normalized.contains("orthogonality")
+        || normalized.contains("condition")
+    {
+        return 25;
+    }
+    if normalized.contains("von_mises") || normalized.contains("stress") {
+        return 95;
+    }
+    if normalized.contains("temperature")
+        || normalized.contains("heat_flux")
+        || normalized.contains("velocity")
+        || normalized.contains("pressure")
+        || normalized.contains("magnetic_flux_density")
+        || normalized.contains("electric_field")
+        || normalized.contains("sound_pressure")
+        || normalized.contains("coupling")
+    {
+        return 90;
+    }
+    if normalized.contains("mode_shape") || normalized.contains("displacement") {
+        return 85;
+    }
+    if normalized.starts_with("structural.")
+        || normalized.starts_with("modal.")
+        || normalized.starts_with("thermal.")
+        || normalized.starts_with("transient.")
+        || normalized.starts_with("nonlinear.")
+        || normalized.starts_with("em.")
+        || normalized.starts_with("electro_thermal.")
+        || normalized.starts_with("thermo_mechanical.")
+        || normalized.starts_with("acoustic.")
+        || normalized.starts_with("cfd.")
+        || normalized.starts_with("fluid.")
+        || normalized.starts_with("cht.")
+        || normalized.starts_with("fsi.")
+    {
+        return 70;
+    }
+    40
 }
 
 #[cfg(feature = "plot-core")]
@@ -3493,29 +3562,16 @@ fn parse_scalar_enum<T: DeserializeOwned>(text: &str, label: &str) -> BuiltinRes
     })
 }
 
-fn default_profile_for_run_kind(run_kind: AnalysisRunKind) -> AnalysisCreateModelProfile {
-    match run_kind {
-        AnalysisRunKind::LinearStatic => AnalysisCreateModelProfile::LinearStaticStructural,
-        AnalysisRunKind::Modal => AnalysisCreateModelProfile::ModalStructural,
-        AnalysisRunKind::Acoustic => AnalysisCreateModelProfile::AcousticHarmonic,
-        AnalysisRunKind::Thermal => AnalysisCreateModelProfile::ThermalStandalone,
-        AnalysisRunKind::Transient => AnalysisCreateModelProfile::TransientStructural,
-        AnalysisRunKind::Cfd => AnalysisCreateModelProfile::CfdSteadyState,
-        AnalysisRunKind::Cht => AnalysisCreateModelProfile::ChtCoupled,
-        AnalysisRunKind::Fsi => AnalysisCreateModelProfile::FsiCoupled,
-        AnalysisRunKind::Nonlinear => AnalysisCreateModelProfile::NonlinearStructural,
-        AnalysisRunKind::Electromagnetic => AnalysisCreateModelProfile::ElectromagneticStatic,
-    }
-}
-
 fn resolve_study_profile_and_run_kind(
     options: &StudyConstructorOptions,
 ) -> BuiltinResult<(AnalysisCreateModelProfile, AnalysisRunKind)> {
-    let profile = match (options.profile, options.run_kind) {
-        (Some(profile), _) => profile,
-        (None, Some(run_kind)) => default_profile_for_run_kind(run_kind),
-        (None, None) => AnalysisCreateModelProfile::LinearStaticStructural,
-    };
+    let profile = options.profile.ok_or_else(|| {
+        builtin_error(
+            STUDY_NAME,
+            &ERROR_INPUT,
+            "fea.study requires Profile; choose a physics profile from fea.capabilities().physicsProfiles",
+        )
+    })?;
     let run_kind = profile.derived_run_kind();
     if let Some(explicit_run_kind) = options.run_kind {
         if explicit_run_kind != run_kind {
@@ -3523,8 +3579,9 @@ fn resolve_study_profile_and_run_kind(
                 STUDY_NAME,
                 &ERROR_INPUT,
                 format!(
-                    "explicit solver {:?} does not match Profile {:?}; omit RunKind or choose a matching Profile",
-                    explicit_run_kind, profile
+                    "explicit solver {} does not match Profile {}; omit RunKind or choose a matching Profile",
+                    explicit_run_kind.as_snake_case(),
+                    profile.as_snake_case()
                 ),
             ));
         }
@@ -3779,6 +3836,44 @@ mod tests {
         ]))
         .expect_err("invalid geometry should fail");
         assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
+    }
+
+    #[test]
+    fn fea_study_requires_profile() {
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        let geometry_path = tmp.path().join("part.step");
+        std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
+        let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
+            geometry_path.to_string_lossy().to_string(),
+        ))
+        .expect("geometry should load");
+
+        let err = block_on(fea_study_builtin(vec![
+            Value::String("missing_profile".to_string()),
+            geometry,
+        ]))
+        .expect_err("missing profile should fail");
+        assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
+        assert!(err.message().contains("fea.study requires Profile"));
+    }
+
+    #[test]
+    fn fea_model_requires_profile() {
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        let geometry_path = tmp.path().join("part.step");
+        std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
+        let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
+            geometry_path.to_string_lossy().to_string(),
+        ))
+        .expect("geometry should load");
+
+        let err = block_on(fea_model_builtin(vec![
+            Value::String("missing_profile_model".to_string()),
+            geometry,
+        ]))
+        .expect_err("missing profile should fail");
+        assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
+        assert!(err.message().contains("fea.model requires Profile"));
     }
 
     #[test]
@@ -4173,6 +4268,53 @@ run:
             select_generated_figure(&mut figures, None).expect("default figure should select");
 
         assert_eq!(selected.title, "stress");
+    }
+
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn fea_plot_default_selects_representative_non_structural_figures() {
+        let cases = [
+            (
+                vec![
+                    generated_test_figure("thermal residual", vec!["thermal.residual_norm"]),
+                    generated_test_figure("temperature", vec!["thermal.temperature.0"]),
+                ],
+                "temperature",
+            ),
+            (
+                vec![
+                    generated_test_figure("flow residual", vec!["cfd.residual_momentum"]),
+                    generated_test_figure("velocity", vec!["fluid.velocity"]),
+                ],
+                "velocity",
+            ),
+            (
+                vec![
+                    generated_test_figure("acoustic phase", vec!["acoustic.phase"]),
+                    generated_test_figure("pressure", vec!["acoustic.pressure"]),
+                ],
+                "pressure",
+            ),
+            (
+                vec![
+                    generated_test_figure(
+                        "coupling residual",
+                        vec!["thermo_mechanical.coupling_residual.0"],
+                    ),
+                    generated_test_figure(
+                        "thermal stress",
+                        vec!["thermo_mechanical.thermal_stress.0"],
+                    ),
+                ],
+                "thermal stress",
+            ),
+        ];
+
+        for (mut figures, expected_title) in cases {
+            let selected =
+                select_generated_figure(&mut figures, None).expect("default figure should select");
+            assert_eq!(selected.title, expected_title);
+        }
     }
 
     #[cfg(feature = "plot-core")]

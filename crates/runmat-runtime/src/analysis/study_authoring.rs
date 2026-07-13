@@ -1,9 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_analysis_core::{
-    AnalysisStep, AnalysisStepKind, BoundaryCondition, BoundaryConditionKind, EvidenceConfidence,
-    LoadCase, LoadKind, MaterialAssignment,
-};
+use runmat_analysis_core::{EvidenceConfidence, LoadKind, MaterialAssignment};
 use runmat_meshing_core::VolumeMeshingOptions;
 
 use crate::operations::{
@@ -13,10 +10,9 @@ use crate::operations::{
 
 use super::{
     analysis_create_model_op, persist_study_evidence, profile_supports_run_kind, study_fingerprint,
-    validate_study_issue_codes, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
-    AnalysisRunKind, AnalysisStudyAuthoringData, AnalysisStudyAuthoringEvidence,
-    AnalysisStudyAuthoringIntent, AnalysisStudyDiagramObservation, AnalysisStudySpec,
-    ANALYSIS_AUTHOR_STUDY_OPERATION, ANALYSIS_AUTHOR_STUDY_OP_VERSION,
+    validate_study_issue_codes, AnalysisCreateModelIntentSpec, AnalysisStudyAuthoringData,
+    AnalysisStudyAuthoringEvidence, AnalysisStudyAuthoringIntent, AnalysisStudyDiagramObservation,
+    AnalysisStudySpec, ANALYSIS_AUTHOR_STUDY_OPERATION, ANALYSIS_AUTHOR_STUDY_OP_VERSION,
 };
 
 pub fn analysis_author_study_op(
@@ -52,19 +48,6 @@ pub fn analysis_author_study_op(
             ]),
         ));
     }
-    if intent.profile != AnalysisCreateModelProfile::LinearStaticStructural
-        || intent.run_kind != AnalysisRunKind::LinearStatic
-    {
-        return Err(author_study_error(
-            &context,
-            "RM.FEA.AUTHOR_STUDY.UNSUPPORTED_PROFILE",
-            "compact evidence study authoring currently supports linear static structural studies",
-            BTreeMap::from([
-                ("profile".to_string(), format!("{:?}", intent.profile)),
-                ("run_kind".to_string(), format!("{:?}", intent.run_kind)),
-            ]),
-        ));
-    }
     if !profile_supports_run_kind(intent.profile, intent.run_kind) {
         return Err(author_study_error(
             &context,
@@ -93,57 +76,6 @@ pub fn analysis_author_study_op(
             )]),
         )
     })?;
-    let (fixed_boundary_region_id, fixed_boundary_region_source) =
-        select_authoring_boundary_region(
-            &intent.mesh_authoring_summary,
-            intent.fixed_boundary_region_id.as_deref(),
-            intent
-                .diagram_observation
-                .as_ref()
-                .and_then(|observation| observation.fixed_boundary_region_id.as_deref()),
-            None,
-        )
-        .map_err(|message| {
-            author_study_error(
-                &context,
-                "RM.FEA.AUTHOR_STUDY.FIXED_BOUNDARY_REGION_UNAVAILABLE",
-                message,
-                BTreeMap::from([(
-                    "mesh_id".to_string(),
-                    intent.mesh_authoring_summary.mesh_id.clone(),
-                )]),
-            )
-        })?;
-    let (load_boundary_region_id, load_boundary_region_source) = select_authoring_boundary_region(
-        &intent.mesh_authoring_summary,
-        intent.load_boundary_region_id.as_deref(),
-        intent
-            .diagram_observation
-            .as_ref()
-            .and_then(|observation| observation.load_boundary_region_id.as_deref()),
-        Some(fixed_boundary_region_id.as_str()),
-    )
-    .map_err(|message| {
-        author_study_error(
-            &context,
-            "RM.FEA.AUTHOR_STUDY.LOAD_BOUNDARY_REGION_UNAVAILABLE",
-            message,
-            BTreeMap::from([(
-                "mesh_id".to_string(),
-                intent.mesh_authoring_summary.mesh_id.clone(),
-            )]),
-        )
-    })?;
-
-    let force_n = intent
-        .force_n
-        .or_else(|| {
-            intent
-                .diagram_observation
-                .as_ref()
-                .and_then(|observation| observation.force_n)
-        })
-        .unwrap_or([0.0, -1000.0, 0.0]);
     let model_id = intent
         .model_id
         .clone()
@@ -171,24 +103,87 @@ pub fn analysis_author_study_op(
         assigned_material_id: material_id,
         confidence: EvidenceConfidence::Inferred,
     }];
-    model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "bc_authored_fixed".to_string(),
-        region_id: fixed_boundary_region_id.clone(),
-        kind: BoundaryConditionKind::Fixed,
-    }];
-    model.loads = vec![LoadCase {
-        load_id: "load_authored_force".to_string(),
-        region_id: load_boundary_region_id.clone(),
-        kind: LoadKind::Force {
-            fx: force_n[0],
-            fy: force_n[1],
-            fz: force_n[2],
-        },
-    }];
-    model.steps = vec![AnalysisStep {
-        step_id: "step_authored_static".to_string(),
-        kind: AnalysisStepKind::Static,
-    }];
+    let (boundary_condition_region_id, boundary_condition_region_source) =
+        if model.boundary_conditions.is_empty() {
+            (None, None)
+        } else {
+            let (region_id, source) = select_authoring_boundary_region(
+                &intent.mesh_authoring_summary,
+                intent.boundary_condition_region_id.as_deref(),
+                intent
+                    .diagram_observation
+                    .as_ref()
+                    .and_then(|observation| observation.boundary_condition_region_id.as_deref()),
+                None,
+            )
+            .map_err(|message| {
+                author_study_error(
+                    &context,
+                    "RM.FEA.AUTHOR_STUDY.BOUNDARY_CONDITION_REGION_UNAVAILABLE",
+                    message,
+                    BTreeMap::from([(
+                        "mesh_id".to_string(),
+                        intent.mesh_authoring_summary.mesh_id.clone(),
+                    )]),
+                )
+            })?;
+            (Some(region_id), Some(source))
+        };
+    let (driving_condition_region_id, driving_condition_region_source) = if model.loads.is_empty() {
+        (None, None)
+    } else {
+        let (region_id, source) = select_authoring_boundary_region(
+            &intent.mesh_authoring_summary,
+            intent.driving_condition_region_id.as_deref(),
+            intent
+                .diagram_observation
+                .as_ref()
+                .and_then(|observation| observation.driving_condition_region_id.as_deref()),
+            boundary_condition_region_id.as_deref(),
+        )
+        .map_err(|message| {
+            author_study_error(
+                &context,
+                "RM.FEA.AUTHOR_STUDY.DRIVING_CONDITION_REGION_UNAVAILABLE",
+                message,
+                BTreeMap::from([(
+                    "mesh_id".to_string(),
+                    intent.mesh_authoring_summary.mesh_id.clone(),
+                )]),
+            )
+        })?;
+        (Some(region_id), Some(source))
+    };
+    if let Some(boundary) = model.boundary_conditions.first_mut() {
+        if let Some(region_id) = &boundary_condition_region_id {
+            boundary.region_id = region_id.clone();
+        }
+    }
+    let mut selected_structural_force_n = None;
+    if let Some(load) = model.loads.first_mut() {
+        if let Some(region_id) = &driving_condition_region_id {
+            load.region_id = region_id.clone();
+        }
+        if let LoadKind::Force { fx, fy, fz } = &mut load.kind {
+            let force_n = intent
+                .structural_force_n
+                .or_else(|| {
+                    intent
+                        .diagram_observation
+                        .as_ref()
+                        .and_then(|observation| observation.structural_force_n)
+                })
+                .unwrap_or([0.0, -1000.0, 0.0]);
+            *fx = force_n[0];
+            *fy = force_n[1];
+            *fz = force_n[2];
+            selected_structural_force_n = Some(force_n);
+        }
+    }
+    let selected_driving_condition_kind = model
+        .loads
+        .first()
+        .map(|load| load_kind_label(&load.kind).to_string());
 
     let study = AnalysisStudySpec {
         study_id: intent.study_id,
@@ -198,6 +193,7 @@ pub fn analysis_author_study_op(
         run_kind: intent.run_kind,
         backend: intent.backend,
         mesh_options: Some(VolumeMeshingOptions::default()),
+        outputs: Vec::new(),
         analysis_mesh_artifact_path: intent.analysis_mesh_artifact_path.clone(),
         analysis_mesh_evidence_artifact_path: intent.analysis_mesh_evidence_artifact_path.clone(),
         linear_static_run_options: None,
@@ -243,9 +239,10 @@ pub fn analysis_author_study_op(
             .tetrahedron_generation_interior_support_accepted_count,
         nested_tetrahedron_shell: intent.mesh_authoring_summary.nested_tetrahedron_shell,
         selected_material_region_id: material_region_id,
-        selected_fixed_boundary_region_id: fixed_boundary_region_id,
-        selected_load_boundary_region_id: load_boundary_region_id,
-        selected_force_n: force_n,
+        selected_boundary_condition_region_id: boundary_condition_region_id,
+        selected_driving_condition_region_id: driving_condition_region_id,
+        selected_driving_condition_kind,
+        selected_structural_force_n,
         diagram_artifact_path: intent
             .diagram_observation
             .as_ref()
@@ -265,8 +262,8 @@ pub fn analysis_author_study_op(
         analysis_mesh_artifact_path: intent.analysis_mesh_artifact_path,
         analysis_mesh_evidence_artifact_path: intent.analysis_mesh_evidence_artifact_path,
         material_region_source,
-        fixed_boundary_region_source,
-        load_boundary_region_source,
+        boundary_condition_region_source,
+        driving_condition_region_source,
     };
     let study_fingerprint = study_fingerprint(&study);
     let evidence_artifact_path = persist_study_evidence(
@@ -299,6 +296,19 @@ pub fn analysis_author_study_op(
             evidence_artifact_path,
         },
     ))
+}
+
+fn load_kind_label(load: &LoadKind) -> &'static str {
+    match load {
+        LoadKind::Force { .. } => "force",
+        LoadKind::Moment { .. } => "moment",
+        LoadKind::Wrench { .. } => "wrench",
+        LoadKind::Pressure { .. } => "pressure",
+        LoadKind::BodyForce { .. } => "body_force",
+        LoadKind::CurrentDensity { .. } => "current_density",
+        LoadKind::CoilCurrent { .. } => "coil_current",
+        LoadKind::HeatSource { .. } => "heat_source",
+    }
 }
 
 fn author_study_error(

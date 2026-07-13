@@ -10,6 +10,12 @@ use runmat_core::{
     TelemetryFailureInfo, TelemetryHost, TelemetryPlatformInfo, TelemetryRunConfig,
     TelemetryRunFinish, TelemetrySink, WorkspaceEntry, WorkspaceResidency,
 };
+use runmat_runtime::analysis::{
+    AnalysisDocumentCheckResult as FeaCheckPayload, AnalysisDocumentKind,
+    AnalysisDocumentRunResult as FeaRunPayload, AnalysisFieldPageResult as FeaFieldPayload,
+    AnalysisFieldRequestOptions as FeaFieldRequestPayload,
+    AnalysisRuntimeCapabilities as FeaCapabilitiesPayload,
+};
 use runmat_runtime::builtins::plotting::{
     close_figure as runtime_close_figure, close_geometry_scene as runtime_close_geometry_scene,
     export_geometry_scene as runtime_export_geometry_scene,
@@ -23,6 +29,10 @@ use runmat_runtime::builtins::plotting::{
 use runmat_runtime::builtins::wasm_registry;
 use runmat_runtime::data::{
     dataset_root, read_array_payload_async, read_array_slice_payload_async, read_manifest_async,
+};
+use runmat_runtime::geometry::{
+    GeometryInspectPayload, GeometryPreviewBudgetPayload, GeometryPreviewBudgetPolicyPayload,
+    GeometryPreviewPayload, GeometryStatsPayload,
 };
 use runmat_runtime::{
     runtime_plot_import_figure_scene_async, runtime_plot_import_figure_scene_from_path_async,
@@ -140,15 +150,6 @@ impl RunMatWasm {
         }
         Ok(())
     }
-}
-
-async fn inspect_geometry_path(
-    path: String,
-    budget: Option<GeometryPreviewBudgetPayload>,
-) -> Result<GeometryInspectPayload, String> {
-    inspect_geometry_path_with_asset(path, budget)
-        .await
-        .map(|result| result.inspect)
 }
 
 async fn inspect_geometry_path_with_asset(
@@ -564,7 +565,7 @@ async fn check_fea_path(path: String) -> Result<FeaCheckPayload, String> {
             }
             Ok(FeaCheckPayload {
                 path,
-                document_kind: "study".to_string(),
+                document_kind: AnalysisDocumentKind::Study,
                 valid: validation.valid,
                 validation: serde_json::to_value(validation).map_err(|err| err.to_string())?,
                 plan: plan
@@ -600,7 +601,7 @@ async fn check_fea_path(path: String) -> Result<FeaCheckPayload, String> {
             }
             Ok(FeaCheckPayload {
                 path,
-                document_kind: "sweep".to_string(),
+                document_kind: AnalysisDocumentKind::Sweep,
                 valid: validation.valid,
                 validation: serde_json::to_value(validation).map_err(|err| err.to_string())?,
                 plan: plan
@@ -639,8 +640,7 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
             .map(|envelope| envelope.data);
             let field_descriptors = results
                 .as_ref()
-                .map(serialize_field_descriptors)
-                .transpose()?
+                .map(field_descriptors_for_results)
                 .unwrap_or_default();
             let result_summary = results
                 .as_ref()
@@ -650,7 +650,7 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
             let (figure_handles, diagnostics) = generated_fea_figure_handles(&study, &run.run_id)?;
             Ok(FeaRunPayload {
                 path,
-                document_kind: "study".to_string(),
+                document_kind: AnalysisDocumentKind::Study,
                 run: serde_json::to_value(run).map_err(|err| err.to_string())?,
                 results: results
                     .map(serde_json::to_value)
@@ -673,7 +673,7 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
             .data;
             Ok(FeaRunPayload {
                 path,
-                document_kind: "sweep".to_string(),
+                document_kind: AnalysisDocumentKind::Sweep,
                 run: serde_json::to_value(run).map_err(|err| err.to_string())?,
                 results: None,
                 field_descriptors: Vec::new(),
@@ -712,25 +712,6 @@ fn generated_fea_figure_handles(
     Ok((handles, diagnostics))
 }
 
-fn load_fea_results(run_id: String) -> Result<FeaResultsPayload, String> {
-    let results = runmat_runtime::analysis::analysis_results_by_run_id_op(
-        &run_id,
-        runmat_runtime::analysis::AnalysisResultsQuery::metadata_only(),
-        runmat_runtime::operations::OperationContext::new(None, None),
-    )
-    .map_err(|err| err.message)?
-    .data;
-    let field_descriptors = serialize_field_descriptors(&results)?;
-    let result_summary =
-        Some(serde_json::to_value(&results.summary).map_err(|err| err.to_string())?);
-    Ok(FeaResultsPayload {
-        run_id,
-        results: serde_json::to_value(results).map_err(|err| err.to_string())?,
-        field_descriptors,
-        result_summary,
-    })
-}
-
 fn load_fea_field(
     run_id: String,
     field_id: String,
@@ -767,7 +748,7 @@ fn load_fea_field(
     Ok(FeaFieldPayload {
         run_id,
         field_id,
-        descriptor: serde_json::to_value(descriptor).map_err(|err| err.to_string())?,
+        descriptor: descriptor.clone(),
         values: sliced_values,
         offset,
         count,
@@ -776,14 +757,10 @@ fn load_fea_field(
     })
 }
 
-fn serialize_field_descriptors(
+fn field_descriptors_for_results(
     results: &runmat_runtime::analysis::AnalysisResultsData,
-) -> Result<Vec<serde_json::Value>, String> {
-    results
-        .field_descriptors
-        .iter()
-        .map(|descriptor| serde_json::to_value(descriptor).map_err(|err| err.to_string()))
-        .collect()
+) -> Vec<runmat_runtime::analysis::AnalysisFieldDescriptor> {
+    results.field_descriptors.clone()
 }
 
 fn filename_for_display(path: &str) -> &str {
@@ -831,143 +808,6 @@ struct ExecuteRequestPayload {
     compatibility: Option<String>,
     host_policy: Option<ExecuteHostPolicyPayload>,
     requested_outputs: Option<u32>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct GeometryPreviewBudgetPayload {
-    max_bytes: Option<u64>,
-    max_triangles: Option<u64>,
-    max_vertices: Option<u64>,
-    timeout_ms: Option<u64>,
-    budget_policy: Option<GeometryPreviewBudgetPolicyPayload>,
-    tessellation_profile: Option<GeometryPreviewTessellationProfilePayload>,
-    xray: Option<bool>,
-    allow_create_fea_study: Option<bool>,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-enum GeometryPreviewBudgetPolicyPayload {
-    #[default]
-    Truncate,
-    Strict,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct GeometryPreviewTessellationProfilePayload {
-    profile_id: Option<String>,
-    chord_tolerance: Option<f64>,
-    angle_tolerance_deg: Option<f64>,
-}
-
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GeometryStatsPayload {
-    mesh_count: usize,
-    total_vertices: u64,
-    total_elements: u64,
-    region_count: usize,
-}
-
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GeometryInspectPayload {
-    path: String,
-    format: String,
-    byte_count: u64,
-    supported: bool,
-    stats: Option<GeometryStatsPayload>,
-    geometry_summary: Option<JsonValue>,
-    regions: Vec<JsonValue>,
-    diagnostics: Vec<JsonValue>,
-    degraded_reason: Option<String>,
-}
-
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GeometryPreviewPayload {
-    #[serde(flatten)]
-    inspect: GeometryInspectPayload,
-    scene_kind: String,
-    figure_handle: Option<u32>,
-    geometry_scene_handle: Option<u32>,
-    truncated: bool,
-    preview_message: Option<String>,
-}
-
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct FeaCapabilitiesPayload {
-    supported_document_extensions: Vec<&'static str>,
-    supported_geometry_extensions: Vec<&'static str>,
-    supports_check: bool,
-    supports_run: bool,
-    supports_results: bool,
-    supports_live_progress: bool,
-    visualization_backend: &'static str,
-}
-
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct FeaCheckPayload {
-    path: String,
-    document_kind: String,
-    valid: bool,
-    validation: JsonValue,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    plan: Option<JsonValue>,
-    diagnostics: Vec<JsonValue>,
-    evidence_artifact_paths: Vec<String>,
-}
-
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct FeaRunPayload {
-    path: String,
-    document_kind: String,
-    run: JsonValue,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    results: Option<JsonValue>,
-    field_descriptors: Vec<JsonValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result_summary: Option<JsonValue>,
-    figure_handles: Vec<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    artifact_manifest: Option<JsonValue>,
-    diagnostics: Vec<JsonValue>,
-    progress_events: Vec<JsonValue>,
-}
-
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct FeaResultsPayload {
-    run_id: String,
-    results: JsonValue,
-    field_descriptors: Vec<JsonValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result_summary: Option<JsonValue>,
-}
-
-#[derive(Debug, serde::Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct FeaFieldRequestPayload {
-    offset: Option<usize>,
-    limit: Option<usize>,
-}
-
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct FeaFieldPayload {
-    run_id: String,
-    field_id: String,
-    descriptor: JsonValue,
-    values: Vec<f64>,
-    offset: usize,
-    count: usize,
-    total_count: usize,
-    truncated: bool,
 }
 
 #[wasm_bindgen]
@@ -1165,32 +1005,6 @@ impl RunMatWasm {
             .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")))
     }
 
-    #[wasm_bindgen(js_name = inspectGeometry)]
-    pub async fn inspect_geometry_js(
-        &self,
-        path: String,
-        budget_value: JsValue,
-    ) -> Result<JsValue, JsValue> {
-        self.ensure_not_disposed()?;
-        let interrupt_handle = self.session.borrow().interrupt_handle();
-        let _interrupt_guard = install_wasm_interrupt(&self.active_interrupt, interrupt_handle);
-        let budget = if budget_value.is_null() || budget_value.is_undefined() {
-            None
-        } else {
-            Some(
-                serde_wasm_bindgen::from_value::<GeometryPreviewBudgetPayload>(budget_value)
-                    .map_err(|err| {
-                        js_error(&format!("inspectGeometry budget parse failed: {err}"))
-                    })?,
-            )
-        };
-        let payload = inspect_geometry_path(path, budget)
-            .await
-            .map_err(|err| js_error(&err))?;
-        serde_wasm_bindgen::to_value(&payload)
-            .map_err(|err| js_error(&format!("Failed to serialize geometry inspection: {err}")))
-    }
-
     #[wasm_bindgen(js_name = previewGeometry)]
     pub async fn preview_geometry_js(
         &self,
@@ -1238,15 +1052,22 @@ impl RunMatWasm {
     pub fn fea_capabilities_js(&self) -> Result<JsValue, JsValue> {
         self.ensure_not_disposed()?;
         let payload = FeaCapabilitiesPayload {
-            supported_document_extensions: vec![".fea"],
+            supported_document_extensions: vec![".fea".to_string()],
             supported_geometry_extensions: vec![
-                ".stl", ".step", ".stp", ".obj", ".ply", ".gltf", ".glb",
+                ".stl".to_string(),
+                ".step".to_string(),
+                ".stp".to_string(),
+                ".obj".to_string(),
+                ".ply".to_string(),
+                ".gltf".to_string(),
+                ".glb".to_string(),
             ],
+            physics_profiles: runmat_runtime::analysis::analysis_runtime_physics_profile_catalog(),
             supports_check: true,
             supports_run: true,
             supports_results: true,
             supports_live_progress: true,
-            visualization_backend: "runmat-plot",
+            visualization_backend: "runmat-plot".to_string(),
         };
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize FEA capabilities: {err}")))
@@ -1258,6 +1079,34 @@ impl RunMatWasm {
         let payload = check_fea_path(path).await.map_err(|err| js_error(&err))?;
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize FEA check result: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = applyFeaStudyDocumentOperation)]
+    pub fn apply_fea_study_document_operation_js(
+        &self,
+        operation: String,
+        path: String,
+        source: Option<String>,
+        input: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let input = serde_wasm_bindgen::from_value::<JsonValue>(input).map_err(|err| {
+            js_error(&format!(
+                "Failed to deserialize FEA study operation input: {err}"
+            ))
+        })?;
+        let output = runmat_runtime::analysis::apply_fea_study_document_operation(
+            &operation,
+            &path,
+            source.as_deref(),
+            input,
+        )
+        .map_err(|err| js_error(&err))?;
+        serde_wasm_bindgen::to_value(&output).map_err(|err| {
+            js_error(&format!(
+                "Failed to serialize FEA study operation result: {err}"
+            ))
+        })
     }
 
     #[wasm_bindgen(js_name = runFeaStudy)]
@@ -1300,24 +1149,10 @@ impl RunMatWasm {
         let mut payload = run_fea_path(path).await.map_err(|err| js_error(&err))?;
         payload.progress_events = progress_events
             .lock()
-            .ok()
-            .map(|events| {
-                events
-                    .iter()
-                    .filter_map(|event| serde_json::to_value(event).ok())
-                    .collect()
-            })
+            .map(|events| events.clone())
             .unwrap_or_default();
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize FEA run result: {err}")))
-    }
-
-    #[wasm_bindgen(js_name = feaResults)]
-    pub fn fea_results_js(&self, run_id: String) -> Result<JsValue, JsValue> {
-        self.ensure_not_disposed()?;
-        let payload = load_fea_results(run_id).map_err(|err| js_error(&err))?;
-        serde_wasm_bindgen::to_value(&payload)
-            .map_err(|err| js_error(&format!("Failed to serialize FEA results: {err}")))
     }
 
     #[wasm_bindgen(js_name = feaField)]

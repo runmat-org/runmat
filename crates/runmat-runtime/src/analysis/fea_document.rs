@@ -22,6 +22,7 @@ use runmat_meshing_core::{
 use serde::de::{DeserializeOwned, Error as DeError};
 use serde::{Deserialize, Deserializer};
 
+use super::contracts::AnalysisOutputRequest;
 use super::{
     analysis_create_model_op, AnalysisAcousticRunOptions, AnalysisCfdRunOptions,
     AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
@@ -86,6 +87,8 @@ struct FeaStudyDocument {
     loads: Vec<FeaLoadDocument>,
     #[serde(default)]
     steps: Vec<FeaStepDocument>,
+    #[serde(default)]
+    outputs: Vec<FeaOutputDocument>,
     #[serde(default)]
     domains: FeaDomainsDocument,
     #[serde(default)]
@@ -511,6 +514,18 @@ struct FeaStepDocument {
     kind: runmat_analysis_core::AnalysisStepKind,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaOutputDocument {
+    id: String,
+    #[serde(rename = "field_id", alias = "field", alias = "name")]
+    field_id: String,
+    #[serde(default, alias = "target")]
+    location: Option<String>,
+    #[serde(default, rename = "kind", alias = "type")]
+    kind: Option<String>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FeaDomainsDocument {
@@ -626,6 +641,7 @@ async fn resolve_study(
         )?;
     }
     let mesh_options = resolve_mesh_options(study.mesh.as_ref(), study.model.profile, run_kind)?;
+    let outputs = study.outputs.iter().map(resolve_output_request).collect();
     let spec = AnalysisStudySpec {
         study_id: study.id,
         geometry,
@@ -634,6 +650,7 @@ async fn resolve_study(
         run_kind,
         backend: study.run.backend,
         mesh_options,
+        outputs,
         analysis_mesh_artifact_path: None,
         analysis_mesh_evidence_artifact_path: None,
         linear_static_run_options: run_options.linear_static,
@@ -648,6 +665,15 @@ async fn resolve_study(
         electromagnetic_run_options: run_options.electromagnetic,
     };
     Ok(ResolvedStudyParts { spec })
+}
+
+fn resolve_output_request(output: &FeaOutputDocument) -> AnalysisOutputRequest {
+    AnalysisOutputRequest {
+        id: output.id.clone(),
+        field_id: output.field_id.clone(),
+        location: output.location.clone(),
+        kind: output.kind.clone(),
+    }
 }
 
 fn resolve_mesh_options(
@@ -902,8 +928,8 @@ fn validate_refinement_indicator_applicability(
         if !refinement_indicator_namespace_applies(namespace, profile, run_kind, domains) {
             return Err(format!(
                 "mesh.refinement.indicators.{namespace} does not apply to profile `{}` and run kind `{}`",
-                profile_refinement_label(profile),
-                run_kind_refinement_label(run_kind)
+                profile.as_snake_case(),
+                run_kind.as_snake_case()
             ));
         }
     }
@@ -942,6 +968,7 @@ fn refinement_indicator_namespace_applies(
                 profile,
                 AnalysisCreateModelProfile::ThermalStandalone
                     | AnalysisCreateModelProfile::ThermoMechanicalCoupled
+                    | AnalysisCreateModelProfile::ElectroThermalCoupled
                     | AnalysisCreateModelProfile::ChtCoupled
             ) || matches!(run_kind, AnalysisRunKind::Thermal | AnalysisRunKind::Cht)
                 || domains.thermo_mechanical.is_some()
@@ -951,10 +978,16 @@ fn refinement_indicator_namespace_applies(
             matches!(profile, AnalysisCreateModelProfile::ThermoMechanicalCoupled)
                 || domains.thermo_mechanical.is_some()
         }
-        "electro_thermal" => domains.electro_thermal.is_some(),
+        "electro_thermal" => {
+            matches!(profile, AnalysisCreateModelProfile::ElectroThermalCoupled)
+                || domains.electro_thermal.is_some()
+        }
         "electromagnetic" => {
-            matches!(profile, AnalysisCreateModelProfile::ElectromagneticStatic)
-                || matches!(run_kind, AnalysisRunKind::Electromagnetic)
+            matches!(
+                profile,
+                AnalysisCreateModelProfile::ElectromagneticStatic
+                    | AnalysisCreateModelProfile::ElectroThermalCoupled
+            ) || matches!(run_kind, AnalysisRunKind::Electromagnetic)
                 || domains.electromagnetic.is_some()
                 || domains.electro_thermal.is_some()
         }
@@ -983,38 +1016,6 @@ fn refinement_indicator_namespace_applies(
                 || matches!(run_kind, AnalysisRunKind::Fsi)
         }
         _ => false,
-    }
-}
-
-fn profile_refinement_label(profile: AnalysisCreateModelProfile) -> &'static str {
-    match profile {
-        AnalysisCreateModelProfile::LinearStaticStructural => "linear_static_structural",
-        AnalysisCreateModelProfile::ThermoMechanicalCoupled => "thermo_mechanical_coupled",
-        AnalysisCreateModelProfile::ThermalStandalone => "thermal_standalone",
-        AnalysisCreateModelProfile::ModalStructural => "modal_structural",
-        AnalysisCreateModelProfile::AcousticHarmonic => "acoustic_harmonic",
-        AnalysisCreateModelProfile::TransientStructural => "transient_structural",
-        AnalysisCreateModelProfile::NonlinearStructural => "nonlinear_structural",
-        AnalysisCreateModelProfile::ElectromagneticStatic => "electromagnetic_static",
-        AnalysisCreateModelProfile::CfdSteadyState => "cfd_steady_state",
-        AnalysisCreateModelProfile::CfdTransient => "cfd_transient",
-        AnalysisCreateModelProfile::ChtCoupled => "cht_coupled",
-        AnalysisCreateModelProfile::FsiCoupled => "fsi_coupled",
-    }
-}
-
-fn run_kind_refinement_label(run_kind: AnalysisRunKind) -> &'static str {
-    match run_kind {
-        AnalysisRunKind::LinearStatic => "linear_static",
-        AnalysisRunKind::Modal => "modal",
-        AnalysisRunKind::Acoustic => "acoustic",
-        AnalysisRunKind::Thermal => "thermal",
-        AnalysisRunKind::Transient => "transient",
-        AnalysisRunKind::Cfd => "cfd",
-        AnalysisRunKind::Cht => "cht",
-        AnalysisRunKind::Fsi => "fsi",
-        AnalysisRunKind::Nonlinear => "nonlinear",
-        AnalysisRunKind::Electromagnetic => "electromagnetic",
     }
 }
 

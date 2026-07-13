@@ -24,13 +24,12 @@ use runmat_analysis_fea::{
     fea_fsi_interface_traction_field_id, fea_fsi_structural_displacement_field_id,
     run_electromagnetic_with_options, run_linear_static_with_options, run_modal_with_options,
     run_nonlinear_with_options, run_thermal_with_options, run_transient_with_options,
-    ComputeBackend, ElectromagneticSolveOptions, FeaProgressEvent, FeaProgressHandler,
-    FeaProgressPhase, FeaProgressStatus, FeaRunError, FeaRunResult, LinearStaticSolveOptions,
-    ModalSolveOptions, ThermalSolveOptions, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PHASE, FEA_FIELD_ACOUSTIC_PRESSURE_IMAG,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
-    FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB, FEA_FIELD_CFD_PRESSURE,
-    FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
+    ComputeBackend, ElectromagneticSolveOptions, FeaProgressHandler, FeaRunError, FeaRunResult,
+    LinearStaticSolveOptions, ModalSolveOptions, ThermalSolveOptions,
+    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PHASE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB,
+    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
     FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
     FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
     FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
@@ -84,6 +83,7 @@ use policy::{
 
 mod contracts;
 mod fea_document;
+mod fea_document_authoring;
 #[cfg(feature = "plot-core")]
 mod figures;
 mod policy;
@@ -169,14 +169,21 @@ fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard 
 }
 
 pub use contracts::{
-    AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
-    AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext, AnalysisCreateModelProfile,
-    AnalysisElectromagneticRunOptions, AnalysisFieldDescriptor, AnalysisFieldKind,
-    AnalysisFieldLocation, AnalysisFieldStorage, AnalysisFsiRunOptions, AnalysisModalRunOptions,
-    AnalysisNonlinearRunOptions, AnalysisRenderMesh, AnalysisRenderRegion, AnalysisRenderTopology,
-    AnalysisRenderTopologySource, AnalysisRenderTriangleRange, AnalysisResultsCompareData,
-    AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
-    AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
+    analysis_runtime_physics_profile_catalog, AnalysisAcousticRunOptions, AnalysisCfdRunOptions,
+    AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext,
+    AnalysisCreateModelProfile, AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
+    AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisElectromagneticRunOptions,
+    AnalysisFieldDescriptor, AnalysisFieldDescriptorsArtifactPayload, AnalysisFieldKind,
+    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPagingDescriptor,
+    AnalysisFieldRequestOptions, AnalysisFieldStorage, AnalysisFieldStorageRef,
+    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
+    AnalysisObjectArtifactMetadata, AnalysisRenderMesh, AnalysisRenderRegion,
+    AnalysisRenderTopology, AnalysisRenderTopologySource, AnalysisRenderTriangleRange,
+    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisResultsData,
+    AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunDatasetFieldPagingPolicy,
+    AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef, AnalysisRunKind, AnalysisRunOptions,
+    AnalysisRunPrepContext, AnalysisRunResult, AnalysisRuntimeCapabilities,
+    AnalysisRuntimePhysicsProfileCatalogEntry, AnalysisRuntimePhysicsProfileDefaultOutput,
     AnalysisStudyAuthoringData, AnalysisStudyAuthoringEvidence, AnalysisStudyAuthoringIntent,
     AnalysisStudyDiagramObservation, AnalysisStudyIssue, AnalysisStudyPlanData,
     AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
@@ -191,17 +198,28 @@ pub use contracts::{
     PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
     RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode, ThermoFieldSource,
     ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
-    TransientIntegrationMethod, TransientResultsData,
+    TransientIntegrationMethod, TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND,
+    ANALYSIS_DATASET_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND,
+    ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION, ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT,
+    ANALYSIS_FIELD_DEFAULT_PAGE_SIZE, ANALYSIS_FIELD_DESCRIPTORS_ARTIFACT_KIND,
+    ANALYSIS_FIELD_DESCRIPTORS_SCHEMA_VERSION, ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
+    ANALYSIS_RUN_DATASET_KIND, ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
 };
 pub use fea_document::{
     is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
     FeaResolvedDocument,
+};
+pub use fea_document_authoring::{
+    apply_fea_study_document_operation, apply_fea_study_document_operation_typed,
+    summarize_fea_study_document, FeaStudyDocumentOperation, FeaStudyDocumentOperationOutput,
+    FEA_STUDY_DOCUMENT_OPERATION_NAMES,
 };
 #[cfg(feature = "plot-core")]
 pub use figures::{
     analysis_generate_study_run_figures, AnalysisFigureGenerationOptions, AnalysisFigureMeshSource,
     AnalysisGeneratedFigure, AnalysisGeneratedFigureKind,
 };
+pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
 pub use study_authoring::analysis_author_study_op;
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "fea.create_model";
@@ -592,6 +610,7 @@ pub fn analysis_create_model_op(
     if matches!(
         intent.profile,
         AnalysisCreateModelProfile::ElectromagneticStatic
+            | AnalysisCreateModelProfile::ElectroThermalCoupled
     ) {
         for material in &mut inferred_materials {
             material.electrical = Some(runmat_analysis_core::MaterialElectricalModel::default());
@@ -641,6 +660,26 @@ pub fn analysis_create_model_op(
             },
             vec![AnalysisStep {
                 step_id: "step_default_thermo_mech".to_string(),
+                kind: AnalysisStepKind::Transient,
+            }],
+        ),
+        AnalysisCreateModelProfile::ElectroThermalCoupled => (
+            BoundaryCondition {
+                bc_id: "bc_default_electro_thermal_ground".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::VectorPotentialGround,
+            },
+            LoadCase {
+                load_id: "load_default_electro_thermal_current".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::CoilCurrent {
+                    current_a: 50.0,
+                    phase_rad: 0.0,
+                    amplitude_scale: 1.0,
+                },
+            },
+            vec![AnalysisStep {
+                step_id: "step_default_electro_thermal".to_string(),
                 kind: AnalysisStepKind::Transient,
             }],
         ),
@@ -953,6 +992,27 @@ pub fn analysis_create_model_op(
         }
         _ => None,
     };
+    let electro_thermal = match intent.profile {
+        AnalysisCreateModelProfile::ElectroThermalCoupled => {
+            Some(runmat_analysis_core::ElectroThermalDomain {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_voltage_v: 24.0,
+                region_conductivity_scales: Vec::new(),
+                time_profile: vec![
+                    runmat_analysis_core::ElectroTimeProfilePoint {
+                        normalized_time: 0.0,
+                        current_scale: 0.5,
+                    },
+                    runmat_analysis_core::ElectroTimeProfilePoint {
+                        normalized_time: 1.0,
+                        current_scale: 1.0,
+                    },
+                ],
+            })
+        }
+        _ => None,
+    };
 
     let mut boundary_conditions = vec![default_bc];
     if matches!(
@@ -1002,7 +1062,7 @@ pub fn analysis_create_model_op(
         material_assignments: inferred_assignments,
         structural: None,
         thermo_mechanical,
-        electro_thermal: None,
+        electro_thermal,
         electromagnetic,
         cfd,
         interfaces: Vec::new(),
@@ -1401,6 +1461,7 @@ pub fn analysis_run_study_op(
             "schema_version": "fea_study_run_artifact/v1",
             "study_id": spec.study_id.clone(),
             "model_id": model.model_id.0.clone(),
+            "model_profile": spec.create_model_intent.profile,
             "run_kind": spec.run_kind,
             "backend": spec.backend,
             "prep_artifact_id": study_prep_artifact_id.clone(),
@@ -1450,6 +1511,7 @@ pub fn analysis_run_study_op(
         AnalysisStudyRunData {
             study_id: spec.study_id.clone(),
             model_id: model.model_id.0.clone(),
+            model_profile: spec.create_model_intent.profile,
             run_kind: spec.run_kind,
             backend: spec.backend,
             electromagnetic_run_options: resolved_electromagnetic_run_options,
@@ -13752,8 +13814,8 @@ fn generate_and_persist_study_analysis_mesh(
             "study_id": spec.study_id.clone(),
             "geometry_id": spec.geometry.geometry_id.clone(),
             "geometry_revision": spec.geometry.revision,
-            "analysis_profile": analysis_refinement_profile_label(spec.create_model_intent.profile),
-            "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
+            "analysis_profile": spec.create_model_intent.profile.as_snake_case(),
+            "run_kind": spec.run_kind.as_snake_case(),
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
             "mesh_validation_options": validation_options,
@@ -13789,8 +13851,8 @@ fn generate_and_persist_study_analysis_mesh(
             "geometry_id": spec.geometry.geometry_id.clone(),
             "geometry_revision": spec.geometry.revision,
             "mesh_evidence_artifact_path": evidence_path.clone(),
-            "analysis_profile": analysis_refinement_profile_label(spec.create_model_intent.profile),
-            "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
+            "analysis_profile": spec.create_model_intent.profile.as_snake_case(),
+            "run_kind": spec.run_kind.as_snake_case(),
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
             "mesh_validation_options": validation_options,
@@ -14604,8 +14666,8 @@ fn generate_and_persist_refined_study_analysis_mesh(
             "geometry_id": spec.geometry.geometry_id.clone(),
             "geometry_revision": spec.geometry.revision,
             "source_analysis_mesh_artifact_path": path,
-            "analysis_profile": analysis_refinement_profile_label(spec.create_model_intent.profile),
-            "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
+            "analysis_profile": spec.create_model_intent.profile.as_snake_case(),
+            "run_kind": spec.run_kind.as_snake_case(),
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
             "mesh_validation_options": validation_options,
@@ -14642,8 +14704,8 @@ fn generate_and_persist_refined_study_analysis_mesh(
             "geometry_revision": spec.geometry.revision,
             "source_analysis_mesh_artifact_path": path,
             "mesh_evidence_artifact_path": refined_evidence_path.clone(),
-            "analysis_profile": analysis_refinement_profile_label(spec.create_model_intent.profile),
-            "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
+            "analysis_profile": spec.create_model_intent.profile.as_snake_case(),
+            "run_kind": spec.run_kind.as_snake_case(),
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
             "mesh_validation_options": validation_options,
@@ -14719,8 +14781,8 @@ fn attach_initial_adaptive_mesh_summary(
         Vec::new()
     } else {
         default_refinement_indicators_for_context(
-            analysis_refinement_profile_label(spec.create_model_intent.profile),
-            analysis_refinement_run_kind_label(spec.run_kind),
+            spec.create_model_intent.profile.as_snake_case(),
+            spec.run_kind.as_snake_case(),
         )
     };
     if defaults.is_empty()
@@ -14775,8 +14837,8 @@ fn initial_boundary_focus_sizing_field(
         Vec::new()
     } else {
         default_refinement_indicators_for_context(
-            analysis_refinement_profile_label(spec.create_model_intent.profile),
-            analysis_refinement_run_kind_label(spec.run_kind),
+            spec.create_model_intent.profile.as_snake_case(),
+            spec.run_kind.as_snake_case(),
         )
     };
     if defaults.is_empty() && options.refinement.indicators.namespaces.is_empty() {
@@ -14863,38 +14925,6 @@ fn default_refinement_indicators_for_context(
     runmat_meshing_core::default_refinement_indicators_for_analysis(profile, run_kind)
 }
 
-fn analysis_refinement_profile_label(profile: AnalysisCreateModelProfile) -> &'static str {
-    match profile {
-        AnalysisCreateModelProfile::LinearStaticStructural => "linear_static_structural",
-        AnalysisCreateModelProfile::ThermoMechanicalCoupled => "thermo_mechanical_coupled",
-        AnalysisCreateModelProfile::ThermalStandalone => "thermal_standalone",
-        AnalysisCreateModelProfile::ModalStructural => "modal_structural",
-        AnalysisCreateModelProfile::AcousticHarmonic => "acoustic_harmonic",
-        AnalysisCreateModelProfile::TransientStructural => "transient_structural",
-        AnalysisCreateModelProfile::NonlinearStructural => "nonlinear_structural",
-        AnalysisCreateModelProfile::ElectromagneticStatic => "electromagnetic_static",
-        AnalysisCreateModelProfile::CfdSteadyState => "cfd_steady_state",
-        AnalysisCreateModelProfile::CfdTransient => "cfd_transient",
-        AnalysisCreateModelProfile::ChtCoupled => "cht_coupled",
-        AnalysisCreateModelProfile::FsiCoupled => "fsi_coupled",
-    }
-}
-
-fn analysis_refinement_run_kind_label(run_kind: AnalysisRunKind) -> &'static str {
-    match run_kind {
-        AnalysisRunKind::LinearStatic => "linear_static",
-        AnalysisRunKind::Modal => "modal",
-        AnalysisRunKind::Acoustic => "acoustic",
-        AnalysisRunKind::Thermal => "thermal",
-        AnalysisRunKind::Transient => "transient",
-        AnalysisRunKind::Cfd => "cfd",
-        AnalysisRunKind::Cht => "cht",
-        AnalysisRunKind::Fsi => "fsi",
-        AnalysisRunKind::Nonlinear => "nonlinear",
-        AnalysisRunKind::Electromagnetic => "electromagnetic",
-    }
-}
-
 fn analysis_refinement_context(spec: &AnalysisStudySpec) -> serde_json::Value {
     let Some(model) = spec.model.as_ref() else {
         return serde_json::json!({
@@ -14954,11 +14984,17 @@ fn append_solved_adaptive_mesh_summary(
     let profile_label = payload
         .get("analysis_profile")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or("linear_static_structural");
+        .ok_or_else(|| {
+            "analysis mesh artifact is missing analysis_profile; regenerate the mesh from the typed .fea study"
+                .to_string()
+        })?;
     let run_kind_label = payload
         .get("run_kind")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or("linear_static");
+        .ok_or_else(|| {
+            "analysis mesh artifact is missing run_kind; regenerate the mesh from the typed .fea study"
+                .to_string()
+        })?;
     let defaults = if matches!(options.refinement.strategy, RefinementStrategy::Uniform) {
         Vec::new()
     } else {

@@ -1764,7 +1764,7 @@ mod tests {
             ],
             vec![[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]],
         )
-        .expect("tet boundary mesh should be valid");
+        .expect("tetrahedron boundary mesh should be valid");
         mesh.set_edge_mode(MeshEdgeMode::None);
         mesh.set_scalar_field(Some(MeshScalarField::new(
             "structural.von_mises",

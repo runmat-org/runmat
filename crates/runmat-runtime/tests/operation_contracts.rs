@@ -163,6 +163,7 @@ fn contract_study_spec(
         run_kind,
         backend: ComputeBackend::Cpu,
         mesh_options: None,
+        outputs: Vec::new(),
         analysis_mesh_artifact_path: None,
         analysis_mesh_evidence_artifact_path: None,
         linear_static_run_options: None,
@@ -480,6 +481,27 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
     assert!(electromagnetic_domain.enabled);
     assert_eq!(electromagnetic_domain.reference_frequency_hz, 60.0);
     assert_eq!(electromagnetic_domain.applied_current_a, 100.0);
+
+    let electro_thermal = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_electro_thermal_model".to_string(),
+            profile: AnalysisCreateModelProfile::ElectroThermalCoupled,
+            prep_context: None,
+        },
+        OperationContext::new(
+            Some("trace-contract-create-4-electro-thermal".to_string()),
+            None,
+        ),
+    )
+    .expect("electro-thermal profile should be supported");
+    assert_eq!(electro_thermal.operation, "fea.create_model");
+    assert_eq!(electro_thermal.op_version, "fea.create_model/v1");
+    assert_eq!(
+        electro_thermal.data.steps[0].kind,
+        runmat_analysis_core::AnalysisStepKind::Transient
+    );
+    assert!(electro_thermal.data.electro_thermal.is_some());
 }
 
 #[test]
@@ -865,8 +887,8 @@ fn analysis_study_sweep_plan_contract_is_v1_and_typed() {
 #[test]
 fn prep_to_create_model_to_validate_flow_is_contract_stable() {
     let geometry = geometry_load_op(
-        "/assembly.step",
-        SIMPLE_STEP.as_bytes(),
+        "/part.stl",
+        TRIANGLE_STL.as_bytes(),
         OperationContext::new(Some("trace-contract-prep-flow-1".to_string()), None),
     )
     .expect("geometry load should succeed");
@@ -907,6 +929,38 @@ fn prep_to_create_model_to_validate_flow_is_contract_stable() {
     assert_eq!(validated.operation, "fea.validate");
     assert_eq!(validated.op_version, "fea.validate/v1");
     assert!(validated.data.valid);
+}
+
+#[test]
+fn prep_metadata_only_step_without_topology_is_typed() {
+    let geometry = geometry_load_op(
+        "/assembly.step",
+        SIMPLE_STEP.as_bytes(),
+        OperationContext::new(
+            Some("trace-contract-prep-metadata-only-1".to_string()),
+            None,
+        ),
+    )
+    .expect("metadata-only STEP load should succeed");
+
+    let err = geometry_prep_for_analysis_op(
+        &geometry.data,
+        GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(
+            Some("trace-contract-prep-metadata-only-2".to_string()),
+            None,
+        ),
+    )
+    .expect_err("metadata-only STEP without topology should not prep for analysis");
+
+    assert_eq!(err.operation, "geometry.prep_for_analysis");
+    assert_eq!(err.op_version, "geometry.prep_for_analysis/v1");
+    assert_eq!(err.error_code, "RM.GEOMETRY.PREP_FOR_ANALYSIS.FAILED");
+    assert!(
+        err.message.contains("no mesh entity mapping"),
+        "unexpected prep failure message: {}",
+        err.message
+    );
 }
 
 #[test]
@@ -2145,11 +2199,15 @@ fn analysis_run_nonlinear_prep_reference_errors_are_typed() {
 #[test]
 fn analysis_run_nonlinear_stale_prep_reference_is_typed() {
     runmat_runtime::geometry::reset_prep_artifact_store_for_tests();
+    let _prep_latest_guard = EnvVarRestoreGuard {
+        key: "RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION",
+        previous: std::env::var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION").ok(),
+    };
     std::env::set_var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION", "true");
 
     let mut geometry_v1 = geometry_load_op(
-        "/assembly.step",
-        SIMPLE_STEP.as_bytes(),
+        "/part.stl",
+        TRIANGLE_STL.as_bytes(),
         OperationContext::new(Some("trace-contract-prep-stale-1".to_string()), None),
     )
     .expect("geometry load should succeed")
@@ -2197,7 +2255,6 @@ fn analysis_run_nonlinear_stale_prep_reference_is_typed() {
     assert_eq!(stale.op_version, "fea.run_nonlinear/v1");
     assert_eq!(stale.error_code, "RM.FEA.RUN_PREP.STALE");
 
-    std::env::remove_var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION");
     runmat_runtime::geometry::reset_prep_artifact_store_for_tests();
 }
 
