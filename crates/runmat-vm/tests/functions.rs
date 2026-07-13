@@ -3957,6 +3957,21 @@ fn metaclass_postfix_member_and_method() {
 }
 
 #[test]
+fn ismethod_script_surface_checks_registered_class_methods() {
+    let program = r#"
+        __register_test_classes();
+        p = new_object('Point');
+        circle = new_object('Circle');
+        ok = ismethod(p, 'move') && ismethod(p, "origin") && ismethod('Point', 'move') && ismethod("Point", "origin") && ~ismethod(p, 'missing') && ~ismethod('Point', 'missing') && ismethod(circle, 'area');
+    "#;
+    let vars = execute_source(program);
+    assert!(
+        matches!(vars.last(), Some(runmat_builtins::Value::Bool(true))),
+        "expected per-case ismethod checks to produce ok=true: {vars:?}"
+    );
+}
+
+#[test]
 fn classdef_with_attributes_enforced() {
     // Define class A with private get and public set on property p, then enforce via getfield/setfield
     let src = "classdef A\n  properties(GetAccess=private, SetAccess=public)\n    p\n  end\nend\n a = new_object('A'); a = setfield(a,'p',5); try; v = getfield(a,'p'); catch e; ok=1; end";

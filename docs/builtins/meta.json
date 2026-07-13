@@ -49706,6 +49706,49 @@
       ]
     },
     {
+      "name": "ismethod",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = ismethod(obj, method_name)",
+          "inputs": [
+            {
+              "name": "obj",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Object, class name, class reference, or gpuArray value to inspect."
+            },
+            {
+              "name": "method_name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Method name as a string scalar or row character vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the object has the requested public method."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ISMETHOD.NAME_INVALID",
+          "identifier": "RunMat:IsMethodNameInvalid",
+          "when": "The method-name argument is not a string scalar or row character vector.",
+          "message": "ismethod: method name must be a string scalar or character vector"
+        }
+      ]
+    },
+    {
       "name": "ismissing",
       "output_mode": "Fixed",
       "completion_policy": "Public",

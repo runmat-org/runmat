@@ -22,6 +22,7 @@ pub mod identifiers;
 pub mod inputname;
 pub(crate) mod isa;
 pub(crate) mod ischar;
+pub(crate) mod ismethod;
 pub(crate) mod isobject;
 pub(crate) mod isstring;
 pub mod isvalid;
