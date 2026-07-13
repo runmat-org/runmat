@@ -59397,6 +59397,35 @@
       ]
     },
     {
+      "name": "metaclass",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "mc = metaclass(object)",
+          "inputs": [
+            {
+              "name": "object",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Object or value whose runtime class metadata is requested."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mc",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Meta-class reference for the input value's runtime class."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "mfilename",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -98534,6 +98563,48 @@
           "identifier": "RunMat:sum:Internal",
           "when": "Reduction execution fails due to conversion, provider, allocation, or coercion operations.",
           "message": "sum: internal reduction failure"
+        }
+      ]
+    },
+    {
+      "name": "superclasses",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = superclasses(obj_or_class)",
+          "inputs": [
+            {
+              "name": "obj_or_class",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Object instance or class name string/character vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "s",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell row of visible superclass names as character vectors."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SUPERCLASSES.CLASS_INVALID",
+          "identifier": "RunMat:SuperclassesClassInvalid",
+          "when": "The argument is neither an object nor a class-name string scalar/row character vector.",
+          "message": "superclasses: input must be an object or class name"
+        },
+        {
+          "code": "RM.SUPERCLASSES.CLASS_UNKNOWN",
+          "identifier": "RunMat:SuperclassesClassUnknown",
+          "when": "The requested class is not present in RunMat class metadata.",
+          "message": "superclasses: class metadata not found"
         }
       ]
     },

@@ -44,6 +44,41 @@ fn has_object_class(values: &[runmat_builtins::Value], class_name: &str) -> bool
     })
 }
 
+fn has_class_ref(values: &[runmat_builtins::Value], class_name: &str) -> bool {
+    values
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::ClassRef(name) if name == class_name))
+}
+
+fn cell_char_row_values(value: &runmat_builtins::Value) -> Option<((usize, usize), Vec<String>)> {
+    let runmat_builtins::Value::Cell(cell) = value else {
+        return None;
+    };
+    let values = cell
+        .data
+        .iter()
+        .map(|entry| match entry {
+            runmat_builtins::Value::CharArray(chars) => Some(chars.data.iter().collect::<String>()),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(((cell.rows, cell.cols), values))
+}
+
+fn has_cell_char_row(values: &[runmat_builtins::Value], expected: &[&str]) -> bool {
+    values.iter().any(|value| {
+        cell_char_row_values(value).is_some_and(|((rows, cols), actual)| {
+            rows == 1
+                && cols == expected.len()
+                && actual
+                    == expected
+                        .iter()
+                        .map(|entry| entry.to_string())
+                        .collect::<Vec<_>>()
+        })
+    })
+}
+
 fn has_object_num_property(
     values: &[runmat_builtins::Value],
     class_name: &str,
@@ -3954,6 +3989,46 @@ fn metaclass_postfix_member_and_method() {
     assert!(has_object_class(&vars, "Point"));
     assert!(has_object_num_property(&vars, "Point", "x", 0.0));
     assert!(has_object_num_property(&vars, "Point", "y", 0.0));
+}
+
+#[test]
+fn metaclass_builtin_script_surface_reports_runtime_class_refs() {
+    let program = r#"
+        __register_test_classes();
+        p = new_object('Point');
+        mc_obj = metaclass(p);
+        mc_char = metaclass('Point');
+        mc_string = metaclass("Point");
+    "#;
+    let vars = execute_source(program);
+    assert!(has_class_ref(&vars, "Point"));
+    assert!(has_class_ref(&vars, "char"));
+    assert!(has_class_ref(&vars, "string"));
+}
+
+#[test]
+fn superclasses_script_surface_reports_registered_parent_chain() {
+    let program = r#"
+        __register_test_classes();
+        c = new_object('Circle');
+        s_obj = superclasses(c);
+        s_name = superclasses('Circle');
+        s_ref = superclasses(classref('Circle'));
+        s_none = superclasses('Point');
+    "#;
+    let vars = execute_source(program);
+    assert!(has_cell_char_row(&vars, &["Shape"]));
+    assert!(
+        vars.iter()
+            .filter(|value| {
+                cell_char_row_values(value).is_some_and(|((rows, cols), actual)| {
+                    rows == 1 && cols == 1 && actual == vec!["Shape".to_string()]
+                })
+            })
+            .count()
+            >= 3
+    );
+    assert!(has_cell_char_row(&vars, &[]));
 }
 
 #[test]

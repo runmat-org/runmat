@@ -2751,6 +2751,32 @@ pub fn is_class_or_subclass(class_name: &str, ancestor_name: &str) -> bool {
     })
 }
 
+pub fn superclass_chain(class_name: &str) -> Option<Vec<String>> {
+    CLASS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let mut current = registry
+            .get(class_name)
+            .and_then(|class_def| class_def.parent.clone());
+        let mut visited = std::collections::HashSet::new();
+        visited.insert(class_name.to_string());
+        let mut supers = Vec::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            supers.push(name.clone());
+            current = registry
+                .get(&name)
+                .and_then(|class_def| class_def.parent.clone());
+        }
+        if registry.contains_key(class_name) {
+            Some(supers)
+        } else {
+            None
+        }
+    })
+}
+
 /// Resolve a property through the inheritance chain, returning the property definition and
 /// the name of the class where it was defined.
 pub fn lookup_property(class_name: &str, prop: &str) -> Option<(PropertyDef, String)> {
@@ -2834,8 +2860,8 @@ pub fn set_static_property_value_in_owner(
 #[cfg(test)]
 mod class_registry_tests {
     use super::{
-        get_class, lookup_method, lookup_property, register_class, Access, ClassDef, MethodDef,
-        PropertyDef,
+        get_class, lookup_method, lookup_property, register_class, superclass_chain, Access,
+        ClassDef, MethodDef, PropertyDef,
     };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2868,6 +2894,75 @@ mod class_registry_tests {
                 Some(class_name)
             );
         }
+    }
+
+    #[test]
+    fn superclass_chain_reports_nearest_to_root_order() {
+        let grand = unique_class_name("super_chain_grand");
+        let parent = unique_class_name("super_chain_parent");
+        let child = unique_class_name("super_chain_child");
+
+        register_class(ClassDef {
+            name: grand.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: parent.clone(),
+            parent: Some(grand.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: child.clone(),
+            parent: Some(parent.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        assert_eq!(
+            superclass_chain(&child),
+            Some(vec![parent.clone(), grand.clone()])
+        );
+        assert_eq!(superclass_chain(&grand), Some(Vec::new()));
+        assert_eq!(superclass_chain("MissingSuperclassChainClass"), None);
+    }
+
+    #[test]
+    fn superclass_chain_reports_recorded_parent_when_parent_metadata_is_missing() {
+        let child = unique_class_name("super_chain_missing_parent_child");
+        let parent = unique_class_name("super_chain_missing_parent_parent");
+
+        register_class(ClassDef {
+            name: child.clone(),
+            parent: Some(parent.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        assert_eq!(superclass_chain(&child), Some(vec![parent]));
+    }
+
+    #[test]
+    fn superclass_chain_stops_before_repeating_cycle_start() {
+        let first = unique_class_name("super_chain_cycle_first");
+        let second = unique_class_name("super_chain_cycle_second");
+
+        register_class(ClassDef {
+            name: first.clone(),
+            parent: Some(second.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: second.clone(),
+            parent: Some(first.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        assert_eq!(superclass_chain(&first), Some(vec![second]));
     }
 
     #[test]
