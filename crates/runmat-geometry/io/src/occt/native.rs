@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 const DEFAULT_LINEAR_DEFLECTION: f64 = 0.01;
 const DEFAULT_ANGULAR_DEFLECTION: f64 = 0.5;
+const OCCT_IMPORT_CANCELLED_MESSAGE: &str = "OCCT CAD import cancelled";
 static NATIVE_CAD_BACKEND_USED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn native_cad_backend_was_used() -> bool {
@@ -51,7 +52,7 @@ pub(crate) fn import_cad_topology(
             cancel_token_id: cancel_token.id(),
         },
     )
-    .map_err(|err| GeometryImportError::ParseFailed(format!("OCCT CAD import failed: {err}")))?;
+    .map_err(|err| occt_bridge_error("OCCT CAD import failed", err))?;
     context.check_cancelled()?;
 
     payload_to_topology(payload, options, context)
@@ -73,9 +74,7 @@ pub(crate) fn start_cad_preview_session(
         ffi_format(format),
         ffi_import_options(options, cancel_token.id()),
     )
-    .map_err(|err| {
-        GeometryImportError::ParseFailed(format!("OCCT CAD preview session failed: {err}"))
-    })?;
+    .map_err(|err| occt_bridge_error("OCCT CAD preview session failed", err))?;
     context.check_cancelled()?;
     Ok(OcctCadPreviewSessionStart {
         session_id: payload.session_id,
@@ -101,9 +100,7 @@ pub(crate) fn read_cad_preview_session_chunk(
             cancel_token_id: cancel_token.id(),
         },
     )
-    .map_err(|err| {
-        GeometryImportError::ParseFailed(format!("OCCT CAD preview session failed: {err}"))
-    })?;
+    .map_err(|err| occt_bridge_error("OCCT CAD preview session failed", err))?;
     context.check_cancelled()?;
     let topology = payload_to_topology(payload.topology, options, context)?;
     Ok(OcctCadPreviewSessionChunk {
@@ -117,6 +114,15 @@ pub(crate) fn read_cad_preview_session_chunk(
 
 pub(crate) fn close_cad_preview_session(session_id: u64) {
     ffi::bridge::close_cad_preview_session(session_id);
+}
+
+fn occt_bridge_error(operation: &str, err: impl std::fmt::Display) -> GeometryImportError {
+    let message = err.to_string();
+    if message.contains(OCCT_IMPORT_CANCELLED_MESSAGE) {
+        GeometryImportError::Cancelled
+    } else {
+        GeometryImportError::ParseFailed(format!("{operation}: {message}"))
+    }
 }
 
 fn payload_to_topology(
