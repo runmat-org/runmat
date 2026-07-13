@@ -5108,6 +5108,19 @@ pub fn axes_handles_for_figure(handle: FigureHandle) -> Result<Vec<f64>, FigureE
         .collect())
 }
 
+pub fn plot_child_handles_for_axes(handle: FigureHandle, axes_index: usize) -> Vec<f64> {
+    let mut handles = registry()
+        .plot_children
+        .iter()
+        .filter_map(|(id, state)| {
+            let (figure, axes) = state.figure_axes();
+            (figure == handle && axes == axes_index).then_some(*id as f64)
+        })
+        .collect::<Vec<_>>();
+    handles.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+    handles
+}
+
 pub fn select_axes_for_figure(handle: FigureHandle, axes_index: usize) -> Result<(), FigureError> {
     let mut reg = registry();
     let state = get_state_mut(&mut reg, handle);

@@ -32306,6 +32306,83 @@
       ]
     },
     {
+      "name": "findobj",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = findobj()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Graphics handles that satisfy the requested hierarchy and property filters."
+            }
+          ]
+        },
+        {
+          "label": "h = findobj(prop, value, ...)",
+          "inputs": [
+            {
+              "name": "filters",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Property/value predicates, -property, -regexp, -not, and logical operators."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Graphics handles that satisfy the requested hierarchy and property filters."
+            }
+          ]
+        },
+        {
+          "label": "h = findobj(objhandles, '-depth', d, filters...)",
+          "inputs": [
+            {
+              "name": "objhandles",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Graphics handle or handle array that restricts the search root."
+            },
+            {
+              "name": "filters",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional depth/flat options and property predicates."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Graphics handles that satisfy the requested hierarchy and property filters."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FINDOBJ.INVALID_ARGUMENT",
+          "identifier": "RunMat:findobj:InvalidArgument",
+          "when": "Arguments, search roots, depth, operators, property names, or regexp patterns are malformed.",
+          "message": "findobj: invalid argument"
+        }
+      ]
+    },
+    {
       "name": "fir1",
       "output_mode": "Fixed",
       "completion_policy": "Public",

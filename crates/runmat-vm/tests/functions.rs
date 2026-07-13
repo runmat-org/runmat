@@ -50,6 +50,20 @@ fn has_class_ref(values: &[runmat_builtins::Value], class_name: &str) -> bool {
         .any(|v| matches!(v, runmat_builtins::Value::ClassRef(name) if name == class_name))
 }
 
+fn has_numeric_tensor(values: &[runmat_builtins::Value], expected: &[f64]) -> bool {
+    values.iter().any(|value| match value {
+        runmat_builtins::Value::Tensor(tensor) => {
+            tensor.data.len() == expected.len()
+                && tensor
+                    .data
+                    .iter()
+                    .zip(expected)
+                    .all(|(actual, expected)| (*actual - *expected).abs() < 1e-9)
+        }
+        _ => false,
+    })
+}
+
 fn cell_char_row_values(value: &runmat_builtins::Value) -> Option<((usize, usize), Vec<String>)> {
     let runmat_builtins::Value::Cell(cell) = value else {
         return None;
@@ -4044,6 +4058,44 @@ fn ismethod_script_surface_checks_registered_class_methods() {
         matches!(vars.last(), Some(runmat_builtins::Value::Bool(true))),
         "expected per-case ismethod checks to produce ok=true: {vars:?}"
     );
+}
+
+#[test]
+fn findobj_script_surface_finds_graphics_handles() {
+    let program = r#"
+        h = plot([1 2 3], 'DisplayName', 'series-a');
+        fig = gcf();
+        by_type = findobj('Type', 'line');
+        by_name = findobj(gca(), 'DisplayName', 'series-a');
+        flat = findobj(fig, 'flat');
+    "#;
+    let vars = execute_source(program);
+    let line_handle = vars
+        .iter()
+        .find_map(|value| match value {
+            runmat_builtins::Value::Num(value) if *value > 1.0e6 => Some(*value),
+            _ => None,
+        })
+        .expect("line handle");
+    let figure_handle = vars
+        .iter()
+        .find_map(|value| match value {
+            runmat_builtins::Value::Num(value) if *value > 0.0 && *value < 1.0e6 => Some(*value),
+            _ => None,
+        })
+        .expect("figure handle");
+
+    assert!(
+        vars.iter()
+            .filter(|value| matches!(
+                value,
+                runmat_builtins::Value::Tensor(tensor)
+                    if tensor.data.len() == 1 && (tensor.data[0] - line_handle).abs() < 1e-9
+            ))
+            .count()
+            >= 2
+    );
+    assert!(has_numeric_tensor(&vars, &[figure_handle]));
 }
 
 #[test]
