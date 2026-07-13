@@ -48381,6 +48381,49 @@
       "errors": []
     },
     {
+      "name": "isUnderlyingType",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isUnderlyingType(X, typename)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input array or object to inspect."
+            },
+            {
+              "name": "typename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Underlying data type name to test."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when X has the requested underlying type."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.IS_UNDERLYING_TYPE.TYPE_NAME_INVALID",
+          "identifier": "RunMat:isUnderlyingType:TypeNameInvalid",
+          "when": "Second argument is not a string scalar or row character vector.",
+          "message": "isUnderlyingType: TYPENAME must be a string scalar or character vector"
+        }
+      ]
+    },
+    {
       "name": "isa",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -104735,6 +104778,35 @@
           "message": "readtable: unsupported file type"
         }
       ]
+    },
+    {
+      "name": "underlyingType",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "typename = underlyingType(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input array or object to inspect."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "typename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Name of the underlying MATLAB data type."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "unicode2native",

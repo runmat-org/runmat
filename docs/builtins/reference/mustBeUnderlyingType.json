@@ -30,6 +30,7 @@
   "behaviors": [
     "Callable validator forms enforce exact supported arity, throw on validation failure, and suppress automatic output on success.",
     "Arguments-block validation uses the same shared runtime predicates for validators that RunMat can encode statically.",
+    "Requested type names are compared exactly after trimming surrounding whitespace, matching `isUnderlyingType` and `underlyingType`.",
     "Numeric validators check every element without materializing a cloned numeric array, including sparse stored values and implicit sparse zeros where relevant.",
     "Text validators accept string scalars/arrays, character row vectors, and compatible cell arrays of text where MATLAB commonly permits them."
   ],

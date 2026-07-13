@@ -31,6 +31,8 @@ static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<u64, TransposeInfo>>> =
 
 static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<u64, ProviderPrecision>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static HANDLE_CLASS_NAMES: Lazy<RwLock<HashMap<u64, String>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 static HANDLE_STORAGES: Lazy<RwLock<HashMap<u64, GpuTensorStorage>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
@@ -130,6 +132,32 @@ pub fn handle_precision(handle: &GpuTensorHandle) -> Option<ProviderPrecision> {
 /// Clear any recorded precision metadata for a GPU tensor handle.
 pub fn clear_handle_precision(handle: &GpuTensorHandle) {
     if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
+        guard.remove(&handle.buffer_id);
+    }
+}
+
+/// Record the MATLAB underlying class associated with a GPU tensor handle.
+///
+/// Precision alone cannot represent integer gpuArray classes, so runtime
+/// introspection and validation use this metadata when the upload path knows
+/// the exact requested or inferred class.
+pub fn set_handle_class_name(handle: &GpuTensorHandle, class_name: impl Into<String>) {
+    if let Ok(mut guard) = HANDLE_CLASS_NAMES.write() {
+        guard.insert(handle.buffer_id, class_name.into());
+    }
+}
+
+/// Look up the recorded MATLAB underlying class for a GPU tensor handle.
+pub fn handle_class_name(handle: &GpuTensorHandle) -> Option<String> {
+    HANDLE_CLASS_NAMES
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&handle.buffer_id).cloned())
+}
+
+/// Clear any recorded MATLAB underlying class metadata for a GPU tensor handle.
+pub fn clear_handle_class_name(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = HANDLE_CLASS_NAMES.write() {
         guard.remove(&handle.buffer_id);
     }
 }

@@ -8,6 +8,14 @@ pub fn isa_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
 
+pub fn underlying_type_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::String
+}
+
+pub fn is_underlying_type_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Bool
+}
+
 pub fn ischar_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
@@ -77,6 +85,22 @@ mod tests {
     #[test]
     fn isa_type_reports_bool() {
         assert_eq!(isa_type(&[], &ResolveContext::new(Vec::new())), Type::Bool);
+    }
+
+    #[test]
+    fn underlying_type_type_reports_string() {
+        assert_eq!(
+            underlying_type_type(&[], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
+    }
+
+    #[test]
+    fn is_underlying_type_type_reports_bool() {
+        assert_eq!(
+            is_underlying_type_type(&[], &ResolveContext::new(Vec::new())),
+            Type::Bool
+        );
     }
 
     #[test]

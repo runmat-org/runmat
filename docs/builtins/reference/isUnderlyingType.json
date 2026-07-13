@@ -1,0 +1,98 @@
+{
+  "title": "isUnderlyingType",
+  "category": "introspection",
+  "keywords": [
+    "isUnderlyingType",
+    "underlying data type",
+    "type checking",
+    "gpuArray",
+    "underlyingType"
+  ],
+  "summary": "Test whether a value has a specified underlying MATLAB data type.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Returns a host logical scalar and inspects gpuArray metadata without launching kernels or gathering data."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::underlying_type::tests",
+    "integration": "crates/runmat-vm/tests/functions.rs::underlying_type_script_surface"
+  },
+  "description": "`isUnderlyingType(X, typename)` returns true when `underlyingType(X)` equals `typename`. The type name must be a string scalar or a character row vector.",
+  "behaviors": [
+    "The predicate compares against the same canonical type names returned by `underlyingType`, such as `\"double\"`, `\"single\"`, `\"logical\"`, `\"char\"`, `\"string\"`, `\"cell\"`, and object class names.",
+    "The `typename` input accepts a string scalar or a character row vector. Multi-element string arrays, multi-row character arrays, and non-text values throw a structured argument error.",
+    "gpuArray inputs are checked from handle metadata. Exact class-name metadata is preferred for uploaded integer and floating-point device arrays; provider precision is used as a fallback for handles that only expose F32/F64.",
+    "`isUnderlyingType(X, typename)` compares the requested type name exactly after trimming surrounding whitespace."
+  ],
+  "examples": [
+    {
+      "description": "Check a single-precision array",
+      "input": "A = single([1 2 3]);\ntf = isUnderlyingType(A, \"single\")",
+      "output": "tf = logical(1)"
+    },
+    {
+      "description": "Reject a mismatched underlying type",
+      "input": "tf = isUnderlyingType(true, \"double\")",
+      "output": "tf = logical(0)"
+    },
+    {
+      "description": "Check gpuArray element type without gathering",
+      "input": "G = gpuArray(single([1 2 3]));\ntf = isUnderlyingType(G, \"single\")",
+      "output": "tf = logical(1)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is this the same as `isa(X, typename)`?",
+      "answer": "No. `isa` tests the class or category of the value itself. `isUnderlyingType` tests the data type returned by `underlyingType`, which differs for gpuArray values."
+    },
+    {
+      "question": "What text forms are accepted for `typename`?",
+      "answer": "Use a string scalar such as `\"double\"` or a character row vector such as `'double'`. Non-scalar string arrays and multi-row character arrays are rejected."
+    },
+    {
+      "question": "Will this gather gpuArray data?",
+      "answer": "No. The predicate reads class-name, logical, and precision metadata from the gpuArray handle and returns a host logical scalar."
+    }
+  ],
+  "links": [
+    {
+      "label": "underlyingType",
+      "url": "./underlyingType"
+    },
+    {
+      "label": "class",
+      "url": "./class"
+    },
+    {
+      "label": "isa",
+      "url": "./isa"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/underlying_type.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/underlying_type.rs"
+  },
+  "gpu_residency": "`isUnderlyingType` is metadata-only for gpuArray inputs. It returns a host logical scalar and preserves provider residency for the inspected buffer.",
+  "gpu_behavior": [
+    "No provider hook is required. RunMat maps gpuArray class-name, logical, and precision metadata to the same names returned by `underlyingType` and compares that name exactly with the requested type."
+  ]
+}

@@ -12,6 +12,7 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::identifiers::is_valid_varname;
 use crate::builtins::introspection::class::class_name_for_value;
+use crate::builtins::introspection::underlying_type::underlying_type_matches;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -633,17 +634,9 @@ pub fn value_underlying_type_matches(
     value: &Value,
     class_names: Vec<String>,
 ) -> Result<bool, RuntimeError> {
-    let actual = match value {
-        Value::Tensor(t) => t.dtype.class_name().to_string(),
-        Value::SparseTensor(_) => "double".to_string(),
-        Value::ComplexTensor(_) | Value::Complex(_, _) | Value::Num(_) => "double".to_string(),
-        Value::Int(v) => v.class_name().to_string(),
-        Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
-        _ => class_name_for_value(value),
-    };
     Ok(class_names
         .iter()
-        .any(|class_name| actual.eq_ignore_ascii_case(class_name.trim())))
+        .any(|class_name| underlying_type_matches(value, class_name)))
 }
 
 pub fn value_is_member(value: &Value, set: &Value) -> Result<bool, RuntimeError> {

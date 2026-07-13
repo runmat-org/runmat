@@ -1731,6 +1731,7 @@ impl AccelProvider for InProcessProvider {
         let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         guard.remove(&h.buffer_id);
         runmat_accelerate_api::clear_handle_precision(h);
+        runmat_accelerate_api::clear_handle_class_name(h);
         runmat_accelerate_api::clear_handle_logical(h);
         runmat_accelerate_api::clear_handle_storage(h);
         Ok(())

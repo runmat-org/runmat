@@ -41,6 +41,7 @@ pub(crate) mod superclasses;
 pub mod test_classes;
 pub mod test_methods;
 pub(crate) mod type_resolvers;
+pub(crate) mod underlying_type;
 pub mod which;
 pub mod who;
 pub mod whos;

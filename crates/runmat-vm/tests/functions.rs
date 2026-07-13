@@ -4076,6 +4076,33 @@ fn ismethod_script_surface_checks_registered_class_methods() {
 }
 
 #[test]
+fn underlying_type_script_surface() {
+    let program = r#"
+        __register_test_classes();
+        p = new_object('Point');
+        a = underlyingType(1);
+        b = underlyingType(single([1 2]));
+        c = underlyingType(true);
+        d = underlyingType('abc');
+        e = underlyingType("abc");
+        f = underlyingType(p);
+        ok = isUnderlyingType(single([3 4]), "single") && isUnderlyingType(true, 'logical') && ~isUnderlyingType(p, "double");
+    "#;
+    let vars = execute_source(program);
+    for expected in ["double", "single", "logical", "char", "string", "Point"] {
+        assert!(
+            vars.iter()
+                .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == expected)),
+            "expected underlyingType output {expected:?}; vars={vars:?}"
+        );
+    }
+    assert!(
+        matches!(vars.last(), Some(runmat_builtins::Value::Bool(true))),
+        "expected isUnderlyingType combined predicate to be true: {vars:?}"
+    );
+}
+
+#[test]
 fn findobj_script_surface_finds_graphics_handles() {
     let program = r#"
         h = plot([1 2 3], 'DisplayName', 'series-a');
