@@ -23779,6 +23779,48 @@
       ]
     },
     {
+      "name": "display",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "display(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Value to display with a variable-name header."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ans",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty matrix placeholder returned by sink invocation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DISPLAY.ARG_CONFIG",
+          "identifier": "RunMat:display:TooManyInputs",
+          "when": "Too many input arguments are passed to display.",
+          "message": "display: too many input arguments"
+        },
+        {
+          "code": "RM.DISPLAY.GATHER",
+          "identifier": "RunMat:display:GatherFailed",
+          "when": "Input value cannot be gathered onto the host for rendering.",
+          "message": "display: failed to gather value for display"
+        }
+      ]
+    },
+    {
       "name": "dividerand",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",

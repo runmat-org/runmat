@@ -147,7 +147,7 @@ async fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     Ok(empty_return_value())
 }
 
-fn format_for_disp(value: &Value) -> Vec<String> {
+pub(crate) fn format_for_disp(value: &Value) -> Vec<String> {
     render_value(value, RenderMode::TopLevel)
 }
 
@@ -781,7 +781,7 @@ fn dims_to_by_string(dims: &[usize]) -> String {
         .join("-by-")
 }
 
-fn empty_return_value() -> Value {
+pub(crate) fn empty_return_value() -> Value {
     Value::Tensor(Tensor::zeros(vec![0, 0]))
 }
 

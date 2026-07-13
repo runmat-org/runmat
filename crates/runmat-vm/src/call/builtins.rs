@@ -397,6 +397,7 @@ pub async fn vm_dynamic_workspace_builtin(
         VmDynamicWorkspaceBuiltin::Eval => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
             let source = workspace_text_arg(builtin.name(), &args[0])?;
+            let source_context = dynamic_source_context("<eval>", &source);
             eval_workspace_source(
                 WorkspaceEvalRequest {
                     builtin: builtin.name(),
@@ -404,8 +405,8 @@ pub async fn vm_dynamic_workspace_builtin(
                     source,
                     source_label: "<eval>".to_string(),
                     requested_outputs,
-                    source_id,
-                    source_context: None,
+                    source_id: Some(source_context.source_id),
+                    source_context: Some(source_context),
                     commit_workspace_on_error: false,
                     capture_display_output: false,
                     empty_value_when_no_result: false,
@@ -417,6 +418,7 @@ pub async fn vm_dynamic_workspace_builtin(
         VmDynamicWorkspaceBuiltin::Evalc => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
             let source = workspace_text_arg(builtin.name(), &args[0])?;
+            let source_context = dynamic_source_context("<evalc>", &source);
             let eval_requested_outputs = if requested_outputs == 1 {
                 1
             } else {
@@ -430,8 +432,8 @@ pub async fn vm_dynamic_workspace_builtin(
                     source,
                     source_label: "<evalc>".to_string(),
                     requested_outputs: eval_requested_outputs,
-                    source_id,
-                    source_context: None,
+                    source_id: Some(source_context.source_id),
+                    source_context: Some(source_context),
                     commit_workspace_on_error: false,
                     capture_display_output: requested_outputs == 1,
                     empty_value_when_no_result: requested_outputs > 1,
@@ -447,6 +449,7 @@ pub async fn vm_dynamic_workspace_builtin(
             validate_intrinsic_arg_count(builtin.name(), args.len(), 2)?;
             let target = workspace_target_arg(builtin.name(), &args[0])?;
             let source = workspace_text_arg(builtin.name(), &args[1])?;
+            let source_context = dynamic_source_context("<eval>", &source);
             eval_workspace_source(
                 WorkspaceEvalRequest {
                     builtin: builtin.name(),
@@ -454,8 +457,8 @@ pub async fn vm_dynamic_workspace_builtin(
                     source,
                     source_label: "<eval>".to_string(),
                     requested_outputs,
-                    source_id,
-                    source_context: None,
+                    source_id: Some(source_context.source_id),
+                    source_context: Some(source_context),
                     commit_workspace_on_error: false,
                     capture_display_output: false,
                     empty_value_when_no_result: false,
@@ -823,6 +826,14 @@ fn install_dynamic_source_context(
         context.text.clone(),
     ));
     runmat_runtime::source_context::replace_source_catalog_with_fullpaths(entries)
+}
+
+fn dynamic_source_context(name: impl Into<String>, text: &str) -> DynamicSourceContext {
+    DynamicSourceContext {
+        source_id: next_dynamic_source_id(),
+        name: name.into(),
+        text: text.to_string(),
+    }
 }
 
 fn next_dynamic_source_id() -> runmat_hir::SourceId {

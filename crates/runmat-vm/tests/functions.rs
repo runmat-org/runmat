@@ -1842,6 +1842,21 @@ fn inputname_reports_feval_caller_argument_names() {
 }
 
 #[test]
+fn display_script_surface_uses_variable_header() {
+    let source = r#"
+        txt = evalc("alpha = [1 2; 3 4]; display(alpha);");
+    "#;
+    let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_display_probe.m");
+    assert!(vars.iter().any(|v| matches!(
+        v,
+        runmat_builtins::Value::String(s)
+            if s.contains("alpha =")
+                && s.contains("1       2")
+                && s.contains("3       4")
+    )));
+}
+
+#[test]
 fn mfilename_reads_current_source_context() {
     let source = r#"
         name = mfilename();

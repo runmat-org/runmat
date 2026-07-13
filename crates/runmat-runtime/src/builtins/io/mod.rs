@@ -4,6 +4,7 @@ pub mod clc;
 pub mod data;
 pub mod diary;
 pub mod disp;
+pub mod display;
 pub mod filetext;
 pub mod format;
 pub mod http;

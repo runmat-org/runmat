@@ -332,7 +332,7 @@ async fn call_builtin_async_impl(
     Err(builder.build())
 }
 
-async fn try_call_registered_instance_method(
+pub(crate) async fn try_call_registered_instance_method(
     method_name: &str,
     args: &[Value],
     output_count: Option<usize>,
