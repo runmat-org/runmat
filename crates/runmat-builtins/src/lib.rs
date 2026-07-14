@@ -2148,6 +2148,13 @@ impl Trace for ObjectInstance {
         for value in self.properties.values() {
             value.trace(tracer);
         }
+        if let Some(dynamic_properties) = &self.dynamic_properties {
+            for property in dynamic_properties.values() {
+                if let Some(metadata_handle) = property.metadata_handle {
+                    tracer.mark(metadata_handle);
+                }
+            }
+        }
     }
 }
 
@@ -2516,6 +2523,7 @@ impl fmt::Display for CellArray {
 pub struct ObjectInstance {
     pub class_name: String,
     pub properties: HashMap<String, Value>,
+    pub dynamic_properties: Option<Box<HashMap<String, DynamicPropertyDef>>>,
 }
 
 impl ObjectInstance {
@@ -2523,11 +2531,54 @@ impl ObjectInstance {
         Self {
             class_name,
             properties: HashMap::new(),
+            dynamic_properties: None,
         }
     }
 
     pub fn is_class(&self, name: &str) -> bool {
         self.class_name == name
+    }
+
+    pub fn dynamic_property(&self, name: &str) -> Option<&DynamicPropertyDef> {
+        self.dynamic_properties
+            .as_ref()
+            .and_then(|properties| properties.get(name))
+    }
+
+    pub fn dynamic_property_mut(&mut self, name: &str) -> Option<&mut DynamicPropertyDef> {
+        self.dynamic_properties
+            .as_mut()
+            .and_then(|properties| properties.get_mut(name))
+    }
+
+    pub fn has_dynamic_property(&self, name: &str) -> bool {
+        self.dynamic_property(name).is_some()
+    }
+
+    pub fn insert_dynamic_property(
+        &mut self,
+        name: String,
+        property: DynamicPropertyDef,
+    ) -> Option<DynamicPropertyDef> {
+        self.dynamic_properties
+            .get_or_insert_with(|| Box::new(HashMap::new()))
+            .insert(name, property)
+    }
+
+    pub fn remove_dynamic_property(&mut self, name: &str) -> Option<DynamicPropertyDef> {
+        let properties = self.dynamic_properties.as_mut()?;
+        let removed = properties.remove(name);
+        if properties.is_empty() {
+            self.dynamic_properties = None;
+        }
+        removed
+    }
+
+    pub fn dynamic_property_names(&self) -> Vec<String> {
+        self.dynamic_properties
+            .as_ref()
+            .map(|properties| properties.keys().cloned().collect())
+            .unwrap_or_default()
     }
 }
 
@@ -2548,6 +2599,43 @@ pub struct PropertyDef {
     pub get_access: Access,
     pub set_access: Access,
     pub default_value: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DynamicPropertyDef {
+    pub name: String,
+    pub defining_class: String,
+    pub metadata_handle: Option<GcHandle>,
+    pub get_access: Access,
+    pub set_access: Access,
+    pub dependent: bool,
+    pub hidden: bool,
+    pub transient: bool,
+    pub non_copyable: bool,
+    pub abort_set: bool,
+    pub set_observable: bool,
+    pub get_observable: bool,
+    pub description: String,
+}
+
+impl DynamicPropertyDef {
+    pub fn new(name: String, defining_class: String) -> Self {
+        Self {
+            name,
+            defining_class,
+            metadata_handle: None,
+            get_access: Access::Public,
+            set_access: Access::Public,
+            dependent: false,
+            hidden: false,
+            transient: false,
+            non_copyable: false,
+            abort_set: false,
+            set_observable: false,
+            get_observable: false,
+            description: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2631,7 +2719,7 @@ pub fn static_property_gc_roots() -> Vec<GcHandle> {
 }
 
 fn primitive_class_registry() -> HashMap<String, ClassDef> {
-    ["double", "single", "logical"]
+    let mut registry: HashMap<String, ClassDef> = ["double", "single", "logical"]
         .into_iter()
         .map(|class_name| {
             let mut methods = HashMap::new();
@@ -2657,7 +2745,59 @@ fn primitive_class_registry() -> HashMap<String, ClassDef> {
                 },
             )
         })
-        .collect()
+        .collect();
+
+    registry.insert(
+        "handle".to_string(),
+        ClassDef {
+            name: "handle".to_string(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        },
+    );
+    registry.insert(
+        "dynamicprops".to_string(),
+        ClassDef {
+            name: "dynamicprops".to_string(),
+            parent: Some("handle".to_string()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        },
+    );
+    registry.insert(
+        "matlab.metadata.Property".to_string(),
+        ClassDef {
+            name: "matlab.metadata.Property".to_string(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        },
+    );
+    let mut dynamic_property_methods = HashMap::new();
+    dynamic_property_methods.insert(
+        "delete".to_string(),
+        MethodDef {
+            name: "delete".to_string(),
+            is_static: false,
+            is_abstract: false,
+            is_sealed: false,
+            access: Access::Public,
+            function_name: "matlab.metadata.DynamicProperty.delete".to_string(),
+            implicit_class_argument: None,
+        },
+    );
+    registry.insert(
+        "matlab.metadata.DynamicProperty".to_string(),
+        ClassDef {
+            name: "matlab.metadata.DynamicProperty".to_string(),
+            parent: Some("handle".to_string()),
+            properties: HashMap::new(),
+            methods: dynamic_property_methods,
+        },
+    );
+
+    registry
 }
 
 pub fn register_class(def: ClassDef) {

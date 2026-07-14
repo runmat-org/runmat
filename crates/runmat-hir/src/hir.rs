@@ -695,6 +695,7 @@ pub struct HirClass {
     pub module: ModuleId,
     pub name: QualifiedName,
     pub super_class: Option<ClassId>,
+    pub builtin_super_class: Option<String>,
     pub kind: ClassKind,
     pub is_sealed: bool,
     pub is_abstract: bool,

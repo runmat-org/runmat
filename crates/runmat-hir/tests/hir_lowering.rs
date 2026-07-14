@@ -844,6 +844,19 @@ fn transitive_handle_inheritance_marks_handle_kind() {
 }
 
 #[test]
+fn dynamicprops_superclass_marks_handle_kind() {
+    let assembly = lower_semantic("classdef DynPoint < dynamicprops\nend\nx = 1;");
+    let class = assembly
+        .classes
+        .iter()
+        .find(|class| class.name.0[0].0 == "DynPoint")
+        .expect("DynPoint class");
+    assert!(matches!(class.kind, runmat_hir::ClassKind::Handle));
+    assert_eq!(class.super_class, None);
+    assert_eq!(class.builtin_super_class.as_deref(), Some("dynamicprops"));
+}
+
+#[test]
 fn struct_aggregate_literal_lowers_with_field_order_and_duplicates() {
     let assembly = lower_semantic("s = struct{a = 1, a = 2, b = 3};");
     let entry = assembly.modules[0].synthetic_entry_function.unwrap();

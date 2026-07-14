@@ -344,6 +344,7 @@ async fn restore_value_after_load_depth(value: Value, depth: usize) -> crate::Bu
             return Ok(Value::Object(ObjectInstance {
                 class_name,
                 properties: fields.fields.into_iter().collect(),
+                dynamic_properties: None,
             }));
         }
         return Ok(restored_payload);

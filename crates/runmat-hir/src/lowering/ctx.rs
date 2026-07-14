@@ -1396,8 +1396,18 @@ impl LoweringCtx {
             span,
         });
 
-        let resolved_super = super_class.and_then(|super_name| {
+        let builtin_super_class = super_class.and_then(|super_name| {
             if super_name.eq_ignore_ascii_case("handle") {
+                Some("handle".to_string())
+            } else if super_name.eq_ignore_ascii_case("dynamicprops") {
+                Some("dynamicprops".to_string())
+            } else {
+                None
+            }
+        });
+
+        let resolved_super = super_class.and_then(|super_name| {
+            if builtin_super_class.is_some() {
                 None
             } else {
                 self.class_names.get(super_name).copied().or_else(|| {
@@ -1413,7 +1423,9 @@ impl LoweringCtx {
         });
 
         let kind = if super_class
-            .map(|name| name.eq_ignore_ascii_case("handle"))
+            .map(|name| {
+                name.eq_ignore_ascii_case("handle") || name.eq_ignore_ascii_case("dynamicprops")
+            })
             .unwrap_or(false)
             || resolved_super
                 .and_then(|id| self.assembly.classes.iter().find(|class| class.id == id))
@@ -1429,6 +1441,7 @@ impl LoweringCtx {
             module: self.module,
             name: qualified,
             super_class: resolved_super,
+            builtin_super_class,
             kind,
             is_sealed,
             is_abstract,

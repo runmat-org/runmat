@@ -2541,6 +2541,73 @@
       ]
     },
     {
+      "name": "addprop",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "prop = addprop(object, property_name)",
+          "inputs": [
+            {
+              "name": "object",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar handle object that receives a per-instance dynamic property."
+            },
+            {
+              "name": "property_name",
+              "ty": "PropertyName",
+              "arity": "Required",
+              "default": null,
+              "description": "Name of the dynamic property to add."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "prop",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Dynamic property metadata handle."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DYNAMICPROPS.INVALID_TARGET",
+          "identifier": "RunMat:dynamicprops:InvalidTarget",
+          "when": "The target is not a valid handle object.",
+          "message": "dynamicprops: target must be a valid handle object"
+        },
+        {
+          "code": "RM.DYNAMICPROPS.INVALID_NAME",
+          "identifier": "RunMat:dynamicprops:InvalidName",
+          "when": "The property name is empty or not a valid identifier.",
+          "message": "dynamicprops: invalid property name"
+        },
+        {
+          "code": "RM.DYNAMICPROPS.DUPLICATE_PROPERTY",
+          "identifier": "RunMat:dynamicprops:DuplicateProperty",
+          "when": "A class-defined or dynamic property already exists with the requested name.",
+          "message": "dynamicprops: property already exists"
+        },
+        {
+          "code": "RM.DYNAMICPROPS.INVALID_METADATA",
+          "identifier": "RunMat:dynamicprops:InvalidMetadata",
+          "when": "A dynamic property metadata handle is invalid or malformed.",
+          "message": "dynamicprops: invalid dynamic property metadata"
+        },
+        {
+          "code": "RM.DYNAMICPROPS.UNSUPPORTED_METADATA_PROPERTY",
+          "identifier": "RunMat:dynamicprops:UnsupportedMetadataProperty",
+          "when": "A metadata property assignment uses an unsupported property name or value.",
+          "message": "dynamicprops: unsupported dynamic property metadata assignment"
+        }
+      ]
+    },
+    {
       "name": "all",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -32425,6 +32492,73 @@
       ]
     },
     {
+      "name": "findprop",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "prop = findprop(object, property_name)",
+          "inputs": [
+            {
+              "name": "object",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Object or handle object to inspect."
+            },
+            {
+              "name": "property_name",
+              "ty": "PropertyName",
+              "arity": "Required",
+              "default": null,
+              "description": "Property name to locate."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "prop",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Property metadata object, or an empty double when no property exists."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DYNAMICPROPS.INVALID_TARGET",
+          "identifier": "RunMat:dynamicprops:InvalidTarget",
+          "when": "The target is not a valid handle object.",
+          "message": "dynamicprops: target must be a valid handle object"
+        },
+        {
+          "code": "RM.DYNAMICPROPS.INVALID_NAME",
+          "identifier": "RunMat:dynamicprops:InvalidName",
+          "when": "The property name is empty or not a valid identifier.",
+          "message": "dynamicprops: invalid property name"
+        },
+        {
+          "code": "RM.DYNAMICPROPS.DUPLICATE_PROPERTY",
+          "identifier": "RunMat:dynamicprops:DuplicateProperty",
+          "when": "A class-defined or dynamic property already exists with the requested name.",
+          "message": "dynamicprops: property already exists"
+        },
+        {
+          "code": "RM.DYNAMICPROPS.INVALID_METADATA",
+          "identifier": "RunMat:dynamicprops:InvalidMetadata",
+          "when": "A dynamic property metadata handle is invalid or malformed.",
+          "message": "dynamicprops: invalid dynamic property metadata"
+        },
+        {
+          "code": "RM.DYNAMICPROPS.UNSUPPORTED_METADATA_PROPERTY",
+          "identifier": "RunMat:dynamicprops:UnsupportedMetadataProperty",
+          "when": "A metadata property assignment uses an unsupported property name or value.",
+          "message": "dynamicprops: unsupported dynamic property metadata assignment"
+        }
+      ]
+    },
+    {
       "name": "fir1",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -57021,6 +57155,58 @@
         }
       ],
       "errors": []
+    },
+    {
+      "name": "matlab.metadata.DynamicProperty.delete",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "delete(prop)",
+          "inputs": [
+            {
+              "name": "prop",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Dynamic property metadata handle to delete."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DYNAMICPROPS.INVALID_TARGET",
+          "identifier": "RunMat:dynamicprops:InvalidTarget",
+          "when": "The target is not a valid handle object.",
+          "message": "dynamicprops: target must be a valid handle object"
+        },
+        {
+          "code": "RM.DYNAMICPROPS.INVALID_NAME",
+          "identifier": "RunMat:dynamicprops:InvalidName",
+          "when": "The property name is empty or not a valid identifier.",
+          "message": "dynamicprops: invalid property name"
+        },
+        {
+          "code": "RM.DYNAMICPROPS.DUPLICATE_PROPERTY",
+          "identifier": "RunMat:dynamicprops:DuplicateProperty",
+          "when": "A class-defined or dynamic property already exists with the requested name.",
+          "message": "dynamicprops: property already exists"
+        },
+        {
+          "code": "RM.DYNAMICPROPS.INVALID_METADATA",
+          "identifier": "RunMat:dynamicprops:InvalidMetadata",
+          "when": "A dynamic property metadata handle is invalid or malformed.",
+          "message": "dynamicprops: invalid dynamic property metadata"
+        },
+        {
+          "code": "RM.DYNAMICPROPS.UNSUPPORTED_METADATA_PROPERTY",
+          "identifier": "RunMat:dynamicprops:UnsupportedMetadataProperty",
+          "when": "A metadata property assignment uses an unsupported property name or value.",
+          "message": "dynamicprops: unsupported dynamic property metadata assignment"
+        }
+      ]
     },
     {
       "name": "matlabroot",

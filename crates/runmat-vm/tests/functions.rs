@@ -4230,6 +4230,35 @@ fn classdef_with_attributes_enforced() {
 }
 
 #[test]
+fn dynamicprops_class_supports_addprop_dot_access_and_delete() {
+    let src = r#"
+classdef DynPoint < dynamicprops
+end
+d = new_object('DynPoint');
+p = addprop(d, 'gain');
+d.gain = 7;
+observed = d.gain;
+p.Hidden = true;
+hidden = p.Hidden;
+is_dyn = isa(d, 'dynamicprops');
+supers = superclasses(d);
+delete(p);
+try
+  missing = d.gain;
+catch e
+  removed = 1;
+end
+"#;
+    let vars = execute_source(src);
+    assert!(has_num(&vars, 7.0));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Bool(true))));
+    assert!(has_cell_char_row(&vars, &["dynamicprops", "handle"]));
+    assert!(has_num(&vars, 1.0));
+}
+
+#[test]
 fn builtin_call_with_expanded_middle_argument() {
     // Use deal to produce a cell row and index into it to pass as middle arg
     // max(a,b) with b coming from C{1}

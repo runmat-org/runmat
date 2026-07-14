@@ -1,0 +1,89 @@
+{
+  "title": "addprop",
+  "category": "introspection",
+  "keywords": [
+    "addprop",
+    "dynamicprops",
+    "dynamic property",
+    "handle",
+    "matlab.metadata.DynamicProperty"
+  ],
+  "summary": "Add a per-instance dynamic property to a handle object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side object metadata mutation. GPU provider kernels do not participate."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::dynamicprops::tests",
+    "integration": "crates/runmat-vm/tests/functions.rs::dynamicprops_class_supports_addprop_dot_access_and_delete"
+  },
+  "description": "`prop = addprop(obj, name)` adds a dynamic property to a valid `dynamicprops` handle object and returns a `matlab.metadata.DynamicProperty` metadata handle for that per-instance property.",
+  "behaviors": [
+    "The target must be a valid handle object whose class inherits from `dynamicprops`; value objects, ordinary handle classes, and structs are rejected.",
+    "The property name must be a valid identifier and must not duplicate a class-defined property or an existing dynamic property on the same instance.",
+    "The new property is immediately readable and writable through dot syntax, `getfield`, and `setfield`.",
+    "The returned metadata handle exposes `Name`, `DefiningClass`, `GetAccess`, `SetAccess`, `Dependent`, `Hidden`, `Transient`, `NonCopyable`, `AbortSet`, `SetObservable`, `GetObservable`, and `Description` fields.",
+    "Writable metadata fields update the target object's dynamic property metadata. `Name` and `DefiningClass` are read-only.",
+    "`delete(prop)` removes the dynamic property and invalidates the metadata handle."
+  ],
+  "examples": [
+    {
+      "description": "Add and use a dynamic property",
+      "input": "classdef Sensor < dynamicprops\nend\ns = new_object('Sensor');\np = addprop(s, 'gain');\ns.gain = 7;\nvalue = s.gain",
+      "output": "value = 7"
+    },
+    {
+      "description": "Set metadata",
+      "input": "p = addprop(s, 'label');\np.Hidden = true;\ntf = p.Hidden",
+      "output": "tf = logical(1)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `addprop` work on value classes?",
+      "answer": "No. MATLAB dynamic properties are handle-object instance state, so RunMat requires a valid handle object."
+    },
+    {
+      "question": "Are dynamic properties saved to MAT files?",
+      "answer": "Not as full classdef metadata. RunMat saves object property values through the existing object serialization path, but complete dynamic-property persistence requires broader classdef persistence support."
+    },
+    {
+      "question": "Do `SetObservable` and `GetObservable` fire property listeners?",
+      "answer": "The metadata flags are stored and reported, but full observable-property listener semantics are not implemented yet."
+    }
+  ],
+  "links": [
+    {
+      "label": "findprop",
+      "url": "./findprop"
+    },
+    {
+      "label": "setfield",
+      "url": "./setfield"
+    },
+    {
+      "label": "getfield",
+      "url": "./getfield"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/dynamicprops.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/dynamicprops.rs"
+  },
+  "gpu_residency": "`addprop` mutates host-side object metadata. GPU-resident numeric values assigned into dynamic properties follow the same residency behavior as ordinary object properties.",
+  "limitations": [
+    "Only scalar handle objects are supported.",
+    "Full MATLAB dynamic-property listener behavior for observable get/set events is not implemented.",
+    "Full dynamic-property persistence across external MATLAB MAT-file representations is not implemented."
+  ]
+}

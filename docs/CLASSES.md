@@ -370,6 +370,30 @@ end
 
 Callbacks can be function handles, static methods (`@CB.on_tick`), or function names.
 
+## Dynamic Properties
+
+Handle classes can opt into per-instance dynamic properties by deriving from
+`dynamicprops`. Use `addprop(obj, name)` to add a property at runtime, `findprop`
+to inspect metadata, and `delete(prop)` to remove a dynamic property.
+
+```matlab
+classdef Sensor < dynamicprops
+end
+
+s = new_object('Sensor');
+p = addprop(s, 'gain');
+s.gain = 7;
+p.Hidden = true;
+delete(p);
+```
+
+RunMat stores dynamic property values and metadata on the handle object's target.
+The metadata handle supports common `matlab.metadata.DynamicProperty` fields such
+as `Name`, `GetAccess`, `SetAccess`, `Hidden`, `Transient`, `AbortSet`,
+`SetObservable`, `GetObservable`, and `Description`. Observable get/set listener
+semantics and full dynamic-property persistence across external MATLAB MAT-file
+representations are not implemented yet.
+
 ## Custom indexing
 
 Override `subsref` and `subsasgn` to customize how `.`, `()`, and `{}` behave on your

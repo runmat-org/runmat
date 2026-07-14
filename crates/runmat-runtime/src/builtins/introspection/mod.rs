@@ -14,6 +14,7 @@ pub mod clearvars;
 pub mod debugging;
 pub mod dependent_property;
 pub mod dynamic_workspace;
+pub mod dynamicprops;
 pub mod feval;
 pub mod function_handle_text;
 pub mod function_metadata;
