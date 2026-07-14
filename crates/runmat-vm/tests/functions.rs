@@ -4103,6 +4103,41 @@ fn underlying_type_script_surface() {
 }
 
 #[test]
+fn num_arguments_from_subscript_script_surface() {
+    let program = r#"
+        C = {"one", 2, "three"};
+        S = struct();
+        S.type = '{}';
+        S.subs = {[1 2]};
+        n1 = numArgumentsFromSubscript(C, S, 'Statement');
+
+        S2 = struct();
+        S2.type = '{}';
+        S2.subs = {':'};
+        ctx = classref('matlab.indexing.IndexingContext').Statement;
+        n2 = numArgumentsFromSubscript(C, S2, ctx);
+
+        __register_test_classes();
+        o = new_object('OverIdx');
+        o = setfield(o, 'nargs', 6);
+        S3 = struct();
+        S3.type = '.';
+        S3.subs = 'field';
+        n3 = numArgumentsFromSubscript(o, S3, 'Expression');
+    "#;
+    let vars = execute_source(program);
+    assert!(has_num(&vars, 2.0), "expected two brace outputs: {vars:?}");
+    assert!(
+        has_num(&vars, 3.0),
+        "expected colon brace output count: {vars:?}"
+    );
+    assert!(
+        has_num(&vars, 6.0),
+        "expected object overload to supply output count: {vars:?}"
+    );
+}
+
+#[test]
 fn findobj_script_surface_finds_graphics_handles() {
     let program = r#"
         h = plot([1 2 3], 'DisplayName', 'series-a');

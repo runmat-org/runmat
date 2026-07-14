@@ -540,6 +540,70 @@ pub(crate) async fn overidx_subsasgn(
     }
 }
 
+const OVERIDX_NUM_ARGUMENTS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Expected indexing argument count.",
+}];
+
+const OVERIDX_NUM_ARGUMENTS_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "OverIdx object.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Substruct-compatible indexing descriptor.",
+    },
+    BuiltinParamDescriptor {
+        name: "indexingContext",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexing context.",
+    },
+];
+
+const OVERIDX_NUM_ARGUMENTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "n = OverIdx.numArgumentsFromSubscript(obj, S, indexingContext)",
+        inputs: &OVERIDX_NUM_ARGUMENTS_INPUTS,
+        outputs: &OVERIDX_NUM_ARGUMENTS_OUTPUT,
+    }];
+
+pub const OVERIDX_NUM_ARGUMENTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &OVERIDX_NUM_ARGUMENTS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &[],
+};
+
+#[runmat_macros::runtime_builtin(
+    name = "OverIdx.numArgumentsFromSubscript",
+    descriptor(self::OVERIDX_NUM_ARGUMENTS_DESCRIPTOR),
+    builtin_path = "crate::builtins::introspection::test_methods"
+)]
+pub(crate) async fn overidx_num_arguments_from_subscript(
+    obj: Value,
+    _subscript: Value,
+    _indexing_context: Value,
+) -> crate::BuiltinResult<Value> {
+    let object = overidx_expect_object(obj, "OverIdx.numArgumentsFromSubscript")?;
+    Ok(object
+        .properties
+        .get("nargs")
+        .cloned()
+        .unwrap_or(Value::Num(3.0)))
+}
+
 fn overidx_expect_object(
     obj: Value,
     method: &str,

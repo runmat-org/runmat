@@ -69522,6 +69522,68 @@
       ]
     },
     {
+      "name": "numArgumentsFromSubscript",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "n = numArgumentsFromSubscript(A, S, indexingContext)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Target of the indexing expression."
+            },
+            {
+              "name": "S",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Substruct-compatible indexing descriptor."
+            },
+            {
+              "name": "indexingContext",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "IndexingContext enum object or compatible text token."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of expected subsref outputs or subsasgn inputs."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NUM_ARGUMENTS_FROM_SUBSCRIPT.INVALID_ARGUMENT",
+          "identifier": "RunMat:numArgumentsFromSubscript:InvalidArgument",
+          "when": "Inputs do not match the documented target, substruct, and indexing-context form.",
+          "message": "numArgumentsFromSubscript: invalid argument"
+        },
+        {
+          "code": "RM.NUM_ARGUMENTS_FROM_SUBSCRIPT.INVALID_SUBSTRUCT",
+          "identifier": "RunMat:numArgumentsFromSubscript:InvalidSubstruct",
+          "when": "The substruct-compatible descriptor is missing type/subs fields or has invalid values.",
+          "message": "numArgumentsFromSubscript: invalid substruct"
+        },
+        {
+          "code": "RM.NUM_ARGUMENTS_FROM_SUBSCRIPT.INVALID_CONTEXT",
+          "identifier": "RunMat:numArgumentsFromSubscript:InvalidContext",
+          "when": "The indexing context is not Statement, Expression, or Assignment.",
+          "message": "numArgumentsFromSubscript: invalid indexing context"
+        }
+      ]
+    },
+    {
       "name": "numel",
       "output_mode": "Fixed",
       "completion_policy": "Public",

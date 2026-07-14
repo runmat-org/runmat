@@ -1,0 +1,96 @@
+{
+  "title": "numArgumentsFromSubscript",
+  "category": "oop/indexing",
+  "keywords": [
+    "numArgumentsFromSubscript",
+    "substruct",
+    "subsref",
+    "subsasgn",
+    "object indexing",
+    "IndexingContext"
+  ],
+  "summary": "Return the expected argument count for MATLAB-style indexing described by a substruct.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Metadata-only indexing introspection. GPU tensor targets use handle shape metadata for default brace counts and are not gathered."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::object_indexing::tests",
+    "integration": "crates/runmat-vm/tests/functions.rs::num_arguments_from_subscript_script_surface"
+  },
+  "description": "`numArgumentsFromSubscript(A, S, indexingContext)` returns the number of expected outputs from `subsref` or expected inputs to `subsasgn` for an indexing expression. `S` is a substruct-compatible descriptor with `type` and `subs` fields, and `indexingContext` is `Statement`, `Expression`, or `Assignment` through `matlab.indexing.IndexingContext` or the legacy `matlab.mixin.util.IndexingContext` name.",
+  "behaviors": [
+    "The public signature is `n = numArgumentsFromSubscript(A, S, indexingContext)`.",
+    "`S.type` accepts `\"()\"`, `\".\"`, or `\"{}\"` as a string scalar or row character vector.",
+    "`S.subs` is text for dot indexing and a cell array of index vectors for parentheses or brace indexing.",
+    "Scalar structs describe one indexing level. Compound substruct arrays are accepted through RunMat's struct-array cell representation, where each cell element is a scalar struct with `type` and `subs` fields.",
+    "Object and handle-object targets dispatch to the receiver class's `numArgumentsFromSubscript` method when it is registered. If no overload exists, RunMat falls back to default array behavior.",
+    "For ordinary arrays, parentheses and dot indexing report one argument. Brace indexing reports the number of selected elements, including validated numeric vector selectors, logical selectors, `':'`, and multidimensional selector products.",
+    "`matlab.indexing.IndexingContext.Statement`, `.Expression`, and `.Assignment` are registered lazily when used through `classref`, and the legacy `matlab.mixin.util.IndexingContext` class name resolves to equivalent enum members.",
+    "RunMat also accepts compatible text tokens such as `'Statement'` and `'matlab.indexing.IndexingContext.Expression'` for integration with code that constructs context values dynamically.",
+    "Invalid substructs and unsupported context values raise stable `RunMat:numArgumentsFromSubscript:*` identifiers."
+  ],
+  "examples": [
+    {
+      "description": "Count outputs from brace indexing",
+      "input": "C = {\"one\", 2, \"three\"};\nS = struct();\nS.type = '{}';\nS.subs = {[1 2]};\nn = numArgumentsFromSubscript(C, S, 'Statement')",
+      "output": "n = 2"
+    },
+    {
+      "description": "Use the IndexingContext enum",
+      "input": "C = {\"one\", 2, \"three\"};\nS = struct();\nS.type = '{}';\nS.subs = {':'};\nctx = classref('matlab.indexing.IndexingContext').Statement;\nn = numArgumentsFromSubscript(C, S, ctx)",
+      "output": "n = 3"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does RunMat implement the `substruct` helper itself?",
+      "answer": "Not in this slice. `numArgumentsFromSubscript` accepts the same descriptor shape, so user code can build `S` with `struct` and field assignment."
+    },
+    {
+      "question": "Can user classes override the result?",
+      "answer": "Yes. For object and handle-object targets, RunMat dispatches to a registered `Class.numArgumentsFromSubscript` method before applying the default array behavior."
+    },
+    {
+      "question": "Does this gather gpuArray data?",
+      "answer": "No. The default path only reads target shape metadata from `GpuTensorHandle` values when counting `':'`. GPU-resident index vectors are rejected because their values cannot be validated without gathering."
+    }
+  ],
+  "links": [
+    {
+      "label": "subsref",
+      "url": "./subsref"
+    },
+    {
+      "label": "subsasgn",
+      "url": "./subsasgn"
+    },
+    {
+      "label": "classref",
+      "url": "./classref"
+    },
+    {
+      "label": "struct",
+      "url": "./struct"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/object_indexing.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/object_indexing.rs"
+  },
+  "gpu_residency": "`numArgumentsFromSubscript` is host-side metadata logic. It does not launch provider kernels, gather target buffers, or allocate GPU outputs.",
+  "gpu_behavior": [
+    "For gpuArray targets, RunMat uses `GpuTensorHandle.shape` to count colon-selected brace outputs.",
+    "For GPU-resident numeric index vectors, RunMat returns `RunMat:numArgumentsFromSubscript:InvalidSubstruct` rather than gathering selector values."
+  ]
+}
