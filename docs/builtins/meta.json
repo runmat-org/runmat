@@ -68444,6 +68444,54 @@
       ]
     },
     {
+      "name": "nonzeros",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "v = nonzeros(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Full or sparse matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "v",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Full column vector."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SPARSE.INVALID_INPUT",
+          "identifier": "RunMat:sparse:InvalidInput",
+          "when": "Inputs are not a supported sparse construction form.",
+          "message": "sparse: invalid input"
+        },
+        {
+          "code": "RM.SPARSE.INVALID_INDEX",
+          "identifier": "RunMat:sparse:InvalidIndex",
+          "when": "Row or column subscripts are nonpositive, noninteger, or outside explicit dimensions.",
+          "message": "sparse: invalid index"
+        },
+        {
+          "code": "RM.SPARSE.INTERNAL",
+          "identifier": "RunMat:sparse:Internal",
+          "when": "Sparse matrix materialisation fails internally.",
+          "message": "sparse: internal error"
+        }
+      ]
+    },
+    {
       "name": "norm",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -92604,6 +92652,187 @@
       ]
     },
     {
+      "name": "spdiags",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Bout = spdiags(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Full or sparse matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Bout",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Dense matrix whose columns contain requested diagonals."
+            }
+          ]
+        },
+        {
+          "label": "[Bout, id] = spdiags(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Full or sparse matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Bout",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Dense matrix whose columns contain requested diagonals."
+            },
+            {
+              "name": "id",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagonal numbers corresponding to columns of Bout."
+            }
+          ]
+        },
+        {
+          "label": "Bout = spdiags(A, d)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Full or sparse matrix."
+            },
+            {
+              "name": "d",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagonal numbers to extract."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Bout",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Dense matrix whose columns contain requested diagonals."
+            }
+          ]
+        },
+        {
+          "label": "S = spdiags(Bin, d, m, n)",
+          "inputs": [
+            {
+              "name": "Bin",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagonal values."
+            },
+            {
+              "name": "d",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagonal numbers."
+            },
+            {
+              "name": "m",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of rows."
+            },
+            {
+              "name": "n",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of columns."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse double matrix."
+            }
+          ]
+        },
+        {
+          "label": "S = spdiags(Bin, d, A)",
+          "inputs": [
+            {
+              "name": "Bin",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Replacement diagonal values."
+            },
+            {
+              "name": "d",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagonal numbers to replace."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose selected diagonals are replaced."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse double matrix."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SPARSE.INVALID_INPUT",
+          "identifier": "RunMat:sparse:InvalidInput",
+          "when": "Inputs are not a supported sparse construction form.",
+          "message": "sparse: invalid input"
+        },
+        {
+          "code": "RM.SPARSE.INVALID_INDEX",
+          "identifier": "RunMat:sparse:InvalidIndex",
+          "when": "Row or column subscripts are nonpositive, noninteger, or outside explicit dimensions.",
+          "message": "sparse: invalid index"
+        },
+        {
+          "code": "RM.SPARSE.INTERNAL",
+          "identifier": "RunMat:sparse:Internal",
+          "when": "Sparse matrix materialisation fails internally.",
+          "message": "sparse: internal error"
+        }
+      ]
+    },
+    {
       "name": "spectrogram",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -92818,6 +93047,116 @@
           "identifier": "RunMat:spectrogram:Internal",
           "when": "Output tensor construction fails internally.",
           "message": "spectrogram: internal error"
+        }
+      ]
+    },
+    {
+      "name": "speye",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "S = speye()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse double matrix."
+            }
+          ]
+        },
+        {
+          "label": "S = speye(n)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Full or sparse matrix to convert."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse double matrix."
+            }
+          ]
+        },
+        {
+          "label": "S = speye(m, n)",
+          "inputs": [
+            {
+              "name": "m",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of rows."
+            },
+            {
+              "name": "n",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of columns."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse double matrix."
+            }
+          ]
+        },
+        {
+          "label": "S = speye(sz)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Full or sparse matrix to convert."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse double matrix."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SPARSE.INVALID_INPUT",
+          "identifier": "RunMat:sparse:InvalidInput",
+          "when": "Inputs are not a supported sparse construction form.",
+          "message": "sparse: invalid input"
+        },
+        {
+          "code": "RM.SPARSE.INVALID_INDEX",
+          "identifier": "RunMat:sparse:InvalidIndex",
+          "when": "Row or column subscripts are nonpositive, noninteger, or outside explicit dimensions.",
+          "message": "sparse: invalid index"
+        },
+        {
+          "code": "RM.SPARSE.INTERNAL",
+          "identifier": "RunMat:sparse:Internal",
+          "when": "Sparse matrix materialisation fails internally.",
+          "message": "sparse: internal error"
         }
       ]
     },
@@ -93371,6 +93710,137 @@
         }
       ],
       "errors": []
+    },
+    {
+      "name": "spones",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "R = spones(S)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Full or sparse matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse double matrix."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SPARSE.INVALID_INPUT",
+          "identifier": "RunMat:sparse:InvalidInput",
+          "when": "Inputs are not a supported sparse construction form.",
+          "message": "sparse: invalid input"
+        },
+        {
+          "code": "RM.SPARSE.INVALID_INDEX",
+          "identifier": "RunMat:sparse:InvalidIndex",
+          "when": "Row or column subscripts are nonpositive, noninteger, or outside explicit dimensions.",
+          "message": "sparse: invalid index"
+        },
+        {
+          "code": "RM.SPARSE.INTERNAL",
+          "identifier": "RunMat:sparse:Internal",
+          "when": "Sparse matrix materialisation fails internally.",
+          "message": "sparse: internal error"
+        }
+      ]
+    },
+    {
+      "name": "sprand",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "R = sprand(S)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Full or sparse matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse double matrix."
+            }
+          ]
+        },
+        {
+          "label": "R = sprand(m, n, density)",
+          "inputs": [
+            {
+              "name": "m",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of rows."
+            },
+            {
+              "name": "n",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of columns."
+            },
+            {
+              "name": "density",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate density in [0,1]."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse double matrix."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SPARSE.INVALID_INPUT",
+          "identifier": "RunMat:sparse:InvalidInput",
+          "when": "Inputs are not a supported sparse construction form.",
+          "message": "sparse: invalid input"
+        },
+        {
+          "code": "RM.SPARSE.INVALID_INDEX",
+          "identifier": "RunMat:sparse:InvalidIndex",
+          "when": "Row or column subscripts are nonpositive, noninteger, or outside explicit dimensions.",
+          "message": "sparse: invalid index"
+        },
+        {
+          "code": "RM.SPARSE.INTERNAL",
+          "identifier": "RunMat:sparse:Internal",
+          "when": "Sparse matrix materialisation fails internally.",
+          "message": "sparse: internal error"
+        }
+      ]
     },
     {
       "name": "spreadsheetImportOptions",

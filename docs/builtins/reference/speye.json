@@ -1,0 +1,85 @@
+{
+  "title": "speye",
+  "category": "array/creation",
+  "keywords": [
+    "speye",
+    "sparse",
+    "identity",
+    "matrix"
+  ],
+  "summary": "Create sparse double identity matrices.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "`speye` creates host-resident sparse CSC matrices. Native sparse GPU storage is not currently exposed by RunMat's acceleration API."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::sparse::tests::speye_supports_square_rectangular_vector_and_negative_sizes"
+  },
+  "description": "`speye` returns a sparse double matrix with ones on the main diagonal and unstored zeros elsewhere.",
+  "behaviors": [
+    "`speye()` returns a sparse `1 x 1` identity matrix.",
+    "`speye(n)` returns an `n x n` sparse identity matrix.",
+    "`speye(m, n)` and `speye([m n])` return an `m x n` sparse matrix with `min(m,n)` stored diagonal ones.",
+    "Negative dimensions are treated as zero, matching MATLAB sparse allocation behavior.",
+    "The optional typename accepts `double`; `single` and `logical` sparse storage are not represented by RunMat's current `SparseTensor`."
+  ],
+  "examples": [
+    {
+      "description": "Rectangular sparse identity",
+      "input": "S = speye(2, 4);\nfull(S)",
+      "output": "ans = [1 0 0 0; 0 1 0 0]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `speye` allocate a dense matrix?",
+      "answer": "No. It constructs RunMat's compressed sparse column representation directly."
+    },
+    {
+      "question": "Can `speye` create native sparse GPU matrices?",
+      "answer": "Not yet. RunMat sparse matrices are host-resident until the acceleration API exposes sparse storage."
+    }
+  ],
+  "links": [
+    {
+      "label": "sparse",
+      "url": "./sparse"
+    },
+    {
+      "label": "full",
+      "url": "./full"
+    },
+    {
+      "label": "issparse",
+      "url": "./issparse"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "S = speye()\nS = speye(n)\nS = speye(m, n)\nS = speye([m n])\nS = speye(..., \"double\")",
+      "output": "`S` is a sparse double matrix."
+    },
+    "points": [
+      "`speye` has one output.",
+      "The result is host-resident sparse CSC storage."
+    ]
+  },
+  "gpu_residency": "`speye` produces a host sparse matrix because RunMat does not currently expose native sparse GPU handles."
+}

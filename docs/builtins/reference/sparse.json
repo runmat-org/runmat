@@ -122,6 +122,26 @@
       "url": "./find"
     },
     {
+      "label": "speye",
+      "url": "./speye"
+    },
+    {
+      "label": "spdiags",
+      "url": "./spdiags"
+    },
+    {
+      "label": "nonzeros",
+      "url": "./nonzeros"
+    },
+    {
+      "label": "spones",
+      "url": "./spones"
+    },
+    {
+      "label": "sprand",
+      "url": "./sprand"
+    },
+    {
       "label": "nnz",
       "url": "./nnz"
     },
@@ -131,8 +151,8 @@
     }
   ],
   "source": {
-    "label": "`crates/runmat-runtime/src/builtins/array/creation/sparse.rs`",
-    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse.rs"
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs"
   },
   "syntax": {
     "example": {

@@ -1,0 +1,81 @@
+{
+  "title": "sprand",
+  "category": "array/creation",
+  "keywords": [
+    "sprand",
+    "sparse",
+    "random",
+    "density"
+  ],
+  "summary": "Create sparse random matrices.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "`sprand` uses RunMat's host RNG and returns host-resident sparse CSC storage."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::sparse::tests::sprand_pattern_form_preserves_shape_and_pattern; builtins::array::creation::sparse::tests::sprand_density_form_constructs_requested_sparse_shape"
+  },
+  "description": "`sprand` creates sparse double matrices with uniformly distributed stored values.",
+  "behaviors": [
+    "`sprand(S)` preserves the nonzero pattern and shape of `S` while replacing stored values with uniform random values.",
+    "`sprand(m, n, density)` creates an `m x n` sparse matrix with approximately `round(m*n*density)` stored entries.",
+    "`density` must be finite and between `0` and `1`.",
+    "`sprand(m, n, density, rc)` is not yet supported because RunMat does not yet shape random sparse values to meet reciprocal condition-number targets.",
+    "Large requested sparse patterns are rejected before allocating excessive storage."
+  ],
+  "examples": [
+    {
+      "description": "Random values on an existing pattern",
+      "input": "P = sparse([1; 3], [1; 2], [10; 20], 3, 2);\nR = sprand(P);\nissparse(R)",
+      "output": "ans = 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `sprand(...,rc)` enforce the reciprocal condition number?",
+      "answer": "No. RunMat rejects the fourth argument with a deterministic unsupported-input error instead of silently producing a matrix with the wrong reciprocal condition number."
+    }
+  ],
+  "links": [
+    {
+      "label": "sparse",
+      "url": "./sparse"
+    },
+    {
+      "label": "rand",
+      "url": "./rand"
+    },
+    {
+      "label": "sprandn",
+      "url": "./sprandn"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "R = sprand(S)\nR = sprand(m, n, density)",
+      "output": "`R` is a sparse double matrix."
+    },
+    "points": [
+      "The output is host-resident sparse CSC storage.",
+      "The fourth `rc` argument is deliberately rejected until condition-number-aware sparse random generation is implemented."
+    ]
+  },
+  "gpu_residency": "`sprand` runs on the host RNG and produces a host sparse matrix."
+}
