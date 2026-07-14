@@ -24,6 +24,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::introspection::object_serialization::prepare_value_for_mat_save;
 use crate::workspace;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -341,6 +342,7 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     let mut mat_vars = Vec::with_capacity(unique_entries.len());
     for (name, value) in unique_entries {
+        let value = prepare_value_for_mat_save(value).await?;
         mat_vars.push(MatVar {
             name,
             array: convert_value(value).await?,
@@ -945,9 +947,10 @@ async fn write_mat_file(path: &Path, vars: &[MatVar]) -> BuiltinResult<()> {
 pub async fn encode_workspace_to_mat_bytes(entries: &[(String, Value)]) -> BuiltinResult<Vec<u8>> {
     let mut mat_vars = Vec::with_capacity(entries.len());
     for (name, value) in entries {
+        let value = prepare_value_for_mat_save(value.clone()).await?;
         mat_vars.push(MatVar {
             name: name.clone(),
-            array: convert_value(value.clone()).await?,
+            array: convert_value(value).await?,
         });
     }
     write_mat_bytes(&mat_vars)

@@ -24,6 +24,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::introspection::object_serialization::restore_value_from_mat_load;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 const LOAD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -532,12 +533,24 @@ pub(crate) async fn read_mat_file(path: &Path) -> BuiltinResult<Vec<(String, Val
         )
     })?;
     let mut reader = BufReader::new(file);
-    read_mat_reader(&mut reader)
+    let entries = read_mat_reader(&mut reader)?;
+    restore_loaded_entries(entries).await
 }
 
 pub fn decode_workspace_from_mat_bytes(bytes: &[u8]) -> BuiltinResult<Vec<(String, Value)>> {
     let mut cursor = Cursor::new(bytes);
-    read_mat_reader(&mut cursor)
+    let entries = read_mat_reader(&mut cursor)?;
+    futures::executor::block_on(restore_loaded_entries(entries))
+}
+
+async fn restore_loaded_entries(
+    entries: Vec<(String, Value)>,
+) -> BuiltinResult<Vec<(String, Value)>> {
+    let mut restored = Vec::with_capacity(entries.len());
+    for (name, value) in entries {
+        restored.push((name, restore_value_from_mat_load(value).await?));
+    }
+    Ok(restored)
 }
 
 #[derive(Clone, Copy, Debug)]

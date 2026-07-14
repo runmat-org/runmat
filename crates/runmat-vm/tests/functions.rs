@@ -110,6 +110,23 @@ fn has_object_num_property(
     })
 }
 
+fn has_object_string_property(
+    values: &[runmat_builtins::Value],
+    class_name: &str,
+    property_name: &str,
+    expected: &str,
+) -> bool {
+    values.iter().any(|v| match v {
+        runmat_builtins::Value::Object(obj) if obj.class_name == class_name => {
+            matches!(
+                obj.properties.get(property_name),
+                Some(runmat_builtins::Value::String(s)) if s == expected
+            )
+        }
+        _ => false,
+    })
+}
+
 fn assert_import_ambiguity_error(err: &runmat_runtime::RuntimeError) {
     assert_eq!(
         err.identifier(),
@@ -4134,6 +4151,33 @@ fn num_arguments_from_subscript_script_surface() {
     assert!(
         has_num(&vars, 6.0),
         "expected object overload to supply output count: {vars:?}"
+    );
+}
+
+#[test]
+fn object_saveobj_loadobj_script_surface() {
+    let program = r#"
+        __register_test_classes();
+        o = new_object('OverIdx');
+        o = setfield(o, 'k', 21);
+        o = setfield(o, 'nargs', 4);
+        payload = saveobj(o);
+        saved_by = getfield(payload, 'saved_by');
+        restored = classref('OverIdx').loadobj(payload);
+    "#;
+    let vars = execute_source(program);
+    assert!(
+        vars.iter()
+            .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "OverIdx.saveobj")),
+        "expected saveobj payload marker: {vars:?}"
+    );
+    assert!(
+        has_object_num_property(&vars, "OverIdx", "k", 21.0),
+        "expected loadobj-restored OverIdx.k property: {vars:?}"
+    );
+    assert!(
+        has_object_string_property(&vars, "OverIdx", "loaded_by", "OverIdx.loadobj"),
+        "expected loadobj marker property: {vars:?}"
     );
 }
 

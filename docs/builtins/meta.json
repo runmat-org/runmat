@@ -54963,6 +54963,54 @@
       ]
     },
     {
+      "name": "loadobj",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "b = loadobj(a)",
+          "inputs": [
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Serialized object representation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Deserialized object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.OBJECT_SERIALIZATION.INVALID_ARGUMENT",
+          "identifier": "RunMat:ObjectSerialization:InvalidArgument",
+          "when": "The input is not an object or serialized object envelope.",
+          "message": "object serialization: invalid argument"
+        },
+        {
+          "code": "RM.OBJECT_SERIALIZATION.DISPATCH",
+          "identifier": "RunMat:ObjectSerialization:Dispatch",
+          "when": "A saveobj or loadobj method cannot be resolved or executed.",
+          "message": "object serialization: method dispatch failed"
+        },
+        {
+          "code": "RM.OBJECT_SERIALIZATION.RECURSION",
+          "identifier": "RunMat:ObjectSerialization:RecursionLimit",
+          "when": "Object serialization nesting exceeds the supported recursion limit.",
+          "message": "object serialization: recursion limit exceeded"
+        }
+      ]
+    },
+    {
       "name": "localfunctions",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -87863,6 +87911,54 @@
           "identifier": "RunMat:figurePersistence:Internal",
           "when": "Internal runtime control-flow or conversion fails.",
           "message": "figure persistence: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "saveobj",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "b = saveobj(a)",
+          "inputs": [
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Object to serialize."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Serialized object representation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.OBJECT_SERIALIZATION.INVALID_ARGUMENT",
+          "identifier": "RunMat:ObjectSerialization:InvalidArgument",
+          "when": "The input is not an object or serialized object envelope.",
+          "message": "object serialization: invalid argument"
+        },
+        {
+          "code": "RM.OBJECT_SERIALIZATION.DISPATCH",
+          "identifier": "RunMat:ObjectSerialization:Dispatch",
+          "when": "A saveobj or loadobj method cannot be resolved or executed.",
+          "message": "object serialization: method dispatch failed"
+        },
+        {
+          "code": "RM.OBJECT_SERIALIZATION.RECURSION",
+          "identifier": "RunMat:ObjectSerialization:RecursionLimit",
+          "when": "Object serialization nesting exceeds the supported recursion limit.",
+          "message": "object serialization: recursion limit exceeded"
         }
       ]
     },

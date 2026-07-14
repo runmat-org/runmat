@@ -1329,6 +1329,29 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
             implicit_class_argument: None,
         },
     );
+    for (name, is_static) in [
+        (
+            crate::builtins::introspection::object_serialization::SAVEOBJ_METHOD,
+            false,
+        ),
+        (
+            crate::builtins::introspection::object_serialization::LOADOBJ_METHOD,
+            true,
+        ),
+    ] {
+        overidx_methods.insert(
+            name.to_string(),
+            MethodDef {
+                name: name.to_string(),
+                is_static,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: format!("OverIdx.{name}"),
+                implicit_class_argument: None,
+            },
+        );
+    }
     for name in [
         "plus", "times", "mtimes", "lt", "gt", "eq", "uplus", "rdivide", "mrdivide", "ldivide",
         "mldivide", "and", "or", "xor",
