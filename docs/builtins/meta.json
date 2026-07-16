@@ -27635,6 +27635,77 @@
       ]
     },
     {
+      "name": "extractHTMLText",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "str = extractHTMLText(code)",
+          "inputs": [
+            {
+              "name": "code",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "HTML code or htmlTree object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "str",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Extracted text."
+            }
+          ]
+        },
+        {
+          "label": "str = extractHTMLText(___, 'ExtractionMethod', method)",
+          "inputs": [
+            {
+              "name": "code",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "HTML code or htmlTree object."
+            },
+            {
+              "name": "Name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "ExtractionMethod",
+              "description": "Extraction method option name."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "tree",
+              "description": "Extraction method: tree, article, or all-text."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "str",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Extracted text."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.HTML.INVALID_INPUT",
+          "identifier": "RunMat:html:InvalidInput",
+          "when": "Inputs are not a supported htmlTree or extractHTMLText form.",
+          "message": "HTML Text Analytics helper received invalid input"
+        }
+      ]
+    },
+    {
       "name": "eye",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -43056,6 +43127,42 @@
           "identifier": "RunMat:hsv2rgb:Internal",
           "when": "RGB output tensor construction fails internally.",
           "message": "hsv2rgb: internal conversion failure"
+        }
+      ]
+    },
+    {
+      "name": "htmlTree",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tree = htmlTree(code)",
+          "inputs": [
+            {
+              "name": "code",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "HTML code or htmlTree object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tree",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Parsed HTML tree."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.HTML.INVALID_INPUT",
+          "identifier": "RunMat:html:InvalidInput",
+          "when": "Inputs are not a supported htmlTree or extractHTMLText form.",
+          "message": "HTML Text Analytics helper received invalid input"
         }
       ]
     },

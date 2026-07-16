@@ -1,0 +1,92 @@
+{
+  "title": "htmlTree",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "htmlTree",
+    "HTML",
+    "DOM",
+    "text analytics",
+    "parse"
+  ],
+  "summary": "Parse HTML code into a lightweight htmlTree object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`htmlTree` parses host-resident text and does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::html::tests",
+    "integration": null
+  },
+  "description": "`htmlTree(code)` parses HTML text and returns an `htmlTree` object that can be passed to `extractHTMLText`. Scalar string and character-vector inputs produce a scalar object. String arrays, multi-row character arrays, and cell arrays of character vectors produce shaped cells containing `htmlTree` objects.",
+  "behaviors": [
+    "`code` can be a string scalar, character vector, string array, multi-row character array, or cell array of character vectors.",
+    "The returned object stores `Name`, `Children`, `Parent`, `Attributes`, `RawHTML`, and `Text` properties.",
+    "`Name` is the uppercase root element name when an element is present.",
+    "`Children` is a column cell array of child `htmlTree` objects because RunMat does not yet have a first-class MATLAB object-array representation for this class.",
+    "`Parent` is `<missing>` at the root. Child objects store the parent element name rather than a cyclic object reference.",
+    "The parser accepts common well-formed and fragment HTML, skips comments and declarations, decodes common HTML entities, and preserves enough structure for text extraction.",
+    "Full Text Analytics DOM parity remains incomplete: selector APIs such as `findElement`, attribute access helpers such as `getAttribute`, cyclic parent object identity, and exact browser-grade malformed-HTML restructuring remain tracked by the broader Text Analytics compatibility issue."
+  ],
+  "examples": [
+    {
+      "description": "Parse HTML",
+      "input": "tree = htmlTree(\"<html><body><h1>Title</h1><p>Body</p></body></html>\")",
+      "output": "`tree` is an `htmlTree` object with `Name` equal to `\"HTML\"`."
+    },
+    {
+      "description": "Extract Text From Parsed HTML",
+      "input": "tree = htmlTree(\"<article><h2>Title</h2><p>Body &amp; tail</p></article>\");\nstr = extractHTMLText(tree)",
+      "output": "str = \"Title\\n\\nBody & tail\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does RunMat implement the full MATLAB htmlTree DOM surface?",
+      "answer": "No. This slice provides the core object representation needed by `extractHTMLText`. Selector, attribute-reader, exact malformed-HTML restructuring, and object-array parity remain tracked in the Text Analytics umbrella issue."
+    },
+    {
+      "question": "Why is `Children` a cell array?",
+      "answer": "RunMat's current generic object value does not yet model MATLAB object arrays for `htmlTree`, so children are stored as a cell array of scalar `htmlTree` objects."
+    },
+    {
+      "question": "Does `htmlTree` execute on the GPU?",
+      "answer": "No. HTML parsing is host text processing and has no `runmat-accelerate` provider path."
+    }
+  ],
+  "links": [
+    {
+      "label": "extractHTMLText",
+      "url": "./extractHTMLText"
+    },
+    {
+      "label": "stopWords",
+      "url": "./stopWords"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "tree = htmlTree(code)",
+      "output": "`tree` is an `htmlTree` object or a shaped cell array of `htmlTree` objects."
+    },
+    "points": [
+      "`code` must contain text HTML.",
+      "Use `extractHTMLText(tree)` to extract visible text from a parsed tree."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/html.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/html.rs"
+  },
+  "gpu_residency": "`htmlTree` parses host-resident text and has no provider kernel."
+}
