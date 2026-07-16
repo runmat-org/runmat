@@ -33,7 +33,7 @@
     "Character vectors and character arrays return character arrays; rows are padded after punctuation removal when needed to preserve rectangular char storage.",
     "Cell arrays are processed recursively for string and character text elements and retain the original cell shape.",
     "Missing string elements are preserved.",
-    "RunMat does not yet implement `tokenizedDocument`; token-type filtering such as `erasePunctuation(documents,'TokenTypes',types)` remains part of the broader Text Analytics Toolbox object surface."
+    "RunMat has a lightweight `tokenizedDocument` compatibility object, but `erasePunctuation` object input and token-type filtering such as `erasePunctuation(documents,'TokenTypes',types)` remain part of the broader Text Analytics Toolbox object surface."
   ],
   "examples": [
     {

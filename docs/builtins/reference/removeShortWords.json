@@ -1,0 +1,95 @@
+{
+  "title": "removeShortWords",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "removeShortWords",
+    "tokenizedDocument",
+    "bagOfWords",
+    "text analytics",
+    "filter"
+  ],
+  "summary": "Remove short words from tokenized documents or bag-of-words models.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`removeShortWords` filters host text-model objects and does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::documents::tests",
+    "integration": null
+  },
+  "description": "`removeShortWords(documents, len)` removes tokens whose character length is less than or equal to `len` from RunMat `tokenizedDocument` compatibility objects. `removeShortWords(bag, len)` removes matching vocabulary columns from RunMat `bagOfWords` objects.",
+  "behaviors": [
+    "`documents` must be a RunMat `tokenizedDocument` object created by `tokenizedDocument`.",
+    "`bag` must be a RunMat `bagOfWords` object created by `bagOfWords`.",
+    "`len` must be a positive integer scalar.",
+    "For tokenized documents, the result preserves `Shape`, `TokenizeMethod`, and `Language` metadata while recomputing document lengths and vocabulary.",
+    "For bag-of-words models, the result preserves document row count and removes count columns for words with length less than or equal to `len`.",
+    "This slice does not implement the broader Text Analytics token-removal family such as `removeStopWords`, `removeWords`, token-type filtering, or table-backed custom token filters."
+  ],
+  "examples": [
+    {
+      "description": "Filter Tokenized Documents",
+      "input": "documents = tokenizedDocument(\"a short document\");\nnewDocuments = removeShortWords(documents, 1)",
+      "output": "`newDocuments` contains `short` and `document`."
+    },
+    {
+      "description": "Filter A Bag Of Words",
+      "input": "documents = tokenizedDocument([\"a beta\"; \"an gamma\"]);\nbag = bagOfWords(documents);\nnewBag = removeShortWords(bag, 2)",
+      "output": "`newBag.Vocabulary` contains `beta` and `gamma`."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `removeShortWords` remove words shorter than len or shorter than or equal to len?",
+      "answer": "It removes words with character length less than or equal to `len`, matching the MATLAB Text Analytics contract."
+    },
+    {
+      "question": "Does `removeShortWords` support raw strings?",
+      "answer": "No. Convert raw text with `tokenizedDocument` first, or build a `bagOfWords` model and filter that object."
+    },
+    {
+      "question": "Does `removeShortWords` execute on the GPU?",
+      "answer": "No. It filters host text/model metadata and has no `runmat-accelerate` provider path."
+    }
+  ],
+  "links": [
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "bagOfWords",
+      "url": "./bagOfWords"
+    },
+    {
+      "label": "erasePunctuation",
+      "url": "./erasePunctuation"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "newDocuments = removeShortWords(documents, len)\nnewBag = removeShortWords(bag, len)",
+      "output": "`newDocuments` is a `tokenizedDocument` compatibility object. `newBag` is a `bagOfWords` compatibility object."
+    },
+    "points": [
+      "`len` must be positive and integer-valued.",
+      "Input objects must be RunMat Text Analytics compatibility objects from this module."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs"
+  },
+  "gpu_residency": "`removeShortWords` filters host text/model objects and has no provider kernel."
+}

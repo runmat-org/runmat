@@ -1,0 +1,100 @@
+{
+  "title": "tokenizedDocument",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "tokenizedDocument",
+    "tokenize",
+    "documents",
+    "text analytics",
+    "words"
+  ],
+  "summary": "Create tokenized document objects for Text Analytics workflows.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`tokenizedDocument` tokenizes host-resident text and stores text metadata; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 7,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::documents::tests",
+    "integration": null
+  },
+  "description": "`tokenizedDocument(str)` tokenizes text into a lightweight RunMat `tokenizedDocument` object. This slice supports English and German Unicode-style tokenization plus pre-tokenized word input through `TokenizeMethod`, `\"none\"`.",
+  "behaviors": [
+    "`tokenizedDocument` with no input creates a scalar `tokenizedDocument` compatibility object containing one empty document.",
+    "`str` may be a string scalar, string array, character vector, multi-row character array, or cell array of scalar text.",
+    "String arrays and cell arrays preserve their document-array shape in the object's `Shape` property. Character matrices are treated as one document per row.",
+    "`tokenizedDocument(str, 'TokenizeMethod', 'unicode')` tokenizes text into words and simple punctuation tokens.",
+    "`tokenizedDocument(words, 'TokenizeMethod', 'none')` accepts a string array, character vector, or cell form as pre-tokenized words. A cell array of string arrays represents multiple pre-tokenized documents.",
+    "`Language` accepts `\"en\"` or `\"de\"`. Japanese and Korean require MeCab-compatible tokenization and remain tracked by the Text Analytics umbrella issue.",
+    "`DetectPatterns` accepts `\"all\"` or `\"none\"`. With `\"all\"`, RunMat keeps common URLs, hashtags, at-mentions, and simple emoticons as tokens.",
+    "The returned object stores `Vocabulary` plus RunMat compatibility metadata properties: `Documents`, `NumDocuments`, `DocumentLengths`, `Shape`, `TokenizeMethod`, and `Language`. The metadata properties are implementation details until RunMat has first-class Text Analytics object arrays.",
+    "RunMat represents a MATLAB tokenizedDocument array as one scalar object carrying document cells and shape metadata because generic first-class MATLAB object arrays are not yet available for this class.",
+    "Custom token tables, regular-expression token tables, top-level-domain tables, exact ICU/MeCab tokenization, token details, part-of-speech/entity data, and object-array identity parity remain tracked in the broader Text Analytics compatibility issue."
+  ],
+  "examples": [
+    {
+      "description": "Tokenize Text",
+      "input": "documents = tokenizedDocument([\"A short document\"; \"Another document\"])",
+      "output": "`documents.NumDocuments` is `2`, and `documents.Vocabulary` contains the unique tokens in first-seen order."
+    },
+    {
+      "description": "Use Pre-Tokenized Words",
+      "input": "documents = tokenizedDocument([\"alpha\" \"beta\" \"alpha\"], \"TokenizeMethod\", \"none\")",
+      "output": "`documents.DocumentLengths` is `3` for the single pre-tokenized document."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is RunMat's tokenizedDocument a full MATLAB object array?",
+      "answer": "No. It is a scalar compatibility object with document cells and a `Shape` property. First-class object-array behavior remains a runtime infrastructure gap tracked by the Text Analytics umbrella."
+    },
+    {
+      "question": "Does `tokenizedDocument` support Japanese or Korean tokenization?",
+      "answer": "No. RunMat rejects Japanese/Korean language or MeCab tokenization forms in this slice and keeps that work in the remaining Text Analytics queue."
+    },
+    {
+      "question": "Does `tokenizedDocument` execute on the GPU?",
+      "answer": "No. Tokenization is host text processing and has no `runmat-accelerate` provider path."
+    }
+  ],
+  "links": [
+    {
+      "label": "bagOfWords",
+      "url": "./bagOfWords"
+    },
+    {
+      "label": "removeShortWords",
+      "url": "./removeShortWords"
+    },
+    {
+      "label": "normalizeWords",
+      "url": "./normalizeWords"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "documents = tokenizedDocument\ndocuments = tokenizedDocument(str)\ndocuments = tokenizedDocument(str, 'TokenizeMethod', method)\ndocuments = tokenizedDocument(str, 'Language', language)\ndocuments = tokenizedDocument(str, 'DetectPatterns', patterns)",
+      "output": "`documents` is a `tokenizedDocument` compatibility object."
+    },
+    "points": [
+      "`method` must be `\"unicode\"` or `\"none\"`.",
+      "`language` must be `\"en\"` or `\"de\"` in this slice.",
+      "`patterns` must be `\"all\"` or `\"none\"`."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs"
+  },
+  "gpu_residency": "`tokenizedDocument` tokenizes host-resident text and has no provider kernel."
+}

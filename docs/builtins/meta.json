@@ -5239,6 +5239,83 @@
       ]
     },
     {
+      "name": "bagOfWords",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "bag = bagOfWords",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "bag",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bag-of-words model object."
+            }
+          ]
+        },
+        {
+          "label": "bag = bagOfWords(documents)",
+          "inputs": [
+            {
+              "name": "documentsOrWords",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Tokenized documents, word vector, or unique vocabulary."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bag",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bag-of-words model object."
+            }
+          ]
+        },
+        {
+          "label": "bag = bagOfWords(uniqueWords, counts)",
+          "inputs": [
+            {
+              "name": "uniqueWords",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Unique words."
+            },
+            {
+              "name": "counts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Word counts per document."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bag",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bag-of-words model object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TEXT_ANALYTICS_DOCUMENTS.INVALID_INPUT",
+          "identifier": "RunMat:textAnalyticsDocuments:InvalidInput",
+          "when": "Inputs do not match a supported tokenizedDocument, bagOfWords, or removeShortWords form.",
+          "message": "Text Analytics document helper received invalid input"
+        }
+      ]
+    },
+    {
       "name": "bandwidth",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -84755,6 +84832,49 @@
       ]
     },
     {
+      "name": "removeShortWords",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "newDocumentsOrBag = removeShortWords(documentsOrBag, len)",
+          "inputs": [
+            {
+              "name": "documentsOrBag",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument or bagOfWords object."
+            },
+            {
+              "name": "len",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum word length to remove."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "newDocumentsOrBag",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Filtered tokenizedDocument or bagOfWords object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TEXT_ANALYTICS_DOCUMENTS.INVALID_INPUT",
+          "identifier": "RunMat:textAnalyticsDocuments:InvalidInput",
+          "when": "Inputs do not match a supported tokenizedDocument, bagOfWords, or removeShortWords form.",
+          "message": "Text Analytics document helper received invalid input"
+        }
+      ]
+    },
+    {
       "name": "repelem",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -103959,6 +104079,83 @@
           "identifier": "RunMat:toeplitz:Internal",
           "when": "Output allocation or gpuArray gather fails.",
           "message": "toeplitz: internal error"
+        }
+      ]
+    },
+    {
+      "name": "tokenizedDocument",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "documents = tokenizedDocument",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Tokenized document object."
+            }
+          ]
+        },
+        {
+          "label": "documents = tokenizedDocument(str)",
+          "inputs": [
+            {
+              "name": "str",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text or pre-tokenized words."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Tokenized document object."
+            }
+          ]
+        },
+        {
+          "label": "documents = tokenizedDocument(str, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "str",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text or pre-tokenized words."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: TokenizeMethod, Language, DetectPatterns ('all' or 'none' in this slice)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Tokenized document object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TEXT_ANALYTICS_DOCUMENTS.INVALID_INPUT",
+          "identifier": "RunMat:textAnalyticsDocuments:InvalidInput",
+          "when": "Inputs do not match a supported tokenizedDocument, bagOfWords, or removeShortWords form.",
+          "message": "Text Analytics document helper received invalid input"
         }
       ]
     },

@@ -38,7 +38,7 @@
     "Cell arrays preserve the cell shape and preserve scalar string versus character-vector element types.",
     "Each text element must contain a single word. Multi-word elements raise `RunMat:normalizeWords:InvalidInput`.",
     "Missing string values are preserved.",
-    "RunMat does not yet implement `tokenizedDocument`; document input, token-type filtering, part-of-speech-aware lemmatization, Japanese/Korean tokenized-document lemmatization, and bag/model object integration remain part of the broader Text Analytics compatibility issue.",
+    "RunMat has a lightweight `tokenizedDocument` compatibility object, but `normalizeWords` object input is not implemented yet; document input, token-type filtering, part-of-speech-aware lemmatization, Japanese/Korean tokenized-document lemmatization, and bag/model object integration remain part of the broader Text Analytics compatibility issue.",
     "English stemming follows a Porter-style algorithm. German stemming is conservative and intended for compatibility with common preprocessing workflows, not exact release-to-release MathWorks dictionary identity."
   ],
   "examples": [
@@ -61,7 +61,7 @@
   "faqs": [
     {
       "question": "Does `normalizeWords` support tokenizedDocument input?",
-      "answer": "No. This implementation covers standalone word input. `tokenizedDocument` normalization requires the broader Text Analytics object model and remains tracked by the Text Analytics compatibility issue."
+      "answer": "No. This implementation covers standalone word input. `tokenizedDocument` normalization requires deeper Text Analytics object behavior and remains tracked by the Text Analytics compatibility issue."
     },
     {
       "question": "Can standalone words use Japanese or Korean?",
