@@ -133,6 +133,12 @@ descriptor!(
     &OUT_ANY
 );
 descriptor!(
+    ERASE_PUNCTUATION_DESCRIPTOR,
+    "s = erasePunctuation(text)",
+    &IN_TEXT,
+    &OUT_ANY
+);
+descriptor!(
     MATCHES_DESCRIPTOR,
     "tf = matches(text, pattern)",
     &IN_TEXT_REST,
@@ -414,6 +420,27 @@ async fn erase_urls_builtin(text: Value) -> BuiltinResult<Value> {
     let regex = Regex::new(r"https?://[^\s]+|www\.[^\s]+")
         .map_err(|e| transform_error("eraseURLs", e.to_string()))?;
     map_text_preserve(text, "eraseURLs", |s| regex.replace_all(s, "").to_string())
+}
+
+#[runtime_builtin(
+    name = "erasePunctuation",
+    category = "strings/transform",
+    summary = "Remove Unicode punctuation and symbol characters from text.",
+    keywords = "erasePunctuation,punctuation,symbol,text analytics,string",
+    accel = "sink",
+    type_resolver(any_type),
+    descriptor(crate::builtins::strings::transform::compat::ERASE_PUNCTUATION_DESCRIPTOR),
+    builtin_path = "crate::builtins::strings::transform::compat"
+)]
+async fn erase_punctuation_builtin(text: Value) -> BuiltinResult<Value> {
+    let text = gather_if_needed_async(&text)
+        .await
+        .map_err(map_flow("erasePunctuation"))?;
+    let regex = Regex::new(r"[\p{P}\p{S}]")
+        .map_err(|e| transform_error("erasePunctuation", e.to_string()))?;
+    map_text_preserve(text, "erasePunctuation", |s| {
+        regex.replace_all(s, "").to_string()
+    })
 }
 
 #[runtime_builtin(
@@ -766,6 +793,7 @@ fn justify(text: &str, side: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::CellArray;
 
     fn block(
         value: impl std::future::Future<Output = BuiltinResult<Value>>,
@@ -857,6 +885,40 @@ mod tests {
             .unwrap(),
             Value::String("see  now".into())
         );
+        assert_eq!(
+            block(erase_punctuation_builtin(Value::String(
+                "it's one and/or two.".into()
+            )))
+            .unwrap(),
+            Value::String("its one andor two".into())
+        );
+        assert_eq!(
+            block(erase_punctuation_builtin(Value::CharArray(
+                CharArray::new_row("cost: $5.00!")
+            )))
+            .unwrap(),
+            Value::CharArray(CharArray::new_row("cost 500"))
+        );
+        let cell = CellArray::new(
+            vec![
+                Value::CharArray(CharArray::new_row("alpha,beta!")),
+                Value::String("C++ and C#".into()),
+            ],
+            1,
+            2,
+        )
+        .unwrap();
+        match block(erase_punctuation_builtin(Value::Cell(cell))).unwrap() {
+            Value::Cell(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(
+                    out.data[0],
+                    Value::CharArray(CharArray::new_row("alphabeta"))
+                );
+                assert_eq!(out.data[1], Value::String("C and C".into()));
+            }
+            other => panic!("expected cell array, got {other:?}"),
+        }
         assert_eq!(
             block(strjust_builtin(
                 Value::CharArray(CharArray::new_row("  x")),

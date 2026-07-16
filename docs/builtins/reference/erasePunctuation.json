@@ -1,0 +1,95 @@
+{
+  "title": "erasePunctuation",
+  "category": "strings/transform",
+  "keywords": [
+    "erasePunctuation",
+    "punctuation",
+    "symbols",
+    "text analytics",
+    "string"
+  ],
+  "summary": "Remove Unicode punctuation and symbol characters from text.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Text values are host-resident. GPU-resident wrapper inputs are gathered before evaluating this string transform."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::compat::tests::splitlines_reverse_deblank_and_matches_work",
+    "integration": null
+  },
+  "description": "`erasePunctuation(text)` removes characters in Unicode punctuation and symbol categories from string, character, and cell text inputs while preserving the input container shape and type.",
+  "behaviors": [
+    "String scalars and string arrays return string values with punctuation and symbol characters removed from each nonmissing element.",
+    "Character vectors and character arrays return character arrays; rows are padded after punctuation removal when needed to preserve rectangular char storage.",
+    "Cell arrays are processed recursively for string and character text elements and retain the original cell shape.",
+    "Missing string elements are preserved.",
+    "RunMat does not yet implement `tokenizedDocument`; token-type filtering such as `erasePunctuation(documents,'TokenTypes',types)` remains part of the broader Text Analytics Toolbox object surface."
+  ],
+  "examples": [
+    {
+      "description": "Erase Punctuation From A String",
+      "input": "erasePunctuation(\"it's one and/or two.\")",
+      "output": "\"its one andor two\""
+    },
+    {
+      "description": "Erase Punctuation And Symbols From A Character Vector",
+      "input": "erasePunctuation('cost: $5.00!')",
+      "output": "'cost 500'"
+    },
+    {
+      "description": "Preserve Cell Array Shape",
+      "input": "erasePunctuation({'alpha,beta!','C++ and C#'})",
+      "output": "{'alphabeta','C and C'}"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `erasePunctuation` remove spaces?",
+      "answer": "No. Whitespace is not in a Unicode punctuation or symbol category, so spaces are preserved."
+    },
+    {
+      "question": "Does this implement tokenizedDocument token-type filtering?",
+      "answer": "No. The plain text transform is implemented. `tokenizedDocument` object input and the `TokenTypes` option require the broader Text Analytics object model and remain tracked by the Text Analytics compatibility issue."
+    }
+  ],
+  "links": [
+    {
+      "label": "eraseURLs",
+      "url": "./eraseURLs"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "newText = erasePunctuation(text)",
+      "output": "`newText` has the same text container shape and type as `text`."
+    },
+    "points": [
+      "`text` may be a string scalar, string array, character vector, character array, or cell array containing text values.",
+      "Punctuation and symbol removal follows Unicode punctuation (`P*`) and symbol (`S*`) categories."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/compat.rs"
+  },
+  "gpu_residency": "`erasePunctuation` operates on host text and has no provider kernel."
+}

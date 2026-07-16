@@ -26445,6 +26445,35 @@
       ]
     },
     {
+      "name": "erasePunctuation",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = erasePunctuation(text)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "eraseURLs",
       "output_mode": "Fixed",
       "completion_policy": "Public",
