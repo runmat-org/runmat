@@ -1,0 +1,100 @@
+{
+  "title": "stopWords",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "stopWords",
+    "stop words",
+    "text analytics",
+    "language",
+    "string"
+  ],
+  "summary": "Return common stop words for supported Text Analytics languages.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`stopWords` returns host-resident string metadata and does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::stopwords::tests",
+    "integration": null
+  },
+  "description": "`stopWords` returns a column string array of common stop words. `stopWords('Language', language)` selects English (`'en'`), Japanese (`'ja'`), German (`'de'`), or Korean (`'ko'`).",
+  "behaviors": [
+    "`stopWords` with no inputs returns the English stop-word list.",
+    "`stopWords('Language', language)` accepts scalar string or character-vector option values.",
+    "The supported language codes are `en`, `ja`, `de`, and `ko`, matching the Text Analytics Toolbox language set for this function.",
+    "The output is a string column vector with shape `N x 1`.",
+    "RunMat provides compatibility stop-word lists for the documented languages. The list contents cover common function use such as building removal sets for text preprocessing; exact release-to-release MathWorks vocabulary identity is not guaranteed.",
+    "Tokenized-document removal helpers such as `removeStopWords` and custom token deletion remain part of the broader Text Analytics object surface."
+  ],
+  "examples": [
+    {
+      "description": "Get English Stop Words",
+      "input": "words = stopWords",
+      "output": "words = N×1 string\n    \"a\"\n    \"about\"\n    \"above\"\n    ..."
+    },
+    {
+      "description": "Get German Stop Words",
+      "input": "words = stopWords('Language','de')",
+      "output": "words = N×1 string\n    \"ab\"\n    \"aber\"\n    \"alle\"\n    ..."
+    },
+    {
+      "description": "Use Stop Words In A Custom Filter",
+      "input": "words = stopWords;\ncustom = [words; \"runmat\"; \"matlab\"]",
+      "output": "`custom` is a string column vector suitable for text-preprocessing workflows."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which language codes are accepted?",
+      "answer": "`en`, `ja`, `de`, and `ko` are accepted. Other language codes raise `RunMat:stopWords:InvalidInput`."
+    },
+    {
+      "question": "Is this tied to tokenizedDocument?",
+      "answer": "No. `stopWords` is a standalone list function. Tokenized-document operations that consume these lists remain tracked separately in the Text Analytics compatibility issue."
+    },
+    {
+      "question": "Does `stopWords` execute on the GPU?",
+      "answer": "No. It returns host string metadata, so no `runmat-accelerate` provider path is involved."
+    }
+  ],
+  "links": [
+    {
+      "label": "erasePunctuation",
+      "url": "./erasePunctuation"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "strings",
+      "url": "./strings"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "words = stopWords\nwords = stopWords('Language', language)",
+      "output": "`words` is an `N x 1` string array."
+    },
+    "points": [
+      "`language` must be `\"en\"`, `\"ja\"`, `\"de\"`, or `\"ko\"`.",
+      "The option name is case-insensitive and must be `Language`."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/stopwords.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/stopwords.rs"
+  },
+  "gpu_residency": "`stopWords` returns host-resident strings and has no provider kernel."
+}

@@ -4,5 +4,6 @@ pub mod common;
 pub mod core;
 pub mod regex;
 pub mod search;
+pub mod text_analytics;
 pub mod transform;
 pub(crate) mod type_resolvers;

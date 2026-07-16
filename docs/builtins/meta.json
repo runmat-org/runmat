@@ -97163,6 +97163,62 @@
       ]
     },
     {
+      "name": "stopWords",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "words = stopWords",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Stop word list."
+            }
+          ]
+        },
+        {
+          "label": "words = stopWords('Language', language)",
+          "inputs": [
+            {
+              "name": "Name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "Language",
+              "description": "Language option name."
+            },
+            {
+              "name": "language",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "en",
+              "description": "Stop word language: en, ja, de, or ko."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Stop word list."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.STOPWORDS.INVALID_INPUT",
+          "identifier": "RunMat:stopWords:InvalidInput",
+          "when": "Inputs are not a supported stopWords form.",
+          "message": "stopWords: invalid input"
+        }
+      ]
+    },
+    {
       "name": "str2double",
       "output_mode": "Fixed",
       "completion_policy": "Public",
