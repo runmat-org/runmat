@@ -3,6 +3,8 @@
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use once_cell::sync::Lazy;
+use regex::Regex;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -13,6 +15,9 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::core::compat::scalar_text;
+use crate::builtins::strings::text_analytics::stopwords::{
+    stop_words_for_language, StopWordsLanguage,
+};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
 pub const TOKENIZED_DOCUMENT_CLASS: &str = "tokenizedDocument";
@@ -46,6 +51,14 @@ const OUT_DOCUMENTS_OR_BAG: [BuiltinParamDescriptor; 1] = [BuiltinParamDescripto
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Filtered tokenizedDocument or bagOfWords object.",
+}];
+
+const OUT_DOCUMENTS_FILTERED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "newDocuments",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Filtered tokenizedDocument object.",
 }];
 
 const IN_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -115,6 +128,31 @@ const IN_REMOVE_SHORT: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
+const IN_REMOVE_STOP: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "documents",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "tokenizedDocument object.",
+    },
+    BuiltinParamDescriptor {
+        name: "NameValue",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value options: IgnoreCase.",
+    },
+];
+
+const IN_REMOVE_STOP_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "documents",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "tokenizedDocument object.",
+}];
+
 const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TEXT_ANALYTICS_DOCUMENTS.INVALID_INPUT",
     identifier: Some("RunMat:textAnalyticsDocuments:InvalidInput"),
@@ -124,6 +162,16 @@ const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 };
 
 const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
+
+const ERROR_REMOVE_STOP_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REMOVESTOPWORDS.INVALID_INPUT",
+    identifier: Some("RunMat:removeStopWords:InvalidInput"),
+    when: "Inputs do not match a supported removeStopWords form.",
+    message: "removeStopWords: invalid input",
+};
+
+const REMOVE_STOP_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] =
+    [ERROR_REMOVE_STOP_WORDS_INVALID_INPUT];
 
 pub const TOKENIZED_DOCUMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
@@ -182,6 +230,24 @@ pub const REMOVE_SHORT_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+pub const REMOVE_STOP_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[
+        BuiltinSignatureDescriptor {
+            label: "newDocuments = removeStopWords(documents)",
+            inputs: &IN_REMOVE_STOP_DOCUMENTS,
+            outputs: &OUT_DOCUMENTS_FILTERED,
+        },
+        BuiltinSignatureDescriptor {
+            label: "newDocuments = removeStopWords(documents, Name, Value, ...)",
+            inputs: &IN_REMOVE_STOP,
+            outputs: &OUT_DOCUMENTS_FILTERED,
+        },
+    ],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &REMOVE_STOP_WORDS_ERRORS,
+};
+
 fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
@@ -190,9 +256,13 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
     fn_name: &str,
     message: impl Into<String>,
 ) -> crate::RuntimeError {
+    let identifier = match fn_name {
+        "removeStopWords" => "RunMat:removeStopWords:InvalidInput",
+        _ => "RunMat:textAnalyticsDocuments:InvalidInput",
+    };
     build_runtime_error(message)
         .with_builtin(fn_name)
-        .with_identifier("RunMat:textAnalyticsDocuments:InvalidInput")
+        .with_identifier(identifier)
         .build()
 }
 
@@ -363,6 +433,62 @@ async fn remove_short_words_builtin(value: Value, len: Value) -> BuiltinResult<V
     }
 }
 
+#[runtime_builtin(
+    name = "removeStopWords",
+    category = "strings/text_analytics",
+    summary = "Remove stop words from tokenized documents.",
+    keywords = "removeStopWords,stop words,text analytics,tokenizedDocument",
+    accel = "sink",
+    type_resolver(any_type),
+    descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_STOP_WORDS_DESCRIPTOR),
+    builtin_path = "crate::builtins::strings::text_analytics::documents"
+)]
+async fn remove_stop_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let gathered = gather_args(args, "removeStopWords").await?;
+    let (value, options) = parse_remove_stop_words_args(gathered)?;
+    let Value::Object(object) = value else {
+        return Err(text_analytics_error(
+            "removeStopWords",
+            format!("removeStopWords: expected tokenizedDocument object, got {value:?}"),
+        ));
+    };
+    if !object.is_class(TOKENIZED_DOCUMENT_CLASS) {
+        return Err(text_analytics_error(
+            "removeStopWords",
+            format!(
+                "removeStopWords: expected tokenizedDocument object, got {}",
+                object.class_name
+            ),
+        ));
+    }
+    let language = stop_words_language_from_document_object(&object, "removeStopWords")?;
+    let words = stop_words_for_language(language);
+    let stop_words = words
+        .iter()
+        .map(|word| {
+            if options.ignore_case {
+                word.to_lowercase()
+            } else {
+                (*word).to_string()
+            }
+        })
+        .collect::<HashSet<_>>();
+    transform_tokenized_document(&object, "removeStopWords", |token, token_type| {
+        if !matches!(
+            token_type,
+            DocumentTokenType::Letters | DocumentTokenType::Other
+        ) {
+            return Ok(Some(token.to_string()));
+        }
+        let key = if options.ignore_case {
+            token.to_lowercase()
+        } else {
+            token.to_string()
+        };
+        Ok((!stop_words.contains(&key)).then(|| token.to_string()))
+    })
+}
+
 async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for arg in args {
@@ -497,6 +623,54 @@ fn parse_detect_patterns(value: &str) -> BuiltinResult<DetectPatterns> {
             ),
         )),
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RemoveStopWordsOptions {
+    ignore_case: bool,
+}
+
+impl Default for RemoveStopWordsOptions {
+    fn default() -> Self {
+        Self { ignore_case: true }
+    }
+}
+
+fn parse_remove_stop_words_args(
+    args: Vec<Value>,
+) -> BuiltinResult<(Value, RemoveStopWordsOptions)> {
+    if args.is_empty() {
+        return Err(text_analytics_error(
+            "removeStopWords",
+            "removeStopWords: expected tokenizedDocument input",
+        ));
+    }
+    if !(args.len() - 1).is_multiple_of(2) {
+        return Err(text_analytics_error(
+            "removeStopWords",
+            "removeStopWords: name-value options must appear in pairs",
+        ));
+    }
+    let mut options = RemoveStopWordsOptions::default();
+    let mut idx = 1;
+    while idx < args.len() {
+        let name = scalar_text(&args[idx], "removeStopWords")
+            .map_err(|err| text_analytics_error("removeStopWords", err.to_string()))?
+            .to_ascii_lowercase();
+        match name.as_str() {
+            "ignorecase" => {
+                options.ignore_case = parse_bool_scalar(&args[idx + 1], "removeStopWords")?;
+            }
+            other => {
+                return Err(text_analytics_error(
+                    "removeStopWords",
+                    format!("removeStopWords: unsupported option '{other}'"),
+                ));
+            }
+        }
+        idx += 2;
+    }
+    Ok((args[0].clone(), options))
 }
 
 struct ParsedDocuments {
@@ -705,6 +879,9 @@ fn complex_token_at(text: &str, pos: usize) -> Option<(String, usize)> {
         let token_end = pos + token.len();
         return Some((token.to_string(), token_end));
     }
+    if let Some((token, end)) = email_token_at(text, pos) {
+        return Some((token, end));
+    }
     if rest.starts_with('#') || rest.starts_with('@') {
         let mut end = pos + 1;
         while end < text.len() {
@@ -733,6 +910,34 @@ fn complex_token_at(text: &str, pos: usize) -> Option<(String, usize)> {
         return Some((text[pos..end].to_string(), end));
     }
     None
+}
+
+fn email_token_at(text: &str, pos: usize) -> Option<(String, usize)> {
+    let rest = &text[pos..];
+    let at = rest.find('@')?;
+    if at == 0 {
+        return None;
+    }
+    let local = &rest[..at];
+    if !local
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '%' | '+' | '-'))
+    {
+        return None;
+    }
+    let after_at = &rest[at + 1..];
+    let domain_len = after_at
+        .char_indices()
+        .take_while(|(_, ch)| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-'))
+        .map(|(idx, ch)| idx + ch.len_utf8())
+        .last()?;
+    let raw_end = pos + at + 1 + domain_len;
+    let token = text[pos..raw_end].trim_end_matches(is_trailing_punctuation);
+    if !token.contains('.') || token.ends_with('@') {
+        return None;
+    }
+    let token_end = pos + token.len();
+    Some((token.to_string(), token_end))
 }
 
 fn take_while_nonspace(text: &str) -> usize {
@@ -796,6 +1001,213 @@ fn tokenized_document_value(
         .properties
         .insert("Language".to_string(), Value::String(options.language));
     Ok(Value::Object(object))
+}
+
+pub(in crate::builtins::strings::text_analytics) fn tokenized_document_language(
+    object: &ObjectInstance,
+) -> String {
+    match object.properties.get("Language") {
+        Some(Value::String(value)) => value.clone(),
+        _ => "en".to_string(),
+    }
+}
+
+pub(in crate::builtins::strings::text_analytics) fn transform_tokenized_document(
+    object: &ObjectInstance,
+    fn_name: &str,
+    mut transform: impl FnMut(&str, DocumentTokenType) -> BuiltinResult<Option<String>>,
+) -> BuiltinResult<Value> {
+    let documents = documents_from_object(object, fn_name)?
+        .into_iter()
+        .map(|doc| {
+            doc.into_iter()
+                .filter_map(
+                    |token| match transform(&token, document_token_type(&token)) {
+                        Ok(Some(value)) => Some(Ok(value)),
+                        Ok(None) => None,
+                        Err(err) => Some(Err(err)),
+                    },
+                )
+                .collect::<BuiltinResult<Vec<_>>>()
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    tokenized_document_value(
+        documents,
+        shape_from_object(object),
+        options_from_document_object(object),
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::builtins::strings::text_analytics) enum DocumentTokenType {
+    Letters,
+    Punctuation,
+    Other,
+    WebAddress,
+    EmailAddress,
+    Hashtag,
+    AtMention,
+    Emoticon,
+}
+
+impl DocumentTokenType {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Letters => "letters",
+            Self::Punctuation => "punctuation",
+            Self::Other => "other",
+            Self::WebAddress => "web-address",
+            Self::EmailAddress => "email-address",
+            Self::Hashtag => "hashtag",
+            Self::AtMention => "at-mention",
+            Self::Emoticon => "emoticon",
+        }
+    }
+}
+
+pub(in crate::builtins::strings) fn erase_punctuation_tokenized_document(
+    object: ObjectInstance,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    if !object.is_class(TOKENIZED_DOCUMENT_CLASS) {
+        return Err(text_analytics_error(
+            "erasePunctuation",
+            format!(
+                "erasePunctuation: expected tokenizedDocument object, got {}",
+                object.class_name
+            ),
+        ));
+    }
+    let selected_types = parse_erase_punctuation_args(args)?;
+    transform_tokenized_document(&object, "erasePunctuation", |token, token_type| {
+        if !selected_types.contains(token_type.as_str()) {
+            return Ok(Some(token.to_string()));
+        }
+        let cleaned = remove_punctuation_and_symbols(token);
+        Ok((!cleaned.is_empty()).then_some(cleaned))
+    })
+}
+
+fn parse_erase_punctuation_args(args: Vec<Value>) -> BuiltinResult<HashSet<String>> {
+    match args.as_slice() {
+        [] => Ok(["punctuation".to_string(), "other".to_string()]
+            .into_iter()
+            .collect()),
+        [name, types] => {
+            let option = scalar_text(name, "erasePunctuation")
+                .map_err(|err| text_analytics_error("erasePunctuation", err.to_string()))?
+                .to_ascii_lowercase();
+            if option != "tokentypes" {
+                return Err(text_analytics_error(
+                    "erasePunctuation",
+                    format!("erasePunctuation: unsupported option '{option}'"),
+                ));
+            }
+            let parsed = words_from_word_vector(types, "erasePunctuation")?
+                .into_iter()
+                .map(|token_type| token_type.trim().to_ascii_lowercase())
+                .filter(|token_type| !token_type.is_empty())
+                .collect::<HashSet<_>>();
+            if parsed.is_empty() {
+                return Err(text_analytics_error(
+                    "erasePunctuation",
+                    "erasePunctuation: TokenTypes must contain at least one token type",
+                ));
+            }
+            Ok(parsed)
+        }
+        _ => Err(text_analytics_error(
+            "erasePunctuation",
+            "erasePunctuation: expected erasePunctuation(documents) or erasePunctuation(documents,'TokenTypes',types)",
+        )),
+    }
+}
+
+fn document_token_type(token: &str) -> DocumentTokenType {
+    if token.starts_with("http://") || token.starts_with("https://") || token.starts_with("www.") {
+        return DocumentTokenType::WebAddress;
+    }
+    if email_token_at(token, 0).is_some_and(|(_, end)| end == token.len()) {
+        return DocumentTokenType::EmailAddress;
+    }
+    if token.starts_with('#')
+        && token
+            .chars()
+            .skip(1)
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        return DocumentTokenType::Hashtag;
+    }
+    if token.starts_with('@')
+        && token
+            .chars()
+            .skip(1)
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        return DocumentTokenType::AtMention;
+    }
+    if matches!(token, ":-)" | ":-D" | ":)" | ":D") {
+        return DocumentTokenType::Emoticon;
+    }
+    if token
+        .chars()
+        .all(|ch| !ch.is_alphanumeric() && !ch.is_whitespace())
+    {
+        return DocumentTokenType::Punctuation;
+    }
+    if token.chars().any(char::is_alphabetic)
+        && token
+            .chars()
+            .all(|ch| ch.is_alphabetic() || ch == '\'' || ch == '-' || ch == '_')
+    {
+        return DocumentTokenType::Letters;
+    }
+    DocumentTokenType::Other
+}
+
+fn remove_punctuation_and_symbols(text: &str) -> String {
+    static PUNCTUATION_OR_SYMBOL: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"[\p{P}\p{S}]").expect("valid punctuation regex"));
+    PUNCTUATION_OR_SYMBOL.replace_all(text, "").to_string()
+}
+
+fn stop_words_language_from_document_object(
+    object: &ObjectInstance,
+    fn_name: &str,
+) -> BuiltinResult<StopWordsLanguage> {
+    match tokenized_document_language(object)
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "en" => Ok(StopWordsLanguage::English),
+        "de" => Ok(StopWordsLanguage::German),
+        "ja" => Ok(StopWordsLanguage::Japanese),
+        "ko" => Ok(StopWordsLanguage::Korean),
+        other => Err(text_analytics_error(
+            fn_name,
+            format!("{fn_name}: unsupported document language '{other}'"),
+        )),
+    }
+}
+
+fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
+    match value {
+        Value::Bool(value) => Ok(*value),
+        Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.data[0] {
+            0.0 => Ok(false),
+            1.0 => Ok(true),
+            other => Err(text_analytics_error(
+                fn_name,
+                format!("{fn_name}: logical scalar option must be true or false, got {other}"),
+            )),
+        },
+        other => Err(text_analytics_error(
+            fn_name,
+            format!("{fn_name}: logical scalar option must be true or false, got {other:?}"),
+        )),
+    }
 }
 
 fn documents_cell(documents: &[Vec<String>]) -> BuiltinResult<Value> {
@@ -1172,6 +1584,10 @@ mod tests {
         futures::executor::block_on(remove_short_words_builtin(value, len))
     }
 
+    fn run_remove_stop(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(remove_stop_words_builtin(args))
+    }
+
     fn object(value: Value) -> ObjectInstance {
         let Value::Object(object) = value else {
             panic!("expected object");
@@ -1191,6 +1607,10 @@ mod tests {
             panic!("expected tensor property {name}");
         };
         tensor.clone()
+    }
+
+    fn documents_property(object: &ObjectInstance) -> Vec<Vec<String>> {
+        documents_from_object(object, "test").expect("documents property")
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1271,13 +1691,15 @@ mod tests {
     fn tokenized_document_detects_complex_tokens_by_default() {
         let doc = object(
             run_tokenized(vec![Value::String(
-                "Analyze #MATLAB :-) at https://www.mathworks.com/help/".to_string(),
+                "Analyze #MATLAB :-) at help@example.com or https://www.mathworks.com/help/"
+                    .to_string(),
             )])
             .expect("tokenized"),
         );
         let vocabulary = string_array_property(&doc, "Vocabulary");
         assert!(vocabulary.contains(&"#MATLAB".to_string()));
         assert!(vocabulary.contains(&":-)".to_string()));
+        assert!(vocabulary.contains(&"help@example.com".to_string()));
         assert!(vocabulary.contains(&"https://www.mathworks.com/help/".to_string()));
     }
 
@@ -1401,6 +1823,111 @@ mod tests {
         };
         assert_eq!(counts.shape, vec![1, 3]);
         assert_eq!(counts.data, vec![1.0, 1.0, 1.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn remove_stop_words_filters_tokenized_documents_with_case_option() {
+        let input = StringArray::new(
+            vec![
+                "an example of a short sentence".to_string(),
+                "The second short sentence".to_string(),
+            ],
+            vec![2, 1],
+        )
+        .unwrap();
+        let docs = run_tokenized(vec![Value::StringArray(input)]).expect("tokenized");
+        let filtered = object(run_remove_stop(vec![docs]).expect("remove stop words"));
+        assert_eq!(
+            documents_property(&filtered),
+            vec![
+                vec!["example", "short", "sentence"],
+                vec!["second", "short", "sentence"],
+            ]
+        );
+
+        let words = StringArray::new(
+            vec!["The".to_string(), "the".to_string(), "word".to_string()],
+            vec![1, 3],
+        )
+        .unwrap();
+        let docs = run_tokenized(vec![
+            Value::StringArray(words),
+            Value::String("TokenizeMethod".to_string()),
+            Value::String("none".to_string()),
+        ])
+        .expect("tokenized");
+        let filtered = object(
+            run_remove_stop(vec![
+                docs,
+                Value::String("IgnoreCase".to_string()),
+                Value::Bool(false),
+            ])
+            .expect("case-sensitive remove stop words"),
+        );
+        assert_eq!(documents_property(&filtered), vec![vec!["The", "word"]]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn erase_punctuation_filters_document_tokens_by_token_type() {
+        let docs = object(
+            run_tokenized(vec![Value::String(
+                "An example: email help@example.com, visit https://example.com.".to_string(),
+            )])
+            .expect("tokenized"),
+        );
+        let filtered =
+            object(erase_punctuation_tokenized_document(docs, vec![]).expect("erase punctuation"));
+        assert_eq!(
+            documents_property(&filtered),
+            vec![vec![
+                "An",
+                "example",
+                "email",
+                "help@example.com",
+                "visit",
+                "https://example.com"
+            ]]
+        );
+
+        let words = StringArray::new(
+            vec![
+                "it's".to_string(),
+                "alpha-beta".to_string(),
+                "help@example.com".to_string(),
+                "https://example.com".to_string(),
+            ],
+            vec![1, 4],
+        )
+        .unwrap();
+        let docs = object(
+            run_tokenized(vec![
+                Value::StringArray(words),
+                Value::String("TokenizeMethod".to_string()),
+                Value::String("none".to_string()),
+            ])
+            .expect("tokenized"),
+        );
+        let filtered = object(
+            erase_punctuation_tokenized_document(
+                docs,
+                vec![
+                    Value::String("TokenTypes".to_string()),
+                    Value::String("letters".to_string()),
+                ],
+            )
+            .expect("erase letters punctuation"),
+        );
+        assert_eq!(
+            documents_property(&filtered),
+            vec![vec![
+                "its",
+                "alphabeta",
+                "help@example.com",
+                "https://example.com"
+            ]]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

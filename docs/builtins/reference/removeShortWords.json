@@ -34,7 +34,7 @@
     "`len` must be a positive integer scalar.",
     "For tokenized documents, the result preserves `Shape`, `TokenizeMethod`, and `Language` metadata while recomputing document lengths and vocabulary.",
     "For bag-of-words models, the result preserves document row count and removes count columns for words with length less than or equal to `len`.",
-    "This slice does not implement the broader Text Analytics token-removal family such as `removeStopWords`, `removeWords`, token-type filtering, or table-backed custom token filters."
+    "`removeStopWords` is implemented separately for tokenized-document stop-word filtering. Broader helpers such as `removeWords`, `removeLongWords`, and table-backed custom token filters remain tracked by the Text Analytics umbrella."
   ],
   "examples": [
     {

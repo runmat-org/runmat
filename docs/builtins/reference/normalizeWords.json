@@ -9,7 +9,7 @@
     "text analytics",
     "words"
   ],
-  "summary": "Stem or lemmatize standalone word arrays.",
+  "summary": "Stem or lemmatize words and tokenized documents.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -28,17 +28,19 @@
     "unit": "builtins::strings::text_analytics::normalize::tests",
     "integration": null
   },
-  "description": "`normalizeWords(words)` reduces each standalone word to a root form. RunMat supports string arrays, character vectors, character arrays, and cell arrays containing scalar string or character-vector elements.",
+  "description": "`normalizeWords(words)` reduces each standalone word to a root form. `normalizeWords(documents)` updates RunMat `tokenizedDocument` compatibility objects while preserving document shape and metadata.",
   "behaviors": [
     "`normalizeWords(words)` uses English stemming by default.",
     "`normalizeWords(words, 'Language', language)` accepts `\"en\"` for English or `\"de\"` for German on standalone word input.",
-    "`normalizeWords(___, 'Style', style)` accepts `\"stem\"` or `\"lemma\"`; standalone lemmatization is implemented for English.",
+    "`normalizeWords(___, 'Style', style)` accepts `\"stem\"` or `\"lemma\"`; English lemmatization uses RunMat's lightweight compatibility rule set for standalone words and tokenized documents.",
+    "`normalizeWords(documents)` normalizes tokens whose derived token type is `letters` or `other`, and preserves punctuation, URLs, hashtags, mentions, and emoticons.",
+    "For `tokenizedDocument` input, RunMat uses the object's `Language` metadata. The `Language` name-value option is only accepted for standalone word input.",
     "String arrays return string arrays with the same shape.",
     "Character vectors and character arrays return character arrays; multi-row character arrays are treated as one word per row and padded after normalization.",
     "Cell arrays preserve the cell shape and preserve scalar string versus character-vector element types.",
     "Each text element must contain a single word. Multi-word elements raise `RunMat:normalizeWords:InvalidInput`.",
     "Missing string values are preserved.",
-    "RunMat has a lightweight `tokenizedDocument` compatibility object, but `normalizeWords` object input is not implemented yet; document input, token-type filtering, part-of-speech-aware lemmatization, Japanese/Korean tokenized-document lemmatization, and bag/model object integration remain part of the broader Text Analytics compatibility issue.",
+    "RunMat supports lightweight English and German `tokenizedDocument` normalization. Japanese/Korean MeCab-backed token details, full dictionary-backed and part-of-speech-aware lemmatization, and exact MathWorks dictionary identity remain tracked by the broader Text Analytics compatibility issue.",
     "English stemming follows a Porter-style algorithm. German stemming is conservative and intended for compatibility with common preprocessing workflows, not exact release-to-release MathWorks dictionary identity."
   ],
   "examples": [
@@ -56,12 +58,17 @@
       "description": "Stem German Words",
       "input": "words = [\"Morgen\"; \"guter\"];\nnewWords = normalizeWords(words, \"Language\", \"de\")",
       "output": "newWords = 2x1 string\n    \"morg\"\n    \"gut\""
+    },
+    {
+      "description": "Stem Tokenized Documents",
+      "input": "documents = tokenizedDocument(\"a strongly worded collection of words\");\nnewDocuments = normalizeWords(documents)",
+      "output": "`newDocuments` is a tokenizedDocument containing `a strongli word collect of word`."
     }
   ],
   "faqs": [
     {
       "question": "Does `normalizeWords` support tokenizedDocument input?",
-      "answer": "No. This implementation covers standalone word input. `tokenizedDocument` normalization requires deeper Text Analytics object behavior and remains tracked by the Text Analytics compatibility issue."
+      "answer": "Yes, for RunMat's lightweight English and German `tokenizedDocument` compatibility objects. It preserves complex tokens and punctuation and normalizes derived `letters` and `other` tokens."
     },
     {
       "question": "Can standalone words use Japanese or Korean?",
@@ -89,13 +96,14 @@
   "syntax": {
     "example": {
       "description": "Supported forms",
-      "input": "updatedWords = normalizeWords(words)\nupdatedWords = normalizeWords(words, 'Language', language)\nupdatedWords = normalizeWords(___, 'Style', style)",
-      "output": "`updatedWords` preserves string-array shape and cell-array shape. Character arrays preserve row count and are repadded after normalization."
+      "input": "updatedDocuments = normalizeWords(documents)\nupdatedWords = normalizeWords(words)\nupdatedWords = normalizeWords(words, 'Language', language)\n___ = normalizeWords(___, 'Style', style)",
+      "output": "`updatedDocuments` is a tokenizedDocument compatibility object. `updatedWords` preserves string-array shape and cell-array shape. Character arrays preserve row count and are repadded after normalization."
     },
     "points": [
+      "`documents` must be a RunMat `tokenizedDocument` object.",
       "`words` may be a string scalar, string array, character vector, character array, or cell array containing scalar string or character-vector elements.",
       "`language` must be `\"en\"` or `\"de\"` for standalone word input.",
-      "`style` must be `\"stem\"` or `\"lemma\"`; standalone `\"lemma\"` supports English only."
+      "`style` must be `\"stem\"` or `\"lemma\"`; `\"lemma\"` supports English in this compatibility slice."
     ]
   },
   "source": {

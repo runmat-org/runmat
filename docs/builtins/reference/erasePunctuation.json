@@ -8,7 +8,7 @@
     "text analytics",
     "string"
   ],
-  "summary": "Remove Unicode punctuation and symbol characters from text.",
+  "summary": "Remove Unicode punctuation and symbol characters from text and tokenized documents.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -19,7 +19,7 @@
   "fusion": {
     "elementwise": false,
     "reduction": false,
-    "max_inputs": 1,
+    "max_inputs": 3,
     "constants": "inline"
   },
   "requires_feature": null,
@@ -27,13 +27,15 @@
     "unit": "builtins::strings::transform::compat::tests::splitlines_reverse_deblank_and_matches_work",
     "integration": null
   },
-  "description": "`erasePunctuation(text)` removes characters in Unicode punctuation and symbol categories from string, character, and cell text inputs while preserving the input container shape and type.",
+  "description": "`erasePunctuation(text)` removes characters in Unicode punctuation and symbol categories from string, character, and cell text inputs while preserving the input container shape and type. `erasePunctuation(documents)` filters punctuation and symbol tokens from RunMat `tokenizedDocument` compatibility objects.",
   "behaviors": [
     "String scalars and string arrays return string values with punctuation and symbol characters removed from each nonmissing element.",
     "Character vectors and character arrays return character arrays; rows are padded after punctuation removal when needed to preserve rectangular char storage.",
     "Cell arrays are processed recursively for string and character text elements and retain the original cell shape.",
     "Missing string elements are preserved.",
-    "RunMat has a lightweight `tokenizedDocument` compatibility object, but `erasePunctuation` object input and token-type filtering such as `erasePunctuation(documents,'TokenTypes',types)` remain part of the broader Text Analytics Toolbox object surface."
+    "`erasePunctuation(documents)` removes punctuation and symbol characters from tokens with derived type `punctuation` or `other` and removes tokens that become empty.",
+    "`erasePunctuation(documents,'TokenTypes',types)` removes punctuation and symbols only from the specified derived token types. RunMat derives token types from the lightweight stored tokens rather than a full MATLAB `tokenDetails` table.",
+    "For tokenized documents, URLs, email addresses, hashtags, mentions, and emoticons are preserved by default."
   ],
   "examples": [
     {
@@ -50,6 +52,11 @@
       "description": "Preserve Cell Array Shape",
       "input": "erasePunctuation({'alpha,beta!','C++ and C#'})",
       "output": "{'alphabeta','C and C'}"
+    },
+    {
+      "description": "Erase Punctuation From Tokenized Documents",
+      "input": "documents = tokenizedDocument(\"An example: visit https://example.com.\");\nnewDocuments = erasePunctuation(documents)",
+      "output": "`newDocuments` contains `An example visit https://example.com`."
     }
   ],
   "faqs": [
@@ -59,7 +66,7 @@
     },
     {
       "question": "Does this implement tokenizedDocument token-type filtering?",
-      "answer": "No. The plain text transform is implemented. `tokenizedDocument` object input and the `TokenTypes` option require the broader Text Analytics object model and remain tracked by the Text Analytics compatibility issue."
+      "answer": "Yes for RunMat's lightweight `tokenizedDocument` objects. It supports default `punctuation`/`other` filtering and explicit `TokenTypes`; full custom token-detail tables remain tracked separately."
     }
   ],
   "links": [
@@ -79,11 +86,13 @@
   "syntax": {
     "example": {
       "description": "Supported forms",
-      "input": "newText = erasePunctuation(text)",
-      "output": "`newText` has the same text container shape and type as `text`."
+      "input": "newText = erasePunctuation(text)\nnewDocuments = erasePunctuation(documents)\nnewDocuments = erasePunctuation(documents,'TokenTypes',types)",
+      "output": "`newText` has the same text container shape and type as `text`. `newDocuments` is a tokenizedDocument compatibility object."
     },
     "points": [
       "`text` may be a string scalar, string array, character vector, character array, or cell array containing text values.",
+      "`documents` must be a RunMat `tokenizedDocument` object.",
+      "`types` may be a string scalar/vector, character vector, or cell array of character vectors naming derived token types.",
       "Punctuation and symbol removal follows Unicode punctuation (`P*`) and symbol (`S*`) categories."
     ]
   },

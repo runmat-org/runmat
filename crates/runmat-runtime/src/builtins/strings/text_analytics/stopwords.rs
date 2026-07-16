@@ -117,7 +117,7 @@ async fn parse_language_args(args: Vec<Value>) -> BuiltinResult<StopWordsLanguag
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StopWordsLanguage {
+pub(in crate::builtins::strings::text_analytics) enum StopWordsLanguage {
     English,
     Japanese,
     German,
@@ -136,7 +136,9 @@ fn parse_language(language: &str) -> BuiltinResult<StopWordsLanguage> {
     }
 }
 
-fn stop_words_for_language(language: StopWordsLanguage) -> &'static [&'static str] {
+pub(in crate::builtins::strings::text_analytics) fn stop_words_for_language(
+    language: StopWordsLanguage,
+) -> &'static [&'static str] {
     match language {
         StopWordsLanguage::English => ENGLISH_STOP_WORDS,
         StopWordsLanguage::Japanese => JAPANESE_STOP_WORDS,

@@ -34,7 +34,7 @@
     "The supported language codes are `en`, `ja`, `de`, and `ko`, matching the Text Analytics Toolbox language set for this function.",
     "The output is a string column vector with shape `N x 1`.",
     "RunMat provides compatibility stop-word lists for the documented languages. The list contents cover common function use such as building removal sets for text preprocessing; exact release-to-release MathWorks vocabulary identity is not guaranteed.",
-    "Tokenized-document removal helpers such as `removeStopWords` and custom token deletion remain part of the broader Text Analytics object surface."
+    "`removeStopWords` consumes these lists for lightweight RunMat `tokenizedDocument` objects; custom token deletion remains part of the broader Text Analytics object surface."
   ],
   "examples": [
     {
@@ -60,7 +60,7 @@
     },
     {
       "question": "Is this tied to tokenizedDocument?",
-      "answer": "No. `stopWords` is a standalone list function. Tokenized-document operations that consume these lists remain tracked separately in the Text Analytics compatibility issue."
+      "answer": "`stopWords` is a standalone list function, and `removeStopWords` uses the same lists for tokenized-document filtering."
     },
     {
       "question": "Does `stopWords` execute on the GPU?",

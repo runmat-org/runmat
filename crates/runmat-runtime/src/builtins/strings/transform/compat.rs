@@ -13,6 +13,7 @@ use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_stri
 use crate::builtins::strings::core::compat::{
     broadcast_flat_index, broadcast_shape, logical_value, pattern_regex, scalar_text, text_items,
 };
+use crate::builtins::strings::text_analytics::documents::erase_punctuation_tokenized_document;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
 const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -134,8 +135,8 @@ descriptor!(
 );
 descriptor!(
     ERASE_PUNCTUATION_DESCRIPTOR,
-    "s = erasePunctuation(text)",
-    &IN_TEXT,
+    "out = erasePunctuation(textOrDocuments, Name, Value, ...)",
+    &IN_TEXT_REST,
     &OUT_ANY
 );
 descriptor!(
@@ -432,10 +433,27 @@ async fn erase_urls_builtin(text: Value) -> BuiltinResult<Value> {
     descriptor(crate::builtins::strings::transform::compat::ERASE_PUNCTUATION_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
-async fn erase_punctuation_builtin(text: Value) -> BuiltinResult<Value> {
+async fn erase_punctuation_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("erasePunctuation"))?;
+    if let Value::Object(object) = text {
+        let mut gathered = Vec::with_capacity(rest.len());
+        for value in rest {
+            gathered.push(
+                gather_if_needed_async(&value)
+                    .await
+                    .map_err(map_flow("erasePunctuation"))?,
+            );
+        }
+        return erase_punctuation_tokenized_document(object, gathered);
+    }
+    if !rest.is_empty() {
+        return Err(transform_error(
+            "erasePunctuation",
+            "erasePunctuation: name-value options are only supported for tokenizedDocument input",
+        ));
+    }
     let regex = Regex::new(r"[\p{P}\p{S}]")
         .map_err(|e| transform_error("erasePunctuation", e.to_string()))?;
     map_text_preserve(text, "erasePunctuation", |s| {
@@ -886,16 +904,18 @@ mod tests {
             Value::String("see  now".into())
         );
         assert_eq!(
-            block(erase_punctuation_builtin(Value::String(
-                "it's one and/or two.".into()
-            )))
+            block(erase_punctuation_builtin(
+                Value::String("it's one and/or two.".into()),
+                vec![]
+            ))
             .unwrap(),
             Value::String("its one andor two".into())
         );
         assert_eq!(
-            block(erase_punctuation_builtin(Value::CharArray(
-                CharArray::new_row("cost: $5.00!")
-            )))
+            block(erase_punctuation_builtin(
+                Value::CharArray(CharArray::new_row("cost: $5.00!")),
+                vec![]
+            ))
             .unwrap(),
             Value::CharArray(CharArray::new_row("cost 500"))
         );
@@ -908,7 +928,7 @@ mod tests {
             2,
         )
         .unwrap();
-        match block(erase_punctuation_builtin(Value::Cell(cell))).unwrap() {
+        match block(erase_punctuation_builtin(Value::Cell(cell), vec![])).unwrap() {
             Value::Cell(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
                 assert_eq!(

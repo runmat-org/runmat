@@ -26667,7 +26667,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "s = erasePunctuation(text)",
+          "label": "out = erasePunctuation(textOrDocuments, Name, Value, ...)",
           "inputs": [
             {
               "name": "text",
@@ -26675,6 +26675,13 @@
               "arity": "Required",
               "default": null,
               "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
             }
           ],
           "outputs": [
@@ -69276,6 +69283,27 @@
       "completion_policy": "Public",
       "signatures": [
         {
+          "label": "updatedDocuments = normalizeWords(documents)",
+          "inputs": [
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Words to stem or lemmatize."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "updatedWords",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized words or tokenizedDocument object."
+            }
+          ]
+        },
+        {
           "label": "updatedWords = normalizeWords(words)",
           "inputs": [
             {
@@ -69292,7 +69320,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Normalized words, preserving the input text container type."
+              "description": "Normalized words or tokenizedDocument object."
             }
           ]
         },
@@ -69320,7 +69348,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Normalized words, preserving the input text container type."
+              "description": "Normalized words or tokenizedDocument object."
             }
           ]
         }
@@ -85011,6 +85039,70 @@
           "identifier": "RunMat:textAnalyticsDocuments:InvalidInput",
           "when": "Inputs do not match a supported tokenizedDocument, bagOfWords, or removeShortWords form.",
           "message": "Text Analytics document helper received invalid input"
+        }
+      ]
+    },
+    {
+      "name": "removeStopWords",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "newDocuments = removeStopWords(documents)",
+          "inputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "newDocuments",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Filtered tokenizedDocument object."
+            }
+          ]
+        },
+        {
+          "label": "newDocuments = removeStopWords(documents, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: IgnoreCase."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "newDocuments",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Filtered tokenizedDocument object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.REMOVESTOPWORDS.INVALID_INPUT",
+          "identifier": "RunMat:removeStopWords:InvalidInput",
+          "when": "Inputs do not match a supported removeStopWords form.",
+          "message": "removeStopWords: invalid input"
         }
       ]
     },
