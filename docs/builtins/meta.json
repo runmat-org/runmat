@@ -5239,6 +5239,146 @@
       ]
     },
     {
+      "name": "bagOfNgrams",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "bag = bagOfNgrams",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "bag",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bag-of-n-grams model object."
+            }
+          ]
+        },
+        {
+          "label": "bag = bagOfNgrams(documents)",
+          "inputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Tokenized documents or a single-document word vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bag",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bag-of-n-grams model object."
+            }
+          ]
+        },
+        {
+          "label": "bag = bagOfNgrams(___, 'NgramLengths', lengths)",
+          "inputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Tokenized documents or a single-document word vector."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value option: NgramLengths."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bag",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bag-of-n-grams model object."
+            }
+          ]
+        },
+        {
+          "label": "bag = bagOfNgrams(uniqueNgrams, counts)",
+          "inputs": [
+            {
+              "name": "uniqueNgrams",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Unique n-gram string matrix."
+            },
+            {
+              "name": "counts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "N-gram counts per document."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bag",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bag-of-n-grams model object."
+            }
+          ]
+        },
+        {
+          "label": "bag = bagOfNgrams(uniqueNgrams, counts, 'NgramLengths', lengths)",
+          "inputs": [
+            {
+              "name": "uniqueNgrams",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Unique n-gram string matrix."
+            },
+            {
+              "name": "counts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "N-gram counts per document."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value option: NgramLengths."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bag",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bag-of-n-grams model object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TEXT_ANALYTICS_NGRAMS.INVALID_INPUT",
+          "identifier": "RunMat:bagOfNgrams:InvalidInput",
+          "when": "Inputs do not match a supported bagOfNgrams form.",
+          "message": "bagOfNgrams: invalid input"
+        }
+      ]
+    },
+    {
       "name": "bagOfWords",
       "output_mode": "Fixed",
       "completion_policy": "Public",

@@ -186,7 +186,10 @@ fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
 
-fn text_analytics_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeError {
+pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
+    fn_name: &str,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
     build_runtime_error(message)
         .with_builtin(fn_name)
         .with_identifier("RunMat:textAnalyticsDocuments:InvalidInput")
@@ -823,7 +826,7 @@ fn vocabulary_value(documents: &[Vec<String>]) -> BuiltinResult<Value> {
         .map_err(|err| text_analytics_error("tokenizedDocument", err))
 }
 
-fn documents_from_object(
+pub(in crate::builtins::strings::text_analytics) fn documents_from_object(
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Vec<Vec<String>>> {
@@ -993,7 +996,11 @@ fn bag_object(vocabulary: Vec<String>, counts: Vec<f64>, rows: usize) -> Builtin
     Ok(Value::Object(object))
 }
 
-fn checked_count_len(rows: usize, cols: usize, fn_name: &str) -> BuiltinResult<usize> {
+pub(in crate::builtins::strings::text_analytics) fn checked_count_len(
+    rows: usize,
+    cols: usize,
+    fn_name: &str,
+) -> BuiltinResult<usize> {
     let len = rows.checked_mul(cols).ok_or_else(|| {
         text_analytics_error(
             fn_name,
@@ -1050,7 +1057,10 @@ fn counts_from_bag(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Tens
     }
 }
 
-fn words_from_word_vector(value: &Value, fn_name: &str) -> BuiltinResult<Vec<String>> {
+pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector(
+    value: &Value,
+    fn_name: &str,
+) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.clone()]),
         Value::StringArray(array) => Ok(array
@@ -1089,7 +1099,7 @@ fn words_from_word_vector(value: &Value, fn_name: &str) -> BuiltinResult<Vec<Str
     }
 }
 
-fn words_from_word_vector_preserving_missing(
+pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector_preserving_missing(
     value: &Value,
     fn_name: &str,
 ) -> BuiltinResult<Vec<String>> {

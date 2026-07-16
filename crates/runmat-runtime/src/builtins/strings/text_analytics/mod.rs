@@ -2,5 +2,6 @@
 
 pub mod documents;
 pub mod html;
+pub mod ngrams;
 pub mod normalize;
 pub mod stopwords;
