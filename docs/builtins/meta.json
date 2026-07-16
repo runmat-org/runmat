@@ -102565,6 +102565,48 @@
       ]
     },
     {
+      "name": "textBoundary",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "pat = textBoundary",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        },
+        {
+          "label": "pat = textBoundary(type)",
+          "inputs": [
+            {
+              "name": "type",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "\"either\"",
+              "description": "Boundary type: \"either\", \"start\", or \"end\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "textscan",
       "output_mode": "Fixed",
       "completion_policy": "Public",

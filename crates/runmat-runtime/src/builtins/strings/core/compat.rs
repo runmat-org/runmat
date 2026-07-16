@@ -47,6 +47,14 @@ const IN_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Input text.",
 }];
 
+const IN_BOUNDARY_TYPE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "type",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: Some("\"either\""),
+    description: "Boundary type: \"either\", \"start\", or \"end\".",
+}];
+
 const IN_TEXT_REST: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "text",
@@ -231,6 +239,24 @@ descriptor!(
     &IN_TEXT_REST,
     &OUT_ANY
 );
+const TEXT_BOUNDARY_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "pat = textBoundary",
+        inputs: &[],
+        outputs: &OUT_ANY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "pat = textBoundary(type)",
+        inputs: &IN_BOUNDARY_TYPE,
+        outputs: &OUT_ANY,
+    },
+];
+pub const TEXT_BOUNDARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TEXT_BOUNDARY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &NO_ERRORS,
+};
 
 fn any_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Unknown
@@ -708,6 +734,46 @@ async fn wildcard_pattern_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         return Ok(pattern_object(".*"));
     }
     bounded_pattern(rest, ".", "wildcardPattern").await
+}
+
+#[runtime_builtin(
+    name = "textBoundary",
+    category = "strings/pattern",
+    summary = "Create a pattern matching the start or end of text.",
+    keywords = "textBoundary,pattern,boundary,start,end,text",
+    accel = "metadata",
+    type_resolver(any_type),
+    descriptor(crate::builtins::strings::core::compat::TEXT_BOUNDARY_DESCRIPTOR),
+    builtin_path = "crate::builtins::strings::core::compat"
+)]
+async fn text_boundary_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+    let boundary_type = match rest.as_slice() {
+        [] => "either".to_string(),
+        [value] => {
+            let value = gather_if_needed_async(value)
+                .await
+                .map_err(map_flow("textBoundary"))?;
+            scalar_text(&value, "textBoundary")?
+        }
+        _ => {
+            return Err(compat_error(
+                "textBoundary",
+                "textBoundary: expected zero inputs or one boundary type",
+            ))
+        }
+    };
+    let regex = match boundary_type.to_ascii_lowercase().as_str() {
+        "either" => r"(?:^|$)",
+        "start" => r"^",
+        "end" => r"$",
+        other => {
+            return Err(compat_error(
+                "textBoundary",
+                format!("textBoundary: unsupported boundary type '{other}'"),
+            ))
+        }
+    };
+    Ok(pattern_object(regex))
 }
 
 pub(crate) fn scalar_text(value: &Value, fn_name: &str) -> BuiltinResult<String> {
@@ -1695,5 +1761,47 @@ mod tests {
             .unwrap(),
             ".*"
         );
+        assert_eq!(
+            pattern_regex(&block(text_boundary_builtin(Vec::new())).unwrap(), "test").unwrap(),
+            r"(?:^|$)"
+        );
+        assert_eq!(
+            pattern_regex(
+                &block(text_boundary_builtin(vec![Value::String("start".into())])).unwrap(),
+                "test"
+            )
+            .unwrap(),
+            r"^"
+        );
+        assert_eq!(
+            pattern_regex(
+                &block(text_boundary_builtin(vec![Value::String("end".into())])).unwrap(),
+                "test"
+            )
+            .unwrap(),
+            r"$"
+        );
+    }
+
+    #[test]
+    fn text_boundary_rejects_invalid_type() {
+        let err = block(text_boundary_builtin(vec![Value::String("middle".into())]))
+            .expect_err("expected invalid boundary type");
+        assert!(err.to_string().contains("unsupported boundary type"));
+    }
+
+    #[test]
+    fn text_boundary_pattern_works_with_replace() {
+        let pattern = block(text_boundary_builtin(vec![Value::String("start".into())])).unwrap();
+        let result = block(crate::call_builtin_async(
+            "replace",
+            &[
+                Value::String("abc".into()),
+                pattern,
+                Value::String(">".into()),
+            ],
+        ))
+        .expect("replace");
+        assert_eq!(result, Value::String(">abc".into()));
     }
 }
