@@ -93786,6 +93786,34 @@
           ]
         },
         {
+          "label": "R = sprand(S, typename)",
+          "inputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Full or sparse matrix."
+            },
+            {
+              "name": "typename",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "double",
+              "description": "Sparse storage type. RunMat currently supports double sparse storage."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse double matrix."
+            }
+          ]
+        },
+        {
           "label": "R = sprand(m, n, density)",
           "inputs": [
             {
@@ -93808,6 +93836,139 @@
               "arity": "Required",
               "default": null,
               "description": "Approximate density in [0,1]."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse double matrix."
+            }
+          ]
+        },
+        {
+          "label": "R = sprand(m, n, density, typename)",
+          "inputs": [
+            {
+              "name": "m",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of rows."
+            },
+            {
+              "name": "n",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of columns."
+            },
+            {
+              "name": "density",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate density in [0,1]."
+            },
+            {
+              "name": "typename",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "double",
+              "description": "Sparse storage type. RunMat currently supports double sparse storage."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse double matrix."
+            }
+          ]
+        },
+        {
+          "label": "R = sprand(m, n, density, rc)",
+          "inputs": [
+            {
+              "name": "m",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of rows."
+            },
+            {
+              "name": "n",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of columns."
+            },
+            {
+              "name": "density",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate density in [0,1]."
+            },
+            {
+              "name": "rc",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reciprocal condition number target or singular-value vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse double matrix."
+            }
+          ]
+        },
+        {
+          "label": "R = sprand(m, n, density, rc, typename)",
+          "inputs": [
+            {
+              "name": "m",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of rows."
+            },
+            {
+              "name": "n",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of columns."
+            },
+            {
+              "name": "density",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate density in [0,1]."
+            },
+            {
+              "name": "rc",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reciprocal condition number target or singular-value vector."
+            },
+            {
+              "name": "typename",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "double",
+              "description": "Sparse storage type. RunMat currently supports double sparse storage."
             }
           ],
           "outputs": [

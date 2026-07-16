@@ -11,6 +11,7 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random;
+use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -25,6 +26,9 @@ pub use descriptors::{
 const NAME: &str = "sparse";
 const SPARSE_DENSE_INPUT_VECTOR_LIMIT: usize = 10_000_000;
 const SPARSE_HELPER_DENSE_INPUT_LIMIT: usize = 10_000_000;
+const SPRAND_CONDITION_DENSE_INPUT_LIMIT: usize = 1_000_000;
+const SPRAND_CONDITION_ROTATION_WORK_LIMIT: usize = 50_000_000;
+const SPRAND_CONDITION_MAX_ROTATION_ATTEMPTS: usize = 10_000;
 
 const SPARSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
@@ -585,7 +589,8 @@ fn sparse_pattern_from_value(value: Value) -> BuiltinResult<SparseTensor> {
     sparse_from_value(value)
 }
 
-fn sprand_sparse(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
+fn sprand_sparse(mut args: Vec<Value>) -> BuiltinResult<SparseTensor> {
+    take_optional_sparse_double_typename(&mut args, "sprand")?;
     match args.len() {
         1 => {
             let pattern = sparse_pattern_from_value(args.into_iter().next().expect("pattern"))?;
@@ -604,17 +609,34 @@ fn sprand_sparse(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
             let cols = parse_size_arg(&args[1], "n")?;
             let density = parse_density_arg(&args[2])?;
             if args.len() == 4 {
-                let _ = scalar_f64(&args[3], "rc", "sprand")?;
-                return Err(sparse_error(
-                    &SPARSE_ERROR_INVALID_INPUT,
-                    "sprand: reciprocal condition-number targets are not yet supported",
-                ));
+                let profile = parse_sprand_condition_profile(&args[3], rows, cols)?;
+                return sprand_from_condition_profile(rows, cols, density, &profile);
             }
             sprand_from_density(rows, cols, density)
         }
         _ => Err(sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
-            "sprand: expected sprand(S) or sprand(m,n,density)",
+            "sprand: expected sprand(S), sprand(m,n,density), or sprand(m,n,density,rc)",
+        )),
+    }
+}
+
+fn take_optional_sparse_double_typename(args: &mut Vec<Value>, label: &str) -> BuiltinResult<()> {
+    let Some(type_name) = args.last().and_then(keyword_of) else {
+        return Ok(());
+    };
+    match type_name.as_str() {
+        "double" => {
+            args.pop();
+            Ok(())
+        }
+        "single" => Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!("{label}: single sparse storage is not supported yet"),
+        )),
+        _ => Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!("{label}: typename must be \"double\" or \"single\", got {type_name}"),
         )),
     }
 }
@@ -662,6 +684,287 @@ fn sprand_from_density(rows: usize, cols: usize, density: f64) -> BuiltinResult<
         entries.insert((col, row), value);
     }
     sparse_from_entries(rows, cols, entries, "sprand")
+}
+
+fn parse_sprand_condition_profile(
+    value: &Value,
+    rows: usize,
+    cols: usize,
+) -> BuiltinResult<Vec<f64>> {
+    let rank_limit = rows.min(cols);
+    if rank_limit == 0 {
+        let values = numeric_vector_for_label(value, "rc", "sprand")?;
+        if values
+            .iter()
+            .any(|&value| !valid_sprand_condition_value(value))
+        {
+            return Err(invalid_sprand_condition_error());
+        }
+        return Ok(Vec::new());
+    }
+
+    let values = numeric_vector_for_label(value, "rc", "sprand")?;
+    if values.is_empty() || values.len() > rank_limit {
+        return Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!("sprand: rc must have between 1 and {rank_limit} elements"),
+        ));
+    }
+    if values
+        .iter()
+        .any(|&value| !valid_sprand_condition_value(value))
+    {
+        return Err(invalid_sprand_condition_error());
+    }
+
+    if values.len() == 1 {
+        Ok(scalar_rcond_singular_profile(rank_limit, values[0]))
+    } else {
+        Ok(values)
+    }
+}
+
+fn valid_sprand_condition_value(value: f64) -> bool {
+    value.is_finite() && (0.0..=1.0).contains(&value)
+}
+
+fn invalid_sprand_condition_error() -> RuntimeError {
+    sparse_error(
+        &SPARSE_ERROR_INVALID_INPUT,
+        "sprand: rc values must be finite and between 0 and 1",
+    )
+}
+
+fn scalar_rcond_singular_profile(rank_limit: usize, rcond: f64) -> Vec<f64> {
+    match rank_limit {
+        0 => Vec::new(),
+        1 => vec![1.0],
+        _ if rcond == 0.0 => (0..rank_limit)
+            .map(|idx| 1.0 - (idx as f64 / (rank_limit - 1) as f64))
+            .collect(),
+        _ => (0..rank_limit)
+            .map(|idx| rcond.powf(idx as f64 / (rank_limit - 1) as f64))
+            .collect(),
+    }
+}
+
+fn sprand_from_condition_profile(
+    rows: usize,
+    cols: usize,
+    density: f64,
+    singular_values: &[f64],
+) -> BuiltinResult<SparseTensor> {
+    let total = rows.checked_mul(cols).ok_or_else(|| {
+        sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            "sprand: matrix dimensions overflow",
+        )
+    })?;
+    if total == 0 || density == 0.0 || singular_values.is_empty() {
+        return Ok(SparseTensor::zeros(rows, cols));
+    }
+    if rows == 1 || cols == 1 {
+        return sprand_condition_vector(rows, cols, density, singular_values);
+    }
+    if total > SPRAND_CONDITION_DENSE_INPUT_LIMIT {
+        return Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!(
+                "sprand: condition-number form requires bounded dense working storage and refuses {total} elements"
+            ),
+        ));
+    }
+
+    let target = ((total as f64) * density).round().clamp(0.0, total as f64) as usize;
+    if target == 0 {
+        return Ok(SparseTensor::zeros(rows, cols));
+    }
+    if target > SPARSE_HELPER_DENSE_INPUT_LIMIT {
+        return Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!(
+                "sprand: requested sparse pattern has {target} stored entries, exceeding safe threshold"
+            ),
+        ));
+    }
+
+    let dense = condition_profile_sparse_rotation_matrix(rows, cols, singular_values, target)?;
+    let mut entries = BTreeMap::new();
+    for (linear, value) in dense.into_iter().enumerate() {
+        if is_stored_value(value) {
+            let row = linear % rows;
+            let col = linear / rows;
+            entries.insert((col, row), value);
+        }
+    }
+    sparse_from_entries(rows, cols, entries, "sprand")
+}
+
+fn sprand_condition_vector(
+    rows: usize,
+    cols: usize,
+    density: f64,
+    singular_values: &[f64],
+) -> BuiltinResult<SparseTensor> {
+    let total = rows.checked_mul(cols).ok_or_else(|| {
+        sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            "sprand: matrix dimensions overflow",
+        )
+    })?;
+    if total == 0 || density == 0.0 {
+        return Ok(SparseTensor::zeros(rows, cols));
+    }
+    let sigma = singular_values.first().copied().unwrap_or(0.0);
+    if sigma == 0.0 {
+        return Ok(SparseTensor::zeros(rows, cols));
+    }
+    let target = ((total as f64) * density).round().clamp(1.0, total as f64) as usize;
+    if target > SPARSE_HELPER_DENSE_INPUT_LIMIT {
+        return Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!(
+                "sprand: requested sparse pattern has {target} stored entries, exceeding safe threshold"
+            ),
+        ));
+    }
+
+    let positions = sample_unique_positions(total, target)?;
+    let draws = random::generate_uniform(target, "sprand")?;
+    let norm = draws.iter().map(|value| value * value).sum::<f64>().sqrt();
+    let scale = if norm > 0.0 { sigma / norm } else { sigma };
+    let mut entries = BTreeMap::new();
+    for (linear, draw) in positions.into_iter().zip(draws) {
+        let row = linear % rows;
+        let col = linear / rows;
+        entries.insert((col, row), draw * scale);
+    }
+    sparse_from_entries(rows, cols, entries, "sprand")
+}
+
+fn condition_profile_sparse_rotation_matrix(
+    rows: usize,
+    cols: usize,
+    singular_values: &[f64],
+    target_nnz: usize,
+) -> BuiltinResult<Vec<f64>> {
+    let rank = singular_values.len().min(rows.min(cols));
+    let mut dense = vec![0.0; rows * cols];
+    for component in 0..rank {
+        dense[component + component * rows] = singular_values[component];
+    }
+
+    let mut current_nnz = dense
+        .iter()
+        .filter(|&&value| is_stored_value(value))
+        .count();
+    if current_nnz >= target_nnz {
+        return Ok(dense);
+    }
+
+    let mut work = 0usize;
+    let mut attempts = 0usize;
+    let mut stale_attempts = 0usize;
+    while current_nnz < target_nnz && attempts < SPRAND_CONDITION_MAX_ROTATION_ATTEMPTS {
+        let prefer_rows = rows > 1 && (attempts.is_multiple_of(2) || cols <= 1);
+        let rotation_cost = if prefer_rows { cols } else { rows };
+        work = work.checked_add(rotation_cost).ok_or_else(|| {
+            sparse_error(
+                &SPARSE_ERROR_INVALID_INPUT,
+                "sprand: condition-number rotation work overflow",
+            )
+        })?;
+        if work > SPRAND_CONDITION_ROTATION_WORK_LIMIT {
+            return Err(sparse_error(
+                &SPARSE_ERROR_INVALID_INPUT,
+                "sprand: condition-number form exceeded bounded plane-rotation work before reaching requested density",
+            ));
+        }
+
+        let (c, s) = random_plane_rotation("sprand")?;
+        if prefer_rows {
+            let first = attempts % rows;
+            let second = (first + 1 + stale_attempts.min(rows.saturating_sub(2))) % rows;
+            apply_row_rotation(&mut dense, rows, cols, first, second, c, s);
+        } else {
+            let first = attempts % cols;
+            let second = (first + 1 + stale_attempts.min(cols.saturating_sub(2))) % cols;
+            apply_col_rotation(&mut dense, rows, cols, first, second, c, s);
+        }
+
+        attempts += 1;
+        let next_nnz = dense
+            .iter()
+            .filter(|&&value| is_stored_value(value))
+            .count();
+        if next_nnz > current_nnz {
+            current_nnz = next_nnz;
+            stale_attempts = 0;
+        } else {
+            stale_attempts += 1;
+        }
+    }
+
+    if current_nnz < target_nnz {
+        return Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            "sprand: condition-number form exceeded bounded plane-rotation attempts before reaching requested density",
+        ));
+    }
+
+    Ok(dense)
+}
+
+fn random_plane_rotation(label: &str) -> BuiltinResult<(f64, f64)> {
+    let draw = random::generate_uniform(1, label)?[0];
+    let theta = (0.1 + 0.8 * draw) * std::f64::consts::FRAC_PI_2;
+    Ok((theta.cos(), theta.sin()))
+}
+
+fn apply_row_rotation(
+    dense: &mut [f64],
+    rows: usize,
+    cols: usize,
+    first: usize,
+    second: usize,
+    c: f64,
+    s: f64,
+) {
+    if first == second {
+        return;
+    }
+    for col in 0..cols {
+        let first_idx = first + col * rows;
+        let second_idx = second + col * rows;
+        let a = dense[first_idx];
+        let b = dense[second_idx];
+        dense[first_idx] = c * a + s * b;
+        dense[second_idx] = -s * a + c * b;
+    }
+}
+
+fn apply_col_rotation(
+    dense: &mut [f64],
+    rows: usize,
+    _cols: usize,
+    first: usize,
+    second: usize,
+    c: f64,
+    s: f64,
+) {
+    if first == second {
+        return;
+    }
+    let first_base = first * rows;
+    let second_base = second * rows;
+    for row in 0..rows {
+        let first_idx = first_base + row;
+        let second_idx = second_base + row;
+        let a = dense[first_idx];
+        let b = dense[second_idx];
+        dense[first_idx] = c * a + s * b;
+        dense[second_idx] = -s * a + c * b;
+    }
 }
 
 fn sample_unique_positions(total: usize, target: usize) -> BuiltinResult<Vec<usize>> {
@@ -1332,10 +1635,70 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     }
 }
 
+fn numeric_vector_for_label(value: &Value, name: &str, label: &str) -> BuiltinResult<Vec<f64>> {
+    match value {
+        Value::Tensor(tensor) => {
+            if !is_vector_shape(&tensor.shape) {
+                return Err(numeric_vector_label_error(value, name, label));
+            }
+            Ok(tensor.data.clone())
+        }
+        Value::SparseTensor(sparse) => {
+            let shape = [sparse.rows, sparse.cols];
+            if !is_vector_shape(&shape) {
+                return Err(numeric_vector_label_error(value, name, label));
+            }
+            let total_elements = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+                sparse_error(
+                    &SPARSE_ERROR_INVALID_INPUT,
+                    format!("{label}: {name} sparse vector dimensions overflow"),
+                )
+            })?;
+            if total_elements > SPARSE_DENSE_INPUT_VECTOR_LIMIT {
+                return Err(sparse_error(
+                    &SPARSE_ERROR_INVALID_INPUT,
+                    format!(
+                        "{label}: cannot densify sparse {name} vector {}x{} with {} stored entries ({} elements exceeds safe threshold)",
+                        sparse.rows,
+                        sparse.cols,
+                        sparse.nnz(),
+                        total_elements
+                    ),
+                ));
+            }
+            sparse
+                .to_dense()
+                .map(|dense| dense.data)
+                .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
+        }
+        Value::LogicalArray(logical) => {
+            if !is_vector_shape(&logical.shape) {
+                return Err(numeric_vector_label_error(value, name, label));
+            }
+            Ok(logical
+                .data
+                .iter()
+                .map(|&bit| if bit != 0 { 1.0 } else { 0.0 })
+                .collect())
+        }
+        Value::Num(n) => Ok(vec![*n]),
+        Value::Int(i) => Ok(vec![i.to_f64()]),
+        Value::Bool(b) => Ok(vec![if *b { 1.0 } else { 0.0 }]),
+        other => Err(numeric_vector_label_error(other, name, label)),
+    }
+}
+
 fn numeric_vector_error(value: &Value, name: &str) -> RuntimeError {
     sparse_error(
         &SPARSE_ERROR_INVALID_INPUT,
         format!("sparse: {name} must be a real numeric vector, got {value:?}"),
+    )
+}
+
+fn numeric_vector_label_error(value: &Value, name: &str, label: &str) -> RuntimeError {
+    sparse_error(
+        &SPARSE_ERROR_INVALID_INPUT,
+        format!("{label}: {name} must be a real numeric vector, got {value:?}"),
     )
 }
 
@@ -1412,6 +1775,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use nalgebra::DMatrix;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntValue;
 
@@ -1447,6 +1811,11 @@ pub(crate) mod tests {
             Value::Tensor(tensor) => tensor,
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    fn dense_matrix_for_svd(sparse: &SparseTensor) -> DMatrix<f64> {
+        let dense = sparse.to_dense().expect("dense sparse test matrix");
+        DMatrix::from_column_slice(sparse.rows, sparse.cols, &dense.data)
     }
 
     #[test]
@@ -1701,16 +2070,108 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn sprand_rc_form_is_explicitly_unsupported() {
+    fn sprand_scalar_rc_form_matches_requested_condition_at_full_density() {
+        random::set_seed(11).expect("seed");
+        let random = expect_sparse(
+            sprand_builtin(vec![
+                Value::Num(4.0),
+                Value::Num(4.0),
+                Value::Num(1.0),
+                Value::Num(0.25),
+            ])
+            .expect("sprand rc"),
+        );
+        assert_eq!(random.shape(), vec![4, 4]);
+        assert_eq!(random.nnz(), 16);
+
+        let matrix = dense_matrix_for_svd(&random);
+        let singular = matrix.svd(false, false).singular_values;
+        let reciprocal_condition = singular[singular.len() - 1] / singular[0];
+        assert!((reciprocal_condition - 0.25).abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn sprand_vector_rc_form_uses_requested_singular_values() {
+        random::set_seed(13).expect("seed");
+        let profile = Tensor::new(vec![1.0, 0.5], vec![2, 1]).unwrap();
+        let random = expect_sparse(
+            sprand_builtin(vec![
+                Value::Num(4.0),
+                Value::Num(3.0),
+                Value::Num(1.0),
+                Value::Tensor(profile),
+            ])
+            .expect("sprand rc vector"),
+        );
+        assert_eq!(random.shape(), vec![4, 3]);
+        assert_eq!(random.nnz(), 12);
+
+        let matrix = dense_matrix_for_svd(&random);
+        let singular = matrix.svd(false, false).singular_values;
+        assert!((singular[0] - 1.0).abs() < 1.0e-10);
+        assert!((singular[1] - 0.5).abs() < 1.0e-10);
+        assert!(singular[2].abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn sprand_rc_form_respects_density_and_typename_validation() {
+        random::set_seed(17).expect("seed");
+        let random = expect_sparse(
+            sprand_builtin(vec![
+                Value::Num(4.0),
+                Value::Num(4.0),
+                Value::Num(0.5),
+                Value::Num(0.25),
+                Value::String("double".into()),
+            ])
+            .expect("sprand rc density"),
+        );
+        assert_eq!(random.shape(), vec![4, 4]);
+        assert!((8..=10).contains(&random.nnz()));
+        let matrix = dense_matrix_for_svd(&random);
+        let singular = matrix.svd(false, false).singular_values;
+        let reciprocal_condition = singular[singular.len() - 1] / singular[0];
+        assert!((reciprocal_condition - 0.25).abs() < 1.0e-10);
+
         let err = sprand_builtin(vec![
             Value::Num(4.0),
             Value::Num(4.0),
             Value::Num(0.25),
-            Value::Num(0.5),
+            Value::Num(1.2),
         ])
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidInput"));
-        assert!(err.message().contains("condition-number"));
+        assert!(err.message().contains("between 0 and 1"));
+
+        let err = sprand_builtin(vec![
+            Value::Num(4.0),
+            Value::Num(4.0),
+            Value::Num(0.25),
+            Value::String("single".into()),
+        ])
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidInput"));
+        assert!(err.message().contains("single sparse storage"));
+    }
+
+    #[test]
+    fn sprand_rc_vector_shape_preserves_singular_value_without_rotation_cap() {
+        random::set_seed(19).expect("seed");
+        let random = expect_sparse(
+            sprand_builtin(vec![
+                Value::Num(1.0),
+                Value::Num(20.0),
+                Value::Num(0.5),
+                Value::Num(0.75),
+            ])
+            .expect("sprand row vector rc"),
+        );
+        assert_eq!(random.shape(), vec![1, 20]);
+        assert_eq!(random.nnz(), 10);
+
+        let matrix = dense_matrix_for_svd(&random);
+        let singular = matrix.svd(false, false).singular_values;
+        assert!((singular[0] - 1.0).abs() < 1.0e-10);
     }
 
     #[test]

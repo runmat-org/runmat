@@ -20,20 +20,21 @@
   "fusion": {
     "elementwise": false,
     "reduction": false,
-    "max_inputs": 4,
+    "max_inputs": 5,
     "constants": "inline"
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::array::creation::sparse::tests::sprand_pattern_form_preserves_shape_and_pattern; builtins::array::creation::sparse::tests::sprand_density_form_constructs_requested_sparse_shape"
+    "unit": "builtins::array::creation::sparse::tests::sprand_pattern_form_preserves_shape_and_pattern; builtins::array::creation::sparse::tests::sprand_density_form_constructs_requested_sparse_shape; builtins::array::creation::sparse::tests::sprand_scalar_rc_form_matches_requested_condition_at_full_density; builtins::array::creation::sparse::tests::sprand_vector_rc_form_uses_requested_singular_values; builtins::array::creation::sparse::tests::sprand_rc_form_respects_density_and_typename_validation; builtins::array::creation::sparse::tests::sprand_rc_vector_shape_preserves_singular_value_without_rotation_cap"
   },
-  "description": "`sprand` creates sparse double matrices with uniformly distributed stored values.",
+  "description": "`sprand` creates sparse double matrices with random values and optional reciprocal-condition control.",
   "behaviors": [
     "`sprand(S)` preserves the nonzero pattern and shape of `S` while replacing stored values with uniform random values.",
     "`sprand(m, n, density)` creates an `m x n` sparse matrix with approximately `round(m*n*density)` stored entries.",
     "`density` must be finite and between `0` and `1`.",
-    "`sprand(m, n, density, rc)` is not yet supported because RunMat does not yet shape random sparse values to meet reciprocal condition-number targets.",
-    "Large requested sparse patterns are rejected before allocating excessive storage."
+    "`sprand(m, n, density, rc)` accepts a scalar reciprocal-condition target or a vector of singular values in `[0,1]`. RunMat starts from the requested singular profile and applies random orthogonal plane rotations to add sparse fill while preserving that profile.",
+    "A trailing `\"double\"` typename is accepted for MATLAB compatibility. `\"single\"` sparse storage is rejected until RunMat has native single-precision sparse matrices.",
+    "Large requested sparse patterns, condition-profile dense intermediates, and excessive plane-rotation work are rejected before allocating or running unbounded work."
   ],
   "examples": [
     {
@@ -45,7 +46,7 @@
   "faqs": [
     {
       "question": "Does `sprand(...,rc)` enforce the reciprocal condition number?",
-      "answer": "No. RunMat rejects the fourth argument with a deterministic unsupported-input error instead of silently producing a matrix with the wrong reciprocal condition number."
+      "answer": "Yes. RunMat uses orthogonal row and column plane rotations, which preserve the singular values of the requested scalar reciprocal condition target or vector singular profile. The requested density remains approximate for small or structurally constrained shapes."
     }
   ],
   "links": [
@@ -69,12 +70,14 @@
   "syntax": {
     "example": {
       "description": "Supported forms",
-      "input": "R = sprand(S)\nR = sprand(m, n, density)",
+      "input": "R = sprand(S)\nR = sprand(S, \"double\")\nR = sprand(m, n, density)\nR = sprand(m, n, density, \"double\")\nR = sprand(m, n, density, rc)\nR = sprand(m, n, density, rc, \"double\")",
       "output": "`R` is a sparse double matrix."
     },
     "points": [
       "The output is host-resident sparse CSC storage.",
-      "The fourth `rc` argument is deliberately rejected until condition-number-aware sparse random generation is implemented."
+      "`rc` can be a scalar reciprocal condition number or a vector of singular values with length at most `min(m,n)`.",
+      "The `rc` form is bounded by dense working-storage and plane-rotation work limits.",
+      "Only `\"double\"` sparse storage is currently supported."
     ]
   },
   "gpu_residency": "`sprand` runs on the host RNG and produces a host sparse matrix."

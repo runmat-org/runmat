@@ -53,6 +53,123 @@ const DIMS_DENSITY_INPUTS: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
+const DIMS_DENSITY_RC_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "m",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Number of rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Number of columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "density",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Approximate density in [0,1].",
+    },
+    BuiltinParamDescriptor {
+        name: "rc",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Reciprocal condition number target or singular-value vector.",
+    },
+];
+
+const MATRIX_TYPENAME_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Full or sparse matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("double"),
+        description: "Sparse storage type. RunMat currently supports double sparse storage.",
+    },
+];
+
+const DIMS_DENSITY_TYPENAME_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "m",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Number of rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Number of columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "density",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Approximate density in [0,1].",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("double"),
+        description: "Sparse storage type. RunMat currently supports double sparse storage.",
+    },
+];
+
+const DIMS_DENSITY_RC_TYPENAME_INPUTS: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "m",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Number of rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Number of columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "density",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Approximate density in [0,1].",
+    },
+    BuiltinParamDescriptor {
+        name: "rc",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Reciprocal condition number target or singular-value vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("double"),
+        description: "Sparse storage type. RunMat currently supports double sparse storage.",
+    },
+];
+
 const SPDIAGS_OUTPUT_BOUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Bout",
     ty: BuiltinParamType::NumericArray,
@@ -193,15 +310,35 @@ const SPONES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDesc
     outputs: &SPARSE_MATRIX_OUTPUT,
 }];
 
-const SPRAND_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const SPRAND_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
     BuiltinSignatureDescriptor {
         label: "R = sprand(S)",
         inputs: &MATRIX_INPUT,
         outputs: &SPARSE_MATRIX_OUTPUT,
     },
     BuiltinSignatureDescriptor {
+        label: "R = sprand(S, typename)",
+        inputs: &MATRIX_TYPENAME_INPUTS,
+        outputs: &SPARSE_MATRIX_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
         label: "R = sprand(m, n, density)",
         inputs: &DIMS_DENSITY_INPUTS,
+        outputs: &SPARSE_MATRIX_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = sprand(m, n, density, typename)",
+        inputs: &DIMS_DENSITY_TYPENAME_INPUTS,
+        outputs: &SPARSE_MATRIX_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = sprand(m, n, density, rc)",
+        inputs: &DIMS_DENSITY_RC_INPUTS,
+        outputs: &SPARSE_MATRIX_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = sprand(m, n, density, rc, typename)",
+        inputs: &DIMS_DENSITY_RC_TYPENAME_INPUTS,
         outputs: &SPARSE_MATRIX_OUTPUT,
     },
 ];
