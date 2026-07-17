@@ -1,5 +1,6 @@
 //! Text Analytics Toolbox compatibility builtins.
 
+pub mod dependencies;
 pub mod details;
 pub mod documents;
 pub mod embeddings;

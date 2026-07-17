@@ -196,7 +196,7 @@ impl RetokenizeMethod {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PosLanguage {
+pub(in crate::builtins::strings::text_analytics) enum PosLanguage {
     English,
     Japanese,
     German,
@@ -205,14 +205,21 @@ enum PosLanguage {
 
 impl PosLanguage {
     fn from_document(language: &str) -> BuiltinResult<Self> {
+        Self::from_document_for(language, "addPartOfSpeechDetails")
+    }
+
+    pub(in crate::builtins::strings::text_analytics) fn from_document_for(
+        language: &str,
+        fn_name: &str,
+    ) -> BuiltinResult<Self> {
         match language.trim().to_ascii_lowercase().as_str() {
             "en" => Ok(Self::English),
             "ja" => Ok(Self::Japanese),
             "de" => Ok(Self::German),
             "ko" => Ok(Self::Korean),
             other => Err(text_analytics_error(
-                "addPartOfSpeechDetails",
-                format!("addPartOfSpeechDetails: unsupported document language '{other}'"),
+                fn_name,
+                format!("{fn_name}: unsupported document language '{other}'"),
             )),
         }
     }
@@ -278,6 +285,9 @@ fn clear_token_aligned_details(object: &mut ObjectInstance) {
         "SentenceNumbers",
         "LemmaDetails",
         POS_DETAILS_PROPERTY,
+        "EntityDetails",
+        "HeadDetails",
+        "DependencyDetails",
     ] {
         object.properties.remove(property);
     }
@@ -359,7 +369,7 @@ fn part_of_speech_details_cell_preserving_known(
     ))
 }
 
-fn part_of_speech_for_token(
+pub(in crate::builtins::strings::text_analytics) fn part_of_speech_for_token(
     token: &str,
     language: PosLanguage,
     options: &crate::builtins::strings::text_analytics::documents::DocumentOptions,
@@ -529,6 +539,9 @@ fn english_part_of_speech(token: &str) -> &'static str {
             | "saw"
             | "want"
             | "wants"
+            | "chase"
+            | "chases"
+            | "chased"
             | "attend"
             | "attends"
             | "attended"

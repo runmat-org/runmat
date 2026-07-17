@@ -10,6 +10,9 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::strings::core::compat::scalar_text;
+use crate::builtins::strings::text_analytics::dependencies::{
+    dependency_details_from_object, dependency_heads_from_object,
+};
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type_with_options, documents_from_object, options_from_document_object,
     parse_top_level_domains, text_analytics_error, tokenized_document_language,
@@ -388,10 +391,18 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
     let stored_lemmas = lemma_details_from_object(object, "tokenDetails")?;
     let stored_pos = part_of_speech_details_from_object(object, "tokenDetails")?;
     let stored_entities = entity_details_from_object(object, "tokenDetails")?;
+    let stored_heads = dependency_heads_from_object(object, "tokenDetails")?;
+    let stored_dependencies = dependency_details_from_object(object, "tokenDetails")?;
     validate_sentence_number_shapes(&documents, stored_sentence_numbers.as_deref())?;
     validate_text_detail_shapes(&documents, stored_lemmas.as_deref(), "LemmaDetails")?;
     validate_text_detail_shapes(&documents, stored_pos.as_deref(), "PartOfSpeechDetails")?;
     validate_text_detail_shapes(&documents, stored_entities.as_deref(), "EntityDetails")?;
+    validate_head_detail_shapes(&documents, stored_heads.as_deref())?;
+    validate_text_detail_shapes(
+        &documents,
+        stored_dependencies.as_deref(),
+        "DependencyDetails",
+    )?;
     let include_default_details = has_default_token_details(object);
     let include_type = include_default_details || stored_types.is_some();
     let include_sentence = stored_sentence_numbers.is_some();
@@ -399,10 +410,14 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
     let include_language = include_line_language
         || stored_lemmas.is_some()
         || stored_pos.is_some()
-        || stored_entities.is_some();
+        || stored_entities.is_some()
+        || stored_heads.is_some()
+        || stored_dependencies.is_some();
     let include_pos = stored_pos.is_some();
     let include_entity = stored_entities.is_some();
     let include_lemma = stored_lemmas.is_some();
+    let include_head = stored_heads.is_some();
+    let include_dependency = stored_dependencies.is_some();
     let total = documents.iter().map(Vec::len).sum::<usize>();
     let document_options = options_from_document_object(object);
 
@@ -415,6 +430,8 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
     let mut part_of_speech = Vec::with_capacity(total);
     let mut entities = Vec::with_capacity(total);
     let mut lemmas = Vec::with_capacity(total);
+    let mut heads = Vec::with_capacity(total);
+    let mut dependencies = Vec::with_capacity(total);
     let language = tokenized_document_language(object);
 
     for (doc_idx, doc) in documents.iter().enumerate() {
@@ -480,6 +497,26 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
                         .unwrap_or_else(|| "non-entity".to_string()),
                 );
             }
+            if include_head {
+                heads.push(
+                    stored_heads
+                        .as_ref()
+                        .and_then(|heads| heads.get(doc_idx))
+                        .and_then(|heads| heads.get(token_idx))
+                        .copied()
+                        .unwrap_or(0.0),
+                );
+            }
+            if include_dependency {
+                dependencies.push(
+                    stored_dependencies
+                        .as_ref()
+                        .and_then(|dependencies| dependencies.get(doc_idx))
+                        .and_then(|dependencies| dependencies.get(token_idx))
+                        .cloned()
+                        .unwrap_or_else(|| "dep".to_string()),
+                );
+            }
         }
     }
 
@@ -540,6 +577,20 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
         names.push("Lemma".to_string());
         columns.push(Value::StringArray(
             StringArray::new(lemmas, vec![total, 1])
+                .map_err(|err| text_analytics_error("tokenDetails", err))?,
+        ));
+    }
+    if include_head {
+        names.push("Head".to_string());
+        columns.push(Value::Tensor(
+            Tensor::new(heads, vec![total, 1])
+                .map_err(|err| text_analytics_error("tokenDetails", err))?,
+        ));
+    }
+    if include_dependency {
+        names.push("Dependency".to_string());
+        columns.push(Value::StringArray(
+            StringArray::new(dependencies, vec![total, 1])
                 .map_err(|err| text_analytics_error("tokenDetails", err))?,
         ));
     }
@@ -986,6 +1037,50 @@ fn validate_text_detail_shapes(
                     idx + 1,
                     values.len(),
                     doc.len()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_head_detail_shapes(
+    documents: &[Vec<String>],
+    stored: Option<&[Vec<f64>]>,
+) -> BuiltinResult<()> {
+    let Some(stored) = stored else {
+        return Ok(());
+    };
+    if stored.len() != documents.len() {
+        return Err(text_analytics_error(
+            "tokenDetails",
+            format!(
+                "tokenDetails: HeadDetails has {} documents but Documents has {}",
+                stored.len(),
+                documents.len()
+            ),
+        ));
+    }
+    for (idx, (values, doc)) in stored.iter().zip(documents).enumerate() {
+        if values.len() != doc.len() {
+            return Err(text_analytics_error(
+                "tokenDetails",
+                format!(
+                    "tokenDetails: HeadDetails entry {} has {} values but document has {} tokens",
+                    idx + 1,
+                    values.len(),
+                    doc.len()
+                ),
+            ));
+        }
+        if values.iter().any(|value| {
+            !value.is_finite() || *value < 0.0 || value.fract() != 0.0 || *value > doc.len() as f64
+        }) {
+            return Err(text_analytics_error(
+                "tokenDetails",
+                format!(
+                    "tokenDetails: HeadDetails entry {} contains invalid head indices",
+                    idx + 1
                 ),
             ));
         }

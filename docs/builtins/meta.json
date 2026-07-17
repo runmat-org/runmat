@@ -2197,6 +2197,42 @@
       ]
     },
     {
+      "name": "addDependencyDetails",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "updatedDocuments = addDependencyDetails(documents)",
+          "inputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "updatedDocuments",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Updated tokenized document object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TEXT_ANALYTICS.ADD_DEPENDENCY_DETAILS.INVALID_INPUT",
+          "identifier": "RunMat:addDependencyDetails:InvalidInput",
+          "when": "Input is not a supported tokenizedDocument object.",
+          "message": "addDependencyDetails: invalid input"
+        }
+      ]
+    },
+    {
       "name": "addEntityDetails",
       "output_mode": "Fixed",
       "completion_policy": "Public",

@@ -284,6 +284,8 @@ fn clear_token_aligned_details(object: &mut ObjectInstance) {
         "LemmaDetails",
         POS_DETAILS_PROPERTY,
         ENTITY_DETAILS_PROPERTY,
+        "HeadDetails",
+        "DependencyDetails",
     ] {
         object.properties.remove(property);
     }
