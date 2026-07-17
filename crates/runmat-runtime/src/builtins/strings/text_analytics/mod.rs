@@ -7,6 +7,7 @@ pub mod encode;
 pub mod encoding;
 pub mod file_text;
 pub mod html;
+pub mod lemmas;
 pub mod ngrams;
 pub mod normalize;
 pub mod sentiment;

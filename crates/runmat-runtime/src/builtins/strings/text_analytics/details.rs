@@ -15,6 +15,7 @@ use crate::builtins::strings::text_analytics::documents::{
     parse_top_level_domains, text_analytics_error, tokenized_document_language,
     top_level_domains_value, words_from_word_vector, TOKENIZED_DOCUMENT_CLASS,
 };
+use crate::builtins::strings::text_analytics::lemmas::lemma_details_from_object;
 use crate::builtins::strings::text_analytics::stopwords::{
     stop_words_for_language, StopWordsLanguage,
 };
@@ -168,7 +169,9 @@ fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     descriptor(crate::builtins::strings::text_analytics::details::TOKEN_DETAILS_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::details"
 )]
-async fn token_details_builtin(documents: Value) -> BuiltinResult<Value> {
+pub(in crate::builtins::strings::text_analytics) async fn token_details_builtin(
+    documents: Value,
+) -> BuiltinResult<Value> {
     let documents = gather_if_needed_async(&documents)
         .await
         .map_err(|err| text_analytics_error("tokenDetails", format!("tokenDetails: {err}")))?;
@@ -378,11 +381,15 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
     let documents = documents_from_object(object, "tokenDetails")?;
     let stored_types = type_details_from_object(object, "tokenDetails")?;
     let stored_sentence_numbers = sentence_numbers_from_object(object, "tokenDetails")?;
+    let stored_lemmas = lemma_details_from_object(object, "tokenDetails")?;
     validate_sentence_number_shapes(&documents, stored_sentence_numbers.as_deref())?;
+    validate_text_detail_shapes(&documents, stored_lemmas.as_deref(), "LemmaDetails")?;
     let include_default_details = has_default_token_details(object);
     let include_type = include_default_details || stored_types.is_some();
     let include_sentence = stored_sentence_numbers.is_some();
     let include_line_language = include_default_details;
+    let include_language = include_line_language || stored_lemmas.is_some();
+    let include_lemma = stored_lemmas.is_some();
     let total = documents.iter().map(Vec::len).sum::<usize>();
     let document_options = options_from_document_object(object);
 
@@ -392,6 +399,7 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
     let mut line_numbers = Vec::with_capacity(total);
     let mut token_types = Vec::with_capacity(total);
     let mut languages = Vec::with_capacity(total);
+    let mut lemmas = Vec::with_capacity(total);
     let language = tokenized_document_language(object);
 
     for (doc_idx, doc) in documents.iter().enumerate() {
@@ -410,6 +418,8 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
             }
             if include_line_language {
                 line_numbers.push(1.0);
+            }
+            if include_language {
                 languages.push(language.clone());
             }
             if include_type {
@@ -424,6 +434,16 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
                             .to_string()
                     });
                 token_types.push(token_type);
+            }
+            if include_lemma {
+                lemmas.push(
+                    stored_lemmas
+                        .as_ref()
+                        .and_then(|lemmas| lemmas.get(doc_idx))
+                        .and_then(|lemmas| lemmas.get(token_idx))
+                        .cloned()
+                        .unwrap_or_else(|| token.clone()),
+                );
             }
         }
     }
@@ -460,10 +480,17 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
                 .map_err(|err| text_analytics_error("tokenDetails", err))?,
         ));
     }
-    if include_line_language {
+    if include_language {
         names.push("Language".to_string());
         columns.push(Value::StringArray(
             StringArray::new(languages, vec![total, 1])
+                .map_err(|err| text_analytics_error("tokenDetails", err))?,
+        ));
+    }
+    if include_lemma {
+        names.push("Lemma".to_string());
+        columns.push(Value::StringArray(
+            StringArray::new(lemmas, vec![total, 1])
                 .map_err(|err| text_analytics_error("tokenDetails", err))?,
         ));
     }
@@ -876,6 +903,40 @@ fn validate_sentence_number_shapes(
                 format!(
                     "tokenDetails: SentenceNumbers entry {} contains invalid sentence numbers",
                     idx + 1
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_text_detail_shapes(
+    documents: &[Vec<String>],
+    stored: Option<&[Vec<String>]>,
+    property: &str,
+) -> BuiltinResult<()> {
+    let Some(stored) = stored else {
+        return Ok(());
+    };
+    if stored.len() != documents.len() {
+        return Err(text_analytics_error(
+            "tokenDetails",
+            format!(
+                "tokenDetails: {property} has {} documents but Documents has {}",
+                stored.len(),
+                documents.len()
+            ),
+        ));
+    }
+    for (idx, (values, doc)) in stored.iter().zip(documents).enumerate() {
+        if values.len() != doc.len() {
+            return Err(text_analytics_error(
+                "tokenDetails",
+                format!(
+                    "tokenDetails: {property} entry {} has {} values but document has {} tokens",
+                    idx + 1,
+                    values.len(),
+                    doc.len()
                 ),
             ));
         }

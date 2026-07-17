@@ -387,11 +387,12 @@ fn char_rows(rows: Vec<String>) -> BuiltinResult<Value> {
         .map_err(|err| normalize_error(format!("normalizeWords: {err}")))
 }
 
-fn english_lemma(word: &str) -> String {
+pub(in crate::builtins::strings::text_analytics) fn english_lemma(word: &str) -> String {
     match word {
         "am" | "are" | "is" | "was" | "were" | "be" | "been" | "being" => "be".to_string(),
         "has" | "had" | "having" => "have".to_string(),
         "does" | "did" | "done" | "doing" => "do".to_string(),
+        "ran" => "run".to_string(),
         "children" => "child".to_string(),
         "men" => "man".to_string(),
         "women" => "woman".to_string(),
