@@ -1,0 +1,83 @@
+{
+  "title": "word2ind",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "word2ind",
+    "wordEncoding",
+    "text analytics",
+    "indices"
+  ],
+  "summary": "Map words to indices in a wordEncoding object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`word2ind` is a host vocabulary lookup and has no provider kernel."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::encoding::tests",
+    "integration": null
+  },
+  "description": "`word2ind(enc, words)` returns numeric vocabulary indices for words in a RunMat `wordEncoding` object.",
+  "behaviors": [
+    "`enc` must be a RunMat `wordEncoding` compatibility object.",
+    "`words` may be a string scalar, string array, character vector, character matrix, or cell array of scalar text.",
+    "The output numeric tensor preserves the input word container shape for string arrays and cell arrays. A character vector returns a scalar 1-by-1 tensor; a character matrix returns one row per input row.",
+    "Indices are 1-based. Words missing from the vocabulary return `NaN`.",
+    "`word2ind(___, 'IgnoreCase', true)` performs case-insensitive vocabulary lookup and uses the first matching vocabulary entry."
+  ],
+  "examples": [
+    {
+      "description": "Map Words To Indices",
+      "input": "enc = wordEncoding([\"rose\" \"love\" \"beauty\"]);\nidx = word2ind(enc, [\"rose\" \"missing\"])",
+      "output": "`idx` is `[1 NaN]`."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens for missing words?",
+      "answer": "RunMat returns `NaN` for words outside the encoding vocabulary."
+    },
+    {
+      "question": "Does `word2ind` execute on the GPU?",
+      "answer": "No. It is a host text lookup."
+    }
+  ],
+  "links": [
+    {
+      "label": "wordEncoding",
+      "url": "./wordEncoding"
+    },
+    {
+      "label": "ind2word",
+      "url": "./ind2word"
+    },
+    {
+      "label": "isVocabularyWord",
+      "url": "./isVocabularyWord"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "M = word2ind(enc, words)\nM = word2ind(enc, words, 'IgnoreCase', true)",
+      "output": "`M` is a numeric tensor of 1-based indices or NaN values."
+    },
+    "points": [
+      "`IgnoreCase` must be a logical scalar."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/encoding.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/encoding.rs"
+  },
+  "gpu_residency": "`word2ind` reads host text/model metadata and returns a CPU numeric tensor."
+}

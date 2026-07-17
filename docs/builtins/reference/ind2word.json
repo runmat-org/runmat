@@ -1,0 +1,82 @@
+{
+  "title": "ind2word",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "ind2word",
+    "wordEncoding",
+    "text analytics",
+    "vocabulary"
+  ],
+  "summary": "Map wordEncoding indices back to words.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`ind2word` is a host vocabulary lookup and has no provider kernel."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::encoding::tests",
+    "integration": null
+  },
+  "description": "`ind2word(enc, M)` returns the vocabulary words corresponding to 1-based indices in `M`.",
+  "behaviors": [
+    "`enc` must be a RunMat `wordEncoding` compatibility object.",
+    "`M` may be a numeric scalar or numeric tensor of positive integer indices.",
+    "The output is a string array with the same shape as `M`.",
+    "Indices must be finite positive integers within the vocabulary size. Invalid, NaN, fractional, zero, negative, or out-of-range indices are rejected with a controlled error."
+  ],
+  "examples": [
+    {
+      "description": "Map Indices To Words",
+      "input": "enc = wordEncoding([\"fairest\" \"desire\" \"thereby\"]);\nwords = ind2word(enc, [1 3])",
+      "output": "`words` is `[\"fairest\" \"thereby\"]`."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `ind2word` return missing strings for invalid indices?",
+      "answer": "No. The documented input is positive integer indices, so RunMat rejects invalid or out-of-range indices."
+    },
+    {
+      "question": "Does `ind2word` execute on the GPU?",
+      "answer": "No. It is a host metadata lookup."
+    }
+  ],
+  "links": [
+    {
+      "label": "wordEncoding",
+      "url": "./wordEncoding"
+    },
+    {
+      "label": "word2ind",
+      "url": "./word2ind"
+    },
+    {
+      "label": "isVocabularyWord",
+      "url": "./isVocabularyWord"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "words = ind2word(enc, M)",
+      "output": "`words` is a string array."
+    },
+    "points": [
+      "`M` must contain positive integer indices within `enc.NumWords`."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/encoding.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/encoding.rs"
+  },
+  "gpu_residency": "`ind2word` reads host text/model metadata and returns a CPU string array."
+}

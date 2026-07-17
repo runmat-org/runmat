@@ -4,17 +4,18 @@
   "keywords": [
     "doc2sequence",
     "wordEmbedding",
+    "wordEncoding",
     "tokenizedDocument",
     "text analytics",
     "sequence"
   ],
-  "summary": "Convert tokenized documents to embedding-vector sequences.",
+  "summary": "Convert tokenized documents to word-vector or word-index sequences.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`doc2sequence` consumes host tokenizedDocument and wordEmbedding objects and returns host cell/tensor outputs; it does not use provider kernels."
+    "notes": "`doc2sequence` consumes host tokenizedDocument plus wordEmbedding or wordEncoding objects and returns host cell/tensor outputs; it does not use provider kernels."
   },
   "fusion": {
     "elementwise": false,
@@ -27,17 +28,17 @@
     "unit": "builtins::strings::text_analytics::embeddings::tests",
     "integration": null
   },
-  "description": "`doc2sequence(emb, documents)` returns a cell array whose i-th cell contains the embedding-vector sequence for the i-th tokenized document.",
+  "description": "`doc2sequence(emb, documents)` returns a cell array whose i-th cell contains the embedding-vector sequence for the i-th tokenized document. `doc2sequence(enc, documents)` returns word-index sequences from a `wordEncoding` object.",
   "behaviors": [
-    "`emb` must be a RunMat `wordEmbedding` compatibility object.",
+    "The first input must be a RunMat `wordEmbedding` or `wordEncoding` compatibility object.",
     "`documents` must be a RunMat `tokenizedDocument` compatibility object.",
     "For embedding input, each output cell contains a D-by-S numeric matrix, where D is the embedding dimension and S is the sequence length.",
-    "Unknown words are discarded by default. Set `UnknownWord` to `\"nan\"` to include NaN vector columns for unknown words.",
+    "For encoding input, each output cell contains a 1-by-S numeric vector of 1-based word encoding indices.",
+    "Unknown words are discarded by default. Set `UnknownWord` to `\"nan\"` to include NaN vector columns for embedding inputs or NaN index elements for encoding inputs.",
     "`PaddingDirection` accepts `\"left\"`, `\"right\"`, and `\"none\"`. The default is left padding.",
-    "`PaddingValue` accepts a finite numeric scalar and defaults to 0.",
+    "`PaddingValue` accepts a numeric scalar and defaults to 0. MATLAB warns against NaN padding for deep learning workflows, but RunMat accepts numeric NaN for compatibility.",
     "`Length` accepts `\"longest\"`, `\"shortest\"`, or a positive integer. Positive integer lengths truncate sequences on the right.",
     "When `PaddingDirection` is `\"none\"`, output cells keep per-document sequence lengths, except that fixed or shortest `Length` values still truncate longer documents.",
-    "The `wordEncoding` input form is not implemented yet and remains tracked in the broader Text Analytics compatibility issue.",
     "Very large padded dense outputs are rejected with a controlled error to avoid accidental memory explosions."
   ],
   "examples": [
@@ -45,6 +46,11 @@
       "description": "Convert Documents To Word Vectors",
       "input": "emb = fastTextWordEmbedding;\ndocuments = tokenizedDocument([\"alpha beta\"; \"beta\"]);\nsequences = doc2sequence(emb, documents)",
       "output": "`sequences` is a cell array of D-by-S matrices."
+    },
+    {
+      "description": "Convert Documents To Word Indices",
+      "input": "documents = tokenizedDocument([\"alpha beta\"; \"beta\"]);\nenc = wordEncoding(documents);\nsequences = doc2sequence(enc, documents)",
+      "output": "`sequences` is a cell array of 1-by-S index vectors."
     },
     {
       "description": "Avoid Padding",
@@ -60,7 +66,7 @@
   "faqs": [
     {
       "question": "Does RunMat support `doc2sequence(enc, documents)` for `wordEncoding`?",
-      "answer": "Not yet. This slice implements the `wordEmbedding` form; `wordEncoding` index sequences remain open work."
+      "answer": "Yes. RunMat returns one 1-by-S numeric index vector per tokenized document."
     },
     {
       "question": "Does `doc2sequence` return single precision like MATLAB examples?",
@@ -81,6 +87,10 @@
       "url": "./word2vec"
     },
     {
+      "label": "wordEncoding",
+      "url": "./wordEncoding"
+    },
+    {
       "label": "vec2word",
       "url": "./vec2word"
     },
@@ -96,13 +106,13 @@
   "syntax": {
     "example": {
       "description": "Supported forms",
-      "input": "sequences = doc2sequence(emb, documents)\nsequences = doc2sequence(emb, documents, Name, Value)",
-      "output": "`sequences` is a cell array of embedding-vector matrices."
+      "input": "sequences = doc2sequence(emb, documents)\nsequences = doc2sequence(enc, documents)\nsequences = doc2sequence(___, Name, Value)",
+      "output": "`sequences` is a cell array of embedding-vector matrices or word-index vectors."
     },
     "points": [
       "`UnknownWord` must be `\"discard\"` or `\"nan\"`.",
       "`PaddingDirection` must be `\"left\"`, `\"right\"`, or `\"none\"`.",
-      "`PaddingValue` must be a finite numeric scalar.",
+      "`PaddingValue` must be a numeric scalar.",
       "`Length` must be `\"longest\"`, `\"shortest\"`, or a positive integer."
     ]
   },

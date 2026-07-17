@@ -17,7 +17,10 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
-    documents_from_object, TOKENIZED_DOCUMENT_CLASS,
+    document_shape_from_object, documents_from_object, TOKENIZED_DOCUMENT_CLASS,
+};
+use crate::builtins::strings::text_analytics::encoding::{
+    word_encoding_from_object, WordEncodingModel, WORD_ENCODING_CLASS,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
@@ -78,7 +81,7 @@ const OUT_SEQUENCES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Cell array of document embedding-vector sequences.",
+    description: "Cell array of document embedding-vector or word-index sequences.",
 }];
 
 const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
@@ -207,11 +210,11 @@ const IN_VECTORS_REST: [BuiltinParamDescriptor; 4] = [
 
 const IN_MAP_DOCUMENTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
-        name: "emb",
+        name: "embOrEnc",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "wordEmbedding object.",
+        description: "wordEmbedding or wordEncoding object.",
     },
     BuiltinParamDescriptor {
         name: "documents",
@@ -224,11 +227,11 @@ const IN_MAP_DOCUMENTS: [BuiltinParamDescriptor; 2] = [
 
 const IN_MAP_DOCUMENTS_REST: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
-        name: "emb",
+        name: "embOrEnc",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "wordEmbedding object.",
+        description: "wordEmbedding or wordEncoding object.",
     },
     BuiltinParamDescriptor {
         name: "documents",
@@ -372,7 +375,17 @@ pub const DOC2SEQUENCE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
             outputs: &OUT_SEQUENCES,
         },
         BuiltinSignatureDescriptor {
+            label: "sequences = doc2sequence(enc, documents)",
+            inputs: &IN_MAP_DOCUMENTS,
+            outputs: &OUT_SEQUENCES,
+        },
+        BuiltinSignatureDescriptor {
             label: "sequences = doc2sequence(emb, documents, Name, Value)",
+            inputs: &IN_MAP_DOCUMENTS_REST,
+            outputs: &OUT_SEQUENCES,
+        },
+        BuiltinSignatureDescriptor {
+            label: "sequences = doc2sequence(enc, documents, Name, Value)",
             inputs: &IN_MAP_DOCUMENTS_REST,
             outputs: &OUT_SEQUENCES,
         },
@@ -494,8 +507,8 @@ async fn train_word_embedding_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
 #[runtime_builtin(
     name = "doc2sequence",
     category = "strings/text_analytics",
-    summary = "Convert tokenized documents to embedding-vector sequences.",
-    keywords = "doc2sequence,wordEmbedding,tokenizedDocument,text analytics,sequences",
+    summary = "Convert tokenized documents to word-vector or word-index sequences.",
+    keywords = "doc2sequence,wordEmbedding,wordEncoding,tokenizedDocument,text analytics,sequences",
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::embeddings::DOC2SEQUENCE_DESCRIPTOR),
@@ -503,10 +516,24 @@ async fn train_word_embedding_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
 )]
 async fn doc2sequence_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let gathered = gather_args(args, "doc2sequence").await?;
-    let (embedding_object, document_object, options) = parse_doc2sequence_args(gathered)?;
-    let embedding = embedding_from_object(&embedding_object, "doc2sequence")?;
+    let (sequence_object, document_object, options) = parse_doc2sequence_args(gathered)?;
+    let document_shape = document_shape_from_object(&document_object, "doc2sequence")?;
     let documents = documents_from_object(&document_object, "doc2sequence")?;
-    doc2sequence_value(&embedding, &documents, options)
+    if sequence_object.is_class(WORD_EMBEDDING_CLASS) {
+        let embedding = embedding_from_object(&sequence_object, "doc2sequence")?;
+        doc2sequence_value(&embedding, &documents, &document_shape, options)
+    } else if sequence_object.is_class(WORD_ENCODING_CLASS) {
+        let encoding = word_encoding_from_object(&sequence_object, "doc2sequence")?;
+        doc2sequence_indices_value(&encoding, &documents, &document_shape, options)
+    } else {
+        Err(embedding_error(
+            "doc2sequence",
+            format!(
+                "doc2sequence: expected wordEmbedding or wordEncoding object, got {}",
+                sequence_object.class_name
+            ),
+        ))
+    }
 }
 
 #[runtime_builtin(
@@ -967,6 +994,13 @@ fn embedding_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResul
         vectors,
         dimension,
     })
+}
+
+pub(in crate::builtins::strings::text_analytics) fn word_embedding_vocabulary_from_object(
+    object: &ObjectInstance,
+    fn_name: &str,
+) -> BuiltinResult<Vec<String>> {
+    embedding_from_object(object, fn_name).map(|model| model.vocabulary)
 }
 
 fn compact_fast_text_embedding() -> EmbeddingModel {
@@ -1786,7 +1820,7 @@ fn parse_doc2sequence_args(
     if args.len() < 2 {
         return Err(embedding_error(
             "doc2sequence",
-            "doc2sequence: expected doc2sequence(emb, documents)",
+            "doc2sequence: expected doc2sequence(embOrEnc, documents)",
         ));
     }
     if !(args.len() - 2).is_multiple_of(2) {
@@ -1795,12 +1829,14 @@ fn parse_doc2sequence_args(
             "doc2sequence: name-value options must be paired",
         ));
     }
-    let embedding = match &args[0] {
+    let sequence_model = match &args[0] {
         Value::Object(object) => object.clone(),
         other => {
             return Err(embedding_error(
                 "doc2sequence",
-                format!("doc2sequence: expected wordEmbedding object, got {other:?}"),
+                format!(
+                    "doc2sequence: expected wordEmbedding or wordEncoding object, got {other:?}"
+                ),
             ));
         }
     };
@@ -1862,7 +1898,7 @@ fn parse_doc2sequence_args(
             }
             "paddingvalue" => {
                 options.padding_value =
-                    parse_finite_numeric_scalar(&args[idx + 1], "doc2sequence", "PaddingValue")?;
+                    parse_numeric_scalar(&args[idx + 1], "doc2sequence", "PaddingValue")?;
             }
             "length" => options.length = parse_sequence_length(&args[idx + 1])?,
             other => {
@@ -1874,7 +1910,7 @@ fn parse_doc2sequence_args(
         }
         idx += 2;
     }
-    Ok((embedding, documents, options))
+    Ok((sequence_model, documents, options))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1886,6 +1922,7 @@ enum SequenceToken {
 fn doc2sequence_value(
     embedding: &EmbeddingModel,
     documents: &[Vec<String>],
+    document_shape: &[usize],
     options: Doc2SequenceOptions,
 ) -> BuiltinResult<Value> {
     let lookup = build_word_lookup(&embedding.vocabulary, false);
@@ -1905,14 +1942,7 @@ fn doc2sequence_value(
     let mut values = Vec::with_capacity(sequences.len());
     let mut total_cells = 0usize;
     for sequence in &sequences {
-        let target_len = match options.padding_direction {
-            PaddingDirection::None => match options.length {
-                SequenceLength::Fixed(len) => sequence.len().min(len),
-                SequenceLength::Shortest => sequence.len().min(resolved_length),
-                SequenceLength::Longest => sequence.len(),
-            },
-            PaddingDirection::Left | PaddingDirection::Right => resolved_length,
-        };
+        let target_len = sequence_target_len(sequence.len(), resolved_length, options);
         total_cells = total_cells
             .checked_add(
                 embedding
@@ -1933,16 +1963,74 @@ fn doc2sequence_value(
         )?));
     }
     Ok(Value::Cell(
-        CellArray::new(values, documents.len(), 1)
+        CellArray::new_with_shape(values, document_shape.to_vec())
             .map_err(|err| embedding_error("doc2sequence", err))?,
     ))
 }
 
-fn resolve_sequence_length(sequences: &[Vec<SequenceToken>], length: SequenceLength) -> usize {
+fn doc2sequence_indices_value(
+    encoding: &WordEncodingModel,
+    documents: &[Vec<String>],
+    document_shape: &[usize],
+    options: Doc2SequenceOptions,
+) -> BuiltinResult<Value> {
+    let lookup = build_word_lookup(&encoding.vocabulary, false);
+    let mut sequences = Vec::with_capacity(documents.len());
+    for document in documents {
+        let mut sequence = Vec::new();
+        for token in document {
+            if let Some(&idx) = lookup.get(token) {
+                sequence.push(IndexSequenceToken::Known((idx + 1) as f64));
+            } else if options.unknown_word == UnknownWordMode::Nan {
+                sequence.push(IndexSequenceToken::UnknownNan);
+            }
+        }
+        sequences.push(sequence);
+    }
+    let resolved_length = resolve_sequence_length(&sequences, options.length);
+    let mut values = Vec::with_capacity(sequences.len());
+    let mut total_cells = 0usize;
+    for sequence in &sequences {
+        let target_len = sequence_target_len(sequence.len(), resolved_length, options);
+        total_cells = total_cells
+            .checked_add(target_len)
+            .ok_or_else(|| dense_doc2sequence_limit_error("doc2sequence"))?;
+        if total_cells > MAX_DOC2SEQUENCE_DENSE_VALUES {
+            return Err(dense_doc2sequence_limit_error("doc2sequence"));
+        }
+        values.push(Value::Tensor(index_sequence_tensor(
+            sequence,
+            target_len,
+            options.padding_direction,
+            options.padding_value,
+        )?));
+    }
+    Ok(Value::Cell(
+        CellArray::new_with_shape(values, document_shape.to_vec())
+            .map_err(|err| embedding_error("doc2sequence", err))?,
+    ))
+}
+
+fn resolve_sequence_length<T>(sequences: &[Vec<T>], length: SequenceLength) -> usize {
     match length {
         SequenceLength::Fixed(len) => len,
         SequenceLength::Longest => sequences.iter().map(Vec::len).max().unwrap_or(0),
         SequenceLength::Shortest => sequences.iter().map(Vec::len).min().unwrap_or(0),
+    }
+}
+
+fn sequence_target_len(
+    sequence_len: usize,
+    resolved_length: usize,
+    options: Doc2SequenceOptions,
+) -> usize {
+    match options.padding_direction {
+        PaddingDirection::None => match options.length {
+            SequenceLength::Fixed(len) => sequence_len.min(len),
+            SequenceLength::Shortest => sequence_len.min(resolved_length),
+            SequenceLength::Longest => sequence_len,
+        },
+        PaddingDirection::Left | PaddingDirection::Right => resolved_length,
     }
 }
 
@@ -1975,6 +2063,36 @@ fn sequence_tensor(
     }
     Tensor::new(out, vec![embedding.dimension, target_len])
         .map_err(|err| embedding_error("doc2sequence", err))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum IndexSequenceToken {
+    Known(f64),
+    UnknownNan,
+}
+
+fn index_sequence_tensor(
+    sequence: &[IndexSequenceToken],
+    target_len: usize,
+    padding_direction: PaddingDirection,
+    padding_value: f64,
+) -> BuiltinResult<Tensor> {
+    let truncated_len = sequence.len().min(target_len);
+    let pad_len = target_len.saturating_sub(truncated_len);
+    let mut out = Vec::with_capacity(target_len);
+    if padding_direction == PaddingDirection::Left {
+        out.extend(std::iter::repeat_n(padding_value, pad_len));
+    }
+    for token in sequence.iter().take(truncated_len) {
+        match token {
+            IndexSequenceToken::Known(idx) => out.push(*idx),
+            IndexSequenceToken::UnknownNan => out.push(f64::NAN),
+        }
+    }
+    if padding_direction == PaddingDirection::Right {
+        out.extend(std::iter::repeat_n(padding_value, pad_len));
+    }
+    Tensor::new(out, vec![1, target_len]).map_err(|err| embedding_error("doc2sequence", err))
 }
 
 fn push_padding_columns(out: &mut Vec<f64>, dimension: usize, count: usize, padding_value: f64) {
@@ -2012,11 +2130,7 @@ fn parse_sequence_length(value: &Value) -> BuiltinResult<SequenceLength> {
     )?))
 }
 
-fn parse_finite_numeric_scalar(
-    value: &Value,
-    fn_name: &str,
-    option_name: &str,
-) -> BuiltinResult<f64> {
+fn parse_numeric_scalar(value: &Value, fn_name: &str, option_name: &str) -> BuiltinResult<f64> {
     let n = match value {
         Value::Num(value) => *value,
         Value::Int(value) => int_value_to_f64(value),
@@ -2024,16 +2138,10 @@ fn parse_finite_numeric_scalar(
         other => {
             return Err(embedding_error(
                 fn_name,
-                format!("{fn_name}: {option_name} must be a finite numeric scalar, got {other:?}"),
+                format!("{fn_name}: {option_name} must be a numeric scalar, got {other:?}"),
             ));
         }
     };
-    if !n.is_finite() {
-        return Err(embedding_error(
-            fn_name,
-            format!("{fn_name}: {option_name} must be finite"),
-        ));
-    }
     Ok(n)
 }
 
@@ -2082,7 +2190,10 @@ fn words_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<String>> 
     }
 }
 
-fn build_word_lookup(vocabulary: &[String], ignore_case: bool) -> HashMap<String, usize> {
+pub(in crate::builtins::strings::text_analytics) fn build_word_lookup(
+    vocabulary: &[String],
+    ignore_case: bool,
+) -> HashMap<String, usize> {
     let mut lookup = HashMap::new();
     for (idx, word) in vocabulary.iter().enumerate() {
         let key = if ignore_case {
@@ -2307,6 +2418,13 @@ mod tests {
         object
             .properties
             .insert("Documents".to_string(), Value::Cell(documents));
+        object
+            .properties
+            .insert("NumDocuments".to_string(), Value::Num(rows as f64));
+        object.properties.insert(
+            "Shape".to_string(),
+            Value::Tensor(Tensor::new(vec![rows as f64, 1.0], vec![1, 2]).unwrap()),
+        );
         object
     }
 
@@ -2594,22 +2712,68 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn doc2sequence_rejects_word_encoding_and_invalid_options() {
+    async fn doc2sequence_supports_word_encoding_index_sequences_and_invalid_options() {
         let model = EmbeddingModel {
             vocabulary: vec!["alpha".into()],
             vectors: vec![1.0, 10.0],
             dimension: 2,
         };
-        let documents = Value::Object(tokenized_document_object(vec![vec!["alpha"]]));
-        let mut word_encoding = ObjectInstance::new("wordEncoding".to_string());
+        let mut documents_object =
+            tokenized_document_object(vec![vec!["alpha", "missing", "beta"], vec!["beta"]]);
+        documents_object.properties.insert(
+            "Shape".to_string(),
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        );
+        let documents = Value::Object(documents_object);
+        let mut word_encoding = ObjectInstance::new(WORD_ENCODING_CLASS.to_string());
+        word_encoding
+            .properties
+            .insert("NumWords".to_string(), Value::Num(2.0));
         word_encoding.properties.insert(
             "Vocabulary".to_string(),
-            Value::StringArray(StringArray::new(vec!["alpha".into()], vec![1, 1]).unwrap()),
+            Value::StringArray(
+                StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).unwrap(),
+            ),
         );
-        let err = doc2sequence_builtin(vec![Value::Object(word_encoding), documents.clone()])
+        let result = doc2sequence_builtin(vec![
+            Value::Object(word_encoding),
+            documents.clone(),
+            Value::String("UnknownWord".into()),
+            Value::String("nan".into()),
+            Value::String("PaddingDirection".into()),
+            Value::String("right".into()),
+            Value::String("Length".into()),
+            Value::Num(4.0),
+        ])
+        .await
+        .unwrap();
+        let Value::Cell(cell) = result else {
+            panic!("expected cell array");
+        };
+        assert_eq!(cell.shape, vec![1, 2]);
+        assert_eq!(cell.rows, 1);
+        assert_eq!(cell.cols, 2);
+        let Value::Tensor(first) = &cell.data[0] else {
+            panic!("expected first tensor");
+        };
+        assert_eq!(first.shape, vec![1, 4]);
+        assert_eq!(first.data[0], 1.0);
+        assert!(first.data[1].is_nan());
+        assert_eq!(first.data[2..4], [2.0, 0.0]);
+        let Value::Tensor(second) = &cell.data[1] else {
+            panic!("expected second tensor");
+        };
+        assert_eq!(second.shape, vec![1, 4]);
+        assert_eq!(second.data, vec![2.0, 0.0, 0.0, 0.0]);
+
+        let err = doc2sequence_builtin(vec![Value::Num(1.0), documents.clone()])
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("wordEmbedding object"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("wordEmbedding or wordEncoding object"),
+            "{err}"
+        );
 
         let err = doc2sequence_builtin(vec![
             embedding_object(model).unwrap(),
@@ -2620,6 +2784,120 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.to_string().contains("PaddingDirection"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn doc2sequence_word_encoding_supports_left_none_and_shortest_length() {
+        let mut word_encoding = ObjectInstance::new(WORD_ENCODING_CLASS.to_string());
+        word_encoding
+            .properties
+            .insert("NumWords".to_string(), Value::Num(3.0));
+        word_encoding.properties.insert(
+            "Vocabulary".to_string(),
+            Value::StringArray(
+                StringArray::new(
+                    vec!["alpha".into(), "beta".into(), "gamma".into()],
+                    vec![1, 3],
+                )
+                .unwrap(),
+            ),
+        );
+        let documents = Value::Object(tokenized_document_object(vec![
+            vec!["alpha", "beta", "gamma"],
+            vec!["gamma"],
+        ]));
+
+        let left = doc2sequence_builtin(vec![
+            Value::Object(word_encoding.clone()),
+            documents.clone(),
+        ])
+        .await
+        .unwrap();
+        let Value::Cell(left) = left else {
+            panic!("expected cell array");
+        };
+        let Value::Tensor(first) = &left.data[0] else {
+            panic!("expected first tensor");
+        };
+        assert_eq!(first.shape, vec![1, 3]);
+        assert_eq!(first.data, vec![1.0, 2.0, 3.0]);
+        let Value::Tensor(second) = &left.data[1] else {
+            panic!("expected second tensor");
+        };
+        assert_eq!(second.shape, vec![1, 3]);
+        assert_eq!(second.data, vec![0.0, 0.0, 3.0]);
+
+        let none = doc2sequence_builtin(vec![
+            Value::Object(word_encoding.clone()),
+            documents.clone(),
+            Value::String("PaddingDirection".into()),
+            Value::String("none".into()),
+        ])
+        .await
+        .unwrap();
+        let Value::Cell(none) = none else {
+            panic!("expected cell array");
+        };
+        let Value::Tensor(second) = &none.data[1] else {
+            panic!("expected second tensor");
+        };
+        assert_eq!(second.shape, vec![1, 1]);
+        assert_eq!(second.data, vec![3.0]);
+
+        let shortest = doc2sequence_builtin(vec![
+            Value::Object(word_encoding),
+            documents,
+            Value::String("Length".into()),
+            Value::String("shortest".into()),
+        ])
+        .await
+        .unwrap();
+        let Value::Cell(shortest) = shortest else {
+            panic!("expected cell array");
+        };
+        let Value::Tensor(first) = &shortest.data[0] else {
+            panic!("expected first tensor");
+        };
+        assert_eq!(first.shape, vec![1, 1]);
+        assert_eq!(first.data, vec![1.0]);
+        let Value::Tensor(second) = &shortest.data[1] else {
+            panic!("expected second tensor");
+        };
+        assert_eq!(second.shape, vec![1, 1]);
+        assert_eq!(second.data, vec![3.0]);
+    }
+
+    #[tokio::test]
+    async fn doc2sequence_allows_nan_padding_value() {
+        let model = EmbeddingModel {
+            vocabulary: vec!["alpha".into()],
+            vectors: vec![1.0, 10.0],
+            dimension: 2,
+        };
+        let emb = embedding_object(model).unwrap();
+        let documents = Value::Object(tokenized_document_object(vec![vec!["alpha"]]));
+        let result = doc2sequence_builtin(vec![
+            emb,
+            documents,
+            Value::String("PaddingDirection".into()),
+            Value::String("left".into()),
+            Value::String("PaddingValue".into()),
+            Value::Num(f64::NAN),
+            Value::String("Length".into()),
+            Value::Num(2.0),
+        ])
+        .await
+        .unwrap();
+        let Value::Cell(cell) = result else {
+            panic!("expected cell array");
+        };
+        let Value::Tensor(sequence) = &cell.data[0] else {
+            panic!("expected tensor");
+        };
+        assert_eq!(sequence.shape, vec![2, 2]);
+        assert!(sequence.data[0].is_nan());
+        assert!(sequence.data[1].is_nan());
+        assert_eq!(sequence.data[2..4], [1.0, 10.0]);
     }
 
     #[tokio::test]

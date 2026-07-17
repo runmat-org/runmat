@@ -24941,11 +24941,11 @@
           "label": "sequences = doc2sequence(emb, documents)",
           "inputs": [
             {
-              "name": "emb",
+              "name": "embOrEnc",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "wordEmbedding object."
+              "description": "wordEmbedding or wordEncoding object."
             },
             {
               "name": "documents",
@@ -24961,7 +24961,35 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Cell array of document embedding-vector sequences."
+              "description": "Cell array of document embedding-vector or word-index sequences."
+            }
+          ]
+        },
+        {
+          "label": "sequences = doc2sequence(enc, documents)",
+          "inputs": [
+            {
+              "name": "embOrEnc",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEmbedding or wordEncoding object."
+            },
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sequences",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array of document embedding-vector or word-index sequences."
             }
           ]
         },
@@ -24969,11 +24997,11 @@
           "label": "sequences = doc2sequence(emb, documents, Name, Value)",
           "inputs": [
             {
-              "name": "emb",
+              "name": "embOrEnc",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "wordEmbedding object."
+              "description": "wordEmbedding or wordEncoding object."
             },
             {
               "name": "documents",
@@ -24996,7 +25024,42 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Cell array of document embedding-vector sequences."
+              "description": "Cell array of document embedding-vector or word-index sequences."
+            }
+          ]
+        },
+        {
+          "label": "sequences = doc2sequence(enc, documents, Name, Value)",
+          "inputs": [
+            {
+              "name": "embOrEnc",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEmbedding or wordEncoding object."
+            },
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: UnknownWord, PaddingDirection, PaddingValue, Length."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sequences",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array of document embedding-vector or word-index sequences."
             }
           ]
         }
@@ -47191,6 +47254,49 @@
       ]
     },
     {
+      "name": "ind2word",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "words = ind2word(enc, M)",
+          "inputs": [
+            {
+              "name": "enc",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEncoding object."
+            },
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer word encoding indices."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Words mapped from encoding indices."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.IND2WORD.INVALID_INPUT",
+          "identifier": "RunMat:ind2word:InvalidInput",
+          "when": "Inputs do not match a supported ind2word form.",
+          "message": "ind2word received invalid input"
+        }
+      ]
+    },
+    {
       "name": "inf",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -49414,6 +49520,112 @@
           "identifier": "RunMat:isUnderlyingType:TypeNameInvalid",
           "when": "Second argument is not a string scalar or row character vector.",
           "message": "isUnderlyingType: TYPENAME must be a string scalar or character vector"
+        }
+      ]
+    },
+    {
+      "name": "isVocabularyWord",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isVocabularyWord(emb, words)",
+          "inputs": [
+            {
+              "name": "embOrEnc",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEmbedding or wordEncoding object."
+            },
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Words to test."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical membership mask."
+            }
+          ]
+        },
+        {
+          "label": "tf = isVocabularyWord(enc, words)",
+          "inputs": [
+            {
+              "name": "embOrEnc",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEmbedding or wordEncoding object."
+            },
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Words to test."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical membership mask."
+            }
+          ]
+        },
+        {
+          "label": "tf = isVocabularyWord(___, 'IgnoreCase', true)",
+          "inputs": [
+            {
+              "name": "embOrEnc",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEmbedding or wordEncoding object."
+            },
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Words to test."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: IgnoreCase."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical membership mask."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ISVOCABULARYWORD.INVALID_INPUT",
+          "identifier": "RunMat:isVocabularyWord:InvalidInput",
+          "when": "Inputs do not match a supported isVocabularyWord form.",
+          "message": "isVocabularyWord received invalid input"
         }
       ]
     },
@@ -111973,6 +112185,84 @@
       "errors": []
     },
     {
+      "name": "word2ind",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "M = word2ind(enc, words)",
+          "inputs": [
+            {
+              "name": "enc",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEncoding object."
+            },
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Words to map to indices."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Word encoding indices, with NaN for words outside the vocabulary."
+            }
+          ]
+        },
+        {
+          "label": "M = word2ind(enc, words, 'IgnoreCase', true)",
+          "inputs": [
+            {
+              "name": "enc",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEncoding object."
+            },
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Words to map to indices."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: IgnoreCase."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Word encoding indices, with NaN for words outside the vocabulary."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.WORD2IND.INVALID_INPUT",
+          "identifier": "RunMat:word2ind:InvalidInput",
+          "when": "Inputs do not match a supported word2ind form.",
+          "message": "word2ind received invalid input"
+        }
+      ]
+    },
+    {
       "name": "word2vec",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -112047,6 +112337,91 @@
           "identifier": "RunMat:word2vec:InvalidInput",
           "when": "Inputs do not match a supported word2vec form.",
           "message": "word2vec received invalid input"
+        }
+      ]
+    },
+    {
+      "name": "wordEncoding",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "enc = wordEncoding(documents)",
+          "inputs": [
+            {
+              "name": "documentsOrWords",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object or word vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "enc",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Word encoding compatibility object."
+            }
+          ]
+        },
+        {
+          "label": "enc = wordEncoding(words)",
+          "inputs": [
+            {
+              "name": "documentsOrWords",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object or word vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "enc",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Word encoding compatibility object."
+            }
+          ]
+        },
+        {
+          "label": "enc = wordEncoding(documents, Name, Value)",
+          "inputs": [
+            {
+              "name": "documentsOrWords",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object or word vector."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: Order, MaxNumWords."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "enc",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Word encoding compatibility object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.WORDENCODING.INVALID_INPUT",
+          "identifier": "RunMat:wordEncoding:InvalidInput",
+          "when": "Inputs do not match a supported wordEncoding form.",
+          "message": "wordEncoding received invalid input"
         }
       ]
     },

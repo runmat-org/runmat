@@ -1647,6 +1647,47 @@ pub(in crate::builtins::strings::text_analytics) fn documents_from_object(
     Ok(documents)
 }
 
+pub(in crate::builtins::strings::text_analytics) fn document_shape_from_object(
+    object: &ObjectInstance,
+    fn_name: &str,
+) -> BuiltinResult<Vec<usize>> {
+    let expected = object
+        .properties
+        .get("Documents")
+        .and_then(|value| match value {
+            Value::Cell(cell) => Some(cell.data.len()),
+            _ => None,
+        })
+        .or_else(|| {
+            object
+                .properties
+                .get("NumDocuments")
+                .and_then(|value| match value {
+                    Value::Num(n) if n.is_finite() && *n >= 0.0 => Some(*n as usize),
+                    _ => None,
+                })
+        })
+        .unwrap_or(1);
+    let shape = shape_from_object(object);
+    let cells = shape.iter().try_fold(1usize, |acc, dim| {
+        acc.checked_mul(*dim).ok_or_else(|| {
+            text_analytics_error(
+                fn_name,
+                format!("{fn_name}: tokenizedDocument Shape property overflows element count"),
+            )
+        })
+    })?;
+    if cells != expected {
+        return Err(text_analytics_error(
+            fn_name,
+            format!(
+                "{fn_name}: tokenizedDocument Shape property has {cells} elements but Documents has {expected}"
+            ),
+        ));
+    }
+    Ok(shape)
+}
+
 fn shape_from_object(object: &ObjectInstance) -> Vec<usize> {
     if let Some(Value::Tensor(tensor)) = object.properties.get("Shape") {
         tensor.data.iter().map(|value| *value as usize).collect()
