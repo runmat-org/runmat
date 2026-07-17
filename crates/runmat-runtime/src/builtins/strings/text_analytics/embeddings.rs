@@ -3,7 +3,7 @@
 use std::cell::Cell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
 use runmat_builtins::{
@@ -84,6 +84,7 @@ const OUT_SEQUENCES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Cell array of document embedding-vector or word-index sequences.",
 }];
 
+const OUT_NONE: [BuiltinParamDescriptor; 0] = [];
 const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
 
 const IN_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -93,6 +94,23 @@ const IN_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "UTF-8 word2vec/GloVe text file or zip file containing one.",
 }];
+
+const IN_EMBEDDING_FILENAME: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "emb",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "wordEmbedding object.",
+    },
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target UTF-8 word2vec text file.",
+    },
+];
 
 const IN_TRAIN_SOURCE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "source",
@@ -256,6 +274,13 @@ const ERROR_READ_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
     message: "readWordEmbedding received invalid input",
 };
 
+const ERROR_WRITE_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WRITEWORDEMBEDDING.INVALID_INPUT",
+    identifier: Some("RunMat:writeWordEmbedding:InvalidInput"),
+    when: "Inputs do not match the supported writeWordEmbedding form.",
+    message: "writeWordEmbedding received invalid input",
+};
+
 const ERROR_WORD2VEC_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.WORD2VEC.INVALID_INPUT",
     identifier: Some("RunMat:word2vec:InvalidInput"),
@@ -291,15 +316,23 @@ const ERROR_DOC2SEQUENCE_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDes
     message: "doc2sequence received invalid input",
 };
 
-const ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+const ERROR_READ_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.READWORDEMBEDDING.IO",
     identifier: Some("RunMat:readWordEmbedding:IOError"),
     when: "The requested word embedding file cannot be read.",
     message: "Unable to read word embedding file",
 };
 
+const ERROR_WRITE_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WRITEWORDEMBEDDING.IO",
+    identifier: Some("RunMat:writeWordEmbedding:IOError"),
+    when: "The requested word embedding file cannot be written.",
+    message: "Unable to write word embedding file",
+};
+
 const FASTTEXT_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_FASTTEXT_INVALID_INPUT];
-const READ_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_READ_INVALID_INPUT, ERROR_IO];
+const READ_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_READ_INVALID_INPUT, ERROR_READ_IO];
+const WRITE_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_WRITE_INVALID_INPUT, ERROR_WRITE_IO];
 const WORD2VEC_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_WORD2VEC_INVALID_INPUT];
 const VEC2WORD_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_VEC2WORD_INVALID_INPUT];
 const TRAIN_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_TRAIN_INVALID_INPUT];
@@ -318,6 +351,17 @@ pub const READ_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor 
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &READ_ERRORS,
+};
+
+pub const WRITE_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "writeWordEmbedding(emb, filename)",
+        inputs: &IN_EMBEDDING_FILENAME,
+        outputs: &OUT_NONE,
+    }],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &WRITE_ERRORS,
 };
 
 pub const FASTTEXT_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -456,7 +500,7 @@ async fn read_word_embedding_builtin(filename: Value) -> BuiltinResult<Value> {
     let filename = gather_if_needed_async(&filename)
         .await
         .map_err(|err| embedding_error("readWordEmbedding", err.to_string()))?;
-    let filename = scalar_text(&filename, "readWordEmbedding")
+    let filename = embedding_filename_text(&filename, "readWordEmbedding")
         .map_err(|err| embedding_error("readWordEmbedding", err.to_string()))?;
     let path = Path::new(&filename);
     let bytes = read_limited_file_bytes(path, "readWordEmbedding").await?;
@@ -471,6 +515,57 @@ async fn read_word_embedding_builtin(filename: Value) -> BuiltinResult<Value> {
         })?
     };
     embedding_object(parse_embedding_text(&text, "readWordEmbedding")?)
+}
+
+#[runtime_builtin(
+    name = "writeWordEmbedding",
+    category = "strings/text_analytics",
+    summary = "Write a word embedding model as UTF-8 word2vec text.",
+    keywords = "writeWordEmbedding,wordEmbedding,text analytics,word2vec,write",
+    accel = "sink",
+    type_resolver(any_type),
+    descriptor(
+        crate::builtins::strings::text_analytics::embeddings::WRITE_WORD_EMBEDDING_DESCRIPTOR
+    ),
+    builtin_path = "crate::builtins::strings::text_analytics::embeddings"
+)]
+async fn write_word_embedding_builtin(emb: Value, filename: Value) -> BuiltinResult<Value> {
+    let emb = gather_if_needed_async(&emb)
+        .await
+        .map_err(|err| embedding_error("writeWordEmbedding", err.to_string()))?;
+    let filename = gather_if_needed_async(&filename)
+        .await
+        .map_err(|err| embedding_error("writeWordEmbedding", err.to_string()))?;
+    let filename = embedding_filename_text(&filename, "writeWordEmbedding")
+        .map_err(|err| embedding_error("writeWordEmbedding", err.to_string()))?;
+    let object = match emb {
+        Value::Object(object) => object,
+        other => {
+            return Err(embedding_error(
+                "writeWordEmbedding",
+                format!("writeWordEmbedding: expected wordEmbedding object, got {other:?}"),
+            ));
+        }
+    };
+    let embedding = embedding_from_object(&object, "writeWordEmbedding")?;
+    let mut file = File::create_async(Path::new(&filename))
+        .await
+        .map_err(|err| {
+            embedding_error_with_source(
+                "writeWordEmbedding",
+                format!("writeWordEmbedding: unable to create '{filename}': {err}"),
+                err,
+            )
+        })?;
+    write_embedding_text(&embedding, &mut file, &filename)?;
+    file.flush().map_err(|err| {
+        embedding_error_with_source(
+            "writeWordEmbedding",
+            format!("writeWordEmbedding: unable to flush '{filename}': {err}"),
+            err,
+        )
+    })?;
+    Ok(Value::Num(0.0))
 }
 
 #[runtime_builtin(
@@ -912,6 +1007,98 @@ fn parse_embedding_line(
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     Ok((word, vector))
+}
+
+fn write_embedding_text(
+    model: &EmbeddingModel,
+    writer: &mut impl Write,
+    filename: &str,
+) -> BuiltinResult<()> {
+    if model.dimension == 0 || model.vocabulary.is_empty() {
+        return Err(embedding_error(
+            "writeWordEmbedding",
+            "writeWordEmbedding: wordEmbedding object must contain at least one word and one dimension",
+        ));
+    }
+    if model.vectors.len() != model.vocabulary.len() * model.dimension {
+        return Err(embedding_error(
+            "writeWordEmbedding",
+            "writeWordEmbedding: wordEmbedding object has inconsistent vector storage",
+        ));
+    }
+    writeln!(writer, "{} {}", model.vocabulary.len(), model.dimension).map_err(|err| {
+        embedding_error_with_source(
+            "writeWordEmbedding",
+            format!("writeWordEmbedding: unable to write '{filename}': {err}"),
+            err,
+        )
+    })?;
+    for (row, word) in model.vocabulary.iter().enumerate() {
+        if word.split_whitespace().count() != 1 {
+            return Err(embedding_error(
+                "writeWordEmbedding",
+                format!(
+                    "writeWordEmbedding: vocabulary word at index {} cannot contain whitespace",
+                    row + 1
+                ),
+            ));
+        }
+        write!(writer, "{word}").map_err(|err| {
+            embedding_error_with_source(
+                "writeWordEmbedding",
+                format!("writeWordEmbedding: unable to write '{filename}': {err}"),
+                err,
+            )
+        })?;
+        let start = row * model.dimension;
+        for value in &model.vectors[start..start + model.dimension] {
+            if !value.is_finite() {
+                return Err(embedding_error(
+                    "writeWordEmbedding",
+                    format!(
+                        "writeWordEmbedding: vector value for word '{}' must be finite",
+                        word
+                    ),
+                ));
+            }
+            write!(writer, " {value}").map_err(|err| {
+                embedding_error_with_source(
+                    "writeWordEmbedding",
+                    format!("writeWordEmbedding: unable to write '{filename}': {err}"),
+                    err,
+                )
+            })?;
+        }
+        writeln!(writer).map_err(|err| {
+            embedding_error_with_source(
+                "writeWordEmbedding",
+                format!("writeWordEmbedding: unable to write '{filename}': {err}"),
+                err,
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn embedding_filename_text(value: &Value, fn_name: &str) -> BuiltinResult<String> {
+    match value {
+        Value::Cell(cell) if cell.data.len() == 1 => match &cell.data[0] {
+            Value::CharArray(array) if array.rows == 0 => Ok(String::new()),
+            Value::CharArray(array) if array.rows == 1 => Ok(char_row_to_string(array)),
+            other => Err(embedding_error(
+                fn_name,
+                format!("{fn_name}: 1-by-1 filename cell must contain a character vector, got {other:?}"),
+            )),
+        },
+        Value::Cell(cell) => Err(embedding_error(
+            fn_name,
+            format!(
+                "{fn_name}: filename cell array must be 1-by-1, got {} elements",
+                cell.data.len()
+            ),
+        )),
+        _ => scalar_text(value, fn_name),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -2328,6 +2515,7 @@ fn embedding_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeE
     let identifier = match fn_name {
         "fastTextWordEmbedding" => "RunMat:fastTextWordEmbedding:InvalidInput",
         "readWordEmbedding" => "RunMat:readWordEmbedding:InvalidInput",
+        "writeWordEmbedding" => "RunMat:writeWordEmbedding:InvalidInput",
         "trainWordEmbedding" => "RunMat:trainWordEmbedding:InvalidInput",
         "doc2sequence" => "RunMat:doc2sequence:InvalidInput",
         "word2vec" => "RunMat:word2vec:InvalidInput",
@@ -2345,10 +2533,10 @@ fn embedding_error_with_source(
     message: impl Into<String>,
     source: impl std::error::Error + Send + Sync + 'static,
 ) -> crate::RuntimeError {
-    let identifier = if fn_name == "readWordEmbedding" {
-        "RunMat:readWordEmbedding:IOError"
-    } else {
-        "RunMat:wordEmbedding:InvalidInput"
+    let identifier = match fn_name {
+        "readWordEmbedding" => "RunMat:readWordEmbedding:IOError",
+        "writeWordEmbedding" => "RunMat:writeWordEmbedding:IOError",
+        _ => "RunMat:wordEmbedding:InvalidInput",
     };
     build_runtime_error(message.into())
         .with_builtin(fn_name)
@@ -2467,6 +2655,125 @@ mod tests {
         assert!(object.is_class(WORD_EMBEDDING_CLASS));
         let model = embedding_from_object(&object, "test").unwrap();
         assert_eq!(model.vocabulary, vec!["left", "right"]);
+    }
+
+    #[tokio::test]
+    async fn read_word_embedding_accepts_scalar_cell_filename() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cell-name.vec");
+        std::fs::write(&path, "1 2\nonly 0.25 0.75\n").unwrap();
+        let filename = Value::Cell(
+            CellArray::new(
+                vec![Value::CharArray(CharArray::new_row(
+                    &path.to_string_lossy(),
+                ))],
+                1,
+                1,
+            )
+            .unwrap(),
+        );
+
+        let value = read_word_embedding_builtin(filename).await.unwrap();
+        let Value::Object(object) = value else {
+            panic!("expected object");
+        };
+        let model = embedding_from_object(&object, "test").unwrap();
+        assert_eq!(model.vocabulary, vec!["only"]);
+        assert_eq!(model.vectors, vec![0.25, 0.75]);
+    }
+
+    #[tokio::test]
+    async fn write_word_embedding_writes_word2vec_text_and_round_trips() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("roundtrip.vec");
+        let emb = embedding_object(EmbeddingModel {
+            vocabulary: vec!["alpha".into(), "beta".into()],
+            vectors: vec![1.0, 2.5, 3.0, 4.25],
+            dimension: 2,
+        })
+        .unwrap();
+        let filename = Value::Cell(
+            CellArray::new(
+                vec![Value::CharArray(CharArray::new_row(
+                    &path.to_string_lossy(),
+                ))],
+                1,
+                1,
+            )
+            .unwrap(),
+        );
+
+        let result = write_word_embedding_builtin(emb, filename).await.unwrap();
+        assert_eq!(result, Value::Num(0.0));
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(contents, "2 2\nalpha 1 2.5\nbeta 3 4.25\n");
+
+        let value = read_word_embedding_builtin(Value::String(path.to_string_lossy().to_string()))
+            .await
+            .unwrap();
+        let Value::Object(object) = value else {
+            panic!("expected object");
+        };
+        let model = embedding_from_object(&object, "test").unwrap();
+        assert_eq!(model.vocabulary, vec!["alpha", "beta"]);
+        assert_eq!(model.dimension, 2);
+        assert_eq!(model.vectors, vec![1.0, 2.5, 3.0, 4.25]);
+    }
+
+    #[tokio::test]
+    async fn write_word_embedding_rejects_bad_inputs_and_vectors() {
+        let dir = tempdir().unwrap();
+        let path = Value::String(dir.path().join("bad.vec").to_string_lossy().to_string());
+        let err =
+            write_word_embedding_builtin(Value::String("not an embedding".into()), path.clone())
+                .await
+                .unwrap_err();
+        assert!(
+            err.to_string().contains("expected wordEmbedding object"),
+            "{err}"
+        );
+
+        let mut object = ObjectInstance::new(WORD_EMBEDDING_CLASS.to_string());
+        object
+            .properties
+            .insert("Dimension".to_string(), Value::Num(1.0));
+        object.properties.insert(
+            "Vocabulary".to_string(),
+            Value::StringArray(StringArray::new(vec!["bad word".into()], vec![1, 1]).unwrap()),
+        );
+        object.properties.insert(
+            VECTOR_PROPERTY.to_string(),
+            Value::Tensor(Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap()),
+        );
+        let err = write_word_embedding_builtin(Value::Object(object), path)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("cannot contain whitespace")
+                || err.to_string().contains("must be finite"),
+            "{err}"
+        );
+
+        let valid = embedding_object(EmbeddingModel {
+            vocabulary: vec!["ok".into()],
+            vectors: vec![1.0],
+            dimension: 1,
+        })
+        .unwrap();
+        let missing_parent = Value::String(
+            dir.path()
+                .join("missing")
+                .join("parent.vec")
+                .to_string_lossy()
+                .to_string(),
+        );
+        let err = write_word_embedding_builtin(valid, missing_parent)
+            .await
+            .unwrap_err();
+        assert!(
+            err.identifier() == Some("RunMat:writeWordEmbedding:IOError"),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]

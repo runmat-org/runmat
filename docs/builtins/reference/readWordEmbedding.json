@@ -29,7 +29,7 @@
   },
   "description": "`readWordEmbedding(filename)` reads UTF-8 word2vec or GloVe text embedding data. Zip archives are supported when they contain an embedding text file.",
   "behaviors": [
-    "`filename` may be a string scalar or character vector path.",
+    "`filename` may be a string scalar, character vector, or a 1-by-1 cell array containing a character vector.",
     "Plain text files may use GloVe-style rows (`word value value ...`) or word2vec text rows with a leading `numWords dimension` header.",
     "Zip archives are scanned for a text-like embedding entry (`.txt`, `.vec`, `.glove`, or `.emb`); otherwise the first file entry is parsed as UTF-8 text.",
     "Duplicate words are collapsed so the last duplicate row supplies the vector, matching MATLAB's documented duplicate-word behavior.",
@@ -92,6 +92,7 @@
     },
     "points": [
       "The embedding text must be UTF-8.",
+      "`filename` must be a scalar text path or 1-by-1 cell containing a character vector path.",
       "Every vector row must have the same dimension.",
       "A word2vec text header, when present, must match the number of vector rows in the file."
     ]

@@ -112756,6 +112756,47 @@
       ]
     },
     {
+      "name": "writeWordEmbedding",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "writeWordEmbedding(emb, filename)",
+          "inputs": [
+            {
+              "name": "emb",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEmbedding object."
+            },
+            {
+              "name": "filename",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Target UTF-8 word2vec text file."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.WRITEWORDEMBEDDING.INVALID_INPUT",
+          "identifier": "RunMat:writeWordEmbedding:InvalidInput",
+          "when": "Inputs do not match the supported writeWordEmbedding form.",
+          "message": "writeWordEmbedding received invalid input"
+        },
+        {
+          "code": "RM.WRITEWORDEMBEDDING.IO",
+          "identifier": "RunMat:writeWordEmbedding:IOError",
+          "when": "The requested word embedding file cannot be written.",
+          "message": "Unable to write word embedding file"
+        }
+      ]
+    },
+    {
       "name": "writecell",
       "output_mode": "Fixed",
       "completion_policy": "Public",
