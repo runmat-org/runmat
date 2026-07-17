@@ -355,6 +355,7 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
         "removeLongWords" => "RunMat:removeLongWords:InvalidInput",
         "tokenDetails" => "RunMat:tokenDetails:InvalidInput",
         "addTypeDetails" => "RunMat:addTypeDetails:InvalidInput",
+        "vaderSentimentScores" => "RunMat:vaderSentimentScores:InvalidInput",
         _ => "RunMat:textAnalyticsDocuments:InvalidInput",
     };
     build_runtime_error(message)

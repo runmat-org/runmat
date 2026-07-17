@@ -108519,6 +108519,119 @@
       "errors": []
     },
     {
+      "name": "vaderSentimentScores",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "compoundScores = vaderSentimentScores(documents)",
+          "inputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "compoundScores",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Compound VADER-style sentiment score for each document."
+            }
+          ]
+        },
+        {
+          "label": "compoundScores = vaderSentimentScores(documents,Name,Value)",
+          "inputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: SentimentLexicon, Boosters, Dampeners, Negations."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "compoundScores",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Compound VADER-style sentiment score for each document."
+            }
+          ]
+        },
+        {
+          "label": "[compoundScores,positiveScores,negativeScores,neutralScores] = vaderSentimentScores(___)",
+          "inputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: SentimentLexicon, Boosters, Dampeners, Negations."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "compoundScores",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Compound VADER-style sentiment score for each document."
+            },
+            {
+              "name": "positiveScores",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive sentiment proportions."
+            },
+            {
+              "name": "negativeScores",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Negative sentiment proportions."
+            },
+            {
+              "name": "neutralScores",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Neutral token proportions."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.VADER_SENTIMENT_SCORES.INVALID_INPUT",
+          "identifier": "RunMat:vaderSentimentScores:InvalidInput",
+          "when": "Inputs do not match supported vaderSentimentScores forms.",
+          "message": "vaderSentimentScores: invalid input"
+        }
+      ]
+    },
+    {
       "name": "validateFunctionSignaturesJSON",
       "output_mode": "Fixed",
       "completion_policy": "Public",

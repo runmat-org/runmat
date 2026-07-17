@@ -1,0 +1,100 @@
+{
+  "title": "vaderSentimentScores",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "vaderSentimentScores",
+    "VADER",
+    "sentiment",
+    "text analytics",
+    "tokenizedDocument"
+  ],
+  "summary": "Score tokenized documents with VADER-style sentiment rules.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`vaderSentimentScores` consumes host tokenizedDocument metadata and returns host score vectors; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 9,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::sentiment::tests",
+    "integration": null
+  },
+  "description": "`vaderSentimentScores(documents)` returns a compound sentiment score for each English `tokenizedDocument`. `[compoundScores,positiveScores,negativeScores,neutralScores] = vaderSentimentScores(___)` also returns positive, negative, and neutral proportions.",
+  "behaviors": [
+    "`documents` must be a RunMat `tokenizedDocument` compatibility object with English language metadata.",
+    "Compound scores are normalized to the range [-1, 1] from token sentiment values after applying booster, dampener, negation, capitalization, and punctuation modifiers.",
+    "`SentimentLexicon` accepts a RunMat table with lowercase string `Token` values and numeric `SentimentScore` values in the documented range [-4, 4].",
+    "`Boosters` and `Dampeners` accept string, character, cell, or string-array inputs. Column vectors are treated as word lists; multi-column string arrays are treated as row-wise n-grams with empty padding ignored.",
+    "`Negations` accepts string, character, cell, or string-array word lists.",
+    "RunMat ships a compact built-in English compatibility lexicon and modifier lists for common scripts and examples. For domain-specific or full-coverage scoring, pass an explicit `SentimentLexicon` table.",
+    "The default lexicon is not yet the complete MATLAB/VADER lexicon, and exact MATLAB VADER scoring parity remains tracked by the broader Text Analytics compatibility issue."
+  ],
+  "examples": [
+    {
+      "description": "Score Tokenized Documents",
+      "input": "documents = tokenizedDocument([\"The book was VERY good!!!!\"; \"The book was not very good.\"]);\ncompoundScores = vaderSentimentScores(documents)",
+      "output": "`compoundScores` is a numeric column vector with one score per document."
+    },
+    {
+      "description": "Return Sentiment Proportions",
+      "input": "[compoundScores,positiveScores,negativeScores,neutralScores] = vaderSentimentScores(documents)",
+      "output": "Each output is a numeric column vector with one value per document."
+    },
+    {
+      "description": "Use a Custom Lexicon",
+      "input": "tbl = table([\"innovative\"; \"risk\"], [4; -3], \"VariableNames\", [\"Token\", \"SentimentScore\"]);\ncompoundScores = vaderSentimentScores(documents, \"SentimentLexicon\", tbl)",
+      "output": "The custom table replaces the built-in compact lexicon."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does RunMat include MATLAB's full default VADER lexicon?",
+      "answer": "Not yet. The builtin includes a compact default compatibility lexicon and fully supports custom lexicon tables."
+    },
+    {
+      "question": "Are booster, dampener, and negation options supported?",
+      "answer": "Yes. `Boosters`, `Dampeners`, and `Negations` are parsed and applied to preceding sentiment-bearing tokens."
+    },
+    {
+      "question": "Does `vaderSentimentScores` execute on the GPU?",
+      "answer": "No. It performs host text/object processing and returns host numeric score vectors."
+    }
+  ],
+  "links": [
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "tokenDetails",
+      "url": "./tokenDetails"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "compoundScores = vaderSentimentScores(documents)\ncompoundScores = vaderSentimentScores(documents, Name, Value)\n[compoundScores,positiveScores,negativeScores,neutralScores] = vaderSentimentScores(___)",
+      "output": "Numeric column vectors with one score per input document."
+    },
+    "points": [
+      "`SentimentLexicon` must be a table with `Token` and `SentimentScore` variables.",
+      "`Token` entries in a custom lexicon must be nonempty lowercase strings.",
+      "`SentimentScore` entries must be finite numeric values in [-4, 4].",
+      "`Boosters`, `Dampeners`, and `Negations` must contain at least one word or n-gram when supplied.",
+      "Only English `tokenizedDocument` inputs are accepted in this slice."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/sentiment.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/sentiment.rs"
+  },
+  "gpu_residency": "`vaderSentimentScores` operates on host tokenizedDocument objects and has no provider-resident kernel."
+}
