@@ -32,11 +32,11 @@
   "behaviors": [
     "`tree` must be a scalar RunMat `htmlTree` object or a cell array of `htmlTree` objects.",
     "`selector` must be a string scalar or character vector.",
-    "Supported selectors include element tags, `*`, `.class`, `#id`, `[attr]`, `[attr=value]`, descendant combinators, child combinators (`>`), adjacent-sibling combinators (`+`), comma-separated groups, `:empty`, and `:not(:empty)`.",
-    "Attribute names are matched case-insensitively through the parser's lowercase attribute map. Attribute values, ids, and classes use exact string matching.",
-    "Adjacent sibling matching follows element siblings and ignores intervening whitespace text nodes.",
+    "Supported selectors include element tags, `*`, `.class`, `#id`, `[attr]`, `[attr=value]`, `[attr~=value]`, `[attr|=value]`, `[attr^=value]`, `[attr$=value]`, `[attr*=value]`, descendant combinators, child combinators (`>`), adjacent-sibling combinators (`+`), general-sibling combinators (`~`), comma-separated groups, `:empty`, `:first-child`, `:first-of-type`, and `:not(...)` for these supported pseudo-classes.",
+    "Attribute names are matched case-insensitively through the parser's lowercase attribute map. Attribute values, ids, and classes use CSS-style exact, whitespace-list, dash-prefix, prefix, suffix, or substring string matching according to the selector operator.",
+    "Sibling matching follows element siblings and ignores intervening whitespace text nodes.",
     "The result is a column cell array because RunMat does not yet have a first-class MATLAB object-array representation for `htmlTree`.",
-    "Unsupported CSS pseudo-classes and attribute operators raise an explicit error instead of silently returning partial results.",
+    "Unsupported CSS pseudo-classes and selector forms raise an explicit error instead of silently returning partial results.",
     "Full CSS3 selector parity remains tracked by the broader Text Analytics compatibility issue."
   ],
   "examples": [
@@ -49,6 +49,16 @@
       "description": "Use Combinators",
       "input": "tree = htmlTree(\"<section><h1>Title</h1><p>Lead</p></section>\");\nlead = findElement(tree, \"h1 + p\")",
       "output": "`lead` is a one-element cell array containing the matching `P` subtree."
+    },
+    {
+      "description": "Use CSS Attribute Operators",
+      "input": "tree = htmlTree(\"<div><a href='manual.pdf'>Manual</a><a href='guide.html'>Guide</a></div>\");\npdfs = findElement(tree, \"a[href$='.pdf']\")",
+      "output": "`pdfs` contains the link whose `href` ends with `.pdf`."
+    },
+    {
+      "description": "Use Positional Pseudo-Classes",
+      "input": "tree = htmlTree(\"<section><p>Intro</p><a>First</a><a>Second</a></section>\");\nfirstLink = findElement(tree, \"a:first-of-type\")",
+      "output": "`firstLink` contains the first `A` element under the section."
     }
   ],
   "faqs": [
@@ -58,7 +68,7 @@
     },
     {
       "question": "Does RunMat support every CSS selector accepted by MATLAB?",
-      "answer": "No. Common tag, id, class, attribute, group, descendant, child, adjacent-sibling, `:empty`, and `:not(:empty)` forms are supported. Full CSS3 parity remains tracked in the Text Analytics umbrella issue."
+      "answer": "No. Common tag, id, class, attribute operator, group, descendant, child, sibling, `:empty`, `:first-child`, `:first-of-type`, and simple `:not(...)` forms are supported. Full CSS3 parity remains tracked in the Text Analytics umbrella issue."
     },
     {
       "question": "Does `findElement` execute on the GPU?",

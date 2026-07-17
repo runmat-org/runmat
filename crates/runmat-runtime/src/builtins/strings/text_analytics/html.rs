@@ -607,11 +607,7 @@ fn execute_selector_chain(
     };
     let mut candidates = all_paths(root)
         .into_iter()
-        .filter(|path| {
-            node_at(root, path)
-                .map(|node| first.simple.matches(node))
-                .unwrap_or(false)
-        })
+        .filter(|path| matches_simple_selector(root, path, &first.simple))
         .collect::<Vec<_>>();
 
     for part in chain.parts.iter().skip(1) {
@@ -620,30 +616,28 @@ fn execute_selector_chain(
             match part.combinator.unwrap_or(Combinator::Descendant) {
                 Combinator::Descendant => {
                     for descendant in descendant_paths(root, path) {
-                        if node_at(root, &descendant)
-                            .map(|node| part.simple.matches(node))
-                            .unwrap_or(false)
-                        {
+                        if matches_simple_selector(root, &descendant, &part.simple) {
                             next.insert(descendant);
                         }
                     }
                 }
                 Combinator::Child => {
                     for child in child_paths(root, path) {
-                        if node_at(root, &child)
-                            .map(|node| part.simple.matches(node))
-                            .unwrap_or(false)
-                        {
+                        if matches_simple_selector(root, &child, &part.simple) {
                             next.insert(child);
                         }
                     }
                 }
                 Combinator::AdjacentSibling => {
                     if let Some(sibling) = next_sibling_path(root, path) {
-                        if node_at(root, &sibling)
-                            .map(|node| part.simple.matches(node))
-                            .unwrap_or(false)
-                        {
+                        if matches_simple_selector(root, &sibling, &part.simple) {
+                            next.insert(sibling);
+                        }
+                    }
+                }
+                Combinator::GeneralSibling => {
+                    for sibling in following_sibling_paths(root, path) {
+                        if matches_simple_selector(root, &sibling, &part.simple) {
                             next.insert(sibling);
                         }
                     }
@@ -719,6 +713,24 @@ fn next_sibling_path(root: &HtmlNode, path: &[usize]) -> Option<Vec<usize>> {
     None
 }
 
+fn following_sibling_paths(root: &HtmlNode, path: &[usize]) -> Vec<Vec<usize>> {
+    let Some((last, parent_path)) = path.split_last() else {
+        return Vec::new();
+    };
+    let Some(HtmlNode::Element(parent)) = node_at(root, parent_path) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for index in (*last + 1)..parent.children.len() {
+        if matches!(parent.children.get(index), Some(HtmlNode::Element(_))) {
+            let mut sibling = parent_path.to_vec();
+            sibling.push(index);
+            out.push(sibling);
+        }
+    }
+    out
+}
+
 fn node_at<'a>(root: &'a HtmlNode, path: &[usize]) -> Option<&'a HtmlNode> {
     let mut node = root;
     for index in path {
@@ -728,6 +740,12 @@ fn node_at<'a>(root: &'a HtmlNode, path: &[usize]) -> Option<&'a HtmlNode> {
         node = element.children.get(*index)?;
     }
     Some(node)
+}
+
+fn matches_simple_selector(root: &HtmlNode, path: &[usize], selector: &SimpleSelector) -> bool {
+    node_at(root, path)
+        .map(|node| selector.matches(root, path, node))
+        .unwrap_or(false)
 }
 
 fn parent_name<'a>(root: &'a HtmlNode, path: &[usize]) -> Option<&'a str> {
@@ -790,6 +808,7 @@ enum Combinator {
     Descendant,
     Child,
     AdjacentSibling,
+    GeneralSibling,
 }
 
 #[derive(Clone, Debug)]
@@ -805,12 +824,26 @@ struct SimpleSelector {
     classes: Vec<String>,
     attrs: Vec<AttrSelector>,
     empty: Option<bool>,
+    first_child: Option<bool>,
+    first_of_type: Option<bool>,
 }
 
 #[derive(Clone, Debug)]
 struct AttrSelector {
     name: String,
+    op: AttrSelectorOp,
     value: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AttrSelectorOp {
+    Exists,
+    Exact,
+    WhitespaceListContains,
+    DashPrefix,
+    Prefix,
+    Suffix,
+    Contains,
 }
 
 #[derive(Clone, Debug)]
@@ -859,7 +892,7 @@ impl SelectorChain {
             }
             let ch = input[index..].chars().next().expect("in bounds");
             match ch {
-                '>' | '+' => {
+                '>' | '+' | '~' => {
                     if parts.is_empty() {
                         return Err(html_error(
                             "findElement",
@@ -872,10 +905,11 @@ impl SelectorChain {
                             "findElement: selector cannot contain repeated combinators",
                         ));
                     }
-                    pending = Some(if ch == '>' {
-                        Combinator::Child
-                    } else {
-                        Combinator::AdjacentSibling
+                    pending = Some(match ch {
+                        '>' => Combinator::Child,
+                        '+' => Combinator::AdjacentSibling,
+                        '~' => Combinator::GeneralSibling,
+                        _ => unreachable!("matched selector combinator"),
                     });
                     index += ch.len_utf8();
                     continue;
@@ -989,7 +1023,7 @@ impl SimpleSelector {
         Ok(selector)
     }
 
-    fn matches(&self, node: &HtmlNode) -> bool {
+    fn matches(&self, root: &HtmlNode, path: &[usize], node: &HtmlNode) -> bool {
         let HtmlNode::Element(element) = node else {
             return false;
         };
@@ -1022,7 +1056,7 @@ impl SimpleSelector {
                 return false;
             };
             if let Some(expected) = &attr.value {
-                if value != expected {
+                if !attr.op.matches(value, expected) {
                     return false;
                 }
             }
@@ -1033,6 +1067,16 @@ impl SimpleSelector {
                 HtmlNode::Text(text) => text.trim().is_empty(),
             });
             if is_empty != expect_empty {
+                return false;
+            }
+        }
+        if let Some(expect_first_child) = self.first_child {
+            if is_first_element_child(root, path) != expect_first_child {
+                return false;
+            }
+        }
+        if let Some(expect_first_of_type) = self.first_of_type {
+            if is_first_element_of_type(root, path, &element.name) != expect_first_of_type {
                 return false;
             }
         }
@@ -1049,36 +1093,84 @@ impl AttrSelector {
                 "findElement: attribute selector requires a name",
             ));
         }
-        if input.contains("~=")
-            || input.contains("|=")
-            || input.contains("^=")
-            || input.contains("$=")
-            || input.contains("*=")
-        {
-            return Err(html_error(
-                "findElement",
-                "findElement: only [attr] and [attr=value] selectors are supported",
-            ));
-        }
-        let Some(eq) = input.find('=') else {
+        let Some((name, op, raw_value)) = split_attr_selector(input) else {
             return Ok(Self {
                 name: input.to_ascii_lowercase(),
+                op: AttrSelectorOp::Exists,
                 value: None,
             });
         };
-        let name = input[..eq].trim();
+        let name = name.trim();
         if name.is_empty() {
             return Err(html_error(
                 "findElement",
                 "findElement: attribute selector requires a name",
             ));
         }
-        let value = strip_selector_quotes(input[eq + 1..].trim())?;
+        let value = strip_selector_quotes(raw_value.trim())?;
         Ok(Self {
             name: name.to_ascii_lowercase(),
+            op,
             value: Some(decode_html_entities(value)),
         })
     }
+}
+
+impl AttrSelectorOp {
+    fn matches(self, actual: &str, expected: &str) -> bool {
+        match self {
+            Self::Exists => true,
+            Self::Exact => actual == expected,
+            Self::WhitespaceListContains => actual.split_whitespace().any(|part| part == expected),
+            Self::DashPrefix => actual == expected || actual.starts_with(&format!("{expected}-")),
+            Self::Prefix => actual.starts_with(expected),
+            Self::Suffix => actual.ends_with(expected),
+            Self::Contains => actual.contains(expected),
+        }
+    }
+}
+
+fn split_attr_selector(input: &str) -> Option<(&str, AttrSelectorOp, &str)> {
+    let mut quote = None;
+    for (idx, ch) in input.char_indices() {
+        match (quote, ch) {
+            (Some(active), current) if current == active => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(ch),
+            (None, '=') => {
+                let before = input[..idx].trim_end();
+                let Some((op, name)) = before
+                    .strip_suffix('~')
+                    .map(|name| (AttrSelectorOp::WhitespaceListContains, name))
+                    .or_else(|| {
+                        before
+                            .strip_suffix('|')
+                            .map(|name| (AttrSelectorOp::DashPrefix, name))
+                    })
+                    .or_else(|| {
+                        before
+                            .strip_suffix('^')
+                            .map(|name| (AttrSelectorOp::Prefix, name))
+                    })
+                    .or_else(|| {
+                        before
+                            .strip_suffix('$')
+                            .map(|name| (AttrSelectorOp::Suffix, name))
+                    })
+                    .or_else(|| {
+                        before
+                            .strip_suffix('*')
+                            .map(|name| (AttrSelectorOp::Contains, name))
+                    })
+                else {
+                    return Some((before, AttrSelectorOp::Exact, &input[idx + ch.len_utf8()..]));
+                };
+                return Some((name, op, &input[idx + ch.len_utf8()..]));
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn split_selector_groups(input: &str) -> BuiltinResult<Vec<&str>> {
@@ -1148,7 +1240,7 @@ fn simple_selector_end(input: &str, start: usize) -> BuiltinResult<usize> {
                     html_error("findElement", "findElement: unmatched ')' in selector")
                 })?;
             }
-            (None, '>' | '+') if bracket_depth == 0 && paren_depth == 0 => return Ok(idx),
+            (None, '>' | '+' | '~') if bracket_depth == 0 && paren_depth == 0 => return Ok(idx),
             (None, current)
                 if current.is_whitespace() && bracket_depth == 0 && paren_depth == 0 =>
             {
@@ -1213,6 +1305,14 @@ fn parse_pseudo_selector(
         selector.empty = Some(true);
         return Ok(name_end);
     }
+    if name.eq_ignore_ascii_case("first-child") {
+        selector.first_child = Some(true);
+        return Ok(name_end);
+    }
+    if name.eq_ignore_ascii_case("first-of-type") {
+        selector.first_of_type = Some(true);
+        return Ok(name_end);
+    }
     if name.eq_ignore_ascii_case("not") {
         if !input[name_end..].starts_with('(') {
             return Err(html_error(
@@ -1227,19 +1327,68 @@ fn parse_pseudo_selector(
             ));
         };
         let inner = input[name_end + 1..close].trim();
-        if inner.eq_ignore_ascii_case(":empty") {
-            selector.empty = Some(false);
-            return Ok(close + 1);
-        }
-        return Err(html_error(
-            "findElement",
-            "findElement: only :not(:empty) is supported",
-        ));
+        apply_negated_simple_pseudo(inner, selector)?;
+        return Ok(close + 1);
     }
     Err(html_error(
         "findElement",
         format!("findElement: unsupported pseudo-class ':{name}'"),
     ))
+}
+
+fn apply_negated_simple_pseudo(input: &str, selector: &mut SimpleSelector) -> BuiltinResult<()> {
+    let Some(name) = input.trim().strip_prefix(':') else {
+        return Err(html_error(
+            "findElement",
+            "findElement: :not selector supports simple pseudo-classes only",
+        ));
+    };
+    if name.eq_ignore_ascii_case("empty") {
+        selector.empty = Some(false);
+        return Ok(());
+    }
+    if name.eq_ignore_ascii_case("first-child") {
+        selector.first_child = Some(false);
+        return Ok(());
+    }
+    if name.eq_ignore_ascii_case("first-of-type") {
+        selector.first_of_type = Some(false);
+        return Ok(());
+    }
+    Err(html_error(
+        "findElement",
+        "findElement: :not selector supports :empty, :first-child, or :first-of-type",
+    ))
+}
+
+fn is_first_element_child(root: &HtmlNode, path: &[usize]) -> bool {
+    let Some((last, parent_path)) = path.split_last() else {
+        return false;
+    };
+    let Some(HtmlNode::Element(parent)) = node_at(root, parent_path) else {
+        return false;
+    };
+    parent
+        .children
+        .iter()
+        .position(|child| matches!(child, HtmlNode::Element(_)))
+        == Some(*last)
+}
+
+fn is_first_element_of_type(root: &HtmlNode, path: &[usize], name: &str) -> bool {
+    let Some((last, parent_path)) = path.split_last() else {
+        return false;
+    };
+    let Some(HtmlNode::Element(parent)) = node_at(root, parent_path) else {
+        return false;
+    };
+    parent.children.iter().enumerate().find_map(|(idx, child)| {
+        if matches!(child, HtmlNode::Element(element) if element.name.eq_ignore_ascii_case(name)) {
+            Some(idx)
+        } else {
+            None
+        }
+    }) == Some(*last)
 }
 
 fn strip_selector_quotes(input: &str) -> BuiltinResult<&str> {
@@ -2094,6 +2243,78 @@ mod tests {
         };
         assert_eq!(missing.shape, vec![0, 1]);
         assert!(missing.data.is_empty());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn find_element_supports_css_attribute_operator_selectors() {
+        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+            "<div><a href='manual.pdf' hreflang='en-US' rel='tag external' data-code='abc-123'>Manual</a><a href='guide.html' hreflang='en' rel='external' data-code='xyz'>Guide</a><a href='notes.txt' data-code='a$=b'>Notes</a></div>"
+                .to_string(),
+        )]))
+        .expect("tree");
+
+        for (selector, expected) in [
+            ("a[href$='.pdf']", vec!["Manual"]),
+            ("a[href^='guide']", vec!["Guide"]),
+            ("a[rel~='tag']", vec!["Manual"]),
+            ("a[hreflang|='en']", vec!["Manual", "Guide"]),
+            ("a[data-code*='bc-']", vec!["Manual"]),
+            ("a[data-code='a$=b']", vec!["Notes"]),
+        ] {
+            let matches = futures::executor::block_on(find_element_builtin(vec![
+                tree.clone(),
+                Value::String(selector.to_string()),
+            ]))
+            .unwrap_or_else(|err| panic!("{selector} failed: {err}"));
+            let text = futures::executor::block_on(extract_html_text_builtin(vec![matches]))
+                .unwrap_or_else(|err| panic!("{selector} text extraction failed: {err}"));
+            match text {
+                Value::String(text) => assert_eq!(vec![text], expected),
+                Value::StringArray(array) => assert_eq!(array.data, expected),
+                other => panic!("expected extracted text for {selector}, got {other:?}"),
+            }
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn find_element_supports_first_child_first_of_type_and_general_sibling() {
+        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+            "<section><p>Intro</p><span>Aside</span><a>First link</a><a>Second link</a></section>"
+                .to_string(),
+        )]))
+        .expect("tree");
+
+        let first_child = futures::executor::block_on(find_element_builtin(vec![
+            tree.clone(),
+            Value::String("p:first-child".to_string()),
+        ]))
+        .expect("first child");
+        let text = futures::executor::block_on(extract_html_text_builtin(vec![first_child]))
+            .expect("first child text");
+        assert_eq!(string_value(text), "Intro");
+
+        let first_of_type = futures::executor::block_on(find_element_builtin(vec![
+            tree.clone(),
+            Value::String("a:first-of-type".to_string()),
+        ]))
+        .expect("first of type");
+        let text = futures::executor::block_on(extract_html_text_builtin(vec![first_of_type]))
+            .expect("first of type text");
+        assert_eq!(string_value(text), "First link");
+
+        let following_links = futures::executor::block_on(find_element_builtin(vec![
+            tree,
+            Value::String("p ~ a".to_string()),
+        ]))
+        .expect("general sibling");
+        let text = futures::executor::block_on(extract_html_text_builtin(vec![following_links]))
+            .expect("general sibling text");
+        let Value::StringArray(text) = text else {
+            panic!("expected string array");
+        };
+        assert_eq!(text.data, vec!["First link", "Second link"]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
