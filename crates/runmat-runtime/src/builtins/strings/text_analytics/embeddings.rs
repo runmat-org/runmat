@@ -16,12 +16,16 @@ use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::strings::core::compat::scalar_text;
+use crate::builtins::strings::text_analytics::documents::{
+    documents_from_object, TOKENIZED_DOCUMENT_CLASS,
+};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
 pub const WORD_EMBEDDING_CLASS: &str = "wordEmbedding";
 const VECTOR_PROPERTY: &str = "__Vectors";
 const MAX_EMBEDDING_FILE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_ZIP_ENTRIES: usize = 256;
+const MAX_TRAINED_DENSE_VALUES: usize = 20_000_000;
 
 thread_local! {
     static WORD_EMBEDDING_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
@@ -75,6 +79,31 @@ const IN_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "UTF-8 word2vec/GloVe text file or zip file containing one.",
 }];
+
+const IN_TRAIN_SOURCE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "source",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "UTF-8 text filename or tokenizedDocument object.",
+}];
+
+const IN_TRAIN_SOURCE_REST: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "source",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "UTF-8 text filename or tokenizedDocument object.",
+    },
+    BuiltinParamDescriptor {
+        name: "NameValue",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value options controlling local deterministic embedding training.",
+    },
+];
 
 const IN_WORDS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
@@ -186,6 +215,13 @@ const ERROR_VEC2WORD_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescrip
     message: "vec2word received invalid input",
 };
 
+const ERROR_TRAIN_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRAINWORDEMBEDDING.INVALID_INPUT",
+    identifier: Some("RunMat:trainWordEmbedding:InvalidInput"),
+    when: "Inputs do not match a supported trainWordEmbedding form.",
+    message: "trainWordEmbedding received invalid input",
+};
+
 const ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.READWORDEMBEDDING.IO",
     identifier: Some("RunMat:readWordEmbedding:IOError"),
@@ -196,6 +232,7 @@ const ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 const READ_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_READ_INVALID_INPUT, ERROR_IO];
 const WORD2VEC_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_WORD2VEC_INVALID_INPUT];
 const VEC2WORD_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_VEC2WORD_INVALID_INPUT];
+const TRAIN_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_TRAIN_INVALID_INPUT];
 
 fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
@@ -248,6 +285,29 @@ pub const VEC2WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &VEC2WORD_ERRORS,
 };
 
+pub const TRAIN_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[
+        BuiltinSignatureDescriptor {
+            label: "emb = trainWordEmbedding(filename)",
+            inputs: &IN_TRAIN_SOURCE,
+            outputs: &OUT_EMBEDDING,
+        },
+        BuiltinSignatureDescriptor {
+            label: "emb = trainWordEmbedding(documents)",
+            inputs: &IN_TRAIN_SOURCE,
+            outputs: &OUT_EMBEDDING,
+        },
+        BuiltinSignatureDescriptor {
+            label: "emb = trainWordEmbedding(___, Name, Value)",
+            inputs: &IN_TRAIN_SOURCE_REST,
+            outputs: &OUT_EMBEDDING,
+        },
+    ],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TRAIN_ERRORS,
+};
+
 #[runtime_builtin(
     name = "readWordEmbedding",
     category = "strings/text_analytics",
@@ -279,6 +339,37 @@ async fn read_word_embedding_builtin(filename: Value) -> BuiltinResult<Value> {
         })?
     };
     embedding_object(parse_embedding_text(&text, "readWordEmbedding")?)
+}
+
+#[runtime_builtin(
+    name = "trainWordEmbedding",
+    category = "strings/text_analytics",
+    summary = "Train a local word embedding compatibility model.",
+    keywords = "trainWordEmbedding,wordEmbedding,text analytics,training",
+    accel = "sink",
+    type_resolver(any_type),
+    descriptor(
+        crate::builtins::strings::text_analytics::embeddings::TRAIN_WORD_EMBEDDING_DESCRIPTOR
+    ),
+    builtin_path = "crate::builtins::strings::text_analytics::embeddings"
+)]
+async fn train_word_embedding_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let gathered = gather_args(args, "trainWordEmbedding").await?;
+    let (source, options) = parse_train_word_embedding_args(gathered)?;
+    let documents = match source {
+        TrainSource::Documents(documents) => documents,
+        TrainSource::Filename(filename) => {
+            let bytes = read_limited_file_bytes(Path::new(&filename), "trainWordEmbedding").await?;
+            let text = String::from_utf8(bytes).map_err(|err| {
+                embedding_error(
+                    "trainWordEmbedding",
+                    format!("trainWordEmbedding: training file must be UTF-8 text: {err}"),
+                )
+            })?;
+            documents_from_training_text(&text)
+        }
+    };
+    embedding_object(train_embedding_model(documents, options)?)
 }
 
 #[runtime_builtin(
@@ -772,6 +863,468 @@ fn property_def(name: &str) -> PropertyDef {
     }
 }
 
+enum TrainSource {
+    Filename(String),
+    Documents(Vec<Vec<String>>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TrainModelKind {
+    SkipGram,
+    Cbow,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TrainLossFunction {
+    NegativeSampling,
+    HierarchicalSoftmax,
+    Softmax,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TrainWordEmbeddingOptions {
+    dimension: usize,
+    window: usize,
+    model: TrainModelKind,
+    discard_factor: f64,
+    loss_function: TrainLossFunction,
+    num_negative_samples: usize,
+    num_negative_samples_was_set: bool,
+    num_epochs: usize,
+    min_count: usize,
+    ngram_range: (usize, usize),
+    initial_learn_rate: f64,
+    update_rate: usize,
+    verbose: bool,
+}
+
+impl Default for TrainWordEmbeddingOptions {
+    fn default() -> Self {
+        Self {
+            dimension: 100,
+            window: 5,
+            model: TrainModelKind::SkipGram,
+            discard_factor: 1.0e-4,
+            loss_function: TrainLossFunction::NegativeSampling,
+            num_negative_samples: 5,
+            num_negative_samples_was_set: false,
+            num_epochs: 5,
+            min_count: 5,
+            ngram_range: (3, 6),
+            initial_learn_rate: 0.05,
+            update_rate: 100,
+            verbose: true,
+        }
+    }
+}
+
+fn parse_train_word_embedding_args(
+    args: Vec<Value>,
+) -> BuiltinResult<(TrainSource, TrainWordEmbeddingOptions)> {
+    if args.is_empty() {
+        return Err(embedding_error(
+            "trainWordEmbedding",
+            "trainWordEmbedding: expected filename or tokenizedDocument input",
+        ));
+    }
+    if !(args.len() - 1).is_multiple_of(2) {
+        return Err(embedding_error(
+            "trainWordEmbedding",
+            "trainWordEmbedding: name-value options must appear in pairs",
+        ));
+    }
+    let source = train_source_from_value(&args[0])?;
+    let mut options = TrainWordEmbeddingOptions::default();
+    let mut idx = 1usize;
+    while idx < args.len() {
+        let name = scalar_text(&args[idx], "trainWordEmbedding")
+            .map_err(|err| embedding_error("trainWordEmbedding", err.to_string()))?
+            .to_ascii_lowercase();
+        match name.as_str() {
+            "dimension" => {
+                options.dimension = parse_positive_integer(&args[idx + 1], "trainWordEmbedding")?
+            }
+            "window" => {
+                options.window =
+                    parse_nonnegative_integer(&args[idx + 1], "trainWordEmbedding", "Window")?
+            }
+            "model" => {
+                let value = scalar_text(&args[idx + 1], "trainWordEmbedding")
+                    .map_err(|err| embedding_error("trainWordEmbedding", err.to_string()))?
+                    .to_ascii_lowercase();
+                options.model = match value.as_str() {
+                    "skipgram" => TrainModelKind::SkipGram,
+                    "cbow" => TrainModelKind::Cbow,
+                    other => {
+                        return Err(embedding_error(
+                            "trainWordEmbedding",
+                            format!(
+                                "trainWordEmbedding: Model must be 'skipgram' or 'cbow', got '{other}'"
+                            ),
+                        ));
+                    }
+                };
+            }
+            "discardfactor" => {
+                options.discard_factor =
+                    parse_positive_scalar(&args[idx + 1], "trainWordEmbedding", "DiscardFactor")?
+            }
+            "lossfunction" => {
+                let value = scalar_text(&args[idx + 1], "trainWordEmbedding")
+                    .map_err(|err| embedding_error("trainWordEmbedding", err.to_string()))?
+                    .to_ascii_lowercase();
+                options.loss_function = match value.as_str() {
+                    "ns" => TrainLossFunction::NegativeSampling,
+                    "hs" => TrainLossFunction::HierarchicalSoftmax,
+                    "softmax" => TrainLossFunction::Softmax,
+                    other => {
+                        return Err(embedding_error(
+                            "trainWordEmbedding",
+                            format!(
+                                "trainWordEmbedding: LossFunction must be 'ns', 'hs', or 'softmax', got '{other}'"
+                            ),
+                        ));
+                    }
+                };
+            }
+            "numnegativesamples" => {
+                options.num_negative_samples =
+                    parse_positive_integer(&args[idx + 1], "trainWordEmbedding")?;
+                options.num_negative_samples_was_set = true;
+            }
+            "numepochs" => {
+                options.num_epochs = parse_positive_integer(&args[idx + 1], "trainWordEmbedding")?
+            }
+            "mincount" => {
+                options.min_count = parse_positive_integer(&args[idx + 1], "trainWordEmbedding")?
+            }
+            "ngramrange" => options.ngram_range = parse_ngram_range(&args[idx + 1])?,
+            "initiallearnrate" => {
+                options.initial_learn_rate =
+                    parse_positive_scalar(&args[idx + 1], "trainWordEmbedding", "InitialLearnRate")?
+            }
+            "updaterate" => {
+                options.update_rate = parse_positive_integer(&args[idx + 1], "trainWordEmbedding")?
+            }
+            "verbose" => options.verbose = parse_bool_scalar(&args[idx + 1], "trainWordEmbedding")?,
+            other => {
+                return Err(embedding_error(
+                    "trainWordEmbedding",
+                    format!("trainWordEmbedding: unsupported option '{other}'"),
+                ));
+            }
+        }
+        idx += 2;
+    }
+    if options.num_negative_samples_was_set
+        && options.loss_function != TrainLossFunction::NegativeSampling
+    {
+        return Err(embedding_error(
+            "trainWordEmbedding",
+            "trainWordEmbedding: NumNegativeSamples is only valid when LossFunction is 'ns'",
+        ));
+    }
+    checked_train_dense_size(options.dimension, 1, "trainWordEmbedding")?;
+    Ok((source, options))
+}
+
+fn train_source_from_value(value: &Value) -> BuiltinResult<TrainSource> {
+    match value {
+        Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => Ok(
+            TrainSource::Documents(documents_from_object(object, "trainWordEmbedding")?),
+        ),
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
+            Ok(TrainSource::Filename(train_filename_from_value(value)?))
+        }
+        other => Err(embedding_error(
+            "trainWordEmbedding",
+            format!("trainWordEmbedding: expected filename or tokenizedDocument, got {other:?}"),
+        )),
+    }
+}
+
+fn train_filename_from_value(value: &Value) -> BuiltinResult<String> {
+    match value {
+        Value::Cell(cell) if cell.data.len() == 1 => train_filename_from_value(&cell.data[0]),
+        other => {
+            let filename = scalar_text(other, "trainWordEmbedding")
+                .map_err(|err| embedding_error("trainWordEmbedding", err.to_string()))?;
+            if filename.trim().is_empty() {
+                Err(embedding_error(
+                    "trainWordEmbedding",
+                    "trainWordEmbedding: filename must not be empty",
+                ))
+            } else {
+                Ok(filename)
+            }
+        }
+    }
+}
+
+fn documents_from_training_text(text: &str) -> Vec<Vec<String>> {
+    text.lines()
+        .map(|line| {
+            line.split_whitespace()
+                .filter(|word| !word.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .filter(|doc| !doc.is_empty())
+        .collect()
+}
+
+fn train_embedding_model(
+    documents: Vec<Vec<String>>,
+    options: TrainWordEmbeddingOptions,
+) -> BuiltinResult<EmbeddingModel> {
+    if documents.is_empty() || documents.iter().all(Vec::is_empty) {
+        return Err(embedding_error(
+            "trainWordEmbedding",
+            "trainWordEmbedding: training data contains no tokens",
+        ));
+    }
+
+    let mut counts = HashMap::<String, (usize, usize)>::new();
+    let mut next_pos = 0usize;
+    for token in documents.iter().flatten() {
+        let entry = counts.entry(token.clone()).or_insert_with(|| {
+            let pos = next_pos;
+            next_pos += 1;
+            (0, pos)
+        });
+        entry.0 += 1;
+    }
+
+    let mut vocabulary = counts
+        .iter()
+        .filter(|(_, (count, _))| *count >= options.min_count)
+        .map(|(word, (count, first_pos))| (word.clone(), *count, *first_pos))
+        .collect::<Vec<_>>();
+    if vocabulary.is_empty() {
+        return Err(embedding_error(
+            "trainWordEmbedding",
+            format!(
+                "trainWordEmbedding: no vocabulary words meet MinCount {}",
+                options.min_count
+            ),
+        ));
+    }
+    vocabulary.sort_by(|left, right| right.1.cmp(&left.1).then(left.2.cmp(&right.2)));
+    checked_train_dense_size(options.dimension, vocabulary.len(), "trainWordEmbedding")?;
+
+    let mut positions = HashMap::new();
+    let mut final_vocabulary = Vec::with_capacity(vocabulary.len());
+    for (idx, (word, _, _)) in vocabulary.into_iter().enumerate() {
+        positions.insert(word.clone(), idx);
+        final_vocabulary.push(word);
+    }
+
+    let mut rows = vec![vec![0.0; options.dimension]; final_vocabulary.len()];
+    for (idx, word) in final_vocabulary.iter().enumerate() {
+        add_lexical_features(&mut rows[idx], word, options);
+    }
+
+    let base = options.initial_learn_rate
+        * options.num_epochs as f64
+        * match options.loss_function {
+            TrainLossFunction::NegativeSampling => {
+                1.0 + (options.num_negative_samples as f64).ln_1p() * 0.05
+            }
+            TrainLossFunction::HierarchicalSoftmax => 0.95,
+            TrainLossFunction::Softmax => 1.05,
+        };
+    let model_scale = match options.model {
+        TrainModelKind::SkipGram => 1.0,
+        TrainModelKind::Cbow => 0.75,
+    };
+    let discard_scale = (1.0 + options.discard_factor.log10().abs()).recip();
+    let update_scale = 1.0 + (options.update_rate as f64).ln_1p() * 0.01;
+
+    for document in &documents {
+        for (target_pos, target) in document.iter().enumerate() {
+            let Some(&target_idx) = positions.get(target) else {
+                continue;
+            };
+            if options.window == 0 {
+                continue;
+            }
+            let start = target_pos.saturating_sub(options.window);
+            let end = target_pos
+                .saturating_add(options.window)
+                .saturating_add(1)
+                .min(document.len());
+            for (ctx_pos, context) in document.iter().enumerate().take(end).skip(start) {
+                if ctx_pos == target_pos {
+                    continue;
+                }
+                let Some(&context_idx) = positions.get(context) else {
+                    continue;
+                };
+                let distance = target_pos.abs_diff(ctx_pos).max(1) as f64;
+                let weight = base * model_scale * discard_scale * update_scale / distance;
+                add_hashed_feature(
+                    &mut rows[target_idx],
+                    context,
+                    weight,
+                    0x9e37_79b9_7f4a_7c15,
+                );
+                if options.model == TrainModelKind::SkipGram {
+                    add_hashed_feature(
+                        &mut rows[context_idx],
+                        target,
+                        weight * 0.5,
+                        0xc2b2_ae3d_27d4_eb4f,
+                    );
+                }
+            }
+        }
+    }
+
+    let mut vectors = Vec::with_capacity(final_vocabulary.len() * options.dimension);
+    for row in &mut rows {
+        normalize_vector(row);
+        vectors.extend(row.iter().copied());
+    }
+    Ok(EmbeddingModel {
+        vocabulary: final_vocabulary,
+        vectors,
+        dimension: options.dimension,
+    })
+}
+
+fn add_lexical_features(row: &mut [f64], word: &str, options: TrainWordEmbeddingOptions) {
+    add_hashed_feature(row, word, 1.0, 0xcbf2_9ce4_8422_2325);
+    if options.ngram_range != (0, 0) {
+        add_character_ngram_features(row, word, options.ngram_range);
+    }
+    add_hashed_feature(row, &word.to_ascii_lowercase(), 0.2, 0x517c_c1b7_2722_0a95);
+}
+
+fn add_character_ngram_features(row: &mut [f64], word: &str, range: (usize, usize)) {
+    let chars = format!("<{word}>").chars().collect::<Vec<_>>();
+    let max_len = range.1.min(chars.len());
+    for len in range.0..=max_len {
+        if len == 0 || len > chars.len() {
+            continue;
+        }
+        for window in chars.windows(len) {
+            let ngram = window.iter().collect::<String>();
+            add_hashed_feature(row, &ngram, 0.35, 0x1000_0000_01b3);
+        }
+    }
+}
+
+fn add_hashed_feature(row: &mut [f64], key: &str, weight: f64, salt: u64) {
+    if row.is_empty() {
+        return;
+    }
+    let hash = fnv1a64_with_salt(key, salt);
+    let idx = (hash as usize) % row.len();
+    let sign = if (hash >> 63) == 0 { 1.0 } else { -1.0 };
+    row[idx] += sign * weight;
+}
+
+fn fnv1a64_with_salt(value: &str, salt: u64) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64 ^ salt;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x1000_0000_01b3);
+    }
+    hash
+}
+
+fn normalize_vector(row: &mut [f64]) {
+    let norm = row.iter().map(|value| value * value).sum::<f64>().sqrt();
+    if norm > 0.0 {
+        for value in row {
+            *value /= norm;
+        }
+    }
+}
+
+fn parse_nonnegative_integer(value: &Value, fn_name: &str, option: &str) -> BuiltinResult<usize> {
+    let n = numeric_scalar(value, fn_name, option)?;
+    if !n.is_finite() || n < 0.0 || n.fract() != 0.0 {
+        return Err(embedding_error(
+            fn_name,
+            format!("{fn_name}: {option} must be a nonnegative integer, got {n}"),
+        ));
+    }
+    Ok(n as usize)
+}
+
+fn parse_positive_scalar(value: &Value, fn_name: &str, option: &str) -> BuiltinResult<f64> {
+    let n = numeric_scalar(value, fn_name, option)?;
+    if !n.is_finite() || n <= 0.0 {
+        return Err(embedding_error(
+            fn_name,
+            format!("{fn_name}: {option} must be a positive scalar, got {n}"),
+        ));
+    }
+    Ok(n)
+}
+
+fn parse_ngram_range(value: &Value) -> BuiltinResult<(usize, usize)> {
+    let values = match value {
+        Value::Tensor(tensor) if tensor.data.len() == 2 => tensor.data.clone(),
+        other => {
+            return Err(embedding_error(
+                "trainWordEmbedding",
+                format!("trainWordEmbedding: NGramRange must be a two-element numeric vector, got {other:?}"),
+            ));
+        }
+    };
+    let min = values[0];
+    let max = values[1];
+    if !min.is_finite()
+        || !max.is_finite()
+        || min < 0.0
+        || max < 0.0
+        || min.fract() != 0.0
+        || max.fract() != 0.0
+        || min > max
+    {
+        return Err(embedding_error(
+            "trainWordEmbedding",
+            format!("trainWordEmbedding: NGramRange must be [min max] nonnegative integers with min <= max, got [{min} {max}]"),
+        ));
+    }
+    Ok((min as usize, max as usize))
+}
+
+fn numeric_scalar(value: &Value, fn_name: &str, option: &str) -> BuiltinResult<f64> {
+    match value {
+        Value::Num(value) => Ok(*value),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        other => Err(embedding_error(
+            fn_name,
+            format!("{fn_name}: {option} must be a numeric scalar, got {other:?}"),
+        )),
+    }
+}
+
+fn checked_train_dense_size(
+    dimension: usize,
+    vocabulary_len: usize,
+    fn_name: &str,
+) -> BuiltinResult<()> {
+    let cells = dimension.checked_mul(vocabulary_len).ok_or_else(|| {
+        embedding_error(
+            fn_name,
+            format!("{fn_name}: trained embedding dimensions overflow dense storage"),
+        )
+    })?;
+    if cells > MAX_TRAINED_DENSE_VALUES {
+        return Err(embedding_error(
+            fn_name,
+            format!(
+                "{fn_name}: trained embedding would require {cells} dense values; limit is {MAX_TRAINED_DENSE_VALUES}"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct Word2VecOptions {
     ignore_case: bool,
@@ -1077,6 +1630,7 @@ fn looks_like_zip(bytes: &[u8]) -> bool {
 fn embedding_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeError {
     let identifier = match fn_name {
         "readWordEmbedding" => "RunMat:readWordEmbedding:InvalidInput",
+        "trainWordEmbedding" => "RunMat:trainWordEmbedding:InvalidInput",
         "word2vec" => "RunMat:word2vec:InvalidInput",
         "vec2word" => "RunMat:vec2word:InvalidInput",
         _ => "RunMat:wordEmbedding:InvalidInput",
@@ -1107,6 +1661,7 @@ fn embedding_error_with_source(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::CellArray;
     use std::fs::File as StdFile;
     use std::io::Write;
     use tempfile::tempdir;
@@ -1183,6 +1738,115 @@ mod tests {
         assert!(object.is_class(WORD_EMBEDDING_CLASS));
         let model = embedding_from_object(&object, "test").unwrap();
         assert_eq!(model.vocabulary, vec!["left", "right"]);
+    }
+
+    #[tokio::test]
+    async fn train_word_embedding_trains_from_text_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("training.txt");
+        std::fs::write(&path, "alpha beta alpha\nbeta gamma alpha\n").unwrap();
+        let value = train_word_embedding_builtin(vec![
+            Value::from(path.to_string_lossy().to_string()),
+            Value::String("Dimension".into()),
+            Value::Num(8.0),
+            Value::String("Window".into()),
+            Value::Num(1.0),
+            Value::String("MinCount".into()),
+            Value::Num(1.0),
+            Value::String("NGramRange".into()),
+            Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()),
+            Value::String("Verbose".into()),
+            Value::Bool(false),
+        ])
+        .await
+        .unwrap();
+        let Value::Object(object) = value else {
+            panic!("expected wordEmbedding object");
+        };
+        assert!(object.is_class(WORD_EMBEDDING_CLASS));
+        let model = embedding_from_object(&object, "test").unwrap();
+        assert_eq!(model.dimension, 8);
+        assert_eq!(model.vocabulary, vec!["alpha", "beta", "gamma"]);
+        assert_eq!(model.vectors.len(), 24);
+
+        let lookup = word2vec_builtin(vec![Value::Object(object), Value::String("alpha".into())])
+            .await
+            .unwrap();
+        let Value::Tensor(tensor) = lookup else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.rows, 1);
+        assert_eq!(tensor.cols, 8);
+        assert!(tensor.data.iter().any(|value| value.abs() > 0.0));
+    }
+
+    #[tokio::test]
+    async fn train_word_embedding_trains_from_tokenized_document_object() {
+        let documents = CellArray::new(
+            vec![
+                Value::StringArray(
+                    StringArray::new(vec!["red".into(), "blue".into()], vec![1, 2]).unwrap(),
+                ),
+                Value::StringArray(
+                    StringArray::new(vec!["red".into(), "green".into()], vec![1, 2]).unwrap(),
+                ),
+            ],
+            2,
+            1,
+        )
+        .unwrap();
+        let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
+        object
+            .properties
+            .insert("Documents".to_string(), Value::Cell(documents));
+
+        let value = train_word_embedding_builtin(vec![
+            Value::Object(object),
+            Value::String("Dimension".into()),
+            Value::Num(6.0),
+            Value::String("MinCount".into()),
+            Value::Num(1.0),
+            Value::String("Model".into()),
+            Value::String("cbow".into()),
+            Value::String("LossFunction".into()),
+            Value::String("softmax".into()),
+        ])
+        .await
+        .unwrap();
+        let Value::Object(object) = value else {
+            panic!("expected wordEmbedding object");
+        };
+        let model = embedding_from_object(&object, "test").unwrap();
+        assert_eq!(model.dimension, 6);
+        assert_eq!(model.vocabulary, vec!["red", "blue", "green"]);
+    }
+
+    #[tokio::test]
+    async fn train_word_embedding_honors_min_count_and_option_validation() {
+        let err = train_word_embedding_builtin(vec![
+            Value::String("missing.txt".into()),
+            Value::String("LossFunction".into()),
+            Value::String("hs".into()),
+            Value::String("NumNegativeSamples".into()),
+            Value::Num(3.0),
+        ])
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("NumNegativeSamples"), "{err}");
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("training.txt");
+        std::fs::write(&path, "solo once\n").unwrap();
+        let err = train_word_embedding_builtin(vec![
+            Value::from(path.to_string_lossy().to_string()),
+            Value::String("MinCount".into()),
+            Value::Num(2.0),
+            Value::String("Verbose".into()),
+            Value::Num(0.0),
+        ])
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("no vocabulary words"), "{err}");
     }
 
     #[tokio::test]

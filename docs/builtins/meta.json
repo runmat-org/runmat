@@ -105074,6 +105074,91 @@
       ]
     },
     {
+      "name": "trainWordEmbedding",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "emb = trainWordEmbedding(filename)",
+          "inputs": [
+            {
+              "name": "source",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "UTF-8 text filename or tokenizedDocument object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "emb",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Word embedding compatibility object."
+            }
+          ]
+        },
+        {
+          "label": "emb = trainWordEmbedding(documents)",
+          "inputs": [
+            {
+              "name": "source",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "UTF-8 text filename or tokenizedDocument object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "emb",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Word embedding compatibility object."
+            }
+          ]
+        },
+        {
+          "label": "emb = trainWordEmbedding(___, Name, Value)",
+          "inputs": [
+            {
+              "name": "source",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "UTF-8 text filename or tokenizedDocument object."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options controlling local deterministic embedding training."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "emb",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Word embedding compatibility object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TRAINWORDEMBEDDING.INVALID_INPUT",
+          "identifier": "RunMat:trainWordEmbedding:InvalidInput",
+          "when": "Inputs do not match a supported trainWordEmbedding form.",
+          "message": "trainWordEmbedding received invalid input"
+        }
+      ]
+    },
+    {
       "name": "training",
       "output_mode": "Fixed",
       "completion_policy": "Public",
