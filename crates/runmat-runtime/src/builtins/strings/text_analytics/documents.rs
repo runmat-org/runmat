@@ -8,8 +8,8 @@ use regex::Regex;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ClassDef, ObjectInstance, PropertyDef, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    CellArray, ClassDef, LogicalArray, ObjectInstance, PropertyDef, ResolveContext, StringArray,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -128,6 +128,47 @@ const IN_REMOVE_SHORT: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
+const IN_REMOVE_LONG: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "documentsOrBag",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "tokenizedDocument or bagOfWords object.",
+    },
+    BuiltinParamDescriptor {
+        name: "len",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Minimum word length to remove.",
+    },
+];
+
+const IN_REMOVE_WORDS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "documentsOrBag",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "tokenizedDocument or bagOfWords object.",
+    },
+    BuiltinParamDescriptor {
+        name: "wordsOrIdx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Words to remove or indices into the object's Vocabulary.",
+    },
+    BuiltinParamDescriptor {
+        name: "NameValue",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value options: IgnoreCase.",
+    },
+];
+
 const IN_REMOVE_STOP: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "documents",
@@ -156,12 +197,30 @@ const IN_REMOVE_STOP_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescr
 const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TEXT_ANALYTICS_DOCUMENTS.INVALID_INPUT",
     identifier: Some("RunMat:textAnalyticsDocuments:InvalidInput"),
-    when:
-        "Inputs do not match a supported tokenizedDocument, bagOfWords, or removeShortWords form.",
+    when: "Inputs do not match a supported Text Analytics document or model helper form.",
     message: "Text Analytics document helper received invalid input",
 };
 
 const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
+
+const ERROR_REMOVE_LONG_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REMOVELONGWORDS.INVALID_INPUT",
+    identifier: Some("RunMat:removeLongWords:InvalidInput"),
+    when: "Inputs do not match a supported removeLongWords form.",
+    message: "removeLongWords: invalid input",
+};
+
+const REMOVE_LONG_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] =
+    [ERROR_REMOVE_LONG_WORDS_INVALID_INPUT];
+
+const ERROR_REMOVE_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REMOVEWORDS.INVALID_INPUT",
+    identifier: Some("RunMat:removeWords:InvalidInput"),
+    when: "Inputs do not match a supported removeWords form.",
+    message: "removeWords: invalid input",
+};
+
+const REMOVE_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_REMOVE_WORDS_INVALID_INPUT];
 
 const ERROR_REMOVE_STOP_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.REMOVESTOPWORDS.INVALID_INPUT",
@@ -230,6 +289,40 @@ pub const REMOVE_SHORT_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+pub const REMOVE_LONG_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "newDocumentsOrBag = removeLongWords(documentsOrBag, len)",
+        inputs: &IN_REMOVE_LONG,
+        outputs: &OUT_DOCUMENTS_OR_BAG,
+    }],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &REMOVE_LONG_WORDS_ERRORS,
+};
+
+pub const REMOVE_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[
+        BuiltinSignatureDescriptor {
+            label: "newDocumentsOrBag = removeWords(documentsOrBag, words)",
+            inputs: &IN_REMOVE_WORDS,
+            outputs: &OUT_DOCUMENTS_OR_BAG,
+        },
+        BuiltinSignatureDescriptor {
+            label: "newDocumentsOrBag = removeWords(documentsOrBag, idx)",
+            inputs: &IN_REMOVE_WORDS,
+            outputs: &OUT_DOCUMENTS_OR_BAG,
+        },
+        BuiltinSignatureDescriptor {
+            label: "newDocumentsOrBag = removeWords(___, 'IgnoreCase', tf)",
+            inputs: &IN_REMOVE_WORDS,
+            outputs: &OUT_DOCUMENTS_OR_BAG,
+        },
+    ],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &REMOVE_WORDS_ERRORS,
+};
+
 pub const REMOVE_STOP_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
         BuiltinSignatureDescriptor {
@@ -258,6 +351,8 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
 ) -> crate::RuntimeError {
     let identifier = match fn_name {
         "removeStopWords" => "RunMat:removeStopWords:InvalidInput",
+        "removeWords" => "RunMat:removeWords:InvalidInput",
+        "removeLongWords" => "RunMat:removeLongWords:InvalidInput",
         _ => "RunMat:textAnalyticsDocuments:InvalidInput",
     };
     build_runtime_error(message)
@@ -429,6 +524,97 @@ async fn remove_short_words_builtin(value: Value, len: Value) -> BuiltinResult<V
             format!(
                 "removeShortWords: expected tokenizedDocument or bagOfWords object, got {other:?}"
             ),
+        )),
+    }
+}
+
+#[runtime_builtin(
+    name = "removeLongWords",
+    category = "strings/text_analytics",
+    summary = "Remove long words from tokenized documents or bag-of-words models.",
+    keywords = "removeLongWords,text analytics,tokenizedDocument,bagOfWords",
+    accel = "sink",
+    type_resolver(any_type),
+    descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_LONG_WORDS_DESCRIPTOR),
+    builtin_path = "crate::builtins::strings::text_analytics::documents"
+)]
+async fn remove_long_words_builtin(value: Value, len: Value) -> BuiltinResult<Value> {
+    let value = gather_if_needed_async(&value).await.map_err(|err| {
+        text_analytics_error("removeLongWords", format!("removeLongWords: {err}"))
+    })?;
+    let len = gather_if_needed_async(&len).await.map_err(|err| {
+        text_analytics_error("removeLongWords", format!("removeLongWords: {err}"))
+    })?;
+    let min_len = parse_positive_integer(&len, "removeLongWords")?;
+    match value {
+        Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
+            transform_tokenized_document(&object, "removeLongWords", |token, _| {
+                Ok((token.chars().count() < min_len).then(|| token.to_string()))
+            })
+        }
+        Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => {
+            filter_bag_columns_by_predicate(object, "removeLongWords", |word| {
+                word.chars().count() < min_len
+            })
+        }
+        Value::Object(object) => Err(text_analytics_error(
+            "removeLongWords",
+            format!(
+                "removeLongWords: expected tokenizedDocument or bagOfWords object, got {}",
+                object.class_name
+            ),
+        )),
+        other => Err(text_analytics_error(
+            "removeLongWords",
+            format!(
+                "removeLongWords: expected tokenizedDocument or bagOfWords object, got {other:?}"
+            ),
+        )),
+    }
+}
+
+#[runtime_builtin(
+    name = "removeWords",
+    category = "strings/text_analytics",
+    summary = "Remove selected words from tokenized documents or bag-of-words models.",
+    keywords = "removeWords,text analytics,tokenizedDocument,bagOfWords,filter",
+    accel = "sink",
+    type_resolver(any_type),
+    descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_WORDS_DESCRIPTOR),
+    builtin_path = "crate::builtins::strings::text_analytics::documents"
+)]
+async fn remove_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let gathered = gather_args(args, "removeWords").await?;
+    let (value, selector, options) = parse_remove_words_args(gathered)?;
+    match value {
+        Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
+            let vocabulary = documents_vocabulary(&object, "removeWords")?;
+            let words = selector.words(&vocabulary, "removeWords")?;
+            let remove_set = word_set(words, options.ignore_case);
+            transform_tokenized_document(&object, "removeWords", |token, _| {
+                let key = comparable_word(token, options.ignore_case);
+                Ok((!remove_set.contains(&key)).then(|| token.to_string()))
+            })
+        }
+        Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => {
+            let vocabulary = vocabulary_from_bag(&object, "removeWords")?;
+            let words = selector.words(&vocabulary, "removeWords")?;
+            let remove_set = word_set(words, options.ignore_case);
+            filter_bag_columns(object, "removeWords", |word| {
+                let key = comparable_word(word, options.ignore_case);
+                !remove_set.contains(&key)
+            })
+        }
+        Value::Object(object) => Err(text_analytics_error(
+            "removeWords",
+            format!(
+                "removeWords: expected tokenizedDocument or bagOfWords object, got {}",
+                object.class_name
+            ),
+        )),
+        other => Err(text_analytics_error(
+            "removeWords",
+            format!("removeWords: expected tokenizedDocument or bagOfWords object, got {other:?}"),
         )),
     }
 }
@@ -636,6 +822,67 @@ impl Default for RemoveStopWordsOptions {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct RemoveWordsOptions {
+    ignore_case: bool,
+}
+
+#[derive(Clone, Debug)]
+enum RemoveWordsSelector {
+    Words(Vec<String>),
+    Indices(Vec<usize>),
+    LogicalMask { indices: Vec<usize>, len: usize },
+}
+
+impl RemoveWordsSelector {
+    fn words(self, vocabulary: &[String], fn_name: &str) -> BuiltinResult<Vec<String>> {
+        match self {
+            Self::Words(words) => Ok(words),
+            Self::LogicalMask { indices, len } => {
+                if len != vocabulary.len() {
+                    return Err(text_analytics_error(
+                        fn_name,
+                        format!(
+                            "{fn_name}: logical index length {len} must match vocabulary length {}",
+                            vocabulary.len()
+                        ),
+                    ));
+                }
+                indices
+                    .into_iter()
+                    .map(|idx| {
+                        vocabulary.get(idx).cloned().ok_or_else(|| {
+                            text_analytics_error(
+                                fn_name,
+                                format!(
+                                    "{fn_name}: vocabulary index {} exceeds vocabulary length {}",
+                                    idx + 1,
+                                    vocabulary.len()
+                                ),
+                            )
+                        })
+                    })
+                    .collect()
+            }
+            Self::Indices(indices) => indices
+                .into_iter()
+                .map(|idx| {
+                    vocabulary.get(idx).cloned().ok_or_else(|| {
+                        text_analytics_error(
+                            fn_name,
+                            format!(
+                                "{fn_name}: vocabulary index {} exceeds vocabulary length {}",
+                                idx + 1,
+                                vocabulary.len()
+                            ),
+                        )
+                    })
+                })
+                .collect(),
+        }
+    }
+}
+
 fn parse_remove_stop_words_args(
     args: Vec<Value>,
 ) -> BuiltinResult<(Value, RemoveStopWordsOptions)> {
@@ -671,6 +918,119 @@ fn parse_remove_stop_words_args(
         idx += 2;
     }
     Ok((args[0].clone(), options))
+}
+
+fn parse_remove_words_args(
+    args: Vec<Value>,
+) -> BuiltinResult<(Value, RemoveWordsSelector, RemoveWordsOptions)> {
+    if args.len() < 2 {
+        return Err(text_analytics_error(
+            "removeWords",
+            "removeWords: expected input object and words or indices",
+        ));
+    }
+    if !(args.len() - 2).is_multiple_of(2) {
+        return Err(text_analytics_error(
+            "removeWords",
+            "removeWords: name-value options must appear in pairs",
+        ));
+    }
+    let mut options = RemoveWordsOptions::default();
+    let mut idx = 2;
+    while idx < args.len() {
+        let name = scalar_text(&args[idx], "removeWords")
+            .map_err(|err| text_analytics_error("removeWords", err.to_string()))?
+            .to_ascii_lowercase();
+        match name.as_str() {
+            "ignorecase" => {
+                options.ignore_case = parse_bool_scalar(&args[idx + 1], "removeWords")?;
+            }
+            other => {
+                return Err(text_analytics_error(
+                    "removeWords",
+                    format!("removeWords: unsupported option '{other}'"),
+                ));
+            }
+        }
+        idx += 2;
+    }
+    let selector = parse_remove_words_selector(&args[1])?;
+    Ok((args[0].clone(), selector, options))
+}
+
+fn parse_remove_words_selector(value: &Value) -> BuiltinResult<RemoveWordsSelector> {
+    match value {
+        Value::Bool(value) => Ok(RemoveWordsSelector::LogicalMask {
+            indices: (*value).then_some(0).into_iter().collect(),
+            len: 1,
+        }),
+        Value::LogicalArray(array) => {
+            let indices = logical_indices(array);
+            Ok(RemoveWordsSelector::LogicalMask {
+                indices,
+                len: array.data.len(),
+            })
+        }
+        Value::Num(_) | Value::Tensor(_) => {
+            parse_remove_words_indices(value).map(RemoveWordsSelector::Indices)
+        }
+        _ => words_from_word_vector(value, "removeWords").map(RemoveWordsSelector::Words),
+    }
+}
+
+fn parse_remove_words_indices(value: &Value) -> BuiltinResult<Vec<usize>> {
+    let raw = match value {
+        Value::Num(value) => vec![*value],
+        Value::Tensor(tensor) => tensor.data.clone(),
+        other => {
+            return Err(text_analytics_error(
+                "removeWords",
+                format!("removeWords: expected numeric or logical indices, got {other:?}"),
+            ))
+        }
+    };
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut seen = HashSet::new();
+    let mut indices = Vec::new();
+    for value in raw {
+        if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 {
+            return Err(text_analytics_error(
+                "removeWords",
+                format!("removeWords: vocabulary indices must be positive integers, got {value}"),
+            ));
+        }
+        let idx = value as usize - 1;
+        if seen.insert(idx) {
+            indices.push(idx);
+        }
+    }
+    Ok(indices)
+}
+
+fn logical_indices(array: &LogicalArray) -> Vec<usize> {
+    array
+        .data
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, flag)| (*flag != 0).then_some(idx))
+        .collect()
+}
+
+fn word_set(words: Vec<String>, ignore_case: bool) -> HashSet<String> {
+    words
+        .into_iter()
+        .map(|word| comparable_word(&word, ignore_case))
+        .collect()
+}
+
+fn comparable_word(word: &str, ignore_case: bool) -> String {
+    if ignore_case {
+        word.to_lowercase()
+    } else {
+        word.to_string()
+    }
 }
 
 struct ParsedDocuments {
@@ -1431,12 +1791,30 @@ pub(in crate::builtins::strings::text_analytics) fn checked_count_len(
 }
 
 fn remove_short_words_from_bag(object: ObjectInstance, max_len: usize) -> BuiltinResult<Value> {
-    let vocabulary = vocabulary_from_bag(&object, "removeShortWords")?;
-    let counts = counts_from_bag(&object, "removeShortWords")?;
+    filter_bag_columns_by_predicate(object, "removeShortWords", |word| {
+        word.chars().count() > max_len
+    })
+}
+
+fn filter_bag_columns_by_predicate(
+    object: ObjectInstance,
+    fn_name: &str,
+    mut keep_word: impl FnMut(&str) -> bool,
+) -> BuiltinResult<Value> {
+    filter_bag_columns(object, fn_name, |word| keep_word(word))
+}
+
+fn filter_bag_columns(
+    object: ObjectInstance,
+    fn_name: &str,
+    mut keep_word: impl FnMut(&str) -> bool,
+) -> BuiltinResult<Value> {
+    let vocabulary = vocabulary_from_bag(&object, fn_name)?;
+    let counts = counts_from_bag(&object, fn_name)?;
     let keep = vocabulary
         .iter()
         .enumerate()
-        .filter_map(|(idx, word)| (word.chars().count() > max_len).then_some(idx))
+        .filter_map(|(idx, word)| keep_word(word).then_some(idx))
         .collect::<Vec<_>>();
     let mut new_vocab = Vec::with_capacity(keep.len());
     let mut new_counts = Vec::with_capacity(counts.rows * keep.len());
@@ -1447,6 +1825,26 @@ fn remove_short_words_from_bag(object: ObjectInstance, max_len: usize) -> Builti
         }
     }
     bag_object(new_vocab, new_counts, counts.rows)
+}
+
+fn documents_vocabulary(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Vec<String>> {
+    match object.properties.get("Vocabulary") {
+        Some(value) => words_from_word_vector(value, fn_name),
+        None => Ok(vocabulary_from_documents(&documents_from_object(
+            object, fn_name,
+        )?)),
+    }
+}
+
+fn vocabulary_from_documents(documents: &[Vec<String>]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut vocabulary = Vec::new();
+    for token in documents.iter().flatten() {
+        if seen.insert(token.clone()) {
+            vocabulary.push(token.clone());
+        }
+    }
+    vocabulary
 }
 
 fn vocabulary_from_bag(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Vec<String>> {
@@ -1582,6 +1980,14 @@ mod tests {
 
     fn run_remove_short(value: Value, len: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(remove_short_words_builtin(value, len))
+    }
+
+    fn run_remove_long(value: Value, len: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(remove_long_words_builtin(value, len))
+    }
+
+    fn run_remove_words(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(remove_words_builtin(args))
     }
 
     fn run_remove_stop(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1823,6 +2229,109 @@ mod tests {
         };
         assert_eq!(counts.shape, vec![1, 3]);
         assert_eq!(counts.data, vec![1.0, 1.0, 1.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn remove_long_words_filters_documents_and_bag() {
+        let input = StringArray::new(
+            vec![
+                "An example of a short sentence".to_string(),
+                "A second compact note".to_string(),
+            ],
+            vec![2, 1],
+        )
+        .unwrap();
+        let docs = run_tokenized(vec![Value::StringArray(input)]).expect("tokenized");
+        let filtered_docs =
+            object(run_remove_long(docs.clone(), Value::Num(7.0)).expect("remove docs"));
+        assert_eq!(
+            documents_property(&filtered_docs),
+            vec![vec!["An", "of", "a", "short"], vec!["A", "second", "note"]]
+        );
+        assert_eq!(
+            string_array_property(&filtered_docs, "Vocabulary"),
+            vec!["An", "of", "a", "short", "A", "second", "note"]
+        );
+
+        let bag = run_bag(vec![docs]).expect("bag");
+        let filtered_bag = object(run_remove_long(bag, Value::Num(7.0)).expect("remove bag"));
+        assert_eq!(
+            string_array_property(&filtered_bag, "Vocabulary"),
+            vec!["An", "of", "a", "short", "A", "second", "note"]
+        );
+        let counts = tensor_property(&filtered_bag, "Counts");
+        assert_eq!(counts.shape, vec![2, 7]);
+        assert_eq!(
+            counts.data,
+            vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn remove_words_filters_by_word_list_indices_and_ignore_case() {
+        let input = StringArray::new(
+            vec![
+                "Short second sentence".to_string(),
+                "short example sentence".to_string(),
+            ],
+            vec![2, 1],
+        )
+        .unwrap();
+        let docs = run_tokenized(vec![Value::StringArray(input)]).expect("tokenized");
+        let words = StringArray::new(vec!["short".into(), "example".into()], vec![1, 2]).unwrap();
+        let filtered = object(
+            run_remove_words(vec![
+                docs.clone(),
+                Value::StringArray(words),
+                Value::String("IgnoreCase".to_string()),
+                Value::Bool(true),
+            ])
+            .expect("remove words"),
+        );
+        assert_eq!(
+            documents_property(&filtered),
+            vec![vec!["second", "sentence"], vec!["sentence"]]
+        );
+
+        let filtered_by_index = object(
+            run_remove_words(vec![
+                docs.clone(),
+                Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap()),
+            ])
+            .expect("remove indexed words"),
+        );
+        assert_eq!(
+            documents_property(&filtered_by_index),
+            vec![vec!["second"], vec!["short", "example"]]
+        );
+
+        let bag = run_bag(vec![docs]).expect("bag");
+        let mask = LogicalArray::new(vec![0, 1, 0, 1, 0], vec![1, 5]).unwrap();
+        let filtered_bag =
+            object(run_remove_words(vec![bag, Value::LogicalArray(mask)]).expect("remove mask"));
+        assert_eq!(
+            string_array_property(&filtered_bag, "Vocabulary"),
+            vec!["Short", "sentence", "example"]
+        );
+        let counts = tensor_property(&filtered_bag, "Counts");
+        assert_eq!(counts.shape, vec![2, 3]);
+        assert_eq!(counts.data, vec![1.0, 0.0, 1.0, 1.0, 0.0, 1.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn remove_words_rejects_bad_indices_and_mask_lengths() {
+        let docs = run_tokenized(vec![Value::String("alpha beta".to_string())]).expect("tokenized");
+        let err = run_remove_words(vec![docs.clone(), Value::Num(0.0)])
+            .expect_err("expected bad numeric index");
+        assert!(err.to_string().contains("positive integers"));
+
+        let mask = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
+        let err = run_remove_words(vec![docs, Value::LogicalArray(mask)])
+            .expect_err("expected mask length mismatch");
+        assert!(err.to_string().contains("logical index length"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

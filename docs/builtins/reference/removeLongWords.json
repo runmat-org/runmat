@@ -1,20 +1,20 @@
 {
-  "title": "removeShortWords",
+  "title": "removeLongWords",
   "category": "strings/text_analytics",
   "keywords": [
-    "removeShortWords",
+    "removeLongWords",
     "tokenizedDocument",
     "bagOfWords",
     "text analytics",
     "filter"
   ],
-  "summary": "Remove short words from tokenized documents or bag-of-words models.",
+  "summary": "Remove long words from tokenized documents or bag-of-words models.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`removeShortWords` filters host text-model objects and does not use provider kernels."
+    "notes": "`removeLongWords` filters host text-model objects and does not use provider kernels."
   },
   "fusion": {
     "elementwise": false,
@@ -27,38 +27,37 @@
     "unit": "builtins::strings::text_analytics::documents::tests",
     "integration": null
   },
-  "description": "`removeShortWords(documents, len)` removes tokens whose character length is less than or equal to `len` from RunMat `tokenizedDocument` compatibility objects. `removeShortWords(bag, len)` removes matching vocabulary columns from RunMat `bagOfWords` objects.",
+  "description": "`removeLongWords(documents, len)` removes tokens whose character length is greater than or equal to `len` from RunMat `tokenizedDocument` compatibility objects. `removeLongWords(bag, len)` removes matching vocabulary columns from RunMat `bagOfWords` objects.",
   "behaviors": [
     "`documents` must be a RunMat `tokenizedDocument` object created by `tokenizedDocument`.",
     "`bag` must be a RunMat `bagOfWords` object created by `bagOfWords`.",
     "`len` must be a positive integer scalar.",
     "For tokenized documents, the result preserves `Shape`, `TokenizeMethod`, and `Language` metadata while recomputing document lengths and vocabulary.",
-    "For bag-of-words models, the result preserves document row count and removes count columns for words with length less than or equal to `len`.",
-    "`removeStopWords`, `removeWords`, and `removeLongWords` are implemented separately for other tokenized-document filtering workflows. Table-backed custom token filters remain tracked by the Text Analytics umbrella."
+    "For bag-of-words models, the result preserves document row count and removes count columns for words with length greater than or equal to `len`."
   ],
   "examples": [
     {
       "description": "Filter Tokenized Documents",
-      "input": "documents = tokenizedDocument(\"a short document\");\nnewDocuments = removeShortWords(documents, 1)",
-      "output": "`newDocuments` contains `short` and `document`."
+      "input": "documents = tokenizedDocument(\"An example of a short sentence\");\nnewDocuments = removeLongWords(documents, 7)",
+      "output": "`newDocuments` contains `An of a short`."
     },
     {
       "description": "Filter A Bag Of Words",
-      "input": "documents = tokenizedDocument([\"a beta\"; \"an gamma\"]);\nbag = bagOfWords(documents);\nnewBag = removeShortWords(bag, 2)",
-      "output": "`newBag.Vocabulary` contains `beta` and `gamma`."
+      "input": "documents = tokenizedDocument([\"an example of a short sentence\"; \"a second short sentence\"]);\nbag = bagOfWords(documents);\nnewBag = removeLongWords(bag, 7)",
+      "output": "`newBag.Vocabulary` excludes `example` and `sentence`."
     }
   ],
   "faqs": [
     {
-      "question": "Does `removeShortWords` remove words shorter than len or shorter than or equal to len?",
-      "answer": "It removes words with character length less than or equal to `len`, matching the MATLAB Text Analytics contract."
+      "question": "Does `removeLongWords` remove words longer than len or longer than or equal to len?",
+      "answer": "It removes words with character length greater than or equal to `len`, matching the MATLAB Text Analytics contract."
     },
     {
-      "question": "Does `removeShortWords` support raw strings?",
+      "question": "Does `removeLongWords` support raw strings?",
       "answer": "No. Convert raw text with `tokenizedDocument` first, or build a `bagOfWords` model and filter that object."
     },
     {
-      "question": "Does `removeShortWords` execute on the GPU?",
+      "question": "Does `removeLongWords` execute on the GPU?",
       "answer": "No. It filters host text/model metadata and has no `runmat-accelerate` provider path."
     }
   ],
@@ -72,12 +71,8 @@
       "url": "./bagOfWords"
     },
     {
-      "label": "erasePunctuation",
-      "url": "./erasePunctuation"
-    },
-    {
-      "label": "removeLongWords",
-      "url": "./removeLongWords"
+      "label": "removeShortWords",
+      "url": "./removeShortWords"
     },
     {
       "label": "removeWords",
@@ -87,7 +82,7 @@
   "syntax": {
     "example": {
       "description": "Supported forms",
-      "input": "newDocuments = removeShortWords(documents, len)\nnewBag = removeShortWords(bag, len)",
+      "input": "newDocuments = removeLongWords(documents, len)\nnewBag = removeLongWords(bag, len)",
       "output": "`newDocuments` is a `tokenizedDocument` compatibility object. `newBag` is a `bagOfWords` compatibility object."
     },
     "points": [
@@ -99,5 +94,5 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs"
   },
-  "gpu_residency": "`removeShortWords` filters host text/model objects and has no provider kernel."
+  "gpu_residency": "`removeLongWords` filters host text/model objects and has no provider kernel."
 }
