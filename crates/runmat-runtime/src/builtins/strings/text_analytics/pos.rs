@@ -95,7 +95,9 @@ fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     ),
     builtin_path = "crate::builtins::strings::text_analytics::pos"
 )]
-async fn add_part_of_speech_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(in crate::builtins::strings::text_analytics) async fn add_part_of_speech_details_builtin(
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     let gathered = gather_args(args).await?;
     let (documents, options) = parse_args(gathered)?;
     let mut object = tokenized_document_object(documents)?;

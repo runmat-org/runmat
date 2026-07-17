@@ -33,12 +33,13 @@
     "Normally tokenized documents return table variables `Token`, `DocumentNumber`, `LineNumber`, `Type`, and `Language`.",
     "After `addSentenceDetails`, documents also return a `SentenceNumber` variable after `DocumentNumber`.",
     "After `addPartOfSpeechDetails`, documents also return a `PartOfSpeech` variable after `Language`.",
-    "After `addLemmaDetails`, documents also return a `Lemma` variable after `Language`; if both details are present, `PartOfSpeech` precedes `Lemma`.",
+    "After `addEntityDetails`, documents also return an `Entity` variable after `PartOfSpeech` when part-of-speech details are present, otherwise after `Language`.",
+    "After `addLemmaDetails`, documents also return a `Lemma` variable after `Language`; if multiple language details are present, `PartOfSpeech` precedes `Entity`, and `Entity` precedes `Lemma`.",
     "Pre-tokenized documents created with `TokenizeMethod`, `\"none\"` initially return only `Token` and `DocumentNumber`, matching MATLAB's manually tokenized form.",
     "After `addTypeDetails`, pre-tokenized documents also return a `Type` variable.",
     "`Type` values are derived from RunMat's lightweight tokenizer and include `letters`, `digits`, `punctuation`, `email-address`, `web-address`, `hashtag`, `at-mention`, `emoticon`, `emoji`, and `other`.",
     "`LineNumber` is currently `1` for each token because RunMat's tokenizer stores document-level tokens and does not yet preserve per-line token provenance.",
-    "Entity, dependency, and full language-detail columns remain broader Text Analytics work."
+    "Dependency and full language-detail columns remain broader Text Analytics work."
   ],
   "examples": [
     {
@@ -65,12 +66,17 @@
       "description": "Add Part-Of-Speech Tags",
       "input": "documents = tokenizedDocument(\"The dogs are running.\");\ndocuments = addPartOfSpeechDetails(documents);\ntdetails = tokenDetails(documents)",
       "output": "`tdetails` includes `PartOfSpeech`."
+    },
+    {
+      "description": "Add Entity Tags",
+      "input": "documents = tokenizedDocument(\"Mary uses MATLAB at MathWorks.\");\ndocuments = addEntityDetails(documents);\ntdetails = tokenDetails(documents)",
+      "output": "`tdetails` includes `Entity`."
     }
   ],
   "faqs": [
     {
       "question": "Does `tokenDetails` return sentence or part-of-speech details?",
-      "answer": "RunMat returns `SentenceNumber` after `addSentenceDetails`, `PartOfSpeech` after `addPartOfSpeechDetails`, and `Lemma` after `addLemmaDetails`. Entity, dependency, and fuller linguistic detail adders remain tracked by the Text Analytics umbrella issue."
+      "answer": "RunMat returns `SentenceNumber` after `addSentenceDetails`, `PartOfSpeech` after `addPartOfSpeechDetails`, `Entity` after `addEntityDetails`, and `Lemma` after `addLemmaDetails`. Dependency and fuller linguistic detail adders remain tracked by the Text Analytics umbrella issue."
     },
     {
       "question": "Does `tokenDetails` execute on the GPU?",
@@ -97,6 +103,10 @@
     {
       "label": "addPartOfSpeechDetails",
       "url": "./addPartOfSpeechDetails"
+    },
+    {
+      "label": "addEntityDetails",
+      "url": "./addEntityDetails"
     }
   ],
   "syntax": {

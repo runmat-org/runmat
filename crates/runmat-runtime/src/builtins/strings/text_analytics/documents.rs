@@ -359,6 +359,7 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
         "addSentenceDetails" => "RunMat:addSentenceDetails:InvalidInput",
         "addLemmaDetails" => "RunMat:addLemmaDetails:InvalidInput",
         "addPartOfSpeechDetails" => "RunMat:addPartOfSpeechDetails:InvalidInput",
+        "addEntityDetails" => "RunMat:addEntityDetails:InvalidInput",
         "vaderSentimentScores" => "RunMat:vaderSentimentScores:InvalidInput",
         _ => "RunMat:textAnalyticsDocuments:InvalidInput",
     };
@@ -389,6 +390,7 @@ fn ensure_tokenized_document_class_registered() {
             "SentenceNumbers",
             "LemmaDetails",
             "PartOfSpeechDetails",
+            "EntityDetails",
         ] {
             properties.insert(name.to_string(), property_def(name));
         }
