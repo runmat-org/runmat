@@ -15081,6 +15081,174 @@
       ]
     },
     {
+      "name": "cosineSimilarity",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "similarities = cosineSimilarity(documents)",
+          "inputs": [
+            {
+              "name": "documentsOrBagOrMatrix",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object, bag model, word vector, or numeric matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "similarities",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise cosine-similarity matrix."
+            }
+          ]
+        },
+        {
+          "label": "similarities = cosineSimilarity(documents, queries)",
+          "inputs": [
+            {
+              "name": "documentsOrBagOrMatrix",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object, bag model, word vector, or numeric matrix."
+            },
+            {
+              "name": "queriesOrMatrix",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Query tokenizedDocument object, word vector, or numeric matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "similarities",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise cosine-similarity matrix."
+            }
+          ]
+        },
+        {
+          "label": "similarities = cosineSimilarity(bag)",
+          "inputs": [
+            {
+              "name": "documentsOrBagOrMatrix",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object, bag model, word vector, or numeric matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "similarities",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise cosine-similarity matrix."
+            }
+          ]
+        },
+        {
+          "label": "similarities = cosineSimilarity(bag, queries)",
+          "inputs": [
+            {
+              "name": "documentsOrBagOrMatrix",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object, bag model, word vector, or numeric matrix."
+            },
+            {
+              "name": "queriesOrMatrix",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Query tokenizedDocument object, word vector, or numeric matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "similarities",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise cosine-similarity matrix."
+            }
+          ]
+        },
+        {
+          "label": "similarities = cosineSimilarity(M)",
+          "inputs": [
+            {
+              "name": "documentsOrBagOrMatrix",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object, bag model, word vector, or numeric matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "similarities",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise cosine-similarity matrix."
+            }
+          ]
+        },
+        {
+          "label": "similarities = cosineSimilarity(M1, M2)",
+          "inputs": [
+            {
+              "name": "documentsOrBagOrMatrix",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object, bag model, word vector, or numeric matrix."
+            },
+            {
+              "name": "queriesOrMatrix",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Query tokenizedDocument object, word vector, or numeric matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "similarities",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise cosine-similarity matrix."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.COSINE_SIMILARITY.INVALID_INPUT",
+          "identifier": "RunMat:cosineSimilarity:InvalidInput",
+          "when": "Inputs do not match a supported cosineSimilarity form.",
+          "message": "cosineSimilarity: invalid input"
+        },
+        {
+          "code": "RM.COSINE_SIMILARITY.DIMENSION_MISMATCH",
+          "identifier": "RunMat:cosineSimilarity:DimensionMismatch",
+          "when": "Matrix inputs have different numbers of columns.",
+          "message": "cosineSimilarity: matrix dimensions are not compatible"
+        }
+      ]
+    },
+    {
       "name": "cospi",
       "output_mode": "Fixed",
       "completion_policy": "Public",

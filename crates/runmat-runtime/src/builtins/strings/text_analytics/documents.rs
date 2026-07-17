@@ -1847,7 +1847,10 @@ fn vocabulary_from_documents(documents: &[Vec<String>]) -> Vec<String> {
     vocabulary
 }
 
-fn vocabulary_from_bag(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Vec<String>> {
+pub(in crate::builtins::strings::text_analytics) fn vocabulary_from_bag(
+    object: &ObjectInstance,
+    fn_name: &str,
+) -> BuiltinResult<Vec<String>> {
     match object.properties.get("Vocabulary") {
         Some(value) => words_from_word_vector(value, fn_name),
         None => Err(text_analytics_error(
@@ -1857,7 +1860,10 @@ fn vocabulary_from_bag(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<
     }
 }
 
-fn counts_from_bag(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Tensor> {
+pub(in crate::builtins::strings::text_analytics) fn counts_from_bag(
+    object: &ObjectInstance,
+    fn_name: &str,
+) -> BuiltinResult<Tensor> {
     match object.properties.get("Counts") {
         Some(Value::Tensor(tensor)) => Ok(tensor.clone()),
         _ => Err(text_analytics_error(
