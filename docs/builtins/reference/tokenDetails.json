@@ -31,11 +31,12 @@
   "behaviors": [
     "`documents` must be a RunMat `tokenizedDocument` object created by `tokenizedDocument`.",
     "Normally tokenized documents return table variables `Token`, `DocumentNumber`, `LineNumber`, `Type`, and `Language`.",
+    "After `addSentenceDetails`, documents also return a `SentenceNumber` variable after `DocumentNumber`.",
     "Pre-tokenized documents created with `TokenizeMethod`, `\"none\"` initially return only `Token` and `DocumentNumber`, matching MATLAB's manually tokenized form.",
     "After `addTypeDetails`, pre-tokenized documents also return a `Type` variable.",
     "`Type` values are derived from RunMat's lightweight tokenizer and include `letters`, `digits`, `punctuation`, `email-address`, `web-address`, `hashtag`, `at-mention`, `emoticon`, `emoji`, and `other`.",
     "`LineNumber` is currently `1` for each token because RunMat's tokenizer stores document-level tokens and does not yet preserve per-line token provenance.",
-    "Sentence, part-of-speech, entity, lemma, dependency, and full language-detail columns remain broader Text Analytics work."
+    "Part-of-speech, entity, lemma, dependency, and full language-detail columns remain broader Text Analytics work."
   ],
   "examples": [
     {
@@ -47,12 +48,17 @@
       "description": "Add Types To Pre-Tokenized Documents",
       "input": "documents = tokenizedDocument([\"For\" \"more\" \"information\"], \"TokenizeMethod\", \"none\");\ndocuments = addTypeDetails(documents);\ntdetails = tokenDetails(documents)",
       "output": "`tdetails` includes `Token`, `DocumentNumber`, and `Type`."
+    },
+    {
+      "description": "Add Sentence Numbers",
+      "input": "documents = tokenizedDocument(\"First sentence. Second sentence.\");\ndocuments = addSentenceDetails(documents);\ntdetails = tokenDetails(documents)",
+      "output": "`tdetails` includes `SentenceNumber`."
     }
   ],
   "faqs": [
     {
       "question": "Does `tokenDetails` return sentence or part-of-speech details?",
-      "answer": "Not yet. RunMat returns the common token/type/language details available from the current tokenizedDocument representation. Linguistic detail adders remain tracked by the Text Analytics umbrella issue."
+      "answer": "RunMat returns `SentenceNumber` after `addSentenceDetails`. Part-of-speech, entity, lemma, dependency, and fuller linguistic detail adders remain tracked by the Text Analytics umbrella issue."
     },
     {
       "question": "Does `tokenDetails` execute on the GPU?",
@@ -67,6 +73,10 @@
     {
       "label": "addTypeDetails",
       "url": "./addTypeDetails"
+    },
+    {
+      "label": "addSentenceDetails",
+      "url": "./addSentenceDetails"
     }
   ],
   "syntax": {

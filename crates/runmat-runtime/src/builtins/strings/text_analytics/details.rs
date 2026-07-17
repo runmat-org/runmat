@@ -1,5 +1,7 @@
 //! Token-detail table helpers for Text Analytics tokenized documents.
 
+use std::collections::{HashMap, HashSet};
+
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -11,12 +13,16 @@ use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type_with_options, documents_from_object, options_from_document_object,
     parse_top_level_domains, text_analytics_error, tokenized_document_language,
-    top_level_domains_value, TOKENIZED_DOCUMENT_CLASS,
+    top_level_domains_value, words_from_word_vector, TOKENIZED_DOCUMENT_CLASS,
 };
-use crate::builtins::table::table_from_columns;
+use crate::builtins::strings::text_analytics::stopwords::{
+    stop_words_for_language, StopWordsLanguage,
+};
+use crate::builtins::table::{categorical_labels, table_from_columns, table_variables};
 use crate::{gather_if_needed_async, BuiltinResult};
 
 const TYPE_DETAILS_PROPERTY: &str = "TypeDetails";
+const SENTENCE_NUMBERS_PROPERTY: &str = "SentenceNumbers";
 
 const OUT_DETAILS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tdetails",
@@ -31,7 +37,7 @@ const OUT_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Tokenized document object with token type details.",
+    description: "Updated tokenized document object.",
 }];
 
 const IN_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -59,6 +65,23 @@ const IN_DOCUMENTS_REST: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
+const IN_DOCUMENTS_SENTENCE_REST: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "documents",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "tokenizedDocument object.",
+    },
+    BuiltinParamDescriptor {
+        name: "NameValue",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value options: Abbreviations, Starters, DiscardKnownValues.",
+    },
+];
+
 const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TEXT_ANALYTICS.TOKEN_DETAILS.INVALID_INPUT",
     identifier: Some("RunMat:tokenDetails:InvalidInput"),
@@ -73,8 +96,16 @@ const ERROR_ADD_TYPE_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescrip
     message: "addTypeDetails: invalid input",
 };
 
+const ERROR_ADD_SENTENCE_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TEXT_ANALYTICS.ADD_SENTENCE_DETAILS.INVALID_INPUT",
+    identifier: Some("RunMat:addSentenceDetails:InvalidInput"),
+    when: "Input is not a supported tokenizedDocument object or option form.",
+    message: "addSentenceDetails: invalid input",
+};
+
 const TOKEN_DETAILS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
 const ADD_TYPE_DETAILS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_ADD_TYPE_INVALID_INPUT];
+const ADD_SENTENCE_DETAILS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_ADD_SENTENCE_INVALID_INPUT];
 
 pub const TOKEN_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
@@ -103,6 +134,24 @@ pub const ADD_TYPE_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ADD_TYPE_DETAILS_ERRORS,
+};
+
+pub const ADD_SENTENCE_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[
+        BuiltinSignatureDescriptor {
+            label: "newDocuments = addSentenceDetails(documents)",
+            inputs: &IN_DOCUMENTS,
+            outputs: &OUT_DOCUMENTS,
+        },
+        BuiltinSignatureDescriptor {
+            label: "newDocuments = addSentenceDetails(documents,Name,Value)",
+            inputs: &IN_DOCUMENTS_SENTENCE_REST,
+            outputs: &OUT_DOCUMENTS,
+        },
+    ],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ADD_SENTENCE_DETAILS_ERRORS,
 };
 
 fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
@@ -166,6 +215,33 @@ async fn add_type_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     Ok(Value::Object(object))
 }
 
+#[runtime_builtin(
+    name = "addSentenceDetails",
+    category = "strings/text_analytics",
+    summary = "Add sentence numbers to tokenizedDocument objects.",
+    keywords = "addSentenceDetails,text analytics,tokenizedDocument,sentences",
+    accel = "sink",
+    type_resolver(any_type),
+    descriptor(crate::builtins::strings::text_analytics::details::ADD_SENTENCE_DETAILS_DESCRIPTOR),
+    builtin_path = "crate::builtins::strings::text_analytics::details"
+)]
+async fn add_sentence_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let gathered = gather_args(args, "addSentenceDetails").await?;
+    let (documents, options) = parse_add_sentence_details_args(gathered)?;
+    let mut object = tokenized_document_object(documents, "addSentenceDetails")?;
+    let documents = documents_from_object(&object, "addSentenceDetails")?;
+    let sentence_numbers = if options.discard_known_values {
+        sentence_numbers_cell(&documents, &options)?
+    } else {
+        let stored = sentence_numbers_from_object(&object, "addSentenceDetails")?;
+        sentence_numbers_cell_preserving_known(&documents, stored.as_deref(), &options)?
+    };
+    object
+        .properties
+        .insert(SENTENCE_NUMBERS_PROPERTY.to_string(), sentence_numbers);
+    Ok(Value::Object(object))
+}
+
 async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for arg in args {
@@ -177,9 +253,71 @@ async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value
 }
 
 #[derive(Clone, Debug)]
+struct AddSentenceDetailsOptions {
+    discard_known_values: bool,
+    abbreviations: HashMap<String, AbbreviationUsage>,
+    starters: HashSet<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AbbreviationUsage {
+    Regular,
+    Inner,
+    Reference,
+    Unit,
+}
+
+impl Default for AddSentenceDetailsOptions {
+    fn default() -> Self {
+        Self {
+            discard_known_values: false,
+            abbreviations: default_abbreviations(),
+            starters: default_sentence_starters(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct AddTypeDetailsOptions {
     discard_known_values: bool,
     top_level_domains: Option<Vec<String>>,
+}
+
+fn parse_add_sentence_details_args(
+    args: Vec<Value>,
+) -> BuiltinResult<(Value, AddSentenceDetailsOptions)> {
+    if args.is_empty() {
+        return Err(text_analytics_error(
+            "addSentenceDetails",
+            "addSentenceDetails: expected tokenizedDocument input",
+        ));
+    }
+    if !(args.len() - 1).is_multiple_of(2) {
+        return Err(text_analytics_error(
+            "addSentenceDetails",
+            "addSentenceDetails: name-value options must appear in pairs",
+        ));
+    }
+    let mut options = AddSentenceDetailsOptions::default();
+    let mut idx = 1usize;
+    while idx < args.len() {
+        let name = scalar_text(&args[idx], "addSentenceDetails")
+            .map_err(|err| text_analytics_error("addSentenceDetails", err.to_string()))?;
+        if name.eq_ignore_ascii_case("DiscardKnownValues") {
+            options.discard_known_values = logical_scalar(&args[idx + 1], "addSentenceDetails")?;
+        } else if name.eq_ignore_ascii_case("Abbreviations") {
+            options.abbreviations = parse_abbreviations(&args[idx + 1])?;
+        } else if name.eq_ignore_ascii_case("Starters") {
+            options.starters = parse_sentence_starters(&args[idx + 1])?;
+        } else {
+            return Err(text_analytics_error(
+                "addSentenceDetails",
+                format!("addSentenceDetails: unsupported option '{name}'"),
+            ));
+        }
+        idx += 2;
+    }
+    Ok((args[0].clone(), options))
 }
 
 fn parse_add_type_details_args(args: Vec<Value>) -> BuiltinResult<(Value, AddTypeDetailsOptions)> {
@@ -239,14 +377,18 @@ fn tokenized_document_object(value: Value, fn_name: &str) -> BuiltinResult<Objec
 fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
     let documents = documents_from_object(object, "tokenDetails")?;
     let stored_types = type_details_from_object(object, "tokenDetails")?;
+    let stored_sentence_numbers = sentence_numbers_from_object(object, "tokenDetails")?;
+    validate_sentence_number_shapes(&documents, stored_sentence_numbers.as_deref())?;
     let include_default_details = has_default_token_details(object);
     let include_type = include_default_details || stored_types.is_some();
+    let include_sentence = stored_sentence_numbers.is_some();
     let include_line_language = include_default_details;
     let total = documents.iter().map(Vec::len).sum::<usize>();
     let document_options = options_from_document_object(object);
 
     let mut tokens = Vec::with_capacity(total);
     let mut document_numbers = Vec::with_capacity(total);
+    let mut sentence_numbers = Vec::with_capacity(total);
     let mut line_numbers = Vec::with_capacity(total);
     let mut token_types = Vec::with_capacity(total);
     let mut languages = Vec::with_capacity(total);
@@ -256,6 +398,16 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
         for (token_idx, token) in doc.iter().enumerate() {
             tokens.push(token.clone());
             document_numbers.push((doc_idx + 1) as f64);
+            if include_sentence {
+                sentence_numbers.push(
+                    stored_sentence_numbers
+                        .as_ref()
+                        .and_then(|numbers| numbers.get(doc_idx))
+                        .and_then(|numbers| numbers.get(token_idx))
+                        .copied()
+                        .unwrap_or(1.0),
+                );
+            }
             if include_line_language {
                 line_numbers.push(1.0);
                 languages.push(language.clone());
@@ -287,6 +439,13 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
                 .map_err(|err| text_analytics_error("tokenDetails", err))?,
         ),
     ];
+    if include_sentence {
+        names.push("SentenceNumber".to_string());
+        columns.push(Value::Tensor(
+            Tensor::new(sentence_numbers, vec![total, 1])
+                .map_err(|err| text_analytics_error("tokenDetails", err))?,
+        ));
+    }
     if include_line_language {
         names.push("LineNumber".to_string());
         columns.push(Value::Tensor(
@@ -387,6 +546,343 @@ fn is_known_type_detail(value: &str) -> bool {
         && !crate::builtins::strings::common::is_missing_string(value)
 }
 
+fn sentence_numbers_cell(
+    documents: &[Vec<String>],
+    options: &AddSentenceDetailsOptions,
+) -> BuiltinResult<Value> {
+    let values = documents
+        .iter()
+        .map(|doc| {
+            let numbers = sentence_numbers_for_doc(doc, options);
+            Tensor::new(numbers, vec![1, doc.len()])
+                .map(Value::Tensor)
+                .map_err(|err| text_analytics_error("addSentenceDetails", err))
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    Ok(Value::Cell(
+        CellArray::new(values, documents.len(), 1)
+            .map_err(|err| text_analytics_error("addSentenceDetails", err))?,
+    ))
+}
+
+fn sentence_numbers_cell_preserving_known(
+    documents: &[Vec<String>],
+    stored: Option<&[Vec<f64>]>,
+    options: &AddSentenceDetailsOptions,
+) -> BuiltinResult<Value> {
+    let values = documents
+        .iter()
+        .enumerate()
+        .map(|(doc_idx, doc)| {
+            let computed = sentence_numbers_for_doc(doc, options);
+            let numbers = if let Some(existing) = stored.and_then(|values| values.get(doc_idx)) {
+                if existing.len() == doc.len()
+                    && existing
+                        .iter()
+                        .all(|value| value.is_finite() && *value >= 1.0 && value.fract() == 0.0)
+                {
+                    existing.clone()
+                } else {
+                    computed
+                }
+            } else {
+                computed
+            };
+            Tensor::new(numbers, vec![1, doc.len()])
+                .map(Value::Tensor)
+                .map_err(|err| text_analytics_error("addSentenceDetails", err))
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    Ok(Value::Cell(
+        CellArray::new(values, documents.len(), 1)
+            .map_err(|err| text_analytics_error("addSentenceDetails", err))?,
+    ))
+}
+
+fn sentence_numbers_for_doc(tokens: &[String], options: &AddSentenceDetailsOptions) -> Vec<f64> {
+    let mut out = Vec::with_capacity(tokens.len());
+    let mut current = 1.0;
+    for idx in 0..tokens.len() {
+        out.push(current);
+        if is_sentence_terminator_at(tokens, idx, options) {
+            current += 1.0;
+        }
+    }
+    out
+}
+
+fn is_sentence_terminator_at(
+    tokens: &[String],
+    idx: usize,
+    options: &AddSentenceDetailsOptions,
+) -> bool {
+    let token = tokens[idx].trim();
+    if !matches!(token, "." | "!" | "?" | "。" | "！" | "？") {
+        return false;
+    }
+    if token != "." {
+        return true;
+    }
+    let Some(previous) = previous_word(tokens, idx) else {
+        return true;
+    };
+    if is_single_letter_abbreviation(previous)
+        && next_word(tokens, idx).is_some_and(is_single_letter_abbreviation)
+    {
+        return false;
+    }
+    let previous_key = normalize_abbreviation(previous);
+    let usage = options
+        .abbreviations
+        .get(&previous_key)
+        .copied()
+        .or_else(|| is_single_letter_abbreviation(previous).then_some(AbbreviationUsage::Regular));
+    let Some(usage) = usage else {
+        return true;
+    };
+    match usage {
+        AbbreviationUsage::Inner => false,
+        AbbreviationUsage::Regular => next_word_is_sentence_starter(tokens, idx, options),
+        AbbreviationUsage::Reference => !next_word(tokens, idx).is_some_and(is_numeric_token),
+        AbbreviationUsage::Unit => {
+            if previous_word_before(tokens, idx, previous).is_some_and(is_numeric_token) {
+                next_word_is_sentence_starter(tokens, idx, options)
+            } else {
+                true
+            }
+        }
+    }
+}
+
+fn previous_word(tokens: &[String], idx: usize) -> Option<&str> {
+    tokens[..idx]
+        .iter()
+        .rev()
+        .find(|token| token.chars().any(char::is_alphanumeric))
+        .map(String::as_str)
+}
+
+fn previous_word_before<'a>(tokens: &'a [String], idx: usize, previous: &str) -> Option<&'a str> {
+    let mut seen_previous = false;
+    for token in tokens[..idx].iter().rev() {
+        if !token.chars().any(char::is_alphanumeric) {
+            continue;
+        }
+        if !seen_previous && token == previous {
+            seen_previous = true;
+            continue;
+        }
+        if seen_previous {
+            return Some(token);
+        }
+    }
+    None
+}
+
+fn next_word(tokens: &[String], idx: usize) -> Option<&str> {
+    tokens[idx + 1..]
+        .iter()
+        .find(|token| token.chars().any(char::is_alphanumeric))
+        .map(String::as_str)
+}
+
+fn next_word_is_sentence_starter(
+    tokens: &[String],
+    idx: usize,
+    options: &AddSentenceDetailsOptions,
+) -> bool {
+    let Some(word) = next_word(tokens, idx) else {
+        return true;
+    };
+    word.chars().next().is_some_and(char::is_uppercase)
+        && options.starters.contains(&word.to_ascii_lowercase())
+}
+
+fn is_numeric_token(token: &str) -> bool {
+    token.chars().any(char::is_numeric)
+        && token
+            .chars()
+            .all(|ch| ch.is_numeric() || matches!(ch, '.' | ',' | '_' | '+' | '-'))
+}
+
+fn is_single_letter_abbreviation(token: &str) -> bool {
+    token.chars().count() == 1 && token.chars().all(char::is_alphabetic)
+}
+
+fn parse_abbreviations(value: &Value) -> BuiltinResult<HashMap<String, AbbreviationUsage>> {
+    if let Value::Object(object) = value {
+        let variables = table_variables(object).map_err(|err| {
+            text_analytics_error(
+                "addSentenceDetails",
+                format!("addSentenceDetails: invalid Abbreviations table: {err}"),
+            )
+        })?;
+        let abbreviations = variables.fields.get("Abbreviation").ok_or_else(|| {
+            text_analytics_error(
+                "addSentenceDetails",
+                "addSentenceDetails: Abbreviations table must contain an Abbreviation variable",
+            )
+        })?;
+        let usages = variables.fields.get("Usage").ok_or_else(|| {
+            text_analytics_error(
+                "addSentenceDetails",
+                "addSentenceDetails: Abbreviations table must contain a Usage variable",
+            )
+        })?;
+        let abbreviations = words_or_categorical_labels(abbreviations)?;
+        let usages = words_or_categorical_labels(usages)?;
+        if abbreviations.len() != usages.len() {
+            return Err(text_analytics_error(
+                "addSentenceDetails",
+                "addSentenceDetails: Abbreviations and Usage variables must have the same length",
+            ));
+        }
+        let mut out = HashMap::new();
+        for (abbreviation, usage) in abbreviations.into_iter().zip(usages) {
+            out.insert(
+                normalize_abbreviation(&abbreviation),
+                parse_abbreviation_usage(&usage)?,
+            );
+        }
+        return Ok(out);
+    }
+
+    let mut out = HashMap::new();
+    for abbreviation in words_from_word_vector(value, "addSentenceDetails")? {
+        out.insert(
+            normalize_abbreviation(&abbreviation),
+            AbbreviationUsage::Regular,
+        );
+    }
+    Ok(out)
+}
+
+fn parse_sentence_starters(value: &Value) -> BuiltinResult<HashSet<String>> {
+    Ok(words_or_categorical_labels(value)?
+        .into_iter()
+        .map(|word| word.trim().to_ascii_lowercase())
+        .filter(|word| !word.is_empty())
+        .collect())
+}
+
+fn words_or_categorical_labels(value: &Value) -> BuiltinResult<Vec<String>> {
+    if matches!(value, Value::Object(_)) {
+        if let Ok(labels) = categorical_labels(value) {
+            return Ok(labels);
+        }
+    }
+    words_from_word_vector(value, "addSentenceDetails")
+}
+
+fn parse_abbreviation_usage(value: &str) -> BuiltinResult<AbbreviationUsage> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "regular" => Ok(AbbreviationUsage::Regular),
+        "inner" => Ok(AbbreviationUsage::Inner),
+        "reference" => Ok(AbbreviationUsage::Reference),
+        "unit" => Ok(AbbreviationUsage::Unit),
+        other => Err(text_analytics_error(
+            "addSentenceDetails",
+            format!("addSentenceDetails: unsupported abbreviation Usage '{other}'"),
+        )),
+    }
+}
+
+fn normalize_abbreviation(value: &str) -> String {
+    value.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
+fn default_abbreviations() -> HashMap<String, AbbreviationUsage> {
+    [
+        ("mr", AbbreviationUsage::Inner),
+        ("mrs", AbbreviationUsage::Inner),
+        ("ms", AbbreviationUsage::Inner),
+        ("dr", AbbreviationUsage::Inner),
+        ("prof", AbbreviationUsage::Inner),
+        ("sr", AbbreviationUsage::Inner),
+        ("jr", AbbreviationUsage::Inner),
+        ("st", AbbreviationUsage::Inner),
+        ("vs", AbbreviationUsage::Regular),
+        ("etc", AbbreviationUsage::Regular),
+        ("appt", AbbreviationUsage::Regular),
+        ("fig", AbbreviationUsage::Reference),
+        ("eq", AbbreviationUsage::Reference),
+        ("sec", AbbreviationUsage::Reference),
+        ("cm", AbbreviationUsage::Unit),
+        ("mm", AbbreviationUsage::Unit),
+        ("in", AbbreviationUsage::Unit),
+        ("ft", AbbreviationUsage::Unit),
+    ]
+    .into_iter()
+    .map(|(abbr, usage)| (abbr.to_string(), usage))
+    .collect()
+}
+
+fn default_sentence_starters() -> HashSet<String> {
+    let mut starters = stop_words_for_language(StopWordsLanguage::English)
+        .iter()
+        .map(|word| (*word).to_string())
+        .collect::<HashSet<_>>();
+    starters.extend(
+        [
+            "another",
+            "here",
+            "let",
+            "try",
+            "today",
+            "tomorrow",
+            "yesterday",
+        ]
+        .into_iter()
+        .map(str::to_string),
+    );
+    starters
+}
+
+fn validate_sentence_number_shapes(
+    documents: &[Vec<String>],
+    stored: Option<&[Vec<f64>]>,
+) -> BuiltinResult<()> {
+    let Some(stored) = stored else {
+        return Ok(());
+    };
+    if stored.len() != documents.len() {
+        return Err(text_analytics_error(
+            "tokenDetails",
+            format!(
+                "tokenDetails: SentenceNumbers has {} documents but Documents has {}",
+                stored.len(),
+                documents.len()
+            ),
+        ));
+    }
+    for (idx, (numbers, doc)) in stored.iter().zip(documents).enumerate() {
+        if numbers.len() != doc.len() {
+            return Err(text_analytics_error(
+                "tokenDetails",
+                format!(
+                    "tokenDetails: SentenceNumbers entry {} has {} values but document has {} tokens",
+                    idx + 1,
+                    numbers.len(),
+                    doc.len()
+                ),
+            ));
+        }
+        if numbers
+            .iter()
+            .any(|value| !value.is_finite() || *value < 1.0 || value.fract() != 0.0)
+        {
+            return Err(text_analytics_error(
+                "tokenDetails",
+                format!(
+                    "tokenDetails: SentenceNumbers entry {} contains invalid sentence numbers",
+                    idx + 1
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn type_details_from_object(
     object: &ObjectInstance,
     fn_name: &str,
@@ -409,6 +905,32 @@ fn type_details_from_object(
             ));
         };
         out.push(array.data.clone());
+    }
+    Ok(Some(out))
+}
+
+fn sentence_numbers_from_object(
+    object: &ObjectInstance,
+    fn_name: &str,
+) -> BuiltinResult<Option<Vec<Vec<f64>>>> {
+    let Some(value) = object.properties.get(SENTENCE_NUMBERS_PROPERTY) else {
+        return Ok(None);
+    };
+    let Value::Cell(cell) = value else {
+        return Err(text_analytics_error(
+            fn_name,
+            format!("{fn_name}: tokenizedDocument object has invalid SentenceNumbers property"),
+        ));
+    };
+    let mut out = Vec::with_capacity(cell.data.len());
+    for item in &cell.data {
+        let Value::Tensor(tensor) = item else {
+            return Err(text_analytics_error(
+                fn_name,
+                format!("{fn_name}: tokenizedDocument object has invalid SentenceNumbers entry"),
+            ));
+        };
+        out.push(tensor.data.clone());
     }
     Ok(Some(out))
 }
@@ -437,7 +959,9 @@ fn logical_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
 mod tests {
     use super::*;
     use crate::builtins::strings::text_analytics::documents::tokenized_document_builtin;
-    use crate::builtins::table::{table_variable_names_from_object, table_variables};
+    use crate::builtins::table::{
+        categorical_from_args, table_variable_names_from_object, table_variables,
+    };
     use runmat_builtins::LogicalArray;
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -450,6 +974,10 @@ mod tests {
 
     fn run_add_type(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(add_type_details_builtin(args))
+    }
+
+    fn run_add_sentence(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(add_sentence_details_builtin(args))
     }
 
     fn object(value: Value) -> ObjectInstance {
@@ -480,6 +1008,233 @@ mod tests {
             Value::Tensor(tensor) => tensor.data,
             other => panic!("expected numeric column {name}, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn add_sentence_details_adds_sentence_number_column() {
+        let docs = run_tokenized(vec![Value::StringArray(
+            StringArray::new(
+                vec![
+                    "This is an example document. It has two sentences.".to_string(),
+                    "This document has one sentence.".to_string(),
+                    "Here is another example document. It also has two sentences.".to_string(),
+                ],
+                vec![3, 1],
+            )
+            .unwrap(),
+        )])
+        .expect("tokenized");
+        let updated = run_add_sentence(vec![docs]).expect("sentences");
+        let table = object(run_token_details(updated).expect("details"));
+
+        assert_eq!(
+            table_variable_names_from_object(&table).expect("names"),
+            vec![
+                "Token",
+                "DocumentNumber",
+                "SentenceNumber",
+                "LineNumber",
+                "Type",
+                "Language"
+            ]
+        );
+        assert_eq!(
+            numeric_column(&table, "SentenceNumber"),
+            vec![
+                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0
+            ]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn add_sentence_details_handles_abbreviations_and_starters() {
+        let docs = run_tokenized(vec![Value::String(
+            "Dr. Smith measured 30 in. The width is 10 in. wide. Try fig. 3.".into(),
+        )])
+        .expect("tokenized");
+        let updated = run_add_sentence(vec![docs]).expect("sentences");
+        let table = object(run_token_details(updated).expect("details"));
+        assert_eq!(
+            string_column(&table, "Token"),
+            vec![
+                "Dr", ".", "Smith", "measured", "30", "in", ".", "The", "width", "is", "10", "in",
+                ".", "wide", ".", "Try", "fig", ".", "3", "."
+            ]
+        );
+        assert_eq!(
+            numeric_column(&table, "SentenceNumber"),
+            vec![
+                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 3.0,
+                3.0, 3.0, 3.0, 3.0
+            ]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn add_sentence_details_accepts_custom_abbreviations_and_starters() {
+        let docs = run_tokenized(vec![Value::String(
+            "Book an appt. We'll meet then. Book an appt. today.".into(),
+        )])
+        .expect("tokenized");
+        let updated = run_add_sentence(vec![
+            docs,
+            Value::String("Abbreviations".into()),
+            Value::String("appt".into()),
+            Value::String("Starters".into()),
+            Value::StringArray(StringArray::new(vec!["we'll".into()], vec![1, 1]).unwrap()),
+        ])
+        .expect("sentences");
+        let table = object(run_token_details(updated).expect("details"));
+        assert_eq!(
+            numeric_column(&table, "SentenceNumber"),
+            vec![1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn add_sentence_details_accepts_abbreviation_usage_table() {
+        let docs = run_tokenized(vec![Value::String(
+            "The dept. chair spoke. See ref. 2. Try ref. again.".into(),
+        )])
+        .expect("tokenized");
+        let abbreviations = table_from_columns(
+            vec!["Abbreviation".into(), "Usage".into()],
+            vec![
+                Value::StringArray(
+                    StringArray::new(vec!["dept".into(), "ref".into()], vec![2, 1]).unwrap(),
+                ),
+                Value::StringArray(
+                    StringArray::new(vec!["inner".into(), "reference".into()], vec![2, 1]).unwrap(),
+                ),
+            ],
+        )
+        .expect("abbreviation table");
+
+        let updated = run_add_sentence(vec![
+            docs,
+            Value::String("Abbreviations".into()),
+            abbreviations,
+        ])
+        .expect("sentences");
+        let table = object(run_token_details(updated).expect("details"));
+        assert_eq!(
+            numeric_column(&table, "SentenceNumber"),
+            vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0, 4.0]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn add_sentence_details_does_not_split_inside_initialisms() {
+        let docs =
+            run_tokenized(vec![Value::String("U.S.A. Today wins.".into())]).expect("tokenized");
+        let updated = run_add_sentence(vec![docs]).expect("sentences");
+        let table = object(run_token_details(updated).expect("details"));
+        assert_eq!(
+            string_column(&table, "Token"),
+            vec!["U", ".", "S", ".", "A", ".", "Today", "wins", "."]
+        );
+        assert_eq!(
+            numeric_column(&table, "SentenceNumber"),
+            vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn add_sentence_details_accepts_categorical_abbreviation_usage() {
+        let docs =
+            run_tokenized(vec![Value::String("The dept. chair spoke.".into())]).expect("tokenized");
+        let usage = categorical_from_args(vec![Value::StringArray(
+            StringArray::new(vec!["inner".into()], vec![1, 1]).unwrap(),
+        )])
+        .expect("categorical usage");
+        let abbreviations = table_from_columns(
+            vec!["Abbreviation".into(), "Usage".into()],
+            vec![
+                Value::StringArray(StringArray::new(vec!["dept".into()], vec![1, 1]).unwrap()),
+                usage,
+            ],
+        )
+        .expect("abbreviation table");
+
+        let updated = run_add_sentence(vec![
+            docs,
+            Value::String("Abbreviations".into()),
+            abbreviations,
+        ])
+        .expect("sentences");
+        let table = object(run_token_details(updated).expect("details"));
+        assert_eq!(
+            numeric_column(&table, "SentenceNumber"),
+            vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn token_details_rejects_malformed_sentence_numbers() {
+        let docs =
+            object(run_tokenized(vec![Value::String("One. Two.".into())]).expect("tokenized"));
+        let mut malformed = docs.clone();
+        malformed.properties.insert(
+            SENTENCE_NUMBERS_PROPERTY.to_string(),
+            Value::Cell(
+                CellArray::new(
+                    vec![Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap())],
+                    1,
+                    1,
+                )
+                .unwrap(),
+            ),
+        );
+        let err = run_token_details(Value::Object(malformed)).expect_err("expected error");
+        assert!(err.to_string().contains("SentenceNumbers entry"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn add_sentence_details_preserves_existing_numbers_unless_discarding() {
+        let docs =
+            object(run_tokenized(vec![Value::String("One. Two.".into())]).expect("tokenized"));
+        let mut stale = docs.clone();
+        stale.properties.insert(
+            SENTENCE_NUMBERS_PROPERTY.to_string(),
+            Value::Cell(
+                CellArray::new(
+                    vec![Value::Tensor(
+                        Tensor::new(vec![7.0, 7.0, 7.0, 7.0], vec![1, 4]).unwrap(),
+                    )],
+                    1,
+                    1,
+                )
+                .unwrap(),
+            ),
+        );
+
+        let preserved = run_add_sentence(vec![Value::Object(stale.clone())]).expect("preserve");
+        let table = object(run_token_details(preserved).expect("details"));
+        assert_eq!(
+            numeric_column(&table, "SentenceNumber"),
+            vec![7.0, 7.0, 7.0, 7.0]
+        );
+
+        let recomputed = run_add_sentence(vec![
+            Value::Object(stale),
+            Value::String("DiscardKnownValues".into()),
+            Value::Bool(true),
+        ])
+        .expect("recompute");
+        let table = object(run_token_details(recomputed).expect("details"));
+        assert_eq!(
+            numeric_column(&table, "SentenceNumber"),
+            vec![1.0, 1.0, 2.0, 2.0]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

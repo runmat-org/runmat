@@ -2197,6 +2197,70 @@
       ]
     },
     {
+      "name": "addSentenceDetails",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "newDocuments = addSentenceDetails(documents)",
+          "inputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "newDocuments",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Updated tokenized document object."
+            }
+          ]
+        },
+        {
+          "label": "newDocuments = addSentenceDetails(documents,Name,Value)",
+          "inputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: Abbreviations, Starters, DiscardKnownValues."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "newDocuments",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Updated tokenized document object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TEXT_ANALYTICS.ADD_SENTENCE_DETAILS.INVALID_INPUT",
+          "identifier": "RunMat:addSentenceDetails:InvalidInput",
+          "when": "Input is not a supported tokenizedDocument object or option form.",
+          "message": "addSentenceDetails: invalid input"
+        }
+      ]
+    },
+    {
       "name": "addTypeDetails",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -2218,7 +2282,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Tokenized document object with token type details."
+              "description": "Updated tokenized document object."
             }
           ]
         },
@@ -2246,7 +2310,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Tokenized document object with token type details."
+              "description": "Updated tokenized document object."
             }
           ]
         }

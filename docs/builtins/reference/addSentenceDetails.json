@@ -1,0 +1,101 @@
+{
+  "title": "addSentenceDetails",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "addSentenceDetails",
+    "tokenizedDocument",
+    "text analytics",
+    "sentence numbers",
+    "token details"
+  ],
+  "summary": "Add sentence numbers to tokenized documents.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`addSentenceDetails` analyzes host token strings and updates tokenizedDocument metadata; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::details::tests",
+    "integration": null
+  },
+  "description": "`addSentenceDetails(documents)` detects sentence boundaries in a RunMat `tokenizedDocument` compatibility object and stores one `SentenceNumber` value per token. Use `tokenDetails` to view the resulting table column.",
+  "behaviors": [
+    "`documents` must be a RunMat `tokenizedDocument` object.",
+    "RunMat assigns sentence numbers from terminating punctuation tokens `.`, `!`, `?`, and common Japanese/Korean equivalents.",
+    "`Abbreviations` accepts a character vector, string array, cell array of character vectors, or a table with `Abbreviation` and `Usage` variables.",
+    "Text abbreviation lists are treated as `regular` abbreviations. Table `Usage` values can be text or categorical values of `regular`, `inner`, `reference`, or `unit`.",
+    "`Starters` accepts a character vector, string array, cell array of character vectors, or categorical vector and controls whether regular abbreviations break before capitalized starter words. The default starter list is based on RunMat's English `stopWords` list plus common sentence starters.",
+    "`DiscardKnownValues` defaults to `false`; existing complete positive integer sentence-number details are preserved. Set it to `true` to recompute every sentence number.",
+    "Single-letter initialisms such as `U.S.A.` are treated as regular abbreviations and are not split inside the initialism.",
+    "RunMat's sentence detector is token-level and deterministic. Exact MathWorks statistical sentence boundary models, emoji-after-terminator placement, line-provenance-aware splitting, and Japanese/Korean MeCab behavior remain broader Text Analytics work."
+  ],
+  "examples": [
+    {
+      "description": "Add Sentence Details",
+      "input": "documents = tokenizedDocument([\"This is an example document. It has two sentences.\"; \"This document has one sentence.\"]);\ndocuments = addSentenceDetails(documents);\ntdetails = tokenDetails(documents)",
+      "output": "`tdetails` includes a `SentenceNumber` column."
+    },
+    {
+      "description": "Use Custom Abbreviations",
+      "input": "documents = tokenizedDocument(\"Book an appt. We'll meet then.\");\ndocuments = addSentenceDetails(documents, \"Abbreviations\", \"appt\", \"Starters\", \"we'll\")",
+      "output": "`appt.` is treated as a regular abbreviation and breaks only before the configured starter."
+    },
+    {
+      "description": "Recompute Sentence Details",
+      "input": "documents = addSentenceDetails(documents, \"DiscardKnownValues\", true)",
+      "output": "`documents` has refreshed sentence-number details."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `addSentenceDetails` support abbreviation tables?",
+      "answer": "Yes. The table must contain `Abbreviation` and `Usage` variables, and `Usage` values can be text or categorical `regular`, `inner`, `reference`, or `unit` values."
+    },
+    {
+      "question": "Does `addSentenceDetails` execute on the GPU?",
+      "answer": "No. It updates host tokenizedDocument metadata."
+    }
+  ],
+  "links": [
+    {
+      "label": "tokenDetails",
+      "url": "./tokenDetails"
+    },
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "addTypeDetails",
+      "url": "./addTypeDetails"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "updatedDocuments = addSentenceDetails(documents)\nupdatedDocuments = addSentenceDetails(documents, 'Abbreviations', abbreviations)\nupdatedDocuments = addSentenceDetails(documents, 'Starters', starters)\nupdatedDocuments = addSentenceDetails(documents, 'DiscardKnownValues', tf)",
+      "output": "`updatedDocuments` is a `tokenizedDocument` compatibility object."
+    },
+    "points": [
+      "`documents` must be a RunMat `tokenizedDocument` object.",
+      "`abbreviations` can be text or a table with `Abbreviation` and `Usage` variables.",
+      "`starters` must be a text or categorical vector.",
+      "`tf` must be a logical scalar or numeric 0/1 scalar.",
+      "Use `tokenDetails(updatedDocuments)` to view the resulting `SentenceNumber` table column."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/details.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/details.rs"
+  },
+  "gpu_residency": "`addSentenceDetails` updates host tokenizedDocument metadata and has no provider kernel."
+}

@@ -356,6 +356,7 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
         "removeLongWords" => "RunMat:removeLongWords:InvalidInput",
         "tokenDetails" => "RunMat:tokenDetails:InvalidInput",
         "addTypeDetails" => "RunMat:addTypeDetails:InvalidInput",
+        "addSentenceDetails" => "RunMat:addSentenceDetails:InvalidInput",
         "vaderSentimentScores" => "RunMat:vaderSentimentScores:InvalidInput",
         _ => "RunMat:textAnalyticsDocuments:InvalidInput",
     };
@@ -383,6 +384,7 @@ fn ensure_tokenized_document_class_registered() {
             "TopLevelDomains",
             "TopLevelDomainsCustom",
             "TypeDetails",
+            "SentenceNumbers",
         ] {
             properties.insert(name.to_string(), property_def(name));
         }
@@ -1536,7 +1538,7 @@ fn starts_with_ascii_ci(text: &str, prefix: &str) -> bool {
 }
 
 fn strip_ascii_prefix<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
-    starts_with_ascii_ci(text, prefix).then_some(&text[prefix.len()..])
+    starts_with_ascii_ci(text, prefix).then(|| &text[prefix.len()..])
 }
 
 fn domain_host_has_valid_tld_shape(host: &str) -> bool {
