@@ -1,0 +1,103 @@
+{
+  "title": "extractFileText",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "extractFileText",
+    "text analytics",
+    "file",
+    "HTML",
+    "DOCX",
+    "plain text"
+  ],
+  "summary": "Read text from plain text, HTML, and DOCX files.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`extractFileText` performs host file IO and text parsing; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 5,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::file_text::tests",
+    "integration": null
+  },
+  "description": "`extractFileText(filename)` reads text from a host file and returns a string scalar. This slice supports plain text files with encodings, HTML files through RunMat's `extractHTMLText` parser, and DOCX files by extracting `word/document.xml` text.",
+  "behaviors": [
+    "`filename` may be a string scalar, character vector, scalar string array, or 1-by-1 cell containing a text filename.",
+    "Plain text files are decoded as UTF-8 by default. The `Encoding` name-value option accepts labels supported by `encoding_rs`, such as `UTF-8`, `windows-1252`, and `ISO-8859-1`.",
+    "HTML files with extensions `.html`, `.htm`, and `.xhtml` are decoded as text and passed to `extractHTMLText`.",
+    "For HTML files, `ExtractionMethod` accepts `\"tree\"`, `\"article\"`, or `\"all-text\"` and follows the existing `extractHTMLText` compatibility behavior.",
+    "DOCX files are read as zip archives and text is extracted from `word/document.xml`, preserving paragraph breaks and basic tabs/line breaks.",
+    "PDF extraction, website/URL fetching, password-protected documents, PDF page selection, legacy binary DOC, and full Microsoft Word layout fidelity remain tracked by the broader Text Analytics compatibility issue.",
+    "Unknown file extensions are treated as plain text files."
+  ],
+  "examples": [
+    {
+      "description": "Read Plain Text",
+      "input": "str = extractFileText(\"notes.txt\")",
+      "output": "`str` is the file contents as a string scalar."
+    },
+    {
+      "description": "Read HTML Text",
+      "input": "str = extractFileText(\"page.html\", \"ExtractionMethod\", \"all-text\")",
+      "output": "`str` contains visible text extracted from the HTML file."
+    },
+    {
+      "description": "Read DOCX Text",
+      "input": "str = extractFileText(\"report.docx\")",
+      "output": "`str` contains the text runs from the DOCX main document part."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `extractFileText` support PDF files?",
+      "answer": "Not yet. RunMat rejects PDF-specific forms with a clear error and keeps PDF extraction in the broader Text Analytics queue."
+    },
+    {
+      "question": "Does `extractFileText` read websites?",
+      "answer": "Not in this slice. URL extraction requires web fetching behavior and remains tracked."
+    },
+    {
+      "question": "Does `extractFileText` execute on the GPU?",
+      "answer": "No. It performs host file IO and text parsing."
+    }
+  ],
+  "links": [
+    {
+      "label": "extractHTMLText",
+      "url": "./extractHTMLText"
+    },
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "str = extractFileText(filename)\nstr = extractFileText(filename, \"Encoding\", encoding)\nstr = extractFileText(filename, \"ExtractionMethod\", method)",
+      "output": "`str` is a string scalar."
+    },
+    "points": [
+      "`Encoding` applies to plain text and HTML decoding in RunMat.",
+      "`ExtractionMethod` is supported for HTML files only.",
+      "`Password` and `Pages` are recognized as PDF-only options but remain unsupported until PDF extraction is implemented."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/file_text.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/file_text.rs"
+  },
+  "gpu_residency": "`extractFileText` performs host file IO and text parsing and has no provider kernel."
+}

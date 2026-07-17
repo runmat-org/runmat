@@ -28091,6 +28091,82 @@
       ]
     },
     {
+      "name": "extractFileText",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "str = extractFileText(filename)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Path to a text, HTML, or DOCX file."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "str",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Extracted text."
+            }
+          ]
+        },
+        {
+          "label": "str = extractFileText(filename,Name,Value)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Path to a text, HTML, or DOCX file."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: Encoding and ExtractionMethod in this slice."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "str",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Extracted text."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.EXTRACT_FILE_TEXT.INVALID_INPUT",
+          "identifier": "RunMat:extractFileText:InvalidInput",
+          "when": "Inputs do not match a supported extractFileText form.",
+          "message": "extractFileText: invalid input"
+        },
+        {
+          "code": "RM.EXTRACT_FILE_TEXT.IO",
+          "identifier": "RunMat:extractFileText:IOError",
+          "when": "The requested file cannot be read.",
+          "message": "extractFileText: file read failed"
+        },
+        {
+          "code": "RM.EXTRACT_FILE_TEXT.UNSUPPORTED",
+          "identifier": "RunMat:extractFileText:UnsupportedFormat",
+          "when": "The requested file type or option requires unsupported extraction infrastructure.",
+          "message": "extractFileText: unsupported file type or option"
+        }
+      ]
+    },
+    {
       "name": "extractHTMLText",
       "output_mode": "Fixed",
       "completion_policy": "Public",

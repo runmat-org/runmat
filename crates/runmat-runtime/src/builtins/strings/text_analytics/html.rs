@@ -233,7 +233,10 @@ fn html_tree_value(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn extract_html_text_value(value: Value, method: ExtractionMethod) -> BuiltinResult<Value> {
+pub(in crate::builtins::strings::text_analytics) fn extract_html_text_value(
+    value: Value,
+    method: ExtractionMethod,
+) -> BuiltinResult<Value> {
     match value {
         Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
             Ok(Value::String(extract_from_object(&object, method)?))
@@ -328,14 +331,14 @@ fn extract_from_object(object: &ObjectInstance, method: ExtractionMethod) -> Bui
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ExtractionMethod {
+pub(in crate::builtins::strings::text_analytics) enum ExtractionMethod {
     Tree,
     Article,
     AllText,
 }
 
 impl ExtractionMethod {
-    fn parse(value: &str) -> BuiltinResult<Self> {
+    pub(in crate::builtins::strings::text_analytics) fn parse(value: &str) -> BuiltinResult<Self> {
         match value.to_ascii_lowercase().as_str() {
             "tree" => Ok(Self::Tree),
             "article" => Ok(Self::Article),
