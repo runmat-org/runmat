@@ -83023,6 +83023,48 @@
       ]
     },
     {
+      "name": "readWordEmbedding",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "emb = readWordEmbedding(filename)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "UTF-8 word2vec/GloVe text file or zip file containing one."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "emb",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Word embedding compatibility object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.READWORDEMBEDDING.INVALID_INPUT",
+          "identifier": "RunMat:readWordEmbedding:InvalidInput",
+          "when": "Inputs do not match a supported readWordEmbedding form.",
+          "message": "readWordEmbedding received invalid input"
+        },
+        {
+          "code": "RM.READWORDEMBEDDING.IO",
+          "identifier": "RunMat:readWordEmbedding:IOError",
+          "when": "The requested word embedding file cannot be read.",
+          "message": "Unable to read word embedding file"
+        }
+      ]
+    },
+    {
       "name": "readcell",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -108574,6 +108616,98 @@
       ]
     },
     {
+      "name": "vec2word",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "words = vec2word(emb, M)",
+          "inputs": [
+            {
+              "name": "emb",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEmbedding object."
+            },
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Embedding vectors, one vector per row."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closest vocabulary words."
+            }
+          ]
+        },
+        {
+          "label": "[words, dist] = vec2word(emb, M, k, 'Distance', distance)",
+          "inputs": [
+            {
+              "name": "emb",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEmbedding object."
+            },
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Embedding vectors, one vector per row."
+            },
+            {
+              "name": "k",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Number of nearest words."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: Distance ('cosine' or 'euclidean')."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closest vocabulary words."
+            },
+            {
+              "name": "dist",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distances to input vectors."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.VEC2WORD.INVALID_INPUT",
+          "identifier": "RunMat:vec2word:InvalidInput",
+          "when": "Inputs do not match a supported vec2word form.",
+          "message": "vec2word received invalid input"
+        }
+      ]
+    },
+    {
       "name": "vecnorm",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -111103,6 +111237,84 @@
         }
       ],
       "errors": []
+    },
+    {
+      "name": "word2vec",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "M = word2vec(emb, words)",
+          "inputs": [
+            {
+              "name": "emb",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEmbedding object."
+            },
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Words to map to vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Embedding vectors, one word per row."
+            }
+          ]
+        },
+        {
+          "label": "M = word2vec(emb, words, 'IgnoreCase', true)",
+          "inputs": [
+            {
+              "name": "emb",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEmbedding object."
+            },
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Words to map to vectors."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: IgnoreCase."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Embedding vectors, one word per row."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.WORD2VEC.INVALID_INPUT",
+          "identifier": "RunMat:word2vec:InvalidInput",
+          "when": "Inputs do not match a supported word2vec form.",
+          "message": "word2vec received invalid input"
+        }
+      ]
     },
     {
       "name": "write",
