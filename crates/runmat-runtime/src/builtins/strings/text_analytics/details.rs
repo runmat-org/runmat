@@ -1493,6 +1493,36 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn token_details_uses_custom_token_type_details() {
+        let custom_tokens = table_from_columns(
+            vec!["Token".into(), "Type".into()],
+            vec![
+                Value::StringArray(
+                    StringArray::new(vec!["Na+".into(), "H2O".into()], vec![2, 1]).unwrap(),
+                ),
+                Value::StringArray(
+                    StringArray::new(vec!["ion".into(), "formula".into()], vec![2, 1]).unwrap(),
+                ),
+            ],
+        )
+        .expect("custom token table");
+        let docs = run_tokenized(vec![
+            Value::String("Na+ in H2O".to_string()),
+            Value::String("CustomTokens".to_string()),
+            custom_tokens,
+        ])
+        .expect("tokenized");
+        let table = object(run_token_details(docs).expect("details"));
+
+        assert_eq!(string_column(&table, "Token"), vec!["Na+", "in", "H2O"]);
+        assert_eq!(
+            string_column(&table, "Type"),
+            vec!["ion", "letters", "formula"]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn pretokenized_documents_have_minimal_details_until_type_details_are_added() {
         let docs = run_tokenized(vec![
             Value::StringArray(

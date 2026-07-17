@@ -18,6 +18,7 @@ use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::stopwords::{
     stop_words_for_language, StopWordsLanguage,
 };
+use crate::builtins::table::table_variables;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
 pub const TOKENIZED_DOCUMENT_CLASS: &str = "tokenizedDocument";
@@ -83,7 +84,7 @@ const IN_TEXT_REST: [BuiltinParamDescriptor; 2] = [
         arity: BuiltinParamArity::Variadic,
         default: None,
         description:
-            "Name-value options: TokenizeMethod, Language, DetectPatterns, TopLevelDomains.",
+            "Name-value options: TokenizeMethod, Language, DetectPatterns, TopLevelDomains, CustomTokens, RegularExpressions.",
     },
 ];
 
@@ -458,9 +459,10 @@ pub(in crate::builtins::strings::text_analytics) async fn tokenized_document_bui
         None => ParsedDocuments {
             documents: vec![Vec::new()],
             shape: vec![1, 1],
+            type_details: None,
         },
     };
-    tokenized_document_value(parsed.documents, parsed.shape, options)
+    tokenized_document_value(parsed.documents, parsed.shape, options, parsed.type_details)
 }
 
 #[runtime_builtin(
@@ -528,7 +530,7 @@ async fn remove_short_words_builtin(value: Value, len: Value) -> BuiltinResult<V
                 .collect::<Vec<_>>();
             let shape = shape_from_object(&object);
             let options = options_from_document_object(&object);
-            tokenized_document_value(documents, shape, options)
+            tokenized_document_value(documents, shape, options, None)
         }
         Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => {
             remove_short_words_from_bag(object, max_len)
@@ -713,6 +715,8 @@ pub(in crate::builtins::strings::text_analytics) struct DocumentOptions {
     pub(in crate::builtins::strings::text_analytics) detect_patterns: DetectPatterns,
     pub(in crate::builtins::strings::text_analytics) top_level_domains: Vec<String>,
     pub(in crate::builtins::strings::text_analytics) top_level_domains_custom: bool,
+    custom_tokens: Vec<CustomTokenRule>,
+    regular_expressions: Vec<RegexTokenRule>,
 }
 
 impl Default for DocumentOptions {
@@ -723,8 +727,28 @@ impl Default for DocumentOptions {
             detect_patterns: DetectPatterns::All,
             top_level_domains: default_top_level_domains(),
             top_level_domains_custom: false,
+            custom_tokens: Vec::new(),
+            regular_expressions: Vec::new(),
         }
     }
+}
+
+impl DocumentOptions {
+    fn requires_type_details(&self) -> bool {
+        !self.custom_tokens.is_empty() || !self.regular_expressions.is_empty()
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CustomTokenRule {
+    token: String,
+    token_type: String,
+}
+
+#[derive(Clone, Debug)]
+struct RegexTokenRule {
+    regex: Regex,
+    token_type: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -849,13 +873,11 @@ fn parse_tokenized_document_args(
                     parse_top_level_domains(&args[idx + 1], "tokenizedDocument")?;
                 options.top_level_domains_custom = true;
             }
-            "customtokens" | "regularexpressions" => {
-                return Err(text_analytics_error(
-                    "tokenizedDocument",
-                    format!(
-                        "tokenizedDocument: option '{name}' requires custom-token/table token infrastructure and remains tracked by the Text Analytics umbrella"
-                    ),
-                ));
+            "customtokens" => {
+                options.custom_tokens = parse_custom_tokens(&args[idx + 1])?;
+            }
+            "regularexpressions" => {
+                options.regular_expressions = parse_regular_expressions(&args[idx + 1])?;
             }
             _ => {
                 return Err(text_analytics_error(
@@ -983,6 +1005,151 @@ pub(in crate::builtins::strings::text_analytics) fn parse_top_level_domains(
         ));
     }
     Ok(out)
+}
+
+fn parse_custom_tokens(value: &Value) -> BuiltinResult<Vec<CustomTokenRule>> {
+    if let Value::Object(object) = value {
+        let variables = table_variables(object).map_err(|err| {
+            text_analytics_error(
+                "tokenizedDocument",
+                format!("tokenizedDocument: invalid CustomTokens table: {err}"),
+            )
+        })?;
+        if variables.fields.contains_key("Token") || variables.fields.contains_key("Type") {
+            let tokens = text_column(&variables, "Token", "CustomTokens")?;
+            let types = optional_text_column(&variables, "Type", "CustomTokens", tokens.len())?;
+            return custom_token_rules_from_columns(tokens, types);
+        }
+    }
+    let tokens = words_from_word_vector_preserving_missing(value, "tokenizedDocument")?;
+    custom_token_rules_from_columns(tokens, None)
+}
+
+fn parse_regular_expressions(value: &Value) -> BuiltinResult<Vec<RegexTokenRule>> {
+    if let Value::Object(object) = value {
+        let variables = table_variables(object).map_err(|err| {
+            text_analytics_error(
+                "tokenizedDocument",
+                format!("tokenizedDocument: invalid RegularExpressions table: {err}"),
+            )
+        })?;
+        if variables.fields.contains_key("Pattern") || variables.fields.contains_key("Type") {
+            let patterns = text_column(&variables, "Pattern", "RegularExpressions")?;
+            let types =
+                optional_text_column(&variables, "Type", "RegularExpressions", patterns.len())?;
+            return regex_token_rules_from_columns(patterns, types);
+        }
+    }
+    let patterns = words_from_word_vector_preserving_missing(value, "tokenizedDocument")?;
+    regex_token_rules_from_columns(patterns, None)
+}
+
+fn text_column(
+    variables: &runmat_builtins::StructValue,
+    name: &str,
+    option_name: &str,
+) -> BuiltinResult<Vec<String>> {
+    let Some(value) = variables.fields.get(name) else {
+        return Err(text_analytics_error(
+            "tokenizedDocument",
+            format!("tokenizedDocument: {option_name} table must contain a {name} variable"),
+        ));
+    };
+    words_from_word_vector_preserving_missing(value, "tokenizedDocument")
+}
+
+fn optional_text_column(
+    variables: &runmat_builtins::StructValue,
+    name: &str,
+    option_name: &str,
+    expected_len: usize,
+) -> BuiltinResult<Option<Vec<String>>> {
+    let Some(value) = variables.fields.get(name) else {
+        return Ok(None);
+    };
+    let values = words_from_word_vector_preserving_missing(value, "tokenizedDocument")?;
+    if values.len() != expected_len {
+        return Err(text_analytics_error(
+            "tokenizedDocument",
+            format!(
+                "tokenizedDocument: {option_name} table variable {name} has {} rows but expected {expected_len}",
+                values.len()
+            ),
+        ));
+    }
+    Ok(Some(values))
+}
+
+fn custom_token_rules_from_columns(
+    tokens: Vec<String>,
+    types: Option<Vec<String>>,
+) -> BuiltinResult<Vec<CustomTokenRule>> {
+    let mut rules = Vec::new();
+    let mut seen = HashSet::new();
+    for (idx, token) in tokens.into_iter().enumerate() {
+        if is_missing_string(&token) {
+            continue;
+        }
+        if token.is_empty() {
+            return Err(text_analytics_error(
+                "tokenizedDocument",
+                "tokenizedDocument: CustomTokens cannot contain empty tokens",
+            ));
+        }
+        let token_type = types
+            .as_ref()
+            .and_then(|values| values.get(idx))
+            .filter(|value| !is_missing_string(value) && !value.is_empty())
+            .cloned()
+            .unwrap_or_else(|| "custom".to_string());
+        if seen.insert(token.clone()) {
+            rules.push(CustomTokenRule { token, token_type });
+        }
+    }
+    Ok(rules)
+}
+
+fn regex_token_rules_from_columns(
+    patterns: Vec<String>,
+    types: Option<Vec<String>>,
+) -> BuiltinResult<Vec<RegexTokenRule>> {
+    let mut rules = Vec::new();
+    for (idx, pattern) in patterns.into_iter().enumerate() {
+        if is_missing_string(&pattern) {
+            continue;
+        }
+        if pattern.is_empty() {
+            return Err(text_analytics_error(
+                "tokenizedDocument",
+                "tokenizedDocument: RegularExpressions cannot contain empty patterns",
+            ));
+        }
+        let regex = Regex::new(&pattern).map_err(|err| {
+            text_analytics_error(
+                "tokenizedDocument",
+                format!("tokenizedDocument: invalid RegularExpressions pattern '{pattern}': {err}"),
+            )
+        })?;
+        if regex
+            .find("")
+            .is_some_and(|mat| mat.start() == 0 && mat.end() == 0)
+        {
+            return Err(text_analytics_error(
+                "tokenizedDocument",
+                format!(
+                    "tokenizedDocument: RegularExpressions pattern '{pattern}' can match empty text"
+                ),
+            ));
+        }
+        let token_type = types
+            .as_ref()
+            .and_then(|values| values.get(idx))
+            .filter(|value| !is_missing_string(value) && !value.is_empty())
+            .cloned()
+            .unwrap_or_else(|| "custom".to_string());
+        rules.push(RegexTokenRule { regex, token_type });
+    }
+    Ok(rules)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1210,6 +1377,12 @@ fn comparable_word(word: &str, ignore_case: bool) -> String {
 struct ParsedDocuments {
     documents: Vec<Vec<String>>,
     shape: Vec<usize>,
+    type_details: Option<Vec<Vec<String>>>,
+}
+
+struct TokenizedText {
+    tokens: Vec<String>,
+    types: Option<Vec<String>>,
 }
 
 fn documents_from_value(value: Value, options: &DocumentOptions) -> BuiltinResult<ParsedDocuments> {
@@ -1221,25 +1394,36 @@ fn documents_from_value(value: Value, options: &DocumentOptions) -> BuiltinResul
 
 fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<ParsedDocuments> {
     match value {
-        Value::String(text) => Ok(ParsedDocuments {
-            documents: vec![tokenize_text(&text, options)],
-            shape: vec![1, 1],
-        }),
+        Value::String(text) => {
+            let tokenized = tokenize_text(&text, options);
+            Ok(ParsedDocuments {
+                type_details: tokenized.types.clone().map(|types| vec![types]),
+                documents: vec![tokenized.tokens],
+                shape: vec![1, 1],
+            })
+        }
         Value::StringArray(array) => {
             let shape = array.shape.clone();
+            let mut docs = Vec::with_capacity(array.data.len());
+            let mut type_details = options.requires_type_details().then(Vec::new);
+            for text in array.data {
+                let tokenized = if is_missing_string(&text) {
+                    TokenizedText {
+                        tokens: Vec::new(),
+                        types: type_details.as_ref().map(|_| Vec::new()),
+                    }
+                } else {
+                    tokenize_text(&text, options)
+                };
+                if let Some(details) = &mut type_details {
+                    details.push(tokenized.types.unwrap_or_default());
+                }
+                docs.push(tokenized.tokens);
+            }
             Ok(ParsedDocuments {
-                documents: array
-                    .data
-                    .into_iter()
-                    .map(|text| {
-                        if is_missing_string(&text) {
-                            Vec::new()
-                        } else {
-                            tokenize_text(&text, options)
-                        }
-                    })
-                    .collect(),
+                documents: docs,
                 shape,
+                type_details,
             })
         }
         Value::CharArray(array) if array.rows <= 1 => {
@@ -1248,35 +1432,49 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
             } else {
                 char_row_to_string_slice(&array.data, array.cols, 0)
             };
+            let tokenized = tokenize_text(&text, options);
             Ok(ParsedDocuments {
-                documents: vec![tokenize_text(&text, options)],
+                type_details: tokenized.types.clone().map(|types| vec![types]),
+                documents: vec![tokenized.tokens],
                 shape: vec![1, 1],
             })
         }
         Value::CharArray(array) => {
             let mut docs = Vec::with_capacity(array.rows);
+            let mut type_details = options.requires_type_details().then(Vec::new);
             for row in 0..array.rows {
-                docs.push(tokenize_text(
+                let tokenized = tokenize_text(
                     &char_row_to_string_slice(&array.data, array.cols, row),
                     options,
-                ));
+                );
+                if let Some(details) = &mut type_details {
+                    details.push(tokenized.types.unwrap_or_default());
+                }
+                docs.push(tokenized.tokens);
             }
             Ok(ParsedDocuments {
                 documents: docs,
                 shape: vec![array.rows, 1],
+                type_details,
             })
         }
         Value::Cell(cell) => {
             let shape = cell.shape.clone();
             let mut docs = Vec::with_capacity(cell.data.len());
+            let mut type_details = options.requires_type_details().then(Vec::new);
             for item in cell.data {
                 let text = scalar_text(&item, "tokenizedDocument")
                     .map_err(|err| text_analytics_error("tokenizedDocument", err.to_string()))?;
-                docs.push(tokenize_text(&text, options));
+                let tokenized = tokenize_text(&text, options);
+                if let Some(details) = &mut type_details {
+                    details.push(tokenized.types.unwrap_or_default());
+                }
+                docs.push(tokenized.tokens);
             }
             Ok(ParsedDocuments {
                 documents: docs,
                 shape,
+                type_details,
             })
         }
         other => Err(text_analytics_error(
@@ -1291,6 +1489,7 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
         Value::String(text) => Ok(ParsedDocuments {
             documents: vec![vec![text]],
             shape: vec![1, 1],
+            type_details: None,
         }),
         Value::StringArray(array) => Ok(ParsedDocuments {
             documents: vec![array
@@ -1299,6 +1498,7 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
                 .filter(|text| !is_missing_string(text))
                 .collect()],
             shape: vec![1, 1],
+            type_details: None,
         }),
         Value::CharArray(array) if array.rows <= 1 => {
             let text = if array.rows == 0 {
@@ -1309,6 +1509,7 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
             Ok(ParsedDocuments {
                 documents: vec![vec![text]],
                 shape: vec![1, 1],
+                type_details: None,
             })
         }
         Value::Cell(cell) => {
@@ -1323,6 +1524,7 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
                             .cloned()
                             .collect()],
                         shape: vec![1, 1],
+                        type_details: None,
                     });
                 }
             }
@@ -1349,11 +1551,13 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
                 Ok(ParsedDocuments {
                     documents: docs,
                     shape,
+                    type_details: None,
                 })
             } else {
                 Ok(ParsedDocuments {
                     documents: vec![docs.into_iter().flatten().collect()],
                     shape: vec![1, 1],
+                    type_details: None,
                 })
             }
         }
@@ -1364,8 +1568,9 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
     }
 }
 
-fn tokenize_text(text: &str, options: &DocumentOptions) -> Vec<String> {
+fn tokenize_text(text: &str, options: &DocumentOptions) -> TokenizedText {
     let mut tokens = Vec::new();
+    let mut types = options.requires_type_details().then(Vec::new);
     let mut pos = 0;
     while pos < text.len() {
         let rest = &text[pos..];
@@ -1375,7 +1580,22 @@ fn tokenize_text(text: &str, options: &DocumentOptions) -> Vec<String> {
                 continue;
             }
         }
+        if let Some((token, token_type, end)) = custom_or_regex_token_at(text, pos, options) {
+            if let Some(types) = &mut types {
+                types.push(token_type);
+            }
+            tokens.push(token);
+            pos = end;
+            continue;
+        }
         if let Some((token, end)) = complex_token_at(text, pos, options) {
+            if let Some(types) = &mut types {
+                types.push(
+                    document_token_type_with_options(&token, options)
+                        .as_str()
+                        .to_string(),
+                );
+            }
             tokens.push(token);
             pos = end;
             continue;
@@ -1394,13 +1614,66 @@ fn tokenize_text(text: &str, options: &DocumentOptions) -> Vec<String> {
                     break;
                 }
             }
-            tokens.push(text[start..pos].to_string());
+            let token = text[start..pos].to_string();
+            if let Some(types) = &mut types {
+                types.push(
+                    document_token_type_with_options(&token, options)
+                        .as_str()
+                        .to_string(),
+                );
+            }
+            tokens.push(token);
             continue;
         }
-        tokens.push(ch.to_string());
+        let token = ch.to_string();
+        if let Some(types) = &mut types {
+            types.push(
+                document_token_type_with_options(&token, options)
+                    .as_str()
+                    .to_string(),
+            );
+        }
+        tokens.push(token);
         pos += ch.len_utf8();
     }
-    tokens
+    TokenizedText { tokens, types }
+}
+
+fn custom_or_regex_token_at(
+    text: &str,
+    pos: usize,
+    options: &DocumentOptions,
+) -> Option<(String, String, usize)> {
+    let rest = &text[pos..];
+    let mut regex_match = None;
+    for rule in &options.regular_expressions {
+        let Some(mat) = rule.regex.find(rest) else {
+            continue;
+        };
+        if mat.start() == 0 && mat.end() > 0 {
+            regex_match = Some((
+                rest[..mat.end()].to_string(),
+                rule.token_type.clone(),
+                pos + mat.end(),
+            ));
+        }
+    }
+    if regex_match.is_some() {
+        return regex_match;
+    }
+
+    options
+        .custom_tokens
+        .iter()
+        .filter(|rule| rest.starts_with(&rule.token))
+        .max_by_key(|rule| rule.token.len())
+        .map(|rule| {
+            (
+                rule.token.clone(),
+                rule.token_type.clone(),
+                pos + rule.token.len(),
+            )
+        })
 }
 
 fn complex_token_at(text: &str, pos: usize, options: &DocumentOptions) -> Option<(String, usize)> {
@@ -1611,6 +1884,7 @@ fn tokenized_document_value(
     documents: Vec<Vec<String>>,
     shape: Vec<usize>,
     options: DocumentOptions,
+    type_details: Option<Vec<Vec<String>>>,
 ) -> BuiltinResult<Value> {
     ensure_tokenized_document_class_registered();
     let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
@@ -1669,7 +1943,27 @@ fn tokenized_document_value(
         "TopLevelDomainsCustom".to_string(),
         Value::Bool(options.top_level_domains_custom),
     );
+    if let Some(type_details) = type_details {
+        object
+            .properties
+            .insert("TypeDetails".to_string(), type_details_cell(&type_details)?);
+    }
     Ok(Value::Object(object))
+}
+
+fn type_details_cell(type_details: &[Vec<String>]) -> BuiltinResult<Value> {
+    let values = type_details
+        .iter()
+        .map(|types| {
+            StringArray::new(types.clone(), vec![1, types.len()])
+                .map(Value::StringArray)
+                .map_err(|err| text_analytics_error("tokenizedDocument", err))
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    Ok(Value::Cell(
+        CellArray::new(values, type_details.len(), 1)
+            .map_err(|err| text_analytics_error("tokenizedDocument", err))?,
+    ))
 }
 
 fn detect_patterns_value(patterns: DetectPatterns) -> BuiltinResult<Value> {
@@ -1738,7 +2032,7 @@ pub(in crate::builtins::strings::text_analytics) fn transform_tokenized_document
                 .collect::<BuiltinResult<Vec<_>>>()
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    tokenized_document_value(documents, shape_from_object(object), options)
+    tokenized_document_value(documents, shape_from_object(object), options, None)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2129,6 +2423,8 @@ pub(in crate::builtins::strings::text_analytics) fn options_from_document_object
         detect_patterns,
         top_level_domains,
         top_level_domains_custom,
+        custom_tokens: Vec::new(),
+        regular_expressions: Vec::new(),
     }
 }
 
@@ -2458,6 +2754,7 @@ fn parse_positive_integer(value: &Value, fn_name: &str) -> BuiltinResult<usize> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::table::table_from_columns;
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(tokenized_document_builtin(args))
@@ -2506,6 +2803,21 @@ mod tests {
 
     fn documents_property(object: &ObjectInstance) -> Vec<Vec<String>> {
         documents_from_object(object, "test").expect("documents property")
+    }
+
+    fn type_details_property(object: &ObjectInstance) -> Vec<Vec<String>> {
+        let Some(Value::Cell(cell)) = object.properties.get("TypeDetails") else {
+            panic!("expected TypeDetails property");
+        };
+        cell.data
+            .iter()
+            .map(|value| {
+                let Value::StringArray(array) = value else {
+                    panic!("expected TypeDetails string array");
+                };
+                array.data.clone()
+            })
+            .collect()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2696,6 +3008,173 @@ mod tests {
                 "D"
             ]]
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tokenized_document_supports_custom_tokens_and_longest_conflict() {
+        let custom = StringArray::new(vec!["C++".into(), "C++17".into()], vec![1, 2]).unwrap();
+        let doc = object(
+            run_tokenized(vec![
+                Value::String("Use C++17 and C++.".to_string()),
+                Value::String("CustomTokens".to_string()),
+                Value::StringArray(custom),
+            ])
+            .expect("tokenized"),
+        );
+        assert_eq!(
+            documents_property(&doc),
+            vec![vec!["Use", "C++17", "and", "C++", "."]]
+        );
+        assert_eq!(
+            type_details_property(&doc),
+            vec![vec![
+                "letters",
+                "custom",
+                "letters",
+                "custom",
+                "punctuation"
+            ]]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tokenized_document_supports_custom_token_table_types() {
+        let table = table_from_columns(
+            vec!["Token".into(), "Type".into()],
+            vec![
+                Value::StringArray(
+                    StringArray::new(vec!["Na+".into(), "H2O".into()], vec![2, 1]).unwrap(),
+                ),
+                Value::StringArray(
+                    StringArray::new(vec!["ion".into(), "formula".into()], vec![2, 1]).unwrap(),
+                ),
+            ],
+        )
+        .expect("custom table");
+        let doc = object(
+            run_tokenized(vec![
+                Value::String("Na+ in H2O".to_string()),
+                Value::String("CustomTokens".to_string()),
+                table,
+            ])
+            .expect("tokenized"),
+        );
+        assert_eq!(documents_property(&doc), vec![vec!["Na+", "in", "H2O"]]);
+        assert_eq!(
+            type_details_property(&doc),
+            vec![vec!["ion", "letters", "formula"]]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tokenized_document_supports_regex_table_and_regex_precedence() {
+        let custom = StringArray::new(vec!["abc123".into()], vec![1, 1]).unwrap();
+        let regex_table = table_from_columns(
+            vec!["Pattern".into(), "Type".into()],
+            vec![
+                Value::StringArray(
+                    StringArray::new(vec![r"[a-z]+\d+".into(), r"abc\d+".into()], vec![2, 1])
+                        .unwrap(),
+                ),
+                Value::StringArray(
+                    StringArray::new(vec!["alnum".into(), "code".into()], vec![2, 1]).unwrap(),
+                ),
+            ],
+        )
+        .expect("regex table");
+        let doc = object(
+            run_tokenized(vec![
+                Value::String("abc123 xyz9".to_string()),
+                Value::String("CustomTokens".to_string()),
+                Value::StringArray(custom),
+                Value::String("RegularExpressions".to_string()),
+                regex_table,
+            ])
+            .expect("tokenized"),
+        );
+        assert_eq!(documents_property(&doc), vec![vec!["abc123", "xyz9"]]);
+        assert_eq!(type_details_property(&doc), vec![vec!["code", "alnum"]]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tokenized_document_supports_non_table_custom_and_regex_vectors() {
+        let custom = CellArray::new(
+            vec![
+                Value::String("R&D".to_string()),
+                Value::String("C#".to_string()),
+            ],
+            1,
+            2,
+        )
+        .unwrap();
+        let regexes = StringArray::new(vec![r"\d{4}-\d{2}-\d{2}".into()], vec![1, 1]).unwrap();
+        let doc = object(
+            run_tokenized(vec![
+                Value::String("R&D shipped C# on 2026-07-17.".to_string()),
+                Value::String("CustomTokens".to_string()),
+                Value::Cell(custom),
+                Value::String("RegularExpressions".to_string()),
+                Value::StringArray(regexes),
+            ])
+            .expect("tokenized"),
+        );
+
+        assert_eq!(
+            documents_property(&doc),
+            vec![vec!["R&D", "shipped", "C#", "on", "2026-07-17", "."]]
+        );
+        assert_eq!(
+            type_details_property(&doc),
+            vec![vec![
+                "custom",
+                "letters",
+                "custom",
+                "letters",
+                "custom",
+                "punctuation"
+            ]]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tokenized_document_rejects_invalid_custom_and_regex_options() {
+        let err = run_tokenized(vec![
+            Value::String("abc".to_string()),
+            Value::String("RegularExpressions".to_string()),
+            Value::String("(".to_string()),
+        ])
+        .expect_err("invalid regex");
+        assert!(err
+            .to_string()
+            .contains("invalid RegularExpressions pattern"));
+
+        let err = run_tokenized(vec![
+            Value::String("abc".to_string()),
+            Value::String("RegularExpressions".to_string()),
+            Value::String(".*".to_string()),
+        ])
+        .expect_err("empty regex");
+        assert!(err.to_string().contains("can match empty text"));
+
+        let table = table_from_columns(
+            vec!["Type".into()],
+            vec![Value::StringArray(
+                StringArray::new(vec!["custom".into()], vec![1, 1]).unwrap(),
+            )],
+        )
+        .expect("bad custom table");
+        let err = run_tokenized(vec![
+            Value::String("abc".to_string()),
+            Value::String("CustomTokens".to_string()),
+            table,
+        ])
+        .expect_err("missing token variable");
+        assert!(err.to_string().contains("must contain a Token variable"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -105712,7 +105712,7 @@
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Name-value options: TokenizeMethod, Language, DetectPatterns, TopLevelDomains."
+              "description": "Name-value options: TokenizeMethod, Language, DetectPatterns, TopLevelDomains, CustomTokens, RegularExpressions."
             }
           ],
           "outputs": [
