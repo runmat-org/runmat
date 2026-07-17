@@ -2237,7 +2237,7 @@
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Name-value options: DiscardKnownValues."
+              "description": "Name-value options: DiscardKnownValues, TopLevelDomains."
             }
           ],
           "outputs": [
@@ -105413,7 +105413,7 @@
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Name-value options: TokenizeMethod, Language, DetectPatterns ('all' or 'none' in this slice)."
+              "description": "Name-value options: TokenizeMethod, Language, DetectPatterns, TopLevelDomains."
             }
           ],
           "outputs": [

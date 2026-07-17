@@ -9,8 +9,9 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
-    document_token_type, documents_from_object, text_analytics_error, tokenized_document_language,
-    TOKENIZED_DOCUMENT_CLASS,
+    document_token_type_with_options, documents_from_object, options_from_document_object,
+    parse_top_level_domains, text_analytics_error, tokenized_document_language,
+    top_level_domains_value, TOKENIZED_DOCUMENT_CLASS,
 };
 use crate::builtins::table::table_from_columns;
 use crate::{gather_if_needed_async, BuiltinResult};
@@ -54,7 +55,7 @@ const IN_DOCUMENTS_REST: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Name-value options: DiscardKnownValues.",
+        description: "Name-value options: DiscardKnownValues, TopLevelDomains.",
     },
 ];
 
@@ -140,13 +141,28 @@ async fn add_type_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let gathered = gather_args(args, "addTypeDetails").await?;
     let (documents, options) = parse_add_type_details_args(gathered)?;
     let mut object = tokenized_document_object(documents, "addTypeDetails")?;
-    if options.discard_known_values || !object.properties.contains_key(TYPE_DETAILS_PROPERTY) {
-        let documents = documents_from_object(&object, "addTypeDetails")?;
+    let mut document_options = options_from_document_object(&object);
+    if let Some(top_level_domains) = options.top_level_domains {
+        document_options.top_level_domains = top_level_domains;
+        document_options.top_level_domains_custom = true;
         object.properties.insert(
-            TYPE_DETAILS_PROPERTY.to_string(),
-            type_details_cell(&documents)?,
+            "TopLevelDomains".to_string(),
+            top_level_domains_value(&document_options.top_level_domains, "addTypeDetails")?,
         );
+        object
+            .properties
+            .insert("TopLevelDomainsCustom".to_string(), Value::Bool(true));
     }
+    let documents = documents_from_object(&object, "addTypeDetails")?;
+    let type_details = if options.discard_known_values {
+        type_details_cell(&documents, &document_options)?
+    } else {
+        let stored_types = type_details_from_object(&object, "addTypeDetails")?;
+        type_details_cell_preserving_known(&documents, stored_types.as_deref(), &document_options)?
+    };
+    object
+        .properties
+        .insert(TYPE_DETAILS_PROPERTY.to_string(), type_details);
     Ok(Value::Object(object))
 }
 
@@ -160,9 +176,10 @@ async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value
     Ok(out)
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct AddTypeDetailsOptions {
     discard_known_values: bool,
+    top_level_domains: Option<Vec<String>>,
 }
 
 fn parse_add_type_details_args(args: Vec<Value>) -> BuiltinResult<(Value, AddTypeDetailsOptions)> {
@@ -180,6 +197,7 @@ fn parse_add_type_details_args(args: Vec<Value>) -> BuiltinResult<(Value, AddTyp
     }
     let mut options = AddTypeDetailsOptions {
         discard_known_values: false,
+        top_level_domains: None,
     };
     let mut idx = 1usize;
     while idx < args.len() {
@@ -187,6 +205,9 @@ fn parse_add_type_details_args(args: Vec<Value>) -> BuiltinResult<(Value, AddTyp
             .map_err(|err| text_analytics_error("addTypeDetails", err.to_string()))?;
         if name.eq_ignore_ascii_case("DiscardKnownValues") {
             options.discard_known_values = logical_scalar(&args[idx + 1], "addTypeDetails")?;
+        } else if name.eq_ignore_ascii_case("TopLevelDomains") {
+            options.top_level_domains =
+                Some(parse_top_level_domains(&args[idx + 1], "addTypeDetails")?);
         } else {
             return Err(text_analytics_error(
                 "addTypeDetails",
@@ -222,6 +243,7 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
     let include_type = include_default_details || stored_types.is_some();
     let include_line_language = include_default_details;
     let total = documents.iter().map(Vec::len).sum::<usize>();
+    let document_options = options_from_document_object(object);
 
     let mut tokens = Vec::with_capacity(total);
     let mut document_numbers = Vec::with_capacity(total);
@@ -244,7 +266,11 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
                     .and_then(|types| types.get(doc_idx))
                     .and_then(|types| types.get(token_idx))
                     .cloned()
-                    .unwrap_or_else(|| document_token_type(token).as_str().to_string());
+                    .unwrap_or_else(|| {
+                        document_token_type_with_options(token, &document_options)
+                            .as_str()
+                            .to_string()
+                    });
                 token_types.push(token_type);
             }
         }
@@ -292,13 +318,20 @@ fn has_default_token_details(object: &ObjectInstance) -> bool {
     )
 }
 
-fn type_details_cell(documents: &[Vec<String>]) -> BuiltinResult<Value> {
+fn type_details_cell(
+    documents: &[Vec<String>],
+    options: &crate::builtins::strings::text_analytics::documents::DocumentOptions,
+) -> BuiltinResult<Value> {
     let values = documents
         .iter()
         .map(|doc| {
             let types = doc
                 .iter()
-                .map(|token| document_token_type(token).as_str().to_string())
+                .map(|token| {
+                    document_token_type_with_options(token, options)
+                        .as_str()
+                        .to_string()
+                })
                 .collect::<Vec<_>>();
             StringArray::new(types, vec![1, doc.len()])
                 .map(Value::StringArray)
@@ -309,6 +342,49 @@ fn type_details_cell(documents: &[Vec<String>]) -> BuiltinResult<Value> {
         CellArray::new(values, documents.len(), 1)
             .map_err(|err| text_analytics_error("addTypeDetails", err))?,
     ))
+}
+
+fn type_details_cell_preserving_known(
+    documents: &[Vec<String>],
+    stored: Option<&[Vec<String>]>,
+    options: &crate::builtins::strings::text_analytics::documents::DocumentOptions,
+) -> BuiltinResult<Value> {
+    let values = documents
+        .iter()
+        .enumerate()
+        .map(|(doc_idx, doc)| {
+            let types = doc
+                .iter()
+                .enumerate()
+                .map(|(token_idx, token)| {
+                    stored
+                        .and_then(|types| types.get(doc_idx))
+                        .and_then(|types| types.get(token_idx))
+                        .filter(|stored_type| is_known_type_detail(stored_type))
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            document_token_type_with_options(token, options)
+                                .as_str()
+                                .to_string()
+                        })
+                })
+                .collect::<Vec<_>>();
+            StringArray::new(types, vec![1, doc.len()])
+                .map(Value::StringArray)
+                .map_err(|err| text_analytics_error("addTypeDetails", err))
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    Ok(Value::Cell(
+        CellArray::new(values, documents.len(), 1)
+            .map_err(|err| text_analytics_error("addTypeDetails", err))?,
+    ))
+}
+
+fn is_known_type_detail(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    !normalized.is_empty()
+        && normalized != "unknown"
+        && !crate::builtins::strings::common::is_missing_string(value)
 }
 
 fn type_details_from_object(
@@ -562,6 +638,136 @@ mod tests {
                 "at-mention",
                 "other"
             ]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn add_type_details_uses_configured_top_level_domains() {
+        let docs = run_tokenized(vec![
+            Value::StringArray(
+                StringArray::new(
+                    vec![
+                        "example.zz".into(),
+                        "example.com".into(),
+                        "https://site.zz/path".into(),
+                    ],
+                    vec![1, 3],
+                )
+                .unwrap(),
+            ),
+            Value::String("TokenizeMethod".into()),
+            Value::String("none".into()),
+        ])
+        .expect("tokenized");
+        let updated = run_add_type(vec![
+            docs,
+            Value::String("TopLevelDomains".into()),
+            Value::String("zz".into()),
+        ])
+        .expect("add types");
+        let table = object(run_token_details(updated).expect("details"));
+        assert_eq!(
+            string_column(&table, "Type"),
+            vec!["web-address", "other", "web-address"]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn add_type_details_preserves_existing_types_unless_discarding() {
+        let docs = object(
+            run_tokenized(vec![
+                Value::StringArray(
+                    StringArray::new(vec!["example.zz".into()], vec![1, 1]).unwrap(),
+                ),
+                Value::String("TokenizeMethod".into()),
+                Value::String("none".into()),
+            ])
+            .expect("tokenized"),
+        );
+        let mut typed = docs.clone();
+        typed.properties.insert(
+            TYPE_DETAILS_PROPERTY.to_string(),
+            Value::Cell(
+                CellArray::new(
+                    vec![Value::StringArray(
+                        StringArray::new(vec!["other".into()], vec![1, 1]).unwrap(),
+                    )],
+                    1,
+                    1,
+                )
+                .unwrap(),
+            ),
+        );
+
+        let preserved = run_add_type(vec![
+            Value::Object(typed.clone()),
+            Value::String("TopLevelDomains".into()),
+            Value::String("zz".into()),
+        ])
+        .expect("preserve existing type details");
+        let table = object(run_token_details(preserved).expect("details"));
+        assert_eq!(string_column(&table, "Type"), vec!["other"]);
+
+        let recomputed = run_add_type(vec![
+            Value::Object(typed),
+            Value::String("TopLevelDomains".into()),
+            Value::String("zz".into()),
+            Value::String("DiscardKnownValues".into()),
+            Value::Bool(true),
+        ])
+        .expect("recompute type details");
+        let table = object(run_token_details(recomputed).expect("details"));
+        assert_eq!(string_column(&table, "Type"), vec!["web-address"]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn add_type_details_fills_unknown_existing_type_details() {
+        let docs = object(
+            run_tokenized(vec![
+                Value::StringArray(
+                    StringArray::new(
+                        vec!["known".into(), "example.zz".into(), "missing".into()],
+                        vec![1, 3],
+                    )
+                    .unwrap(),
+                ),
+                Value::String("TokenizeMethod".into()),
+                Value::String("none".into()),
+            ])
+            .expect("tokenized"),
+        );
+        let mut typed = docs.clone();
+        typed.properties.insert(
+            TYPE_DETAILS_PROPERTY.to_string(),
+            Value::Cell(
+                CellArray::new(
+                    vec![Value::StringArray(
+                        StringArray::new(
+                            vec!["letters".into(), "unknown".into(), "".into()],
+                            vec![1, 3],
+                        )
+                        .unwrap(),
+                    )],
+                    1,
+                    1,
+                )
+                .unwrap(),
+            ),
+        );
+
+        let updated = run_add_type(vec![
+            Value::Object(typed),
+            Value::String("TopLevelDomains".into()),
+            Value::String("zz".into()),
+        ])
+        .expect("fill unknown type details");
+        let table = object(run_token_details(updated).expect("details"));
+        assert_eq!(
+            string_column(&table, "Type"),
+            vec!["letters", "web-address", "letters"]
         );
     }
 

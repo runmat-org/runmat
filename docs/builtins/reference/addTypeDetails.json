@@ -26,14 +26,15 @@
     "unit": "builtins::strings::text_analytics::details::tests",
     "integration": null
   },
-  "description": "`addTypeDetails(documents)` detects token types in a RunMat `tokenizedDocument` compatibility object and returns an updated object. `addTypeDetails(documents,'DiscardKnownValues',tf)` controls whether existing type details are preserved or recomputed.",
+  "description": "`addTypeDetails(documents)` detects token types in a RunMat `tokenizedDocument` compatibility object and returns an updated object. `addTypeDetails(documents,'DiscardKnownValues',tf)` controls whether existing type details are preserved or recomputed. `addTypeDetails(documents,'TopLevelDomains',domains)` customizes web-address type recognition.",
   "behaviors": [
     "`documents` must be a RunMat `tokenizedDocument` object.",
     "When type details are absent, RunMat derives one type value for each token and stores the details on the returned object.",
-    "`DiscardKnownValues` defaults to `false`, so existing type details are preserved.",
+    "`DiscardKnownValues` defaults to `false`, so existing known type details are preserved while missing or `unknown` type details are filled.",
     "`DiscardKnownValues`, `true` recomputes every stored type detail.",
+    "`TopLevelDomains` accepts a character vector, string array, or cell array of character vectors. It overrides the document's stored TLD list for web-address type recognition and is stored on the returned object.",
     "RunMat recognizes `letters`, `digits`, `punctuation`, `email-address`, `web-address`, `hashtag`, `at-mention`, `emoticon`, `emoji`, and `other` using the same lightweight token rules as `tokenizedDocument`.",
-    "The MATLAB `TopLevelDomains` option, custom token-type tables, and exact MathWorks URL classifier parity remain broader Text Analytics work."
+    "Custom token-type tables, full MathWorks `topLevelDomains` corpus parity, and exact MathWorks URL classifier parity remain broader Text Analytics work."
   ],
   "examples": [
     {
@@ -45,12 +46,17 @@
       "description": "Recompute Type Details",
       "input": "documents = addTypeDetails(documents, \"DiscardKnownValues\", true)",
       "output": "`documents` has refreshed token type details."
+    },
+    {
+      "description": "Configure Web Address Domains",
+      "input": "documents = tokenizedDocument([\"example.zz\"], \"TokenizeMethod\", \"none\");\ndocuments = addTypeDetails(documents, \"TopLevelDomains\", \"zz\");\ntdetails = tokenDetails(documents)",
+      "output": "`tdetails.Type` contains `web-address` for `example.zz`."
     }
   ],
   "faqs": [
     {
       "question": "Does `addTypeDetails` support `TopLevelDomains`?",
-      "answer": "Not in this slice. RunMat uses the current lightweight URL detector and keeps full top-level-domain customization in the broader Text Analytics queue."
+      "answer": "Yes. RunMat accepts character, string-array, and cell-string TLD lists for web-address detection. Full default `topLevelDomains` corpus parity remains tracked."
     },
     {
       "question": "Does `addTypeDetails` execute on the GPU?",
@@ -70,12 +76,13 @@
   "syntax": {
     "example": {
       "description": "Supported forms",
-      "input": "updatedDocuments = addTypeDetails(documents)\nupdatedDocuments = addTypeDetails(documents, 'DiscardKnownValues', tf)",
+      "input": "updatedDocuments = addTypeDetails(documents)\nupdatedDocuments = addTypeDetails(documents, 'DiscardKnownValues', tf)\nupdatedDocuments = addTypeDetails(documents, 'TopLevelDomains', domains)",
       "output": "`updatedDocuments` is a `tokenizedDocument` compatibility object."
     },
     "points": [
       "`documents` must be a RunMat `tokenizedDocument` object.",
       "`tf` must be a logical scalar or numeric 0/1 scalar.",
+      "`domains` must contain one or more valid top-level-domain labels.",
       "Use `tokenDetails(updatedDocuments)` to view the resulting type table."
     ]
   },

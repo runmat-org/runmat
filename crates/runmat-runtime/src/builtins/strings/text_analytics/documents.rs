@@ -82,7 +82,8 @@ const IN_TEXT_REST: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Name-value options: TokenizeMethod, Language, DetectPatterns ('all' or 'none' in this slice).",
+        description:
+            "Name-value options: TokenizeMethod, Language, DetectPatterns, TopLevelDomains.",
     },
 ];
 
@@ -378,6 +379,9 @@ fn ensure_tokenized_document_class_registered() {
             "Shape",
             "TokenizeMethod",
             "Language",
+            "DetectPatterns",
+            "TopLevelDomains",
+            "TopLevelDomainsCustom",
             "TypeDetails",
         ] {
             properties.insert(name.to_string(), property_def(name));
@@ -692,10 +696,12 @@ async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value
 }
 
 #[derive(Clone, Debug)]
-struct DocumentOptions {
-    tokenize_method: TokenizeMethod,
-    language: String,
-    detect_patterns: DetectPatterns,
+pub(in crate::builtins::strings::text_analytics) struct DocumentOptions {
+    pub(in crate::builtins::strings::text_analytics) tokenize_method: TokenizeMethod,
+    pub(in crate::builtins::strings::text_analytics) language: String,
+    pub(in crate::builtins::strings::text_analytics) detect_patterns: DetectPatterns,
+    pub(in crate::builtins::strings::text_analytics) top_level_domains: Vec<String>,
+    pub(in crate::builtins::strings::text_analytics) top_level_domains_custom: bool,
 }
 
 impl Default for DocumentOptions {
@@ -704,20 +710,93 @@ impl Default for DocumentOptions {
             tokenize_method: TokenizeMethod::Unicode,
             language: "en".to_string(),
             detect_patterns: DetectPatterns::All,
+            top_level_domains: default_top_level_domains(),
+            top_level_domains_custom: false,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TokenizeMethod {
+pub(in crate::builtins::strings::text_analytics) enum TokenizeMethod {
     Unicode,
     None,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DetectPatterns {
+pub(in crate::builtins::strings::text_analytics) enum DetectPatterns {
     All,
     None,
+    Selected(ComplexPatternSet),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::builtins::strings::text_analytics) struct ComplexPatternSet {
+    email_address: bool,
+    web_address: bool,
+    hashtag: bool,
+    at_mention: bool,
+    emoticon: bool,
+}
+
+impl ComplexPatternSet {
+    fn empty() -> Self {
+        Self {
+            email_address: false,
+            web_address: false,
+            hashtag: false,
+            at_mention: false,
+            emoticon: false,
+        }
+    }
+}
+
+impl DetectPatterns {
+    fn detects_email_address(self) -> bool {
+        matches!(
+            self,
+            Self::All
+                | Self::Selected(ComplexPatternSet {
+                    email_address: true,
+                    ..
+                })
+        )
+    }
+
+    fn detects_web_address(self) -> bool {
+        matches!(
+            self,
+            Self::All
+                | Self::Selected(ComplexPatternSet {
+                    web_address: true,
+                    ..
+                })
+        )
+    }
+
+    fn detects_hashtag(self) -> bool {
+        matches!(
+            self,
+            Self::All | Self::Selected(ComplexPatternSet { hashtag: true, .. })
+        )
+    }
+
+    fn detects_at_mention(self) -> bool {
+        matches!(
+            self,
+            Self::All
+                | Self::Selected(ComplexPatternSet {
+                    at_mention: true,
+                    ..
+                })
+        )
+    }
+
+    fn detects_emoticon(self) -> bool {
+        matches!(
+            self,
+            Self::All | Self::Selected(ComplexPatternSet { emoticon: true, .. })
+        )
+    }
 }
 
 fn parse_tokenized_document_args(
@@ -751,11 +830,15 @@ fn parse_tokenized_document_args(
                 options.language = parse_language(&value)?;
             }
             "detectpatterns" => {
-                let value = scalar_text(&args[idx + 1], "tokenizedDocument")
-                    .map_err(|err| text_analytics_error("tokenizedDocument", err.to_string()))?;
-                options.detect_patterns = parse_detect_patterns(&value)?;
+                options.detect_patterns =
+                    parse_detect_patterns(&args[idx + 1], "tokenizedDocument")?;
             }
-            "customtokens" | "regularexpressions" | "topleveldomains" => {
+            "topleveldomains" => {
+                options.top_level_domains =
+                    parse_top_level_domains(&args[idx + 1], "tokenizedDocument")?;
+                options.top_level_domains_custom = true;
+            }
+            "customtokens" | "regularexpressions" => {
                 return Err(text_analytics_error(
                     "tokenizedDocument",
                     format!(
@@ -804,17 +887,91 @@ fn parse_language(value: &str) -> BuiltinResult<String> {
     }
 }
 
-fn parse_detect_patterns(value: &str) -> BuiltinResult<DetectPatterns> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "all" => Ok(DetectPatterns::All),
-        "none" => Ok(DetectPatterns::None),
-        other => Err(text_analytics_error(
-            "tokenizedDocument",
-            format!(
-                "tokenizedDocument: DetectPatterns currently supports 'all' or 'none', got '{other}'"
-            ),
-        )),
+fn parse_detect_patterns(value: &Value, fn_name: &str) -> BuiltinResult<DetectPatterns> {
+    let patterns = words_from_word_vector(value, fn_name)?
+        .into_iter()
+        .map(|pattern| pattern.trim().to_ascii_lowercase())
+        .filter(|pattern| !pattern.is_empty())
+        .collect::<Vec<_>>();
+    if patterns.is_empty() {
+        return Err(text_analytics_error(
+            fn_name,
+            format!("{fn_name}: DetectPatterns must contain at least one pattern"),
+        ));
     }
+    if patterns.len() == 1 {
+        match patterns[0].as_str() {
+            "all" => return Ok(DetectPatterns::All),
+            "none" => return Ok(DetectPatterns::None),
+            _ => {}
+        }
+    }
+
+    let mut selected = ComplexPatternSet::empty();
+    for pattern in patterns {
+        match pattern.as_str() {
+            "email-address" => selected.email_address = true,
+            "web-address" => selected.web_address = true,
+            "hashtag" => selected.hashtag = true,
+            "at-mention" => selected.at_mention = true,
+            "emoticon" => selected.emoticon = true,
+            "all" | "none" => {
+                return Err(text_analytics_error(
+                    fn_name,
+                    format!("{fn_name}: DetectPatterns '{pattern}' must be specified alone"),
+                ))
+            }
+            other => {
+                return Err(text_analytics_error(
+                    fn_name,
+                    format!("{fn_name}: unsupported DetectPatterns value '{other}'"),
+                ))
+            }
+        }
+    }
+    Ok(DetectPatterns::Selected(selected))
+}
+
+pub(in crate::builtins::strings::text_analytics) fn parse_top_level_domains(
+    value: &Value,
+    fn_name: &str,
+) -> BuiltinResult<Vec<String>> {
+    let domains = words_from_word_vector_preserving_missing(value, fn_name)?;
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for raw in domains {
+        if is_missing_string(&raw) {
+            continue;
+        }
+        let domain = raw
+            .trim()
+            .trim_start_matches('.')
+            .trim_end_matches('.')
+            .to_ascii_lowercase();
+        if domain.is_empty()
+            || domain.contains('.')
+            || !domain
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+            || domain.starts_with('-')
+            || domain.ends_with('-')
+        {
+            return Err(text_analytics_error(
+                fn_name,
+                format!("{fn_name}: TopLevelDomains contains invalid domain '{raw}'"),
+            ));
+        }
+        if seen.insert(domain.clone()) {
+            out.push(domain);
+        }
+    }
+    if out.is_empty() {
+        return Err(text_analytics_error(
+            fn_name,
+            format!("{fn_name}: TopLevelDomains must contain at least one domain"),
+        ));
+    }
+    Ok(out)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1207,12 +1364,10 @@ fn tokenize_text(text: &str, options: &DocumentOptions) -> Vec<String> {
                 continue;
             }
         }
-        if options.detect_patterns == DetectPatterns::All {
-            if let Some((token, end)) = complex_token_at(text, pos) {
-                tokens.push(token);
-                pos = end;
-                continue;
-            }
+        if let Some((token, end)) = complex_token_at(text, pos, options) {
+            tokens.push(token);
+            pos = end;
+            continue;
         }
         let Some(ch) = rest.chars().next() else {
             break;
@@ -1237,18 +1392,21 @@ fn tokenize_text(text: &str, options: &DocumentOptions) -> Vec<String> {
     tokens
 }
 
-fn complex_token_at(text: &str, pos: usize) -> Option<(String, usize)> {
+fn complex_token_at(text: &str, pos: usize, options: &DocumentOptions) -> Option<(String, usize)> {
     let rest = &text[pos..];
-    if rest.starts_with("http://") || rest.starts_with("https://") || rest.starts_with("www.") {
-        let end = pos + take_while_nonspace(rest);
-        let token = text[pos..end].trim_end_matches(is_trailing_punctuation);
-        let token_end = pos + token.len();
-        return Some((token.to_string(), token_end));
+    if options.detect_patterns.detects_web_address() {
+        if let Some((token, end)) = web_token_at(text, pos, options) {
+            return Some((token, end));
+        }
     }
-    if let Some((token, end)) = email_token_at(text, pos) {
-        return Some((token, end));
+    if options.detect_patterns.detects_email_address() {
+        if let Some((token, end)) = email_token_at(text, pos) {
+            return Some((token, end));
+        }
     }
-    if rest.starts_with('#') || rest.starts_with('@') {
+    if (options.detect_patterns.detects_hashtag() && rest.starts_with('#'))
+        || (options.detect_patterns.detects_at_mention() && rest.starts_with('@'))
+    {
         let mut end = pos + 1;
         while end < text.len() {
             let ch = text[end..].chars().next().unwrap();
@@ -1262,10 +1420,11 @@ fn complex_token_at(text: &str, pos: usize) -> Option<(String, usize)> {
             return Some((text[pos..end].to_string(), end));
         }
     }
-    if rest.starts_with(":-)")
-        || rest.starts_with(":-D")
-        || rest.starts_with(":)")
-        || rest.starts_with(":D")
+    if options.detect_patterns.detects_emoticon()
+        && (rest.starts_with(":-)")
+            || rest.starts_with(":-D")
+            || rest.starts_with(":)")
+            || rest.starts_with(":D"))
     {
         let len = if rest.starts_with(":-)") || rest.starts_with(":-D") {
             3
@@ -1276,6 +1435,26 @@ fn complex_token_at(text: &str, pos: usize) -> Option<(String, usize)> {
         return Some((text[pos..end].to_string(), end));
     }
     None
+}
+
+fn web_token_at(text: &str, pos: usize, options: &DocumentOptions) -> Option<(String, usize)> {
+    let rest = &text[pos..];
+    if !(has_web_scheme(rest)
+        || starts_with_ascii_ci(rest, "www.")
+        || rest
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphanumeric()))
+    {
+        return None;
+    }
+    let end = pos + take_while_nonspace(rest);
+    let token = text[pos..end].trim_end_matches(is_trailing_punctuation);
+    if !is_web_address_token(token, options) {
+        return None;
+    }
+    let token_end = pos + token.len();
+    Some((token.to_string(), token_end))
 }
 
 fn email_token_at(text: &str, pos: usize) -> Option<(String, usize)> {
@@ -1304,6 +1483,107 @@ fn email_token_at(text: &str, pos: usize) -> Option<(String, usize)> {
     }
     let token_end = pos + token.len();
     Some((token.to_string(), token_end))
+}
+
+fn is_web_address_token(token: &str, options: &DocumentOptions) -> bool {
+    if !web_address_candidate(token) {
+        return false;
+    }
+    let Some(host) = web_address_host(token) else {
+        return false;
+    };
+    let has_explicit_prefix = has_web_scheme(token) || starts_with_ascii_ci(token, "www.");
+    if has_explicit_prefix && !options.top_level_domains_custom {
+        return domain_host_has_valid_tld_shape(host);
+    }
+    domain_host_has_allowed_tld(host, &options.top_level_domains)
+}
+
+fn web_address_host(token: &str) -> Option<&str> {
+    let stripped = strip_ascii_prefix(token, "http://")
+        .or_else(|| strip_ascii_prefix(token, "https://"))
+        .unwrap_or(token);
+    let host_and_port = stripped
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(stripped)
+        .trim_end_matches(is_trailing_punctuation);
+    let host = host_and_port.split(':').next().unwrap_or(host_and_port);
+    if host.is_empty() || host.contains('@') {
+        return None;
+    }
+    Some(host)
+}
+
+fn web_address_candidate(token: &str) -> bool {
+    token.contains('.')
+        && (has_web_scheme(token)
+            || starts_with_ascii_ci(token, "www.")
+            || token
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_alphanumeric()))
+}
+
+fn has_web_scheme(text: &str) -> bool {
+    starts_with_ascii_ci(text, "http://") || starts_with_ascii_ci(text, "https://")
+}
+
+fn starts_with_ascii_ci(text: &str, prefix: &str) -> bool {
+    text.as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|bytes| bytes.eq_ignore_ascii_case(prefix.as_bytes()))
+}
+
+fn strip_ascii_prefix<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    starts_with_ascii_ci(text, prefix).then_some(&text[prefix.len()..])
+}
+
+fn domain_host_has_valid_tld_shape(host: &str) -> bool {
+    domain_host_tld(host).is_some_and(|tld| tld.len() >= 2)
+}
+
+fn domain_host_has_allowed_tld(host: &str, top_level_domains: &[String]) -> bool {
+    domain_host_tld(host)
+        .map(|tld| top_level_domains.iter().any(|domain| domain == &tld))
+        .unwrap_or(false)
+}
+
+fn domain_host_tld(host: &str) -> Option<String> {
+    let host = host.trim_matches('.');
+    let mut saw_dot = false;
+    let mut tld = None;
+    for label in host.split('.') {
+        if label.is_empty()
+            || label.starts_with('-')
+            || label.ends_with('-')
+            || !label
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+        {
+            return None;
+        }
+        if tld.is_some() {
+            saw_dot = true;
+        }
+        tld = Some(label);
+    }
+    saw_dot.then(|| {
+        tld.expect("tld present after label loop")
+            .to_ascii_lowercase()
+    })
+}
+
+fn default_top_level_domains() -> Vec<String> {
+    [
+        "com", "org", "net", "edu", "gov", "mil", "int", "io", "co", "ai", "dev", "app", "info",
+        "biz", "name", "pro", "us", "uk", "ca", "au", "de", "fr", "jp", "kr", "cn", "in", "br",
+        "mx", "es", "it", "nl", "se", "no", "fi", "dk", "ch", "at", "be", "ie", "nz", "za", "sg",
+        "hk", "tw", "ru", "pl", "cz", "me", "tv", "ly", "xyz", "site", "online", "tech",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
 }
 
 fn take_while_nonspace(text: &str) -> usize {
@@ -1366,7 +1646,56 @@ fn tokenized_document_value(
     object
         .properties
         .insert("Language".to_string(), Value::String(options.language));
+    object.properties.insert(
+        "DetectPatterns".to_string(),
+        detect_patterns_value(options.detect_patterns)?,
+    );
+    object.properties.insert(
+        "TopLevelDomains".to_string(),
+        top_level_domains_value(&options.top_level_domains, "tokenizedDocument")?,
+    );
+    object.properties.insert(
+        "TopLevelDomainsCustom".to_string(),
+        Value::Bool(options.top_level_domains_custom),
+    );
     Ok(Value::Object(object))
+}
+
+fn detect_patterns_value(patterns: DetectPatterns) -> BuiltinResult<Value> {
+    match patterns {
+        DetectPatterns::All => Ok(Value::String("all".to_string())),
+        DetectPatterns::None => Ok(Value::String("none".to_string())),
+        DetectPatterns::Selected(selected) => {
+            let mut values = Vec::new();
+            if selected.email_address {
+                values.push("email-address".to_string());
+            }
+            if selected.web_address {
+                values.push("web-address".to_string());
+            }
+            if selected.hashtag {
+                values.push("hashtag".to_string());
+            }
+            if selected.at_mention {
+                values.push("at-mention".to_string());
+            }
+            if selected.emoticon {
+                values.push("emoticon".to_string());
+            }
+            StringArray::new(values.clone(), vec![1, values.len()])
+                .map(Value::StringArray)
+                .map_err(|err| text_analytics_error("tokenizedDocument", err))
+        }
+    }
+}
+
+pub(in crate::builtins::strings::text_analytics) fn top_level_domains_value(
+    domains: &[String],
+    fn_name: &str,
+) -> BuiltinResult<Value> {
+    StringArray::new(domains.to_vec(), vec![1, domains.len()])
+        .map(Value::StringArray)
+        .map_err(|err| text_analytics_error(fn_name, err))
 }
 
 pub(in crate::builtins::strings::text_analytics) fn tokenized_document_language(
@@ -1383,25 +1712,22 @@ pub(in crate::builtins::strings::text_analytics) fn transform_tokenized_document
     fn_name: &str,
     mut transform: impl FnMut(&str, DocumentTokenType) -> BuiltinResult<Option<String>>,
 ) -> BuiltinResult<Value> {
+    let options = options_from_document_object(object);
     let documents = documents_from_object(object, fn_name)?
         .into_iter()
         .map(|doc| {
             doc.into_iter()
-                .filter_map(
-                    |token| match transform(&token, document_token_type(&token)) {
+                .filter_map(|token| {
+                    match transform(&token, document_token_type_with_options(&token, &options)) {
                         Ok(Some(value)) => Some(Ok(value)),
                         Ok(None) => None,
                         Err(err) => Some(Err(err)),
-                    },
-                )
+                    }
+                })
                 .collect::<BuiltinResult<Vec<_>>>()
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    tokenized_document_value(
-        documents,
-        shape_from_object(object),
-        options_from_document_object(object),
-    )
+    tokenized_document_value(documents, shape_from_object(object), options)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1496,7 +1822,14 @@ fn parse_erase_punctuation_args(args: Vec<Value>) -> BuiltinResult<HashSet<Strin
 pub(in crate::builtins::strings::text_analytics) fn document_token_type(
     token: &str,
 ) -> DocumentTokenType {
-    if token.starts_with("http://") || token.starts_with("https://") || token.starts_with("www.") {
+    document_token_type_with_options(token, &DEFAULT_DOCUMENT_OPTIONS)
+}
+
+pub(in crate::builtins::strings::text_analytics) fn document_token_type_with_options(
+    token: &str,
+    options: &DocumentOptions,
+) -> DocumentTokenType {
+    if is_web_address_token(token, options) {
         return DocumentTokenType::WebAddress;
     }
     if email_token_at(token, 0).is_some_and(|(_, end)| end == token.len()) {
@@ -1556,6 +1889,8 @@ fn is_emoji_char(ch: char) -> bool {
         0x1F300..=0x1FAFF | 0x2600..=0x27BF | 0x2300..=0x23FF | 0xFE0F
     )
 }
+
+static DEFAULT_DOCUMENT_OPTIONS: Lazy<DocumentOptions> = Lazy::new(DocumentOptions::default);
 
 fn remove_punctuation_and_symbols(text: &str) -> String {
     static PUNCTUATION_OR_SYMBOL: Lazy<Regex> =
@@ -1706,7 +2041,9 @@ fn shape_from_object(object: &ObjectInstance) -> Vec<usize> {
     }
 }
 
-fn options_from_document_object(object: &ObjectInstance) -> DocumentOptions {
+pub(in crate::builtins::strings::text_analytics) fn options_from_document_object(
+    object: &ObjectInstance,
+) -> DocumentOptions {
     let tokenize_method = match object.properties.get("TokenizeMethod") {
         Some(Value::String(value)) if value == "none" => TokenizeMethod::None,
         _ => TokenizeMethod::Unicode,
@@ -1715,10 +2052,26 @@ fn options_from_document_object(object: &ObjectInstance) -> DocumentOptions {
         Some(Value::String(value)) => value.clone(),
         _ => "en".to_string(),
     };
+    let detect_patterns = object
+        .properties
+        .get("DetectPatterns")
+        .and_then(|value| parse_detect_patterns(value, "tokenizedDocument").ok())
+        .unwrap_or(DetectPatterns::All);
+    let top_level_domains = object
+        .properties
+        .get("TopLevelDomains")
+        .and_then(|value| parse_top_level_domains(value, "tokenizedDocument").ok())
+        .unwrap_or_else(default_top_level_domains);
+    let top_level_domains_custom = match object.properties.get("TopLevelDomainsCustom") {
+        Some(Value::Bool(value)) => *value,
+        _ => false,
+    };
     DocumentOptions {
         tokenize_method,
         language,
-        detect_patterns: DetectPatterns::All,
+        detect_patterns,
+        top_level_domains,
+        top_level_domains_custom,
     }
 }
 
@@ -2204,6 +2557,92 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn tokenized_document_preserves_explicit_urls_with_uncommon_default_tlds() {
+        let doc = object(
+            run_tokenized(vec![Value::String(
+                "Visit HTTPS://example.software and www.example.community.".to_string(),
+            )])
+            .expect("tokenized"),
+        );
+        assert_eq!(
+            documents_property(&doc),
+            vec![vec![
+                "Visit",
+                "HTTPS://example.software",
+                "and",
+                "www.example.community",
+                "."
+            ]]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tokenized_document_detects_bare_domains_with_configured_tlds() {
+        let tlds = StringArray::new(vec!["zz".into(), "dev".into()], vec![1, 2]).unwrap();
+        let doc = object(
+            run_tokenized(vec![
+                Value::String("See example.zz, docs.example.dev/path and example.com".to_string()),
+                Value::String("TopLevelDomains".to_string()),
+                Value::StringArray(tlds),
+            ])
+            .expect("tokenized"),
+        );
+        assert_eq!(
+            documents_property(&doc),
+            vec![vec![
+                "See",
+                "example.zz",
+                ",",
+                "docs.example.dev/path",
+                "and",
+                "example",
+                ".",
+                "com"
+            ]]
+        );
+        assert_eq!(
+            string_array_property(&doc, "TopLevelDomains"),
+            vec!["zz", "dev"]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tokenized_document_respects_detect_patterns_subset() {
+        let patterns =
+            StringArray::new(vec!["hashtag".into(), "email-address".into()], vec![1, 2]).unwrap();
+        let doc = object(
+            run_tokenized(vec![
+                Value::String("Mail a@example.com #MATLAB at https://example.com :-D".to_string()),
+                Value::String("DetectPatterns".to_string()),
+                Value::StringArray(patterns),
+            ])
+            .expect("tokenized"),
+        );
+        assert_eq!(
+            documents_property(&doc),
+            vec![vec![
+                "Mail",
+                "a@example.com",
+                "#MATLAB",
+                "at",
+                "https",
+                ":",
+                "/",
+                "/",
+                "example",
+                ".",
+                "com",
+                ":",
+                "-",
+                "D"
+            ]]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn bag_of_words_counts_tokenized_documents() {
         let input = StringArray::new(
             vec![
@@ -2532,14 +2971,36 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn rejects_unimplemented_specific_detect_patterns() {
+    fn tokenized_document_rejects_invalid_detect_patterns() {
         let err = run_tokenized(vec![
             Value::String("email me at a@example.com".to_string()),
             Value::String("DetectPatterns".to_string()),
-            Value::String("email-address".to_string()),
+            Value::StringArray(
+                StringArray::new(vec!["all".into(), "web-address".into()], vec![1, 2]).unwrap(),
+            ),
         ])
-        .expect_err("expected unsupported specific DetectPatterns");
-        assert!(err.to_string().contains("DetectPatterns"));
+        .expect_err("expected mixed all rejection");
+        assert!(err.to_string().contains("specified alone"));
+
+        let err = run_tokenized(vec![
+            Value::String("email me at a@example.com".to_string()),
+            Value::String("DetectPatterns".to_string()),
+            Value::String("url".to_string()),
+        ])
+        .expect_err("expected unsupported pattern");
+        assert!(err.to_string().contains("unsupported DetectPatterns"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tokenized_document_rejects_invalid_top_level_domains() {
+        let err = run_tokenized(vec![
+            Value::String("visit example.com".to_string()),
+            Value::String("TopLevelDomains".to_string()),
+            Value::String("co.uk".to_string()),
+        ])
+        .expect_err("expected invalid tld");
+        assert!(err.to_string().contains("TopLevelDomains"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
