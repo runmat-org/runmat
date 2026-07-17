@@ -208,6 +208,8 @@ pub(crate) mod triplot;
 pub(crate) mod view;
 #[path = "ops/waitbar.rs"]
 pub(crate) mod waitbar;
+#[path = "ops/wordcloud.rs"]
+pub(crate) mod wordcloud;
 #[path = "ops/xlabel.rs"]
 pub(crate) mod xlabel;
 #[path = "ops/xlim.rs"]

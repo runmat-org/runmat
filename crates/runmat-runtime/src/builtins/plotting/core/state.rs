@@ -722,6 +722,33 @@ pub enum TextScatterMarkerColor {
 }
 
 #[derive(Clone, Debug)]
+pub struct WordCloudHandleState {
+    pub figure: FigureHandle,
+    pub axes_index: usize,
+    pub annotation_indices: Vec<usize>,
+    pub word_data: Vec<String>,
+    pub size_data: Vec<f64>,
+    pub word_variable: String,
+    pub size_variable: String,
+    pub max_display_words: usize,
+    pub color: Vec<glam::Vec4>,
+    pub highlight_color: glam::Vec4,
+    pub shape: String,
+    pub layout_num: usize,
+    pub size_power: f64,
+    pub title: String,
+    pub title_font_name: String,
+    pub visible: bool,
+    pub font_name: String,
+    pub box_visible: bool,
+    pub units: String,
+    pub position: [f64; 4],
+    pub handle_visibility: String,
+    pub display_name: String,
+    pub tag: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct StackedSourceTableSnapshot {
     pub classes: Vec<String>,
     pub variable_names: Vec<Vec<String>>,
@@ -776,6 +803,7 @@ pub enum PlotChildHandleState {
     Pie(SimplePlotHandleState),
     Text(TextAnnotationHandleState),
     TextScatter(TextScatterHandleState),
+    WordCloud(WordCloudHandleState),
     StackedPlot(StackedPlotHandleState),
 }
 
@@ -808,6 +836,7 @@ impl PlotChildHandleState {
             Self::Area(state) => (state.figure, state.axes_index),
             Self::Text(state) => (state.figure, state.axes_index),
             Self::TextScatter(state) => (state.figure, state.axes_index),
+            Self::WordCloud(state) => (state.figure, state.axes_index),
             Self::StackedPlot(state) => (
                 state.figure,
                 state.axes_indices.first().copied().unwrap_or(0),
@@ -843,6 +872,7 @@ impl PlotChildHandleState {
             Self::Area(state) => state.plot_index,
             Self::Text(_) => return None,
             Self::TextScatter(state) => return state.marker_plot_index,
+            Self::WordCloud(_) => return None,
             Self::StackedPlot(state) => return state.line_plot_indices.first().copied(),
         })
     }
@@ -1018,6 +1048,7 @@ impl PlotChildHandleState {
             }),
             Self::Text(_) => return None,
             Self::TextScatter(_) => return None,
+            Self::WordCloud(_) => return None,
             Self::StackedPlot(_) => return None,
         })
     }
@@ -1047,6 +1078,7 @@ impl PlotChildHandleState {
             Self::Pie(_) => "pie",
             Self::Text(_) => "text",
             Self::TextScatter(_) => "textscatter",
+            Self::WordCloud(_) => "wordcloud",
             Self::StackedPlot(_) => "stackedplot",
         }
     }
@@ -4059,6 +4091,46 @@ pub fn update_textscatter_figure(
     Ok(())
 }
 
+pub fn register_wordcloud_handle(state: WordCloudHandleState) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children
+        .insert(id, PlotChildHandleState::WordCloud(state));
+    id as f64
+}
+
+pub fn update_wordcloud_handle_state(
+    handle: f64,
+    state: WordCloudHandleState,
+) -> Result<(), FigureError> {
+    if !handle.is_finite() || handle <= 0.0 {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+    let mut reg = registry();
+    let id = handle.round() as u64;
+    match reg.plot_children.get_mut(&id) {
+        Some(PlotChildHandleState::WordCloud(slot)) => {
+            *slot = state;
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
+pub fn update_wordcloud_figure(
+    state: &WordCloudHandleState,
+    mut apply: impl FnMut(&mut Figure) -> Result<(), FigureError>,
+) -> Result<(), FigureError> {
+    let (result, figure_clone) =
+        with_axes_target_mut(state.figure, state.axes_index, |figure_state| {
+            apply(&mut figure_state.figure)
+        })?;
+    result?;
+    notify_with_figure(state.figure, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
 pub fn register_stackedplot_handle(state: StackedPlotHandleState) -> f64 {
     let mut reg = registry();
     let id = reg.next_plot_child_handle;
@@ -4759,6 +4831,7 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         PlotChildHandleState::Area(area) => area.figure != handle,
         PlotChildHandleState::Text(text) => text.figure != handle,
         PlotChildHandleState::TextScatter(textscatter) => textscatter.figure != handle,
+        PlotChildHandleState::WordCloud(wordcloud) => wordcloud.figure != handle,
         PlotChildHandleState::StackedPlot(stacked) => stacked.figure != handle,
     });
 }
@@ -4820,6 +4893,9 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
         }
         PlotChildHandleState::TextScatter(textscatter) => {
             !(textscatter.figure == handle && textscatter.axes_index == axes_index)
+        }
+        PlotChildHandleState::WordCloud(wordcloud) => {
+            !(wordcloud.figure == handle && wordcloud.axes_index == axes_index)
         }
         PlotChildHandleState::StackedPlot(stacked) => {
             !(stacked.figure == handle && stacked.axes_indices.contains(&axes_index))

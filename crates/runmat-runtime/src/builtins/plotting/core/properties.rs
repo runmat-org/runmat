@@ -2438,6 +2438,11 @@ fn get_plot_child_property(
                 builtin,
             )
         }
+        super::state::PlotChildHandleState::WordCloud(wordcloud) => {
+            crate::builtins::plotting::wordcloud::get_wordcloud_property(
+                wordcloud, property, builtin,
+            )
+        }
         super::state::PlotChildHandleState::StackedPlot(stacked) => {
             crate::builtins::plotting::stackedplot::get_stackedplot_property(
                 stacked, property, builtin,
@@ -2536,6 +2541,11 @@ fn apply_plot_child_property(
                 key,
                 value,
                 builtin,
+            )
+        }
+        super::state::PlotChildHandleState::WordCloud(wordcloud) => {
+            crate::builtins::plotting::wordcloud::apply_wordcloud_property(
+                handle, wordcloud, key, value, builtin,
             )
         }
         super::state::PlotChildHandleState::StackedPlot(stacked) => {

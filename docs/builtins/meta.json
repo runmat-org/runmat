@@ -111965,6 +111965,216 @@
       ]
     },
     {
+      "name": "wordcloud",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "wc = wordcloud(str)",
+          "inputs": [
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Text, tokenizedDocument, bag model, categorical array, or LDA model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "wc",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the WordCloudChart object."
+            }
+          ]
+        },
+        {
+          "label": "wc = wordcloud(documents)",
+          "inputs": [
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Text, tokenizedDocument, bag model, categorical array, or LDA model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "wc",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the WordCloudChart object."
+            }
+          ]
+        },
+        {
+          "label": "wc = wordcloud(bag)",
+          "inputs": [
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Text, tokenizedDocument, bag model, categorical array, or LDA model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "wc",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the WordCloudChart object."
+            }
+          ]
+        },
+        {
+          "label": "wc = wordcloud(words, sizeData)",
+          "inputs": [
+            {
+              "name": "words",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Word vector."
+            },
+            {
+              "name": "sizeData",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Word size vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "wc",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the WordCloudChart object."
+            }
+          ]
+        },
+        {
+          "label": "wc = wordcloud(tbl, wordVar, sizeVar)",
+          "inputs": [
+            {
+              "name": "tbl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Table with word and size variables."
+            },
+            {
+              "name": "wordVar",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Table variable containing words."
+            },
+            {
+              "name": "sizeVar",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Table variable containing word sizes."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "wc",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the WordCloudChart object."
+            }
+          ]
+        },
+        {
+          "label": "wc = wordcloud(C)",
+          "inputs": [
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Text, tokenizedDocument, bag model, categorical array, or LDA model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "wc",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the WordCloudChart object."
+            }
+          ]
+        },
+        {
+          "label": "wc = wordcloud(parent, ...)",
+          "inputs": [
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "WordCloudChart name-value properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "wc",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the WordCloudChart object."
+            }
+          ]
+        },
+        {
+          "label": "wc = wordcloud(..., Name, Value)",
+          "inputs": [
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "WordCloudChart name-value properties."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "wc",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the WordCloudChart object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.WORDCLOUD.INVALID_ARGUMENT",
+          "identifier": "RunMat:wordcloud:InvalidArgument",
+          "when": "Input data, table selectors, parent axes, or WordCloudChart properties are invalid.",
+          "message": "wordcloud: invalid argument"
+        },
+        {
+          "code": "RM.WORDCLOUD.INTERNAL",
+          "identifier": "RunMat:wordcloud:Internal",
+          "when": "Internal plotting state update fails while creating or mutating a word cloud.",
+          "message": "wordcloud: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "write",
       "output_mode": "Fixed",
       "completion_policy": "Public",
