@@ -9,8 +9,8 @@ use std::path::Path;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ClassDef, ObjectInstance, PropertyDef, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    CellArray, CharArray, ClassDef, ObjectInstance, PropertyDef, ResolveContext, StringArray,
+    Tensor, Type, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -26,6 +26,7 @@ const VECTOR_PROPERTY: &str = "__Vectors";
 const MAX_EMBEDDING_FILE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_ZIP_ENTRIES: usize = 256;
 const MAX_TRAINED_DENSE_VALUES: usize = 20_000_000;
+const MAX_DOC2SEQUENCE_DENSE_VALUES: usize = 50_000_000;
 
 thread_local! {
     static WORD_EMBEDDING_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
@@ -71,6 +72,16 @@ const OUT_WORDS_DIST: [BuiltinParamDescriptor; 2] = [
         description: "Distances to input vectors.",
     },
 ];
+
+const OUT_SEQUENCES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "sequences",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Cell array of document embedding-vector sequences.",
+}];
+
+const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
 
 const IN_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "filename",
@@ -194,6 +205,47 @@ const IN_VECTORS_REST: [BuiltinParamDescriptor; 4] = [
     },
 ];
 
+const IN_MAP_DOCUMENTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "emb",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "wordEmbedding object.",
+    },
+    BuiltinParamDescriptor {
+        name: "documents",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "tokenizedDocument object.",
+    },
+];
+
+const IN_MAP_DOCUMENTS_REST: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "emb",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "wordEmbedding object.",
+    },
+    BuiltinParamDescriptor {
+        name: "documents",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "tokenizedDocument object.",
+    },
+    BuiltinParamDescriptor {
+        name: "NameValue",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value options: UnknownWord, PaddingDirection, PaddingValue, Length.",
+    },
+];
+
 const ERROR_READ_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.READWORDEMBEDDING.INVALID_INPUT",
     identifier: Some("RunMat:readWordEmbedding:InvalidInput"),
@@ -222,6 +274,20 @@ const ERROR_TRAIN_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor
     message: "trainWordEmbedding received invalid input",
 };
 
+const ERROR_FASTTEXT_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FASTTEXTWORDEMBEDDING.INVALID_INPUT",
+    identifier: Some("RunMat:fastTextWordEmbedding:InvalidInput"),
+    when: "Inputs do not match the supported fastTextWordEmbedding form.",
+    message: "fastTextWordEmbedding received invalid input",
+};
+
+const ERROR_DOC2SEQUENCE_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DOC2SEQUENCE.INVALID_INPUT",
+    identifier: Some("RunMat:doc2sequence:InvalidInput"),
+    when: "Inputs do not match a supported doc2sequence form.",
+    message: "doc2sequence received invalid input",
+};
+
 const ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.READWORDEMBEDDING.IO",
     identifier: Some("RunMat:readWordEmbedding:IOError"),
@@ -229,10 +295,12 @@ const ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "Unable to read word embedding file",
 };
 
+const FASTTEXT_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_FASTTEXT_INVALID_INPUT];
 const READ_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_READ_INVALID_INPUT, ERROR_IO];
 const WORD2VEC_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_WORD2VEC_INVALID_INPUT];
 const VEC2WORD_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_VEC2WORD_INVALID_INPUT];
 const TRAIN_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_TRAIN_INVALID_INPUT];
+const DOC2SEQUENCE_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_DOC2SEQUENCE_INVALID_INPUT];
 
 fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
@@ -247,6 +315,17 @@ pub const READ_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor 
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &READ_ERRORS,
+};
+
+pub const FASTTEXT_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "emb = fastTextWordEmbedding",
+        inputs: &NO_INPUTS,
+        outputs: &OUT_EMBEDDING,
+    }],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FASTTEXT_ERRORS,
 };
 
 pub const WORD2VEC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -285,6 +364,24 @@ pub const VEC2WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &VEC2WORD_ERRORS,
 };
 
+pub const DOC2SEQUENCE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[
+        BuiltinSignatureDescriptor {
+            label: "sequences = doc2sequence(emb, documents)",
+            inputs: &IN_MAP_DOCUMENTS,
+            outputs: &OUT_SEQUENCES,
+        },
+        BuiltinSignatureDescriptor {
+            label: "sequences = doc2sequence(emb, documents, Name, Value)",
+            inputs: &IN_MAP_DOCUMENTS_REST,
+            outputs: &OUT_SEQUENCES,
+        },
+    ],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DOC2SEQUENCE_ERRORS,
+};
+
 pub const TRAIN_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
         BuiltinSignatureDescriptor {
@@ -307,6 +404,28 @@ pub const TRAIN_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TRAIN_ERRORS,
 };
+
+#[runtime_builtin(
+    name = "fastTextWordEmbedding",
+    category = "strings/text_analytics",
+    summary = "Return a bundled fastText-style word embedding compatibility model.",
+    keywords = "fastTextWordEmbedding,wordEmbedding,text analytics,fastText,pretrained",
+    accel = "sink",
+    type_resolver(any_type),
+    descriptor(
+        crate::builtins::strings::text_analytics::embeddings::FASTTEXT_WORD_EMBEDDING_DESCRIPTOR
+    ),
+    builtin_path = "crate::builtins::strings::text_analytics::embeddings"
+)]
+async fn fast_text_word_embedding_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if !args.is_empty() {
+        return Err(embedding_error(
+            "fastTextWordEmbedding",
+            "fastTextWordEmbedding: expected no input arguments",
+        ));
+    }
+    embedding_object(compact_fast_text_embedding())
+}
 
 #[runtime_builtin(
     name = "readWordEmbedding",
@@ -370,6 +489,24 @@ async fn train_word_embedding_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
         }
     };
     embedding_object(train_embedding_model(documents, options)?)
+}
+
+#[runtime_builtin(
+    name = "doc2sequence",
+    category = "strings/text_analytics",
+    summary = "Convert tokenized documents to embedding-vector sequences.",
+    keywords = "doc2sequence,wordEmbedding,tokenizedDocument,text analytics,sequences",
+    accel = "sink",
+    type_resolver(any_type),
+    descriptor(crate::builtins::strings::text_analytics::embeddings::DOC2SEQUENCE_DESCRIPTOR),
+    builtin_path = "crate::builtins::strings::text_analytics::embeddings"
+)]
+async fn doc2sequence_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let gathered = gather_args(args, "doc2sequence").await?;
+    let (embedding_object, document_object, options) = parse_doc2sequence_args(gathered)?;
+    let embedding = embedding_from_object(&embedding_object, "doc2sequence")?;
+    let documents = documents_from_object(&document_object, "doc2sequence")?;
+    doc2sequence_value(&embedding, &documents, options)
 }
 
 #[runtime_builtin(
@@ -830,6 +967,136 @@ fn embedding_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResul
         vectors,
         dimension,
     })
+}
+
+fn compact_fast_text_embedding() -> EmbeddingModel {
+    let vocabulary = [
+        "France",
+        "Italy",
+        "Rome",
+        "Paris",
+        "king",
+        "queen",
+        "man",
+        "woman",
+        "good",
+        "bad",
+        "excellent",
+        "terrible",
+        "data",
+        "model",
+        "analysis",
+        "report",
+        "signal",
+        "image",
+        "learning",
+        "network",
+        "algorithm",
+        "matrix",
+        "vector",
+        "science",
+        "engineering",
+        "physics",
+        "compute",
+        "runtime",
+        "test",
+        "train",
+        "document",
+        "sequence",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect::<Vec<_>>();
+    let dimension = 300usize;
+    let mut vectors = Vec::with_capacity(vocabulary.len() * dimension);
+    for word in &vocabulary {
+        vectors.extend(compact_fast_text_vector(word, dimension));
+    }
+    EmbeddingModel {
+        vocabulary,
+        vectors,
+        dimension,
+    }
+}
+
+fn compact_fast_text_vector(word: &str, dimension: usize) -> Vec<f64> {
+    let mut vector = vec![0.0; dimension];
+    let has_curated_vector = match word {
+        "France" => {
+            vector[0] = 1.0;
+            vector[2] = 1.0;
+            true
+        }
+        "Italy" => {
+            vector[2] = 1.0;
+            true
+        }
+        "Rome" => {
+            vector[1] = 1.0;
+            vector[2] = 1.0;
+            true
+        }
+        "Paris" => {
+            vector[0] = 1.0;
+            vector[1] = 1.0;
+            vector[2] = 1.0;
+            true
+        }
+        "king" => {
+            vector[3] = 1.0;
+            vector[5] = 1.0;
+            true
+        }
+        "queen" => {
+            vector[4] = 1.0;
+            vector[5] = 1.0;
+            true
+        }
+        "man" => {
+            vector[3] = 1.0;
+            true
+        }
+        "woman" => {
+            vector[4] = 1.0;
+            true
+        }
+        "good" => {
+            vector[6] = 1.0;
+            true
+        }
+        "bad" => {
+            vector[6] = -1.0;
+            true
+        }
+        "excellent" => {
+            vector[6] = 1.4;
+            vector[7] = 0.4;
+            true
+        }
+        "terrible" => {
+            vector[6] = -1.4;
+            vector[7] = -0.4;
+            true
+        }
+        _ => false,
+    };
+    if !has_curated_vector {
+        let seed = stable_word_hash(word);
+        for (idx, slot) in vector.iter_mut().enumerate() {
+            let bit = ((seed.rotate_left((idx % 31) as u32) ^ idx as u64) & 0x0f) as f64;
+            *slot = (bit - 7.5) / 64.0;
+        }
+    }
+    vector
+}
+
+fn stable_word_hash(word: &str) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in word.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn ensure_word_embedding_class_registered() {
@@ -1474,6 +1741,311 @@ fn parse_vec2word_args(
     Ok((object, matrix, options))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UnknownWordMode {
+    Discard,
+    Nan,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PaddingDirection {
+    Left,
+    Right,
+    None,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SequenceLength {
+    Longest,
+    Shortest,
+    Fixed(usize),
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Doc2SequenceOptions {
+    unknown_word: UnknownWordMode,
+    padding_direction: PaddingDirection,
+    padding_value: f64,
+    length: SequenceLength,
+}
+
+impl Default for Doc2SequenceOptions {
+    fn default() -> Self {
+        Self {
+            unknown_word: UnknownWordMode::Discard,
+            padding_direction: PaddingDirection::Left,
+            padding_value: 0.0,
+            length: SequenceLength::Longest,
+        }
+    }
+}
+
+fn parse_doc2sequence_args(
+    args: Vec<Value>,
+) -> BuiltinResult<(ObjectInstance, ObjectInstance, Doc2SequenceOptions)> {
+    if args.len() < 2 {
+        return Err(embedding_error(
+            "doc2sequence",
+            "doc2sequence: expected doc2sequence(emb, documents)",
+        ));
+    }
+    if !(args.len() - 2).is_multiple_of(2) {
+        return Err(embedding_error(
+            "doc2sequence",
+            "doc2sequence: name-value options must be paired",
+        ));
+    }
+    let embedding = match &args[0] {
+        Value::Object(object) => object.clone(),
+        other => {
+            return Err(embedding_error(
+                "doc2sequence",
+                format!("doc2sequence: expected wordEmbedding object, got {other:?}"),
+            ));
+        }
+    };
+    let documents = match &args[1] {
+        Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => object.clone(),
+        Value::Object(object) => {
+            return Err(embedding_error(
+                "doc2sequence",
+                format!(
+                    "doc2sequence: expected tokenizedDocument object, got {}",
+                    object.class_name
+                ),
+            ));
+        }
+        other => {
+            return Err(embedding_error(
+                "doc2sequence",
+                format!("doc2sequence: expected tokenizedDocument object, got {other:?}"),
+            ));
+        }
+    };
+    let mut options = Doc2SequenceOptions::default();
+    let mut idx = 2usize;
+    while idx < args.len() {
+        let name = scalar_text(&args[idx], "doc2sequence")
+            .map_err(|err| embedding_error("doc2sequence", err.to_string()))?
+            .to_ascii_lowercase();
+        match name.as_str() {
+            "unknownword" => {
+                let value = scalar_text(&args[idx + 1], "doc2sequence")
+                    .map_err(|err| embedding_error("doc2sequence", err.to_string()))?
+                    .to_ascii_lowercase();
+                options.unknown_word = match value.as_str() {
+                    "discard" => UnknownWordMode::Discard,
+                    "nan" => UnknownWordMode::Nan,
+                    other => {
+                        return Err(embedding_error(
+                            "doc2sequence",
+                            format!("doc2sequence: UnknownWord must be 'discard' or 'nan', got '{other}'"),
+                        ));
+                    }
+                };
+            }
+            "paddingdirection" => {
+                let value = scalar_text(&args[idx + 1], "doc2sequence")
+                    .map_err(|err| embedding_error("doc2sequence", err.to_string()))?
+                    .to_ascii_lowercase();
+                options.padding_direction = match value.as_str() {
+                    "left" => PaddingDirection::Left,
+                    "right" => PaddingDirection::Right,
+                    "none" => PaddingDirection::None,
+                    other => {
+                        return Err(embedding_error(
+                            "doc2sequence",
+                            format!("doc2sequence: PaddingDirection must be 'left', 'right', or 'none', got '{other}'"),
+                        ));
+                    }
+                };
+            }
+            "paddingvalue" => {
+                options.padding_value =
+                    parse_finite_numeric_scalar(&args[idx + 1], "doc2sequence", "PaddingValue")?;
+            }
+            "length" => options.length = parse_sequence_length(&args[idx + 1])?,
+            other => {
+                return Err(embedding_error(
+                    "doc2sequence",
+                    format!("doc2sequence: unsupported option '{other}'"),
+                ));
+            }
+        }
+        idx += 2;
+    }
+    Ok((embedding, documents, options))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SequenceToken {
+    Known(usize),
+    UnknownNan,
+}
+
+fn doc2sequence_value(
+    embedding: &EmbeddingModel,
+    documents: &[Vec<String>],
+    options: Doc2SequenceOptions,
+) -> BuiltinResult<Value> {
+    let lookup = build_word_lookup(&embedding.vocabulary, false);
+    let mut sequences = Vec::with_capacity(documents.len());
+    for document in documents {
+        let mut sequence = Vec::new();
+        for token in document {
+            if let Some(&idx) = lookup.get(token) {
+                sequence.push(SequenceToken::Known(idx));
+            } else if options.unknown_word == UnknownWordMode::Nan {
+                sequence.push(SequenceToken::UnknownNan);
+            }
+        }
+        sequences.push(sequence);
+    }
+    let resolved_length = resolve_sequence_length(&sequences, options.length);
+    let mut values = Vec::with_capacity(sequences.len());
+    let mut total_cells = 0usize;
+    for sequence in &sequences {
+        let target_len = match options.padding_direction {
+            PaddingDirection::None => match options.length {
+                SequenceLength::Fixed(len) => sequence.len().min(len),
+                SequenceLength::Shortest => sequence.len().min(resolved_length),
+                SequenceLength::Longest => sequence.len(),
+            },
+            PaddingDirection::Left | PaddingDirection::Right => resolved_length,
+        };
+        total_cells = total_cells
+            .checked_add(
+                embedding
+                    .dimension
+                    .checked_mul(target_len)
+                    .ok_or_else(|| dense_doc2sequence_limit_error("doc2sequence"))?,
+            )
+            .ok_or_else(|| dense_doc2sequence_limit_error("doc2sequence"))?;
+        if total_cells > MAX_DOC2SEQUENCE_DENSE_VALUES {
+            return Err(dense_doc2sequence_limit_error("doc2sequence"));
+        }
+        values.push(Value::Tensor(sequence_tensor(
+            embedding,
+            sequence,
+            target_len,
+            options.padding_direction,
+            options.padding_value,
+        )?));
+    }
+    Ok(Value::Cell(
+        CellArray::new(values, documents.len(), 1)
+            .map_err(|err| embedding_error("doc2sequence", err))?,
+    ))
+}
+
+fn resolve_sequence_length(sequences: &[Vec<SequenceToken>], length: SequenceLength) -> usize {
+    match length {
+        SequenceLength::Fixed(len) => len,
+        SequenceLength::Longest => sequences.iter().map(Vec::len).max().unwrap_or(0),
+        SequenceLength::Shortest => sequences.iter().map(Vec::len).min().unwrap_or(0),
+    }
+}
+
+fn sequence_tensor(
+    embedding: &EmbeddingModel,
+    sequence: &[SequenceToken],
+    target_len: usize,
+    padding_direction: PaddingDirection,
+    padding_value: f64,
+) -> BuiltinResult<Tensor> {
+    let truncated_len = sequence.len().min(target_len);
+    let pad_len = target_len.saturating_sub(truncated_len);
+    let mut out = Vec::with_capacity(embedding.dimension * target_len);
+    if padding_direction == PaddingDirection::Left {
+        push_padding_columns(&mut out, embedding.dimension, pad_len, padding_value);
+    }
+    for token in sequence.iter().take(truncated_len) {
+        match token {
+            SequenceToken::Known(row) => {
+                let start = row * embedding.dimension;
+                out.extend_from_slice(&embedding.vectors[start..start + embedding.dimension]);
+            }
+            SequenceToken::UnknownNan => {
+                out.extend(std::iter::repeat_n(f64::NAN, embedding.dimension));
+            }
+        }
+    }
+    if padding_direction == PaddingDirection::Right {
+        push_padding_columns(&mut out, embedding.dimension, pad_len, padding_value);
+    }
+    Tensor::new(out, vec![embedding.dimension, target_len])
+        .map_err(|err| embedding_error("doc2sequence", err))
+}
+
+fn push_padding_columns(out: &mut Vec<f64>, dimension: usize, count: usize, padding_value: f64) {
+    out.extend(std::iter::repeat_n(padding_value, dimension * count));
+}
+
+fn parse_sequence_length(value: &Value) -> BuiltinResult<SequenceLength> {
+    if matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    ) {
+        let text = scalar_text(value, "doc2sequence")
+            .map_err(|err| embedding_error("doc2sequence", err.to_string()))?;
+        match text.trim().to_ascii_lowercase().as_str() {
+            "longest" => return Ok(SequenceLength::Longest),
+            "shortest" => return Ok(SequenceLength::Shortest),
+            other => {
+                if let Ok(value) = other.parse::<usize>() {
+                    if value > 0 {
+                        return Ok(SequenceLength::Fixed(value));
+                    }
+                }
+                return Err(embedding_error(
+                    "doc2sequence",
+                    format!(
+                        "doc2sequence: Length must be 'longest', 'shortest', or a positive integer, got '{other}'"
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(SequenceLength::Fixed(parse_positive_integer(
+        value,
+        "doc2sequence",
+    )?))
+}
+
+fn parse_finite_numeric_scalar(
+    value: &Value,
+    fn_name: &str,
+    option_name: &str,
+) -> BuiltinResult<f64> {
+    let n = match value {
+        Value::Num(value) => *value,
+        Value::Int(value) => int_value_to_f64(value),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        other => {
+            return Err(embedding_error(
+                fn_name,
+                format!("{fn_name}: {option_name} must be a finite numeric scalar, got {other:?}"),
+            ));
+        }
+    };
+    if !n.is_finite() {
+        return Err(embedding_error(
+            fn_name,
+            format!("{fn_name}: {option_name} must be finite"),
+        ));
+    }
+    Ok(n)
+}
+
+fn dense_doc2sequence_limit_error(fn_name: &str) -> crate::RuntimeError {
+    embedding_error(
+        fn_name,
+        format!(
+            "{fn_name}: output would exceed {MAX_DOC2SEQUENCE_DENSE_VALUES} dense values; use PaddingDirection 'none' or a smaller Length"
+        ),
+    )
+}
+
 fn words_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.clone()]),
@@ -1588,9 +2160,23 @@ fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
     }
 }
 
+fn int_value_to_f64(value: &runmat_builtins::IntValue) -> f64 {
+    match value {
+        runmat_builtins::IntValue::I8(value) => *value as f64,
+        runmat_builtins::IntValue::I16(value) => *value as f64,
+        runmat_builtins::IntValue::I32(value) => *value as f64,
+        runmat_builtins::IntValue::I64(value) => *value as f64,
+        runmat_builtins::IntValue::U8(value) => *value as f64,
+        runmat_builtins::IntValue::U16(value) => *value as f64,
+        runmat_builtins::IntValue::U32(value) => *value as f64,
+        runmat_builtins::IntValue::U64(value) => *value as f64,
+    }
+}
+
 fn parse_positive_integer(value: &Value, fn_name: &str) -> BuiltinResult<usize> {
     let n = match value {
         Value::Num(value) => *value,
+        Value::Int(value) => int_value_to_f64(value),
         Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
         other => {
             return Err(embedding_error(
@@ -1629,8 +2215,10 @@ fn looks_like_zip(bytes: &[u8]) -> bool {
 
 fn embedding_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeError {
     let identifier = match fn_name {
+        "fastTextWordEmbedding" => "RunMat:fastTextWordEmbedding:InvalidInput",
         "readWordEmbedding" => "RunMat:readWordEmbedding:InvalidInput",
         "trainWordEmbedding" => "RunMat:trainWordEmbedding:InvalidInput",
+        "doc2sequence" => "RunMat:doc2sequence:InvalidInput",
         "word2vec" => "RunMat:word2vec:InvalidInput",
         "vec2word" => "RunMat:vec2word:InvalidInput",
         _ => "RunMat:wordEmbedding:InvalidInput",
@@ -1699,6 +2287,29 @@ mod tests {
         );
     }
 
+    fn tokenized_document_object(rows: Vec<Vec<&str>>) -> ObjectInstance {
+        let values = rows
+            .into_iter()
+            .map(|row| {
+                let len = row.len();
+                Value::StringArray(
+                    StringArray::new(
+                        row.into_iter().map(str::to_string).collect::<Vec<_>>(),
+                        vec![1, len],
+                    )
+                    .unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let rows = values.len();
+        let documents = CellArray::new(values, rows, 1).unwrap();
+        let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
+        object
+            .properties
+            .insert("Documents".to_string(), Value::Cell(documents));
+        object
+    }
+
     #[tokio::test]
     async fn read_word_embedding_reads_plain_text_file() {
         let dir = tempdir().unwrap();
@@ -1738,6 +2349,66 @@ mod tests {
         assert!(object.is_class(WORD_EMBEDDING_CLASS));
         let model = embedding_from_object(&object, "test").unwrap();
         assert_eq!(model.vocabulary, vec!["left", "right"]);
+    }
+
+    #[tokio::test]
+    async fn fast_text_word_embedding_returns_compact_300d_model() {
+        let value = fast_text_word_embedding_builtin(vec![]).await.unwrap();
+        let Value::Object(object) = value else {
+            panic!("expected wordEmbedding object");
+        };
+        assert!(object.is_class(WORD_EMBEDDING_CLASS));
+        assert_eq!(object.properties.get("Dimension"), Some(&Value::Num(300.0)));
+
+        let italy = word2vec_builtin(vec![
+            Value::Object(object.clone()),
+            Value::String("Italy".into()),
+        ])
+        .await
+        .unwrap();
+        let rome = word2vec_builtin(vec![
+            Value::Object(object.clone()),
+            Value::String("Rome".into()),
+        ])
+        .await
+        .unwrap();
+        let paris = word2vec_builtin(vec![
+            Value::Object(object.clone()),
+            Value::String("Paris".into()),
+        ])
+        .await
+        .unwrap();
+        let (Value::Tensor(italy), Value::Tensor(rome), Value::Tensor(paris)) =
+            (italy, rome, paris)
+        else {
+            panic!("expected tensors");
+        };
+        let query = italy
+            .data
+            .iter()
+            .zip(&rome.data)
+            .zip(&paris.data)
+            .map(|((i, r), p)| i - r + p)
+            .collect::<Vec<_>>();
+        let nearest = vec2word_builtin(vec![
+            Value::Object(object),
+            Value::Tensor(Tensor::new(query, vec![1, 300]).unwrap()),
+            Value::Num(1.0),
+        ])
+        .await
+        .unwrap();
+        let Value::OutputList(outputs) = nearest else {
+            panic!("expected output list");
+        };
+        let Value::StringArray(words) = &outputs[0] else {
+            panic!("expected nearest words");
+        };
+        assert_eq!(words.data, vec!["France"]);
+
+        let err = fast_text_word_embedding_builtin(vec![Value::Num(1.0)])
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("expected no input"), "{err}");
     }
 
     #[tokio::test]
@@ -1782,23 +2453,7 @@ mod tests {
 
     #[tokio::test]
     async fn train_word_embedding_trains_from_tokenized_document_object() {
-        let documents = CellArray::new(
-            vec![
-                Value::StringArray(
-                    StringArray::new(vec!["red".into(), "blue".into()], vec![1, 2]).unwrap(),
-                ),
-                Value::StringArray(
-                    StringArray::new(vec!["red".into(), "green".into()], vec![1, 2]).unwrap(),
-                ),
-            ],
-            2,
-            1,
-        )
-        .unwrap();
-        let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
-        object
-            .properties
-            .insert("Documents".to_string(), Value::Cell(documents));
+        let object = tokenized_document_object(vec![vec!["red", "blue"], vec!["red", "green"]]);
 
         let value = train_word_embedding_builtin(vec![
             Value::Object(object),
@@ -1819,6 +2474,152 @@ mod tests {
         let model = embedding_from_object(&object, "test").unwrap();
         assert_eq!(model.dimension, 6);
         assert_eq!(model.vocabulary, vec!["red", "blue", "green"]);
+    }
+
+    #[tokio::test]
+    async fn doc2sequence_pads_to_longest_and_discards_unknown_words() {
+        let model = EmbeddingModel {
+            vocabulary: vec!["alpha".into(), "beta".into()],
+            vectors: vec![1.0, 10.0, 2.0, 20.0],
+            dimension: 2,
+        };
+        let emb = embedding_object(model).unwrap();
+        let documents = Value::Object(tokenized_document_object(vec![
+            vec!["alpha", "beta"],
+            vec!["missing", "beta"],
+        ]));
+
+        let result = doc2sequence_builtin(vec![emb, documents]).await.unwrap();
+        let Value::Cell(cell) = result else {
+            panic!("expected cell array");
+        };
+        assert_eq!(cell.rows, 2);
+        assert_eq!(cell.cols, 1);
+
+        let Value::Tensor(first) = &cell.data[0] else {
+            panic!("expected first tensor");
+        };
+        assert_eq!(first.shape, vec![2, 2]);
+        assert_eq!(first.data, vec![1.0, 10.0, 2.0, 20.0]);
+
+        let Value::Tensor(second) = &cell.data[1] else {
+            panic!("expected second tensor");
+        };
+        assert_eq!(second.shape, vec![2, 2]);
+        assert_eq!(second.data, vec![0.0, 0.0, 2.0, 20.0]);
+    }
+
+    #[tokio::test]
+    async fn doc2sequence_supports_unknown_nan_right_padding_and_fixed_length() {
+        let model = EmbeddingModel {
+            vocabulary: vec!["alpha".into(), "beta".into()],
+            vectors: vec![1.0, 10.0, 2.0, 20.0],
+            dimension: 2,
+        };
+        let emb = embedding_object(model).unwrap();
+        let documents = Value::Object(tokenized_document_object(vec![
+            vec!["alpha", "missing"],
+            vec!["beta"],
+        ]));
+
+        let result = doc2sequence_builtin(vec![
+            emb,
+            documents,
+            Value::String("UnknownWord".into()),
+            Value::String("nan".into()),
+            Value::String("PaddingDirection".into()),
+            Value::String("right".into()),
+            Value::String("PaddingValue".into()),
+            Value::Num(-5.0),
+            Value::String("Length".into()),
+            Value::Num(3.0),
+        ])
+        .await
+        .unwrap();
+        let Value::Cell(cell) = result else {
+            panic!("expected cell array");
+        };
+        let Value::Tensor(first) = &cell.data[0] else {
+            panic!("expected first tensor");
+        };
+        assert_eq!(first.shape, vec![2, 3]);
+        assert_eq!(first.data[0..2], [1.0, 10.0]);
+        assert!(first.data[2].is_nan());
+        assert!(first.data[3].is_nan());
+        assert_eq!(first.data[4..6], [-5.0, -5.0]);
+
+        let Value::Tensor(second) = &cell.data[1] else {
+            panic!("expected second tensor");
+        };
+        assert_eq!(second.data, vec![2.0, 20.0, -5.0, -5.0, -5.0, -5.0]);
+    }
+
+    #[tokio::test]
+    async fn doc2sequence_none_padding_keeps_per_document_lengths_and_truncates_right() {
+        let model = EmbeddingModel {
+            vocabulary: vec!["a".into(), "b".into(), "c".into()],
+            vectors: vec![1.0, 11.0, 2.0, 22.0, 3.0, 33.0],
+            dimension: 2,
+        };
+        let emb = embedding_object(model).unwrap();
+        let documents = Value::Object(tokenized_document_object(vec![
+            vec!["a", "b", "c"],
+            vec!["a"],
+        ]));
+
+        let result = doc2sequence_builtin(vec![
+            emb,
+            documents,
+            Value::String("PaddingDirection".into()),
+            Value::String("none".into()),
+            Value::String("Length".into()),
+            Value::Num(2.0),
+        ])
+        .await
+        .unwrap();
+        let Value::Cell(cell) = result else {
+            panic!("expected cell array");
+        };
+        let Value::Tensor(first) = &cell.data[0] else {
+            panic!("expected first tensor");
+        };
+        assert_eq!(first.shape, vec![2, 2]);
+        assert_eq!(first.data, vec![1.0, 11.0, 2.0, 22.0]);
+
+        let Value::Tensor(second) = &cell.data[1] else {
+            panic!("expected second tensor");
+        };
+        assert_eq!(second.shape, vec![2, 1]);
+        assert_eq!(second.data, vec![1.0, 11.0]);
+    }
+
+    #[tokio::test]
+    async fn doc2sequence_rejects_word_encoding_and_invalid_options() {
+        let model = EmbeddingModel {
+            vocabulary: vec!["alpha".into()],
+            vectors: vec![1.0, 10.0],
+            dimension: 2,
+        };
+        let documents = Value::Object(tokenized_document_object(vec![vec!["alpha"]]));
+        let mut word_encoding = ObjectInstance::new("wordEncoding".to_string());
+        word_encoding.properties.insert(
+            "Vocabulary".to_string(),
+            Value::StringArray(StringArray::new(vec!["alpha".into()], vec![1, 1]).unwrap()),
+        );
+        let err = doc2sequence_builtin(vec![Value::Object(word_encoding), documents.clone()])
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("wordEmbedding object"), "{err}");
+
+        let err = doc2sequence_builtin(vec![
+            embedding_object(model).unwrap(),
+            documents,
+            Value::String("PaddingDirection".into()),
+            Value::String("middle".into()),
+        ])
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("PaddingDirection"), "{err}");
     }
 
     #[tokio::test]

@@ -24933,6 +24933,84 @@
       ]
     },
     {
+      "name": "doc2sequence",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "sequences = doc2sequence(emb, documents)",
+          "inputs": [
+            {
+              "name": "emb",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEmbedding object."
+            },
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sequences",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array of document embedding-vector sequences."
+            }
+          ]
+        },
+        {
+          "label": "sequences = doc2sequence(emb, documents, Name, Value)",
+          "inputs": [
+            {
+              "name": "emb",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "wordEmbedding object."
+            },
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: UnknownWord, PaddingDirection, PaddingValue, Length."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sequences",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array of document embedding-vector sequences."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DOC2SEQUENCE.INVALID_INPUT",
+          "identifier": "RunMat:doc2sequence:InvalidInput",
+          "when": "Inputs do not match a supported doc2sequence form.",
+          "message": "doc2sequence received invalid input"
+        }
+      ]
+    },
+    {
       "name": "dot",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -28715,6 +28793,34 @@
           "identifier": null,
           "when": "Dimension arguments fail numeric/shape parsing.",
           "message": "false: dimension arguments must be numeric and nonnegative"
+        }
+      ]
+    },
+    {
+      "name": "fastTextWordEmbedding",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "emb = fastTextWordEmbedding",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "emb",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Word embedding compatibility object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FASTTEXTWORDEMBEDDING.INVALID_INPUT",
+          "identifier": "RunMat:fastTextWordEmbedding:InvalidInput",
+          "when": "Inputs do not match the supported fastTextWordEmbedding form.",
+          "message": "fastTextWordEmbedding received invalid input"
         }
       ]
     },
