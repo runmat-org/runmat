@@ -33105,6 +33105,49 @@
       ]
     },
     {
+      "name": "findElement",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "subtrees = findElement(tree, selector)",
+          "inputs": [
+            {
+              "name": "tree",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "htmlTree object or cell array of htmlTree objects."
+            },
+            {
+              "name": "selector",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "CSS selector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "subtrees",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matching htmlTree subtrees."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.HTML.INVALID_INPUT",
+          "identifier": "RunMat:html:InvalidInput",
+          "when": "Inputs are not a supported htmlTree or extractHTMLText form.",
+          "message": "HTML Text Analytics helper received invalid input"
+        }
+      ]
+    },
+    {
       "name": "findgroups",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -39181,6 +39224,49 @@
           "identifier": "RunMat:get:Internal",
           "when": "Internal handle/property retrieval fails unexpectedly.",
           "message": "get: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "getAttribute",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "str = getAttribute(tree, attr)",
+          "inputs": [
+            {
+              "name": "tree",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "htmlTree object or cell array of htmlTree objects."
+            },
+            {
+              "name": "attr",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Attribute name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "str",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Extracted text."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.HTML.INVALID_INPUT",
+          "identifier": "RunMat:html:InvalidInput",
+          "when": "Inputs are not a supported htmlTree or extractHTMLText form.",
+          "message": "HTML Text Analytics helper received invalid input"
         }
       ]
     },

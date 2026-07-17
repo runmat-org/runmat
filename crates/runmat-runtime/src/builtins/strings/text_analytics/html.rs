@@ -1,6 +1,6 @@
 //! MATLAB-compatible HTML text extraction helpers.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -29,6 +29,14 @@ const OUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Extracted text.",
+}];
+
+const OUT_SUBTREES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "subtrees",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Matching htmlTree subtrees.",
 }];
 
 const IN_CODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -60,6 +68,40 @@ const IN_CODE_METHOD: [BuiltinParamDescriptor; 3] = [
         arity: BuiltinParamArity::Required,
         default: Some("tree"),
         description: "Extraction method: tree, article, or all-text.",
+    },
+];
+
+const IN_TREE_SELECTOR: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "tree",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "htmlTree object or cell array of htmlTree objects.",
+    },
+    BuiltinParamDescriptor {
+        name: "selector",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "CSS selector.",
+    },
+];
+
+const IN_TREE_ATTR: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "tree",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "htmlTree object or cell array of htmlTree objects.",
+    },
+    BuiltinParamDescriptor {
+        name: "attr",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Attribute name.",
     },
 ];
 
@@ -96,6 +138,28 @@ pub const EXTRACT_HTML_TEXT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
             outputs: &OUT_TEXT,
         },
     ],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+pub const FIND_ELEMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "subtrees = findElement(tree, selector)",
+        inputs: &IN_TREE_SELECTOR,
+        outputs: &OUT_SUBTREES,
+    }],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+pub const GET_ATTRIBUTE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "str = getAttribute(tree, attr)",
+        inputs: &IN_TREE_ATTR,
+        outputs: &OUT_TEXT,
+    }],
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
@@ -155,6 +219,72 @@ async fn html_tree_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 async fn extract_html_text_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let (source, method) = parse_extract_args(args).await?;
     extract_html_text_value(source, method)
+}
+
+#[runtime_builtin(
+    name = "findElement",
+    category = "strings/text_analytics",
+    summary = "Find elements in an htmlTree using common CSS selectors.",
+    keywords = "findElement,htmlTree,HTML,CSS selector,text analytics",
+    accel = "metadata",
+    type_resolver(any_type),
+    descriptor(crate::builtins::strings::text_analytics::html::FIND_ELEMENT_DESCRIPTOR),
+    builtin_path = "crate::builtins::strings::text_analytics::html"
+)]
+async fn find_element_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.len() != 2 {
+        return Err(html_error(
+            "findElement",
+            "findElement: expected htmlTree and selector",
+        ));
+    }
+    let tree = gather_if_needed_async(&args[0]).await.map_err(|err| {
+        html_error(
+            "findElement",
+            format!("findElement: failed to gather tree: {err}"),
+        )
+    })?;
+    let selector = gather_if_needed_async(&args[1]).await.map_err(|err| {
+        html_error(
+            "findElement",
+            format!("findElement: failed to gather selector: {err}"),
+        )
+    })?;
+    let selector = scalar_text(&selector, "findElement")?;
+    find_element_value(tree, &selector)
+}
+
+#[runtime_builtin(
+    name = "getAttribute",
+    category = "strings/text_analytics",
+    summary = "Read an HTML attribute from htmlTree root nodes.",
+    keywords = "getAttribute,htmlTree,HTML,attribute,text analytics",
+    accel = "metadata",
+    type_resolver(string_type),
+    descriptor(crate::builtins::strings::text_analytics::html::GET_ATTRIBUTE_DESCRIPTOR),
+    builtin_path = "crate::builtins::strings::text_analytics::html"
+)]
+async fn get_attribute_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.len() != 2 {
+        return Err(html_error(
+            "getAttribute",
+            "getAttribute: expected htmlTree and attribute name",
+        ));
+    }
+    let tree = gather_if_needed_async(&args[0]).await.map_err(|err| {
+        html_error(
+            "getAttribute",
+            format!("getAttribute: failed to gather tree: {err}"),
+        )
+    })?;
+    let attr = gather_if_needed_async(&args[1]).await.map_err(|err| {
+        html_error(
+            "getAttribute",
+            format!("getAttribute: failed to gather attribute name: {err}"),
+        )
+    })?;
+    let attr = scalar_text(&attr, "getAttribute")?;
+    get_attribute_value(tree, &attr)
 }
 
 async fn parse_extract_args(args: Vec<Value>) -> BuiltinResult<(Value, ExtractionMethod)> {
@@ -311,22 +441,300 @@ fn string_output(data: Vec<String>, shape: Vec<usize>, fn_name: &str) -> Builtin
 }
 
 fn extract_from_object(object: &ObjectInstance, method: ExtractionMethod) -> BuiltinResult<String> {
+    Ok(node_from_object(object, "extractHTMLText")?.extract_text(method))
+}
+
+fn find_element_value(value: Value, selector: &str) -> BuiltinResult<Value> {
+    let selector = Selector::parse(selector)?;
+    let mut matches = Vec::new();
+    match value {
+        Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
+            let root = node_from_object(&object, "findElement")?;
+            collect_selector_matches(&root, &selector, &mut matches)?;
+        }
+        Value::Cell(cell) => {
+            for item in cell.data {
+                match item {
+                    Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
+                        let root = node_from_object(&object, "findElement")?;
+                        collect_selector_matches(&root, &selector, &mut matches)?;
+                    }
+                    other => {
+                        return Err(html_error(
+                            "findElement",
+                            format!("findElement: expected htmlTree object, got {other:?}"),
+                        ));
+                    }
+                }
+            }
+        }
+        Value::Object(object) => {
+            return Err(html_error(
+                "findElement",
+                format!(
+                    "findElement: expected htmlTree, got object {}",
+                    object.class_name
+                ),
+            ));
+        }
+        other => {
+            return Err(html_error(
+                "findElement",
+                format!("findElement: expected htmlTree object, got {other:?}"),
+            ));
+        }
+    }
+
+    let objects = matches
+        .into_iter()
+        .map(|matched| {
+            matched
+                .node
+                .into_object(matched.parent.as_deref())
+                .map(Value::Object)
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let rows = objects.len();
+    Ok(Value::Cell(CellArray::new(objects, rows, 1).map_err(
+        |err| html_error("findElement", format!("findElement: {err}")),
+    )?))
+}
+
+fn get_attribute_value(value: Value, attr: &str) -> BuiltinResult<Value> {
+    let attr = attr.trim().to_ascii_lowercase();
+    if attr.is_empty() {
+        return Err(html_error(
+            "getAttribute",
+            "getAttribute: attribute name must be nonempty",
+        ));
+    }
+    match value {
+        Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
+            Ok(Value::String(attribute_from_object(&object, &attr)?))
+        }
+        Value::Object(object) => Err(html_error(
+            "getAttribute",
+            format!(
+                "getAttribute: expected htmlTree, got object {}",
+                object.class_name
+            ),
+        )),
+        Value::Cell(cell) => {
+            let shape = cell.shape.clone();
+            let mut values = Vec::with_capacity(cell.data.len());
+            for item in cell.data {
+                match item {
+                    Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
+                        values.push(attribute_from_object(&object, &attr)?);
+                    }
+                    other => {
+                        return Err(html_error(
+                            "getAttribute",
+                            format!("getAttribute: expected htmlTree object, got {other:?}"),
+                        ));
+                    }
+                }
+            }
+            string_output(values, shape, "getAttribute")
+        }
+        other => Err(html_error(
+            "getAttribute",
+            format!("getAttribute: expected htmlTree object, got {other:?}"),
+        )),
+    }
+}
+
+fn attribute_from_object(object: &ObjectInstance, attr: &str) -> BuiltinResult<String> {
+    let node = node_from_object(object, "getAttribute")?;
+    match node {
+        HtmlNode::Element(element) => Ok(element
+            .attrs
+            .get(attr)
+            .cloned()
+            .unwrap_or_else(|| MISSING.to_string())),
+        HtmlNode::Text(_) => Ok(MISSING.to_string()),
+    }
+}
+
+fn node_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<HtmlNode> {
     match object.properties.get("RawHTML") {
-        Some(Value::String(html)) => Ok(parse_html_tree(html)?.extract_text(method)),
+        Some(Value::String(html)) => parse_html_tree(html),
         Some(Value::CharArray(_)) | Some(Value::StringArray(_)) => {
             let html = scalar_text(
                 object
                     .properties
                     .get("RawHTML")
                     .expect("RawHTML checked above"),
-                "extractHTMLText",
+                fn_name,
             )?;
-            Ok(parse_html_tree(&html)?.extract_text(method))
+            parse_html_tree(&html)
         }
         _ => Err(html_error(
-            "extractHTMLText",
-            "extractHTMLText: invalid htmlTree object",
+            fn_name,
+            format!("{fn_name}: invalid htmlTree object"),
         )),
+    }
+}
+
+fn collect_selector_matches(
+    root: &HtmlNode,
+    selector: &Selector,
+    out: &mut Vec<MatchedNode>,
+) -> BuiltinResult<()> {
+    let mut seen = BTreeSet::<Vec<usize>>::new();
+    for chain in &selector.chains {
+        for path in execute_selector_chain(root, chain)? {
+            seen.insert(path);
+        }
+    }
+    for path in seen {
+        out.push(MatchedNode {
+            node: node_at(root, &path)
+                .ok_or_else(|| html_error("findElement", "findElement: invalid match"))?
+                .clone(),
+            parent: parent_name(root, &path).map(str::to_ascii_uppercase),
+        });
+    }
+    Ok(())
+}
+
+fn execute_selector_chain(
+    root: &HtmlNode,
+    chain: &SelectorChain,
+) -> BuiltinResult<Vec<Vec<usize>>> {
+    let Some(first) = chain.parts.first() else {
+        return Ok(Vec::new());
+    };
+    let mut candidates = all_paths(root)
+        .into_iter()
+        .filter(|path| {
+            node_at(root, path)
+                .map(|node| first.simple.matches(node))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+
+    for part in chain.parts.iter().skip(1) {
+        let mut next = BTreeSet::<Vec<usize>>::new();
+        for path in &candidates {
+            match part.combinator.unwrap_or(Combinator::Descendant) {
+                Combinator::Descendant => {
+                    for descendant in descendant_paths(root, path) {
+                        if node_at(root, &descendant)
+                            .map(|node| part.simple.matches(node))
+                            .unwrap_or(false)
+                        {
+                            next.insert(descendant);
+                        }
+                    }
+                }
+                Combinator::Child => {
+                    for child in child_paths(root, path) {
+                        if node_at(root, &child)
+                            .map(|node| part.simple.matches(node))
+                            .unwrap_or(false)
+                        {
+                            next.insert(child);
+                        }
+                    }
+                }
+                Combinator::AdjacentSibling => {
+                    if let Some(sibling) = next_sibling_path(root, path) {
+                        if node_at(root, &sibling)
+                            .map(|node| part.simple.matches(node))
+                            .unwrap_or(false)
+                        {
+                            next.insert(sibling);
+                        }
+                    }
+                }
+            }
+        }
+        candidates = next.into_iter().collect();
+    }
+    Ok(candidates)
+}
+
+fn all_paths(root: &HtmlNode) -> Vec<Vec<usize>> {
+    let mut out = Vec::new();
+    collect_paths(root, &mut Vec::new(), &mut out);
+    out
+}
+
+fn collect_paths(node: &HtmlNode, path: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+    out.push(path.clone());
+    if let HtmlNode::Element(element) = node {
+        for (idx, child) in element.children.iter().enumerate() {
+            path.push(idx);
+            collect_paths(child, path, out);
+            path.pop();
+        }
+    }
+}
+
+fn descendant_paths(root: &HtmlNode, path: &[usize]) -> Vec<Vec<usize>> {
+    let Some(node) = node_at(root, path) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut current = path.to_vec();
+    if let HtmlNode::Element(element) = node {
+        for (idx, child) in element.children.iter().enumerate() {
+            current.push(idx);
+            collect_paths(child, &mut current, &mut out);
+            current.pop();
+        }
+    }
+    out
+}
+
+fn child_paths(root: &HtmlNode, path: &[usize]) -> Vec<Vec<usize>> {
+    match node_at(root, path) {
+        Some(HtmlNode::Element(element)) => (0..element.children.len())
+            .map(|idx| {
+                let mut child = path.to_vec();
+                child.push(idx);
+                child
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn next_sibling_path(root: &HtmlNode, path: &[usize]) -> Option<Vec<usize>> {
+    let (last, parent_path) = path.split_last()?;
+    let parent = node_at(root, parent_path)?;
+    let HtmlNode::Element(element) = parent else {
+        return None;
+    };
+    let mut next = *last + 1;
+    while next < element.children.len() {
+        if matches!(element.children.get(next), Some(HtmlNode::Element(_))) {
+            let mut sibling = parent_path.to_vec();
+            sibling.push(next);
+            return Some(sibling);
+        }
+        next += 1;
+    }
+    None
+}
+
+fn node_at<'a>(root: &'a HtmlNode, path: &[usize]) -> Option<&'a HtmlNode> {
+    let mut node = root;
+    for index in path {
+        let HtmlNode::Element(element) = node else {
+            return None;
+        };
+        node = element.children.get(*index)?;
+    }
+    Some(node)
+}
+
+fn parent_name<'a>(root: &'a HtmlNode, path: &[usize]) -> Option<&'a str> {
+    let (_, parent_path) = path.split_last()?;
+    match node_at(root, parent_path) {
+        Some(HtmlNode::Element(element)) => Some(element.name.as_str()),
+        _ => None,
     }
 }
 
@@ -365,6 +773,515 @@ struct HtmlElement {
     attrs: BTreeMap<String, String>,
     children: Vec<HtmlNode>,
     raw: String,
+}
+
+#[derive(Clone, Debug)]
+struct Selector {
+    chains: Vec<SelectorChain>,
+}
+
+#[derive(Clone, Debug)]
+struct SelectorChain {
+    parts: Vec<SelectorPart>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Combinator {
+    Descendant,
+    Child,
+    AdjacentSibling,
+}
+
+#[derive(Clone, Debug)]
+struct SelectorPart {
+    combinator: Option<Combinator>,
+    simple: SimpleSelector,
+}
+
+#[derive(Clone, Debug, Default)]
+struct SimpleSelector {
+    tag: Option<String>,
+    id: Option<String>,
+    classes: Vec<String>,
+    attrs: Vec<AttrSelector>,
+    empty: Option<bool>,
+}
+
+#[derive(Clone, Debug)]
+struct AttrSelector {
+    name: String,
+    value: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct MatchedNode {
+    node: HtmlNode,
+    parent: Option<String>,
+}
+
+impl Selector {
+    fn parse(input: &str) -> BuiltinResult<Self> {
+        let input = input.trim();
+        if input.is_empty() {
+            return Err(html_error(
+                "findElement",
+                "findElement: selector must be nonempty",
+            ));
+        }
+        let mut chains = Vec::new();
+        for group in split_selector_groups(input)? {
+            let chain = SelectorChain::parse(group.trim())?;
+            if !chain.parts.is_empty() {
+                chains.push(chain);
+            }
+        }
+        if chains.is_empty() {
+            return Err(html_error(
+                "findElement",
+                "findElement: selector must contain at least one simple selector",
+            ));
+        }
+        Ok(Self { chains })
+    }
+}
+
+impl SelectorChain {
+    fn parse(input: &str) -> BuiltinResult<Self> {
+        let mut parts = Vec::new();
+        let mut index = 0;
+        let mut pending = None;
+
+        while index < input.len() {
+            let (after_space, had_space) = skip_selector_space(input, index);
+            index = after_space;
+            if index >= input.len() {
+                break;
+            }
+            let ch = input[index..].chars().next().expect("in bounds");
+            match ch {
+                '>' | '+' => {
+                    if parts.is_empty() {
+                        return Err(html_error(
+                            "findElement",
+                            "findElement: selector cannot start with a combinator",
+                        ));
+                    }
+                    if pending.is_some() {
+                        return Err(html_error(
+                            "findElement",
+                            "findElement: selector cannot contain repeated combinators",
+                        ));
+                    }
+                    pending = Some(if ch == '>' {
+                        Combinator::Child
+                    } else {
+                        Combinator::AdjacentSibling
+                    });
+                    index += ch.len_utf8();
+                    continue;
+                }
+                _ => {}
+            }
+            if had_space && !parts.is_empty() && pending.is_none() {
+                pending = Some(Combinator::Descendant);
+            }
+
+            let end = simple_selector_end(input, index)?;
+            if end == index {
+                return Err(html_error(
+                    "findElement",
+                    format!("findElement: invalid selector near '{}'", &input[index..]),
+                ));
+            }
+            let simple = SimpleSelector::parse(&input[index..end])?;
+            let combinator = if parts.is_empty() {
+                if pending.is_some() {
+                    return Err(html_error(
+                        "findElement",
+                        "findElement: selector cannot start with a combinator",
+                    ));
+                }
+                None
+            } else {
+                pending.take().or(Some(Combinator::Descendant))
+            };
+            parts.push(SelectorPart { combinator, simple });
+            index = end;
+        }
+
+        if pending.is_some() {
+            return Err(html_error(
+                "findElement",
+                "findElement: selector cannot end with a combinator",
+            ));
+        }
+        Ok(Self { parts })
+    }
+}
+
+impl SimpleSelector {
+    fn parse(input: &str) -> BuiltinResult<Self> {
+        let mut selector = Self::default();
+        let mut index = 0;
+
+        if let Some(ch) = input.chars().next() {
+            if ch == '*' {
+                index += ch.len_utf8();
+            } else if is_selector_ident_start(ch) {
+                let end = consume_selector_ident(input, index);
+                selector.tag = Some(input[index..end].to_ascii_lowercase());
+                index = end;
+            }
+        }
+
+        while index < input.len() {
+            let ch = input[index..].chars().next().expect("in bounds");
+            match ch {
+                '.' => {
+                    index += ch.len_utf8();
+                    let end = consume_selector_ident(input, index);
+                    if end == index {
+                        return Err(html_error(
+                            "findElement",
+                            "findElement: class selector requires a name",
+                        ));
+                    }
+                    selector.classes.push(input[index..end].to_string());
+                    index = end;
+                }
+                '#' => {
+                    index += ch.len_utf8();
+                    let end = consume_selector_ident(input, index);
+                    if end == index {
+                        return Err(html_error(
+                            "findElement",
+                            "findElement: id selector requires a name",
+                        ));
+                    }
+                    selector.id = Some(input[index..end].to_string());
+                    index = end;
+                }
+                '[' => {
+                    let Some(end) = matching_selector_bracket(input, index, '[', ']')? else {
+                        return Err(html_error(
+                            "findElement",
+                            "findElement: attribute selector is missing ']'",
+                        ));
+                    };
+                    selector
+                        .attrs
+                        .push(AttrSelector::parse(&input[index + 1..end])?);
+                    index = end + 1;
+                }
+                ':' => {
+                    let end = parse_pseudo_selector(input, index, &mut selector)?;
+                    index = end;
+                }
+                _ => {
+                    return Err(html_error(
+                        "findElement",
+                        format!("findElement: unsupported selector token '{ch}'"),
+                    ));
+                }
+            }
+        }
+
+        Ok(selector)
+    }
+
+    fn matches(&self, node: &HtmlNode) -> bool {
+        let HtmlNode::Element(element) = node else {
+            return false;
+        };
+        if let Some(tag) = &self.tag {
+            if !element.name.eq_ignore_ascii_case(tag) {
+                return false;
+            }
+        }
+        if let Some(id) = &self.id {
+            if element.attrs.get("id") != Some(id) {
+                return false;
+            }
+        }
+        if !self.classes.is_empty() {
+            let classes = element
+                .attrs
+                .get("class")
+                .map(|value| value.split_whitespace().collect::<Vec<_>>())
+                .unwrap_or_default();
+            if self
+                .classes
+                .iter()
+                .any(|class| !classes.iter().any(|existing| existing == class))
+            {
+                return false;
+            }
+        }
+        for attr in &self.attrs {
+            let Some(value) = element.attrs.get(&attr.name) else {
+                return false;
+            };
+            if let Some(expected) = &attr.value {
+                if value != expected {
+                    return false;
+                }
+            }
+        }
+        if let Some(expect_empty) = self.empty {
+            let is_empty = element.children.iter().all(|child| match child {
+                HtmlNode::Element(_) => false,
+                HtmlNode::Text(text) => text.trim().is_empty(),
+            });
+            if is_empty != expect_empty {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl AttrSelector {
+    fn parse(input: &str) -> BuiltinResult<Self> {
+        let input = input.trim();
+        if input.is_empty() {
+            return Err(html_error(
+                "findElement",
+                "findElement: attribute selector requires a name",
+            ));
+        }
+        if input.contains("~=")
+            || input.contains("|=")
+            || input.contains("^=")
+            || input.contains("$=")
+            || input.contains("*=")
+        {
+            return Err(html_error(
+                "findElement",
+                "findElement: only [attr] and [attr=value] selectors are supported",
+            ));
+        }
+        let Some(eq) = input.find('=') else {
+            return Ok(Self {
+                name: input.to_ascii_lowercase(),
+                value: None,
+            });
+        };
+        let name = input[..eq].trim();
+        if name.is_empty() {
+            return Err(html_error(
+                "findElement",
+                "findElement: attribute selector requires a name",
+            ));
+        }
+        let value = strip_selector_quotes(input[eq + 1..].trim())?;
+        Ok(Self {
+            name: name.to_ascii_lowercase(),
+            value: Some(decode_html_entities(value)),
+        })
+    }
+}
+
+fn split_selector_groups(input: &str) -> BuiltinResult<Vec<&str>> {
+    let mut groups = Vec::new();
+    let mut start = 0;
+    let mut quote = None;
+    let mut bracket_depth = 0usize;
+    let mut paren_depth = 0usize;
+    for (idx, ch) in input.char_indices() {
+        match (quote, ch) {
+            (Some(active), current) if current == active => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(ch),
+            (None, '[') => bracket_depth += 1,
+            (None, ']') => bracket_depth = bracket_depth.saturating_sub(1),
+            (None, '(') => paren_depth += 1,
+            (None, ')') => paren_depth = paren_depth.saturating_sub(1),
+            (None, ',') if bracket_depth == 0 && paren_depth == 0 => {
+                groups.push(&input[start..idx]);
+                start = idx + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    groups.push(&input[start..]);
+    if groups.iter().any(|group| group.trim().is_empty()) {
+        return Err(html_error(
+            "findElement",
+            "findElement: selector group must be nonempty",
+        ));
+    }
+    Ok(groups)
+}
+
+fn skip_selector_space(input: &str, mut index: usize) -> (usize, bool) {
+    let mut skipped = false;
+    while index < input.len() {
+        let ch = input[index..].chars().next().expect("in bounds");
+        if !ch.is_whitespace() {
+            break;
+        }
+        skipped = true;
+        index += ch.len_utf8();
+    }
+    (index, skipped)
+}
+
+fn simple_selector_end(input: &str, start: usize) -> BuiltinResult<usize> {
+    let mut quote = None;
+    let mut bracket_depth = 0usize;
+    let mut paren_depth = 0usize;
+    for (rel, ch) in input[start..].char_indices() {
+        let idx = start + rel;
+        match (quote, ch) {
+            (Some(active), current) if current == active => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(ch),
+            (None, '[') => bracket_depth += 1,
+            (None, ']') => {
+                bracket_depth = bracket_depth.checked_sub(1).ok_or_else(|| {
+                    html_error("findElement", "findElement: unmatched ']' in selector")
+                })?;
+            }
+            (None, '(') => paren_depth += 1,
+            (None, ')') => {
+                paren_depth = paren_depth.checked_sub(1).ok_or_else(|| {
+                    html_error("findElement", "findElement: unmatched ')' in selector")
+                })?;
+            }
+            (None, '>' | '+') if bracket_depth == 0 && paren_depth == 0 => return Ok(idx),
+            (None, current)
+                if current.is_whitespace() && bracket_depth == 0 && paren_depth == 0 =>
+            {
+                return Ok(idx);
+            }
+            _ => {}
+        }
+    }
+    if quote.is_some() || bracket_depth != 0 || paren_depth != 0 {
+        return Err(html_error(
+            "findElement",
+            "findElement: selector has unclosed quote, bracket, or parenthesis",
+        ));
+    }
+    Ok(input.len())
+}
+
+fn matching_selector_bracket(
+    input: &str,
+    start: usize,
+    open: char,
+    close: char,
+) -> BuiltinResult<Option<usize>> {
+    let mut quote = None;
+    let mut depth = 0usize;
+    for (rel, ch) in input[start..].char_indices() {
+        let idx = start + rel;
+        match (quote, ch) {
+            (Some(active), current) if current == active => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(ch),
+            (None, current) if current == open => depth += 1,
+            (None, current) if current == close => {
+                depth = depth.checked_sub(1).ok_or_else(|| {
+                    html_error("findElement", "findElement: unmatched selector delimiter")
+                })?;
+                if depth == 0 {
+                    return Ok(Some(idx));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(None)
+}
+
+fn parse_pseudo_selector(
+    input: &str,
+    start: usize,
+    selector: &mut SimpleSelector,
+) -> BuiltinResult<usize> {
+    let name_start = start + 1;
+    let name_end = consume_selector_ident(input, name_start);
+    if name_end == name_start {
+        return Err(html_error(
+            "findElement",
+            "findElement: pseudo-class selector requires a name",
+        ));
+    }
+    let name = &input[name_start..name_end];
+    if name.eq_ignore_ascii_case("empty") {
+        selector.empty = Some(true);
+        return Ok(name_end);
+    }
+    if name.eq_ignore_ascii_case("not") {
+        if !input[name_end..].starts_with('(') {
+            return Err(html_error(
+                "findElement",
+                "findElement: :not selector requires parentheses",
+            ));
+        }
+        let Some(close) = matching_selector_bracket(input, name_end, '(', ')')? else {
+            return Err(html_error(
+                "findElement",
+                "findElement: :not selector is missing ')'",
+            ));
+        };
+        let inner = input[name_end + 1..close].trim();
+        if inner.eq_ignore_ascii_case(":empty") {
+            selector.empty = Some(false);
+            return Ok(close + 1);
+        }
+        return Err(html_error(
+            "findElement",
+            "findElement: only :not(:empty) is supported",
+        ));
+    }
+    Err(html_error(
+        "findElement",
+        format!("findElement: unsupported pseudo-class ':{name}'"),
+    ))
+}
+
+fn strip_selector_quotes(input: &str) -> BuiltinResult<&str> {
+    let Some(first) = input.chars().next() else {
+        return Ok(input);
+    };
+    if first != '"' && first != '\'' {
+        return Ok(input);
+    }
+    let Some(last) = input.chars().last() else {
+        return Ok(input);
+    };
+    if first != last || input.len() < first.len_utf8() + last.len_utf8() {
+        return Err(html_error(
+            "findElement",
+            "findElement: attribute selector has an unterminated quoted value",
+        ));
+    }
+    Ok(&input[first.len_utf8()..input.len() - last.len_utf8()])
+}
+
+fn consume_selector_ident(input: &str, start: usize) -> usize {
+    let mut end = start;
+    for (rel, ch) in input[start..].char_indices() {
+        if rel == 0 {
+            if !is_selector_ident_start(ch) {
+                break;
+            }
+        } else if !is_selector_ident_continue(ch) {
+            break;
+        }
+        end = start + rel + ch.len_utf8();
+    }
+    end
+}
+
+fn is_selector_ident_start(ch: char) -> bool {
+    ch.is_ascii_alphabetic() || ch == '_' || ch == '-'
+}
+
+fn is_selector_ident_continue(ch: char) -> bool {
+    is_selector_ident_start(ch) || ch.is_ascii_digit()
 }
 
 #[derive(Debug)]
@@ -1017,6 +1934,190 @@ mod tests {
         let out =
             futures::executor::block_on(extract_html_text_builtin(vec![tree])).expect("extract");
         assert_eq!(string_value(out), "Title\n\nBody & tail");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn find_element_supports_common_selectors_and_attribute_reads() {
+        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+            "<div><a id='home' class='nav primary' href='/home'>Home</a><a class='nav'>Docs</a><p data-kind='lead'>Lead</p></div>"
+                .to_string(),
+        )]))
+        .expect("tree");
+        let links = futures::executor::block_on(find_element_builtin(vec![
+            tree.clone(),
+            Value::String("a.nav".to_string()),
+        ]))
+        .expect("find links");
+        let Value::Cell(link_cell) = links else {
+            panic!("expected cell of htmlTree objects");
+        };
+        assert_eq!(link_cell.shape, vec![2, 1]);
+
+        let link_text = futures::executor::block_on(extract_html_text_builtin(vec![Value::Cell(
+            link_cell.clone(),
+        )]))
+        .expect("extract link text");
+        let Value::StringArray(link_text) = link_text else {
+            panic!("expected string array");
+        };
+        assert_eq!(link_text.shape, vec![2, 1]);
+        assert_eq!(link_text.data, vec!["Home", "Docs"]);
+
+        let hrefs = futures::executor::block_on(get_attribute_builtin(vec![
+            Value::Cell(link_cell),
+            Value::String("href".to_string()),
+        ]))
+        .expect("hrefs");
+        let Value::StringArray(hrefs) = hrefs else {
+            panic!("expected string array");
+        };
+        assert_eq!(hrefs.shape, vec![2, 1]);
+        assert_eq!(hrefs.data, vec!["/home", MISSING]);
+
+        let lead = futures::executor::block_on(find_element_builtin(vec![
+            tree.clone(),
+            Value::String("[data-kind=lead]".to_string()),
+        ]))
+        .expect("find attr");
+        let Value::Cell(lead) = lead else {
+            panic!("expected cell");
+        };
+        assert_eq!(lead.shape, vec![1, 1]);
+
+        let home = futures::executor::block_on(find_element_builtin(vec![
+            tree,
+            Value::String("#home".to_string()),
+        ]))
+        .expect("find id");
+        let Value::Cell(home) = home else {
+            panic!("expected cell");
+        };
+        assert_eq!(home.shape, vec![1, 1]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn find_element_supports_combinators_empty_not_empty_and_groups() {
+        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+            "<section><h1>Title</h1>\n<p class='lead'>Lead</p><label></label><label>Name</label></section>"
+                .to_string(),
+        )]))
+        .expect("tree");
+        let adjacent = futures::executor::block_on(find_element_builtin(vec![
+            tree.clone(),
+            Value::String("h1 + p".to_string()),
+        ]))
+        .expect("adjacent");
+        let Value::Cell(adjacent) = adjacent else {
+            panic!("expected cell");
+        };
+        assert_eq!(adjacent.shape, vec![1, 1]);
+
+        let child = futures::executor::block_on(find_element_builtin(vec![
+            tree.clone(),
+            Value::String("section > p.lead".to_string()),
+        ]))
+        .expect("child");
+        let Value::Cell(child) = child else {
+            panic!("expected cell");
+        };
+        assert_eq!(child.shape, vec![1, 1]);
+
+        let empty = futures::executor::block_on(find_element_builtin(vec![
+            tree.clone(),
+            Value::String("label:empty".to_string()),
+        ]))
+        .expect("empty");
+        let Value::Cell(empty) = empty else {
+            panic!("expected cell");
+        };
+        assert_eq!(empty.shape, vec![1, 1]);
+
+        let not_empty = futures::executor::block_on(find_element_builtin(vec![
+            tree,
+            Value::String("label:not(:empty), h1".to_string()),
+        ]))
+        .expect("not empty");
+        let Value::Cell(not_empty) = not_empty else {
+            panic!("expected cell");
+        };
+        assert_eq!(not_empty.shape, vec![2, 1]);
+        let text =
+            futures::executor::block_on(extract_html_text_builtin(vec![Value::Cell(not_empty)]))
+                .expect("extract group order");
+        let Value::StringArray(text) = text else {
+            panic!("expected string array");
+        };
+        assert_eq!(text.data, vec!["Title", "Name"]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn get_attribute_returns_missing_for_absent_scalar_attribute() {
+        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+            "<a href='/home'>Home</a>".to_string(),
+        )]))
+        .expect("tree");
+        let out = futures::executor::block_on(get_attribute_builtin(vec![
+            tree,
+            Value::String("title".to_string()),
+        ]))
+        .expect("attribute");
+        assert_eq!(string_value(out), MISSING);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn find_element_handles_quoted_attribute_selectors_and_empty_results() {
+        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+            "<div><p data-kind=\"lead item\">Lead</p></div>".to_string(),
+        )]))
+        .expect("tree");
+        let quoted = futures::executor::block_on(find_element_builtin(vec![
+            tree.clone(),
+            Value::String("p[data-kind=\"lead item\"]".to_string()),
+        ]))
+        .expect("quoted attribute selector");
+        let Value::Cell(quoted) = quoted else {
+            panic!("expected cell");
+        };
+        assert_eq!(quoted.shape, vec![1, 1]);
+
+        let missing = futures::executor::block_on(find_element_builtin(vec![
+            tree,
+            Value::String("span.unknown".to_string()),
+        ]))
+        .expect("empty result");
+        let Value::Cell(missing) = missing else {
+            panic!("expected cell");
+        };
+        assert_eq!(missing.shape, vec![0, 1]);
+        assert!(missing.data.is_empty());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn find_element_rejects_unsupported_selectors() {
+        let tree =
+            futures::executor::block_on(html_tree_builtin(vec![Value::String("<p>x</p>".into())]))
+                .expect("tree");
+        let err = futures::executor::block_on(find_element_builtin(vec![
+            tree,
+            Value::String("p:hover".to_string()),
+        ]))
+        .expect_err("unsupported selector");
+        assert!(err.to_string().contains("unsupported pseudo-class"));
+
+        let tree =
+            futures::executor::block_on(html_tree_builtin(vec![Value::String("<p>x</p>".into())]))
+                .expect("tree");
+        let err = futures::executor::block_on(find_element_builtin(vec![
+            tree,
+            Value::String("div > + p".to_string()),
+        ]))
+        .expect_err("repeated combinator");
+        assert!(err.to_string().contains("repeated combinators"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

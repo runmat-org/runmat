@@ -1,0 +1,98 @@
+{
+  "title": "findElement",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "findElement",
+    "htmlTree",
+    "HTML",
+    "DOM",
+    "CSS selector",
+    "text analytics"
+  ],
+  "summary": "Find matching elements in an htmlTree object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`findElement` traverses host-resident HTML metadata and does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::html::tests",
+    "integration": null
+  },
+  "description": "`findElement(tree, selector)` searches a RunMat `htmlTree` object and returns matching subtrees as a column cell array of scalar `htmlTree` objects.",
+  "behaviors": [
+    "`tree` must be a scalar RunMat `htmlTree` object or a cell array of `htmlTree` objects.",
+    "`selector` must be a string scalar or character vector.",
+    "Supported selectors include element tags, `*`, `.class`, `#id`, `[attr]`, `[attr=value]`, descendant combinators, child combinators (`>`), adjacent-sibling combinators (`+`), comma-separated groups, `:empty`, and `:not(:empty)`.",
+    "Attribute names are matched case-insensitively through the parser's lowercase attribute map. Attribute values, ids, and classes use exact string matching.",
+    "Adjacent sibling matching follows element siblings and ignores intervening whitespace text nodes.",
+    "The result is a column cell array because RunMat does not yet have a first-class MATLAB object-array representation for `htmlTree`.",
+    "Unsupported CSS pseudo-classes and attribute operators raise an explicit error instead of silently returning partial results.",
+    "Full CSS3 selector parity remains tracked by the broader Text Analytics compatibility issue."
+  ],
+  "examples": [
+    {
+      "description": "Find Links",
+      "input": "tree = htmlTree(\"<div><a class='nav' href='/home'>Home</a><a class='nav'>Docs</a></div>\");\nlinks = findElement(tree, \"a.nav\");\ntext = extractHTMLText(links)",
+      "output": "text = [\"Home\"; \"Docs\"]"
+    },
+    {
+      "description": "Use Combinators",
+      "input": "tree = htmlTree(\"<section><h1>Title</h1><p>Lead</p></section>\");\nlead = findElement(tree, \"h1 + p\")",
+      "output": "`lead` is a one-element cell array containing the matching `P` subtree."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `findElement` return a MATLAB object array?",
+      "answer": "No. RunMat currently returns a column cell array of scalar `htmlTree` objects because generic object-array identity semantics are still tracked separately."
+    },
+    {
+      "question": "Does RunMat support every CSS selector accepted by MATLAB?",
+      "answer": "No. Common tag, id, class, attribute, group, descendant, child, adjacent-sibling, `:empty`, and `:not(:empty)` forms are supported. Full CSS3 parity remains tracked in the Text Analytics umbrella issue."
+    },
+    {
+      "question": "Does `findElement` execute on the GPU?",
+      "answer": "No. It traverses host HTML metadata and has no `runmat-accelerate` provider path."
+    }
+  ],
+  "links": [
+    {
+      "label": "htmlTree",
+      "url": "./htmlTree"
+    },
+    {
+      "label": "getAttribute",
+      "url": "./getAttribute"
+    },
+    {
+      "label": "extractHTMLText",
+      "url": "./extractHTMLText"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "subtrees = findElement(tree, selector)",
+      "output": "`subtrees` is a column cell array of scalar `htmlTree` objects."
+    },
+    "points": [
+      "`tree` must be an `htmlTree` object or a cell array of `htmlTree` objects.",
+      "`selector` must use the supported selector subset documented above."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/html.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/html.rs"
+  },
+  "gpu_residency": "`findElement` traverses host-resident HTML metadata and has no provider kernel."
+}

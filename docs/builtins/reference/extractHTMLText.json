@@ -75,6 +75,14 @@
       "url": "./htmlTree"
     },
     {
+      "label": "findElement",
+      "url": "./findElement"
+    },
+    {
+      "label": "getAttribute",
+      "url": "./getAttribute"
+    },
+    {
       "label": "erasePunctuation",
       "url": "./erasePunctuation"
     },
