@@ -10,6 +10,7 @@ pub mod html;
 pub mod lemmas;
 pub mod ngrams;
 pub mod normalize;
+pub mod pos;
 pub mod sentiment;
 pub mod similarity;
 pub mod stopwords;

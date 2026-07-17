@@ -16,6 +16,7 @@ use crate::builtins::strings::text_analytics::documents::{
     top_level_domains_value, words_from_word_vector, TOKENIZED_DOCUMENT_CLASS,
 };
 use crate::builtins::strings::text_analytics::lemmas::lemma_details_from_object;
+use crate::builtins::strings::text_analytics::pos::part_of_speech_details_from_object;
 use crate::builtins::strings::text_analytics::stopwords::{
     stop_words_for_language, StopWordsLanguage,
 };
@@ -228,7 +229,9 @@ async fn add_type_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     descriptor(crate::builtins::strings::text_analytics::details::ADD_SENTENCE_DETAILS_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::details"
 )]
-async fn add_sentence_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(in crate::builtins::strings::text_analytics) async fn add_sentence_details_builtin(
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     let gathered = gather_args(args, "addSentenceDetails").await?;
     let (documents, options) = parse_add_sentence_details_args(gathered)?;
     let mut object = tokenized_document_object(documents, "addSentenceDetails")?;
@@ -382,13 +385,16 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
     let stored_types = type_details_from_object(object, "tokenDetails")?;
     let stored_sentence_numbers = sentence_numbers_from_object(object, "tokenDetails")?;
     let stored_lemmas = lemma_details_from_object(object, "tokenDetails")?;
+    let stored_pos = part_of_speech_details_from_object(object, "tokenDetails")?;
     validate_sentence_number_shapes(&documents, stored_sentence_numbers.as_deref())?;
     validate_text_detail_shapes(&documents, stored_lemmas.as_deref(), "LemmaDetails")?;
+    validate_text_detail_shapes(&documents, stored_pos.as_deref(), "PartOfSpeechDetails")?;
     let include_default_details = has_default_token_details(object);
     let include_type = include_default_details || stored_types.is_some();
     let include_sentence = stored_sentence_numbers.is_some();
     let include_line_language = include_default_details;
-    let include_language = include_line_language || stored_lemmas.is_some();
+    let include_language = include_line_language || stored_lemmas.is_some() || stored_pos.is_some();
+    let include_pos = stored_pos.is_some();
     let include_lemma = stored_lemmas.is_some();
     let total = documents.iter().map(Vec::len).sum::<usize>();
     let document_options = options_from_document_object(object);
@@ -399,6 +405,7 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
     let mut line_numbers = Vec::with_capacity(total);
     let mut token_types = Vec::with_capacity(total);
     let mut languages = Vec::with_capacity(total);
+    let mut part_of_speech = Vec::with_capacity(total);
     let mut lemmas = Vec::with_capacity(total);
     let language = tokenized_document_language(object);
 
@@ -445,6 +452,16 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
                         .unwrap_or_else(|| token.clone()),
                 );
             }
+            if include_pos {
+                part_of_speech.push(
+                    stored_pos
+                        .as_ref()
+                        .and_then(|pos| pos.get(doc_idx))
+                        .and_then(|pos| pos.get(token_idx))
+                        .cloned()
+                        .unwrap_or_else(|| "other".to_string()),
+                );
+            }
         }
     }
 
@@ -484,6 +501,13 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
         names.push("Language".to_string());
         columns.push(Value::StringArray(
             StringArray::new(languages, vec![total, 1])
+                .map_err(|err| text_analytics_error("tokenDetails", err))?,
+        ));
+    }
+    if include_pos {
+        names.push("PartOfSpeech".to_string());
+        columns.push(Value::StringArray(
+            StringArray::new(part_of_speech, vec![total, 1])
                 .map_err(|err| text_analytics_error("tokenDetails", err))?,
         ));
     }

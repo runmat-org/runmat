@@ -358,6 +358,7 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
         "addTypeDetails" => "RunMat:addTypeDetails:InvalidInput",
         "addSentenceDetails" => "RunMat:addSentenceDetails:InvalidInput",
         "addLemmaDetails" => "RunMat:addLemmaDetails:InvalidInput",
+        "addPartOfSpeechDetails" => "RunMat:addPartOfSpeechDetails:InvalidInput",
         "vaderSentimentScores" => "RunMat:vaderSentimentScores:InvalidInput",
         _ => "RunMat:textAnalyticsDocuments:InvalidInput",
     };
@@ -387,6 +388,7 @@ fn ensure_tokenized_document_class_registered() {
             "TypeDetails",
             "SentenceNumbers",
             "LemmaDetails",
+            "PartOfSpeechDetails",
         ] {
             properties.insert(name.to_string(), property_def(name));
         }
@@ -1984,6 +1986,52 @@ pub(in crate::builtins::strings::text_analytics) fn documents_from_object(
         documents.push(words_from_word_vector(item, fn_name)?);
     }
     Ok(documents)
+}
+
+pub(in crate::builtins::strings::text_analytics) fn replace_tokenized_document_documents(
+    object: &mut ObjectInstance,
+    documents: Vec<Vec<String>>,
+    fn_name: &str,
+) -> BuiltinResult<()> {
+    let shape = document_shape_from_object(object, fn_name)?;
+    let expected = shape.iter().try_fold(1usize, |acc, dim| {
+        acc.checked_mul(*dim).ok_or_else(|| {
+            text_analytics_error(
+                fn_name,
+                format!("{fn_name}: tokenizedDocument Shape property overflows element count"),
+            )
+        })
+    })?;
+    if expected != documents.len() {
+        return Err(text_analytics_error(
+            fn_name,
+            format!(
+                "{fn_name}: replacement documents has {} documents but Shape requires {expected}",
+                documents.len()
+            ),
+        ));
+    }
+    object
+        .properties
+        .insert("Documents".to_string(), documents_cell(&documents)?);
+    object
+        .properties
+        .insert("Vocabulary".to_string(), vocabulary_value(&documents)?);
+    object.properties.insert(
+        "NumDocuments".to_string(),
+        Value::Num(documents.len() as f64),
+    );
+    object.properties.insert(
+        "DocumentLengths".to_string(),
+        Value::Tensor(
+            Tensor::new(
+                documents.iter().map(|doc| doc.len() as f64).collect(),
+                vec![documents.len(), 1],
+            )
+            .map_err(|err| text_analytics_error(fn_name, err))?,
+        ),
+    );
+    Ok(())
 }
 
 pub(in crate::builtins::strings::text_analytics) fn document_shape_from_object(

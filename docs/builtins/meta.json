@@ -2268,6 +2268,70 @@
       ]
     },
     {
+      "name": "addPartOfSpeechDetails",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "updatedDocuments = addPartOfSpeechDetails(documents)",
+          "inputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "updatedDocuments",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Updated tokenized document object."
+            }
+          ]
+        },
+        {
+          "label": "updatedDocuments = addPartOfSpeechDetails(documents,Name,Value)",
+          "inputs": [
+            {
+              "name": "documents",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: RetokenizeMethod, Abbreviations, DiscardKnownValues."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "updatedDocuments",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Updated tokenized document object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TEXT_ANALYTICS.ADD_PART_OF_SPEECH_DETAILS.INVALID_INPUT",
+          "identifier": "RunMat:addPartOfSpeechDetails:InvalidInput",
+          "when": "Input is not a supported tokenizedDocument object or option form.",
+          "message": "addPartOfSpeechDetails: invalid input"
+        }
+      ]
+    },
+    {
       "name": "addSentenceDetails",
       "output_mode": "Fixed",
       "completion_policy": "Public",
