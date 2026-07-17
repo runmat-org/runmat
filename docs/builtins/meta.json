@@ -26434,6 +26434,56 @@
       ]
     },
     {
+      "name": "encode",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "counts = encode(bag, documentsOrWords, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "bag",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "bagOfWords or bagOfNgrams model."
+            },
+            {
+              "name": "documentsOrWords",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "tokenizedDocument object or row word vector."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: DocumentsIn, ForceCellOutput."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "counts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse word or n-gram count matrix."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ENCODE.INVALID_INPUT",
+          "identifier": "RunMat:encode:InvalidInput",
+          "when": "Inputs do not match a supported Text Analytics encode form.",
+          "message": "encode: invalid input"
+        }
+      ]
+    },
+    {
       "name": "endsWith",
       "output_mode": "Fixed",
       "completion_policy": "Public",

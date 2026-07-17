@@ -3,6 +3,7 @@
 pub mod details;
 pub mod documents;
 pub mod embeddings;
+pub mod encode;
 pub mod encoding;
 pub mod file_text;
 pub mod html;

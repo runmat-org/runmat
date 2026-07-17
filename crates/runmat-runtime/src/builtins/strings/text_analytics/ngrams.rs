@@ -625,6 +625,46 @@ fn bag_object(
     Ok(Value::Object(object))
 }
 
+pub(in crate::builtins::strings::text_analytics) fn ngrams_from_bag(
+    object: &ObjectInstance,
+    fn_name: &str,
+) -> BuiltinResult<Vec<Vec<String>>> {
+    match object.properties.get("Ngrams") {
+        Some(Value::StringArray(array)) => {
+            let mut ngrams = Vec::with_capacity(array.rows);
+            let mut seen = HashSet::new();
+            for row in 0..array.rows {
+                let mut ngram = Vec::new();
+                for col in 0..array.cols {
+                    let word = &array.data[row + col * array.rows];
+                    if !word.is_empty() && !is_missing_string(word) {
+                        ngram.push(word.clone());
+                    }
+                }
+                if ngram.is_empty() {
+                    return Err(ngrams_error(format!(
+                        "{fn_name}: bagOfNgrams object contains an empty n-gram"
+                    )));
+                }
+                if !seen.insert(ngram.clone()) {
+                    return Err(ngrams_error(format!(
+                        "{fn_name}: bagOfNgrams object contains duplicate n-gram '{}'",
+                        ngram.join(" ")
+                    )));
+                }
+                ngrams.push(ngram);
+            }
+            Ok(ngrams)
+        }
+        Some(other) => Err(ngrams_error(format!(
+            "{fn_name}: bagOfNgrams Ngrams property must be a string array, got {other:?}"
+        ))),
+        None => Err(ngrams_error(format!(
+            "{fn_name}: bagOfNgrams object missing Ngrams property"
+        ))),
+    }
+}
+
 fn ngram_array(ngrams: &[Vec<String>], max_len: usize) -> BuiltinResult<StringArray> {
     let rows = ngrams.len();
     let mut data = Vec::with_capacity(rows * max_len);

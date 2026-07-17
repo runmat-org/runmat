@@ -1,0 +1,106 @@
+{
+  "title": "encode",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "encode",
+    "text analytics",
+    "bagOfWords",
+    "bagOfNgrams",
+    "count matrix"
+  ],
+  "summary": "Encode documents as sparse word or n-gram count matrices.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`encode` gathers provider inputs when needed, then builds and returns host sparse count matrices from host text-model metadata."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::encode::tests",
+    "integration": null
+  },
+  "description": "`encode(bag, documents)` encodes `tokenizedDocument` input or a row word vector against a RunMat `bagOfWords` or `bagOfNgrams` compatibility object.",
+  "behaviors": [
+    "`bag` must be a scalar RunMat `bagOfWords` or `bagOfNgrams` object.",
+    "`documents` can be a RunMat `tokenizedDocument` object. A non-tokenized row word vector is accepted as one document.",
+    "The result is a RunMat sparse double matrix. By default, documents are rows and bag terms are columns.",
+    "`encode(___, 'DocumentsIn', 'rows')` returns one row per document. This is the default.",
+    "`encode(___, 'DocumentsIn', 'columns')` returns one column per document.",
+    "`encode(___, 'ForceCellOutput', true)` wraps the sparse result in a 1-by-1 cell array. This preserves the documented scalar-bag cell-output form without pretending object-array parity exists.",
+    "Words or n-grams not present in the bag model are ignored.",
+    "For `bagOfNgrams`, RunMat encodes the n-gram rows stored on the compatibility object and derives scan lengths from those rows.",
+    "Non-scalar bag object arrays and native MATLAB sparse model storage remain broader Text Analytics/runtime work."
+  ],
+  "examples": [
+    {
+      "description": "Encode Documents With A Bag Of Words",
+      "input": "bag = bagOfWords(tokenizedDocument([\"alpha beta\"; \"beta gamma\"]));\nnewDocuments = tokenizedDocument([\"beta beta delta\"; \"alpha gamma\"]);\ncounts = encode(bag, newDocuments)",
+      "output": "`counts` is a sparse 2-by-3 matrix using `bag.Vocabulary` as the column order."
+    },
+    {
+      "description": "Put Documents In Columns",
+      "input": "counts = encode(bag, [\"alpha\" \"beta\" \"alpha\"], \"DocumentsIn\", \"columns\")",
+      "output": "`counts` is a sparse matrix with one column because the word vector is one document."
+    },
+    {
+      "description": "Encode N-Grams",
+      "input": "bag = bagOfNgrams(tokenizedDocument(\"a b a\"), \"NgramLengths\", [1 2]);\ncounts = encode(bag, tokenizedDocument(\"a b a b\"))",
+      "output": "`counts` contains unigram and bigram counts for n-grams stored in `bag.Ngrams`."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `encode` return sparse output?",
+      "answer": "Yes. RunMat returns a host `SparseTensor` count matrix for both `bagOfWords` and `bagOfNgrams` inputs."
+    },
+    {
+      "question": "Does `ForceCellOutput` implement bag object arrays?",
+      "answer": "No. RunMat supports the scalar-bag cell wrapper form. MATLAB object-array identity and non-scalar bag arrays remain tracked by the Text Analytics umbrella issue."
+    },
+    {
+      "question": "Does `encode` execute on the GPU?",
+      "answer": "No. It gathers provider inputs when needed, uses host text metadata, and returns host sparse values."
+    }
+  ],
+  "links": [
+    {
+      "label": "bagOfWords",
+      "url": "./bagOfWords"
+    },
+    {
+      "label": "bagOfNgrams",
+      "url": "./bagOfNgrams"
+    },
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "counts = encode(bag, documents)\ncounts = encode(bag, words)\ncounts = encode(___, \"DocumentsIn\", \"rows\")\ncounts = encode(___, \"DocumentsIn\", \"columns\")\nC = encode(___, \"ForceCellOutput\", true)",
+      "output": "`counts` is a sparse count matrix. `C` is a 1-by-1 cell containing that sparse matrix."
+    },
+    "points": [
+      "`bag` must be a scalar RunMat `bagOfWords` or `bagOfNgrams` object.",
+      "`documents` must be a RunMat `tokenizedDocument` object.",
+      "Non-tokenized input must be a row word vector and is treated as one document.",
+      "`DocumentsIn` must be `'rows'` or `'columns'`.",
+      "`ForceCellOutput` must be a logical scalar."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/encode.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/encode.rs"
+  },
+  "gpu_residency": "`encode` currently gathers provider inputs and returns host sparse output because RunMat sparse values are host-resident."
+}
