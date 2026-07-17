@@ -34,7 +34,7 @@
     "Cell arrays are processed recursively for string and character text elements and retain the original cell shape.",
     "Missing string elements are preserved.",
     "`erasePunctuation(documents)` removes punctuation and symbol characters from tokens with derived type `punctuation` or `other` and removes tokens that become empty.",
-    "`erasePunctuation(documents,'TokenTypes',types)` removes punctuation and symbols only from the specified derived token types. RunMat derives token types from the lightweight stored tokens rather than a full MATLAB `tokenDetails` table.",
+    "`erasePunctuation(documents,'TokenTypes',types)` removes punctuation and symbols only from the specified derived token types. RunMat uses the same lightweight token-type classifier exposed by `tokenDetails` and `addTypeDetails`.",
     "For tokenized documents, URLs, email addresses, hashtags, mentions, and emoticons are preserved by default."
   ],
   "examples": [
@@ -66,7 +66,7 @@
     },
     {
       "question": "Does this implement tokenizedDocument token-type filtering?",
-      "answer": "Yes for RunMat's lightweight `tokenizedDocument` objects. It supports default `punctuation`/`other` filtering and explicit `TokenTypes`; full custom token-detail tables remain tracked separately."
+      "answer": "Yes for RunMat's lightweight `tokenizedDocument` objects. It supports default `punctuation`/`other` filtering and explicit `TokenTypes`; full custom token-detail tables and linguistic detail columns remain tracked separately."
     }
   ],
   "links": [

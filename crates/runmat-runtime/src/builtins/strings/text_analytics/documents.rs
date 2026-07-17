@@ -353,6 +353,8 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
         "removeStopWords" => "RunMat:removeStopWords:InvalidInput",
         "removeWords" => "RunMat:removeWords:InvalidInput",
         "removeLongWords" => "RunMat:removeLongWords:InvalidInput",
+        "tokenDetails" => "RunMat:tokenDetails:InvalidInput",
+        "addTypeDetails" => "RunMat:addTypeDetails:InvalidInput",
         _ => "RunMat:textAnalyticsDocuments:InvalidInput",
     };
     build_runtime_error(message)
@@ -375,6 +377,7 @@ fn ensure_tokenized_document_class_registered() {
             "Shape",
             "TokenizeMethod",
             "Language",
+            "TypeDetails",
         ] {
             properties.insert(name.to_string(), property_def(name));
         }
@@ -429,7 +432,9 @@ fn property_def(name: &str) -> PropertyDef {
     descriptor(crate::builtins::strings::text_analytics::documents::TOKENIZED_DOCUMENT_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
-async fn tokenized_document_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(in crate::builtins::strings::text_analytics) async fn tokenized_document_builtin(
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     let gathered = gather_args(args, "tokenizedDocument").await?;
     let (input, options) = parse_tokenized_document_args(gathered)?;
     let parsed = match input {
@@ -1401,6 +1406,7 @@ pub(in crate::builtins::strings::text_analytics) fn transform_tokenized_document
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::builtins::strings::text_analytics) enum DocumentTokenType {
     Letters,
+    Digits,
     Punctuation,
     Other,
     WebAddress,
@@ -1408,12 +1414,14 @@ pub(in crate::builtins::strings::text_analytics) enum DocumentTokenType {
     Hashtag,
     AtMention,
     Emoticon,
+    Emoji,
 }
 
 impl DocumentTokenType {
-    fn as_str(self) -> &'static str {
+    pub(in crate::builtins::strings::text_analytics) fn as_str(self) -> &'static str {
         match self {
             Self::Letters => "letters",
+            Self::Digits => "digits",
             Self::Punctuation => "punctuation",
             Self::Other => "other",
             Self::WebAddress => "web-address",
@@ -1421,6 +1429,7 @@ impl DocumentTokenType {
             Self::Hashtag => "hashtag",
             Self::AtMention => "at-mention",
             Self::Emoticon => "emoticon",
+            Self::Emoji => "emoji",
         }
     }
 }
@@ -1483,31 +1492,46 @@ fn parse_erase_punctuation_args(args: Vec<Value>) -> BuiltinResult<HashSet<Strin
     }
 }
 
-fn document_token_type(token: &str) -> DocumentTokenType {
+pub(in crate::builtins::strings::text_analytics) fn document_token_type(
+    token: &str,
+) -> DocumentTokenType {
     if token.starts_with("http://") || token.starts_with("https://") || token.starts_with("www.") {
         return DocumentTokenType::WebAddress;
     }
     if email_token_at(token, 0).is_some_and(|(_, end)| end == token.len()) {
         return DocumentTokenType::EmailAddress;
     }
-    if token.starts_with('#')
-        && token
-            .chars()
-            .skip(1)
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-    {
-        return DocumentTokenType::Hashtag;
+    if let Some(tag) = token.strip_prefix('#') {
+        if !tag.is_empty()
+            && tag
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_alphabetic())
+            && tag
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return DocumentTokenType::Hashtag;
+        }
     }
-    if token.starts_with('@')
-        && token
-            .chars()
-            .skip(1)
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-    {
-        return DocumentTokenType::AtMention;
+    if let Some(mention) = token.strip_prefix('@') {
+        let len = mention.chars().count();
+        if (1..=15).contains(&len)
+            && mention
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return DocumentTokenType::AtMention;
+        }
     }
     if matches!(token, ":-)" | ":-D" | ":)" | ":D") {
         return DocumentTokenType::Emoticon;
+    }
+    if !token.is_empty() && token.chars().all(char::is_numeric) {
+        return DocumentTokenType::Digits;
+    }
+    if !token.is_empty() && token.chars().all(is_emoji_char) {
+        return DocumentTokenType::Emoji;
     }
     if token
         .chars()
@@ -1523,6 +1547,13 @@ fn document_token_type(token: &str) -> DocumentTokenType {
         return DocumentTokenType::Letters;
     }
     DocumentTokenType::Other
+}
+
+fn is_emoji_char(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x1F300..=0x1FAFF | 0x2600..=0x27BF | 0x2300..=0x23FF | 0xFE0F
+    )
 }
 
 fn remove_punctuation_and_symbols(text: &str) -> String {

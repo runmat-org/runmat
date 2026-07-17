@@ -36,9 +36,9 @@
     "`tokenizedDocument(words, 'TokenizeMethod', 'none')` accepts a string array, character vector, or cell form as pre-tokenized words. A cell array of string arrays represents multiple pre-tokenized documents.",
     "`Language` accepts `\"en\"` or `\"de\"`. Japanese and Korean require MeCab-compatible tokenization and remain tracked by the Text Analytics umbrella issue.",
     "`DetectPatterns` accepts `\"all\"` or `\"none\"`. With `\"all\"`, RunMat keeps common URLs, hashtags, at-mentions, and simple emoticons as tokens.",
-    "The returned object stores `Vocabulary` plus RunMat compatibility metadata properties: `Documents`, `NumDocuments`, `DocumentLengths`, `Shape`, `TokenizeMethod`, and `Language`. The metadata properties are implementation details until RunMat has first-class Text Analytics object arrays.",
+    "The returned object stores `Vocabulary` plus RunMat compatibility metadata properties: `Documents`, `NumDocuments`, `DocumentLengths`, `Shape`, `TokenizeMethod`, and `Language`. `tokenDetails` derives common token type and language columns from this metadata; pre-tokenized `TokenizeMethod`, `\"none\"` documents need `addTypeDetails` before a `Type` column is returned.",
     "RunMat represents a MATLAB tokenizedDocument array as one scalar object carrying document cells and shape metadata because generic first-class MATLAB object arrays are not yet available for this class.",
-    "Custom token tables, regular-expression token tables, top-level-domain tables, exact ICU/MeCab tokenization, token details, part-of-speech/entity data, and object-array identity parity remain tracked in the broader Text Analytics compatibility issue."
+    "Custom token tables, regular-expression token tables, top-level-domain tables, exact ICU/MeCab tokenization, full sentence/part-of-speech/entity/dependency detail columns, and object-array identity parity remain tracked in the broader Text Analytics compatibility issue."
   ],
   "examples": [
     {
@@ -78,6 +78,10 @@
     {
       "label": "normalizeWords",
       "url": "./normalizeWords"
+    },
+    {
+      "label": "tokenDetails",
+      "url": "./tokenDetails"
     }
   ],
   "syntax": {

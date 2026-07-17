@@ -1,0 +1,89 @@
+{
+  "title": "tokenDetails",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "tokenDetails",
+    "tokenizedDocument",
+    "text analytics",
+    "token types",
+    "table"
+  ],
+  "summary": "Return a table of token details for tokenized documents.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`tokenDetails` reads host-resident tokenizedDocument metadata and constructs a host table; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::details::tests",
+    "integration": null
+  },
+  "description": "`tokenDetails(documents)` returns a table describing the tokens stored in a RunMat `tokenizedDocument` compatibility object.",
+  "behaviors": [
+    "`documents` must be a RunMat `tokenizedDocument` object created by `tokenizedDocument`.",
+    "Normally tokenized documents return table variables `Token`, `DocumentNumber`, `LineNumber`, `Type`, and `Language`.",
+    "Pre-tokenized documents created with `TokenizeMethod`, `\"none\"` initially return only `Token` and `DocumentNumber`, matching MATLAB's manually tokenized form.",
+    "After `addTypeDetails`, pre-tokenized documents also return a `Type` variable.",
+    "`Type` values are derived from RunMat's lightweight tokenizer and include `letters`, `digits`, `punctuation`, `email-address`, `web-address`, `hashtag`, `at-mention`, `emoticon`, `emoji`, and `other`.",
+    "`LineNumber` is currently `1` for each token because RunMat's tokenizer stores document-level tokens and does not yet preserve per-line token provenance.",
+    "Sentence, part-of-speech, entity, lemma, dependency, and full language-detail columns remain broader Text Analytics work."
+  ],
+  "examples": [
+    {
+      "description": "View Token Details",
+      "input": "documents = tokenizedDocument([\"alpha 123\"; \"visit https://example.com\"]);\ntdetails = tokenDetails(documents)",
+      "output": "`tdetails` is a table with token text, document number, line number, token type, and language."
+    },
+    {
+      "description": "Add Types To Pre-Tokenized Documents",
+      "input": "documents = tokenizedDocument([\"For\" \"more\" \"information\"], \"TokenizeMethod\", \"none\");\ndocuments = addTypeDetails(documents);\ntdetails = tokenDetails(documents)",
+      "output": "`tdetails` includes `Token`, `DocumentNumber`, and `Type`."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `tokenDetails` return sentence or part-of-speech details?",
+      "answer": "Not yet. RunMat returns the common token/type/language details available from the current tokenizedDocument representation. Linguistic detail adders remain tracked by the Text Analytics umbrella issue."
+    },
+    {
+      "question": "Does `tokenDetails` execute on the GPU?",
+      "answer": "No. It builds a host table from token metadata."
+    }
+  ],
+  "links": [
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "addTypeDetails",
+      "url": "./addTypeDetails"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "tdetails = tokenDetails(documents)",
+      "output": "`tdetails` is a table."
+    },
+    "points": [
+      "`documents` must be a RunMat `tokenizedDocument` object.",
+      "The returned table has one row per token in document order.",
+      "RunMat's table variable storage preserves MATLAB-compatible column names."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/details.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/details.rs"
+  },
+  "gpu_residency": "`tokenDetails` constructs a host table and has no provider kernel."
+}
