@@ -268,7 +268,7 @@ fn ensure_ss_class_registered() {
     descriptor(crate::builtins::control::ss::SS_DESCRIPTOR),
     builtin_path = "crate::builtins::control::ss"
 )]
-async fn ss_builtin(
+pub(crate) async fn ss_builtin(
     a: Value,
     b: Value,
     c: Value,

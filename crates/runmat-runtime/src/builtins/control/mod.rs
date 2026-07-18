@@ -8,6 +8,7 @@ pub mod dcgain;
 pub mod feedback;
 pub mod impulse;
 pub mod isstable;
+pub mod lqr;
 pub mod nyquist;
 pub mod pole;
 pub mod pzmap;

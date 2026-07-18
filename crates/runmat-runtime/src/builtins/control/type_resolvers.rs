@@ -74,6 +74,10 @@ pub fn pole_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }
 
+pub fn lqr_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::tensor()
+}
+
 pub fn zero_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }

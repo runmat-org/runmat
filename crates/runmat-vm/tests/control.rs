@@ -75,6 +75,33 @@ fn tf_variable_control_workflow_runs_through_vm_dispatch() {
 }
 
 #[test]
+fn lqr_matrix_and_state_space_forms_run_through_vm_dispatch() {
+    let program = r#"
+        A = [0 1; 0 0];
+        B = [0; 1];
+        Q = eye(2);
+        R = 1;
+        [K, S, e] = lqr(A, B, Q, R);
+        sys = ss(A, B, [1 0], 0);
+        Ksys = lqr(sys, Q, R);
+        assert(abs(K(1) - 1) < 1e-8);
+        assert(abs(K(2) - sqrt(3)) < 1e-8);
+        assert(abs(S(1,1) - sqrt(3)) < 1e-8);
+        assert(abs(S(1,2) - 1) < 1e-8);
+        assert(length(e) == 2);
+        assert(all(real(e) < 0));
+        assert(all(abs(Ksys - K) < 1e-8));
+        sysd = ss([1 0.1; 0 1], [0.005; 0.1], [1 0], 0, 0.1);
+        [Kd, Sd, ed] = lqr(sysd, Q, R);
+        assert(length(ed) == 2);
+        assert(all(abs(ed) < 1));
+        assert(all(isfinite(Kd)));
+        assert(all(isfinite(Sd)));
+    "#;
+    execute_source(program).unwrap();
+}
+
+#[test]
 fn tf_rhs_elementwise_division_preserves_operand_order() {
     let program = r#"
         s = tf('s');
