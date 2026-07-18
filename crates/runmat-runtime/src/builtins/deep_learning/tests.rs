@@ -1,9 +1,10 @@
 use super::graph::*;
 use super::layers::*;
+use super::losses::*;
 use super::sequences::*;
 use super::training::*;
 use futures::executor::block_on;
-use runmat_builtins::{CellArray, NumericDType, Tensor, Value};
+use runmat_builtins::{CellArray, LogicalArray, NumericDType, Tensor, Value};
 
 fn layer_name(value: &Value) -> String {
     let Value::Object(object) = value else {
@@ -255,6 +256,235 @@ fn crossentropy_computes_mean_loss() {
         panic!("expected scalar");
     };
     assert!((loss - 0.11157177565710488).abs() < 1.0e-12);
+}
+
+#[test]
+fn crossentropy_supports_dataformat_class_weights_and_batch_normalization() {
+    let out = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2, 0.25, 0.75], vec![2, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap()),
+        vec![
+            Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![2, 1]).unwrap()),
+            Value::String("DataFormat".into()),
+            Value::String("CB".into()),
+        ],
+    ))
+    .expect("weighted crossentropy");
+    let Value::Num(loss) = out else {
+        panic!("expected scalar");
+    };
+    let expected = (-2.0_f64 * 0.8_f64.ln() - 0.75_f64.ln()) / 2.0;
+    assert!(
+        (loss - expected).abs() < 1.0e-12,
+        "loss {loss} expected {expected}"
+    );
+}
+
+#[test]
+fn crossentropy_supports_weights_name_value_and_weights_format_mapping() {
+    let out = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2, 0.25, 0.75], vec![2, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap()),
+        vec![
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap()),
+            Value::String("DataFormat".into()),
+            Value::String("CB".into()),
+            Value::String("WeightsFormat".into()),
+            Value::String("UC".into()),
+        ],
+    ))
+    .expect("formatted class weights");
+    let Value::Num(loss) = out else {
+        panic!("expected scalar");
+    };
+    let expected = (-2.0_f64 * 0.8_f64.ln() - 0.75_f64.ln()) / 2.0;
+    assert!((loss - expected).abs() < 1.0e-12);
+
+    let out = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2, 0.25, 0.75], vec![2, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap()),
+        vec![
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![0.5, 2.0], vec![1, 2]).unwrap()),
+            Value::String("DataFormat".into()),
+            Value::String("CB".into()),
+            Value::String("WeightsFormat".into()),
+            Value::String("UB".into()),
+        ],
+    ))
+    .expect("formatted observation weights");
+    let Value::Num(loss) = out else {
+        panic!("expected scalar");
+    };
+    let expected = (-0.5_f64 * 0.8_f64.ln() - 2.0_f64 * 0.75_f64.ln()) / 2.0;
+    assert!((loss - expected).abs() < 1.0e-12);
+}
+
+#[test]
+fn crossentropy_remaps_full_size_formatted_weights() {
+    let out = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2, 0.25, 0.75], vec![2, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap()),
+        vec![
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![2.0, 3.0, 5.0, 7.0], vec![2, 2]).unwrap()),
+            Value::String("DataFormat".into()),
+            Value::String("CB".into()),
+            Value::String("WeightsFormat".into()),
+            Value::String("BC".into()),
+        ],
+    ))
+    .expect("formatted full-size weights");
+    let Value::Num(loss) = out else {
+        panic!("expected scalar");
+    };
+    let expected = (-2.0_f64 * 0.8_f64.ln() - 7.0_f64 * 0.75_f64.ln()) / 2.0;
+    assert!((loss - expected).abs() < 1.0e-12);
+
+    let err = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2, 0.25, 0.75], vec![2, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap()),
+        vec![
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![1.0, 1.0, 1.0, 1.0], vec![2, 2]).unwrap()),
+            Value::String("DataFormat".into()),
+            Value::String("CB".into()),
+            Value::String("WeightsFormat".into()),
+            Value::String("TC".into()),
+        ],
+    ))
+    .unwrap_err();
+    assert!(err.to_string().contains("not present in DataFormat"));
+}
+
+#[test]
+fn crossentropy_supports_multilabel_reduction_none_and_mask_normalization() {
+    let unreduced = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+        vec![
+            Value::String("ClassificationMode".into()),
+            Value::String("multi-label".into()),
+            Value::String("Reduction".into()),
+            Value::String("none".into()),
+        ],
+    ))
+    .expect("multilabel unreduced crossentropy");
+    let Value::Tensor(tensor) = unreduced else {
+        panic!("expected tensor");
+    };
+    assert_eq!(tensor.shape, vec![1, 2]);
+    assert!((tensor.data[0] + 0.8_f64.ln()).abs() < 1.0e-12);
+    assert!((tensor.data[1] + 0.8_f64.ln()).abs() < 1.0e-12);
+
+    let masked = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+        vec![
+            Value::String("Mask".into()),
+            Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap()),
+            Value::String("NormalizationFactor".into()),
+            Value::String("mask-included".into()),
+        ],
+    ))
+    .expect("masked crossentropy");
+    let Value::Num(loss) = masked else {
+        panic!("expected scalar");
+    };
+    assert!((loss + 0.8_f64.ln()).abs() < 1.0e-12);
+}
+
+#[test]
+fn crossentropy_rejects_incompatible_shapes_masks_and_formats() {
+    let err = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap()),
+        vec![],
+    ))
+    .unwrap_err();
+    assert!(err.to_string().contains("prediction shape"));
+
+    let err = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+        vec![Value::String("Mask".into()), Value::Bool(true)],
+    ))
+    .unwrap_err();
+    assert!(err.to_string().contains("same size"));
+
+    let err = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+        vec![
+            Value::String("Mask".into()),
+            Value::Tensor(Tensor::new(vec![0.5, 1.0], vec![1, 2]).unwrap()),
+        ],
+    ))
+    .unwrap_err();
+    assert!(err.to_string().contains("binary"));
+
+    let err = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+        vec![
+            Value::String("DataFormat".into()),
+            Value::String("CC".into()),
+        ],
+    ))
+    .unwrap_err();
+    assert!(err.to_string().contains("cannot repeat"));
+}
+
+#[test]
+fn crossentropy_preserves_dlarray_output_for_dlarray_inputs() {
+    let predictions = block_on(dlarray_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![2, 1]).unwrap()),
+        vec![Value::String("CB".into())],
+    ))
+    .expect("prediction dlarray");
+    let targets = block_on(dlarray_builtin(
+        Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap()),
+        vec![Value::String("CB".into())],
+    ))
+    .expect("target dlarray");
+    let out =
+        block_on(crossentropy_builtin(predictions, targets, vec![])).expect("dlarray crossentropy");
+    let Value::Object(object) = out else {
+        panic!("expected dlarray object");
+    };
+    assert_eq!(object.class_name, "dlarray");
+    let Value::Num(loss) = object.properties.get("Data").unwrap() else {
+        panic!("expected scalar data");
+    };
+    assert!((*loss + 0.8_f64.ln()).abs() < 1.0e-12);
+
+    let predictions = block_on(dlarray_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![2, 1]).unwrap()),
+        vec![Value::String("CB".into())],
+    ))
+    .expect("prediction dlarray");
+    let targets = block_on(dlarray_builtin(
+        Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap()),
+        vec![Value::String("CB".into())],
+    ))
+    .expect("target dlarray");
+    let out = block_on(crossentropy_builtin(
+        predictions,
+        targets,
+        vec![
+            Value::String("Reduction".into()),
+            Value::String("none".into()),
+        ],
+    ))
+    .expect("unreduced dlarray crossentropy");
+    let Value::Object(object) = out else {
+        panic!("expected dlarray object");
+    };
+    assert_eq!(
+        object.properties.get("Format"),
+        Some(&Value::String(String::new()))
+    );
 }
 
 #[test]

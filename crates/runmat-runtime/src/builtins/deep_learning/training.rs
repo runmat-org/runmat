@@ -4,8 +4,8 @@ use runmat_macros::runtime_builtin;
 use crate::BuiltinResult;
 
 use super::{
-    any_type, deep_learning_error, gather_args, numeric_values, object, parse_name_values,
-    scalar_text, text_or_missing, unsupported_error,
+    any_type, deep_learning_error, gather_args, object, parse_name_values, scalar_text,
+    text_or_missing, unsupported_error,
 };
 
 #[runtime_builtin(
@@ -223,49 +223,6 @@ pub(super) async fn dlupdate_builtin(_args: Vec<Value>) -> BuiltinResult<Value> 
 }
 
 #[runtime_builtin(
-    name = "crossentropy",
-    category = "deep_learning",
-    summary = "Compute cross-entropy loss for numeric prediction and target arrays.",
-    keywords = "crossentropy,deep learning,loss",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::ARRAY_DESCRIPTOR),
-    builtin_path = "crate::builtins::deep_learning::training"
-)]
-pub(super) async fn crossentropy_builtin(
-    predictions: Value,
-    targets: Value,
-    rest: Vec<Value>,
-) -> BuiltinResult<Value> {
-    if !rest.is_empty() {
-        return Err(deep_learning_error(
-            "crossentropy",
-            "crossentropy: optional format/reduction arguments are not implemented in this compatibility slice",
-        ));
-    }
-    let y = finite_numeric_values(&predictions, "crossentropy", "predictions")?;
-    let t = finite_numeric_values(&targets, "crossentropy", "targets")?;
-    if y.len() != t.len() {
-        return Err(deep_learning_error(
-            "crossentropy",
-            "crossentropy: predictions and targets must have the same number of elements",
-        ));
-    }
-    if y.is_empty() {
-        return Err(deep_learning_error(
-            "crossentropy",
-            "crossentropy: predictions and targets must not be empty",
-        ));
-    }
-    let mut loss = 0.0;
-    let eps = 1.0e-12;
-    for (yp, target) in y.iter().zip(t.iter()) {
-        let clipped = yp.clamp(eps, 1.0 - eps);
-        loss -= target * clipped.ln();
-    }
-    Ok(Value::Num(loss / y.len() as f64))
-}
-
-#[runtime_builtin(
     name = "exportONNXNetwork",
     category = "deep_learning",
     summary = "Report that ONNX export is not yet implemented.",
@@ -279,21 +236,6 @@ pub(super) async fn export_onnx_network_builtin(_args: Vec<Value>) -> BuiltinRes
         "exportONNXNetwork",
         "exportONNXNetwork requires ONNX graph serialization and trained-network execution metadata",
     ))
-}
-
-fn finite_numeric_values(
-    value: &Value,
-    function: &'static str,
-    label: &str,
-) -> BuiltinResult<Vec<f64>> {
-    let values = numeric_values(value, function, label)?;
-    if values.iter().any(|value| !value.is_finite()) {
-        return Err(deep_learning_error(
-            function,
-            format!("{function}: {label} must contain finite numeric values"),
-        ));
-    }
-    Ok(values)
 }
 
 struct AdamUpdateArgs {

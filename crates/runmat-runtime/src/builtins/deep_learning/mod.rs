@@ -445,6 +445,7 @@ pub(super) fn layer_names(layers: &[Value], function: &'static str) -> BuiltinRe
 
 pub(crate) mod graph;
 pub(crate) mod layers;
+pub(crate) mod losses;
 pub(crate) mod sequences;
 pub(crate) mod training;
 
