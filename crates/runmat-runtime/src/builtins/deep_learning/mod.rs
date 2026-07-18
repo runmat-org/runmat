@@ -101,6 +101,37 @@ const ADAMUPDATE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
+const OUT_VARARG: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "varargout",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Outputs returned by the invoked function.",
+}];
+
+const DLFEVAL_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "fun",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle to evaluate.",
+    },
+    BuiltinParamDescriptor {
+        name: "args",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Arguments forwarded to the function handle.",
+    },
+];
+
+const DLFEVAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "varargout = dlfeval(fun, args...)",
+    inputs: &DLFEVAL_INPUTS,
+    outputs: &OUT_VARARG,
+}];
+
 pub const OBJECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &OBJECT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -117,6 +148,13 @@ pub const ARRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 
 pub const ADAMUPDATE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ADAMUPDATE_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+pub const DLFEVAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DLFEVAL_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,

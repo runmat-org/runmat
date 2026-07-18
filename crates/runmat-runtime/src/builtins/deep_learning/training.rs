@@ -147,17 +147,34 @@ pub(super) async fn dlarray_builtin(data: Value, rest: Vec<Value>) -> BuiltinRes
 #[runtime_builtin(
     name = "dlfeval",
     category = "deep_learning",
-    summary = "Report that automatic differentiation function evaluation is not yet implemented.",
+    summary = "Evaluate a function handle in Deep Learning compatibility context.",
     keywords = "dlfeval,deep learning,autodiff,function evaluation",
     type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    descriptor(crate::builtins::deep_learning::DLFEVAL_DESCRIPTOR),
     builtin_path = "crate::builtins::deep_learning::training"
 )]
-pub(super) async fn dlfeval_builtin(_args: Vec<Value>) -> BuiltinResult<Value> {
-    Err(unsupported_error(
-        "dlfeval",
-        "dlfeval requires automatic differentiation and function-handle invocation over traced dlarray values",
-    ))
+pub(super) async fn dlfeval_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let Some((function, rest)) = args.split_first() else {
+        return Err(deep_learning_error(
+            "dlfeval",
+            "dlfeval: expected a function handle followed by input arguments",
+        ));
+    };
+    if !matches!(
+        function,
+        Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
+            | Value::BoundFunctionHandle { .. }
+            | Value::Closure(_)
+    ) {
+        return Err(deep_learning_error(
+            "dlfeval",
+            format!("dlfeval: expected a function handle, got {function:?}"),
+        ));
+    }
+    let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
+    crate::call_feval_async_with_outputs(function.clone(), rest, requested_outputs).await
 }
 
 #[runtime_builtin(

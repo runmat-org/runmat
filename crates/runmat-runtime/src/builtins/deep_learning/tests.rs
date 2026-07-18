@@ -410,6 +410,68 @@ fn adamupdate_accepts_zero_decay_and_rejects_integer_tensor_state() {
 }
 
 #[test]
+fn dlfeval_dispatches_function_handles() {
+    let out = block_on(dlfeval_builtin(vec![
+        Value::FunctionHandle("plus".into()),
+        Value::Num(2.0),
+        Value::Num(3.0),
+    ]))
+    .expect("dlfeval plus");
+    assert_eq!(out, Value::Num(5.0));
+}
+
+#[test]
+fn dlfeval_preserves_requested_output_count() {
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let out = block_on(dlfeval_builtin(vec![
+        Value::FunctionHandle("deal".into()),
+        Value::String("a".into()),
+        Value::String("b".into()),
+    ]))
+    .expect("dlfeval deal");
+    let Value::OutputList(outputs) = out else {
+        panic!("expected output list");
+    };
+    assert_eq!(
+        outputs,
+        vec![Value::String("a".into()), Value::String("b".into())]
+    );
+}
+
+#[test]
+fn dlfeval_registered_dispatch_preserves_requested_outputs() {
+    let out = block_on(crate::call_builtin_async_with_outputs(
+        "dlfeval",
+        &[
+            Value::FunctionHandle("deal".into()),
+            Value::String("left".into()),
+            Value::String("right".into()),
+        ],
+        2,
+    ))
+    .expect("registered dlfeval deal");
+    let Value::OutputList(outputs) = out else {
+        panic!("expected output list");
+    };
+    assert_eq!(
+        outputs,
+        vec![Value::String("left".into()), Value::String("right".into())]
+    );
+}
+
+#[test]
+fn dlfeval_rejects_missing_or_non_callable_function() {
+    let err = block_on(dlfeval_builtin(vec![])).unwrap_err();
+    assert!(err.to_string().contains("expected a function handle"));
+
+    let err = block_on(dlfeval_builtin(vec![Value::Num(1.0)])).unwrap_err();
+    assert!(err.to_string().contains("expected a function handle"));
+
+    let err = block_on(dlfeval_builtin(vec![Value::String("@plus".into())])).unwrap_err();
+    assert!(err.to_string().contains("expected a function handle"));
+}
+
+#[test]
 fn dlarray_and_crossentropy_reject_unsupported_forms() {
     let err = block_on(dlarray_builtin(
         Value::Num(1.0),

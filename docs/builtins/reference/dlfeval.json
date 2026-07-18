@@ -1,26 +1,28 @@
 {
   "title": "dlfeval",
   "category": "deep_learning",
-  "keywords": ["dlfeval", "deep learning", "automatic differentiation"],
-  "summary": "Report unsupported automatic differentiation evaluation with a deterministic error.",
-  "description": "`dlfeval` is registered but requires automatic differentiation and traced function-handle invocation that are outside this slice.",
+  "keywords": ["dlfeval", "deep learning", "automatic differentiation", "function handle"],
+  "summary": "Evaluate a function handle in Deep Learning compatibility context.",
+  "description": "`dlfeval(fun,args...)` invokes a function handle through RunMat's function-handle dispatch and forwards requested outputs.",
   "behaviors": [
-    "The builtin returns a deterministic unsupported-autodiff error without materializing inputs.",
-    "Function-handle execution over traced `dlarray` values remains future Deep Learning infrastructure work."
+    "`fun` must be a function handle value, including named handles, method handles, bound handles, and closures.",
+    "Requested output count is preserved, so bracketed multi-output calls forward to the invoked function.",
+    "Automatic differentiation tracing and `dlgradient`-style gradient recording are not implemented in this slice.",
+    "Text function names and callable objects are rejected by `dlfeval`; use `feval` for those RunMat extension forms."
   ],
   "examples": [
     {
-      "description": "Deferred Autodiff Evaluation",
+      "description": "Evaluate Function",
       "input": "[loss,gradients] = dlfeval(@modelLoss, net, X, T)",
-      "output": "RunMat reports that automatic differentiation is not yet implemented."
+      "output": "Outputs returned by `modelLoss`; automatic differentiation remains future work."
     }
   ],
   "syntax": {
     "example": {
-      "description": "Registered form",
+      "description": "Supported form",
       "input": "varargout = dlfeval(fun, args...)",
-      "output": "Unsupported-autodiff error in this slice."
+      "output": "Outputs returned by `fun`."
     }
   },
-  "gpu_residency": "Autodiff execution is not implemented in this slice; provider-resident gradients remain future work."
+  "gpu_residency": "`dlfeval` preserves callable dispatch behavior; provider-resident autodiff and gradient tracing remain future work."
 }
