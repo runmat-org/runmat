@@ -4,6 +4,7 @@ use super::losses::*;
 use super::sequences::*;
 use super::training::*;
 use futures::executor::block_on;
+use runmat_accelerate_api::{handle_precision, handle_storage, HostTensorView};
 use runmat_builtins::{
     CellArray, LogicalArray, NumericDType, StringArray, StructValue, Tensor, Value,
 };
@@ -244,6 +245,39 @@ fn dlarray_preserves_data_and_format_labels() {
         object.properties.get("Format"),
         Some(&Value::String("CB".into()))
     );
+}
+
+#[test]
+fn dlarray_preserves_gpu_array_residency() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let view = HostTensorView {
+            data: &tensor.data,
+            shape: &tensor.shape,
+        };
+        let handle = provider.upload(&view).expect("upload");
+        let out = block_on(dlarray_builtin(
+            Value::GpuTensor(handle.clone()),
+            vec![Value::String("CB".into())],
+        ))
+        .expect("dlarray gpu");
+        let Value::Object(object) = out else {
+            panic!("expected object");
+        };
+        assert_eq!(object.class_name, "dlarray");
+        let Value::GpuTensor(wrapped) = object.properties.get("Data").unwrap() else {
+            panic!("expected gpu tensor data");
+        };
+        assert_eq!(wrapped.buffer_id, handle.buffer_id);
+        assert_eq!(wrapped.device_id, handle.device_id);
+        assert_eq!(wrapped.shape, handle.shape);
+        assert_eq!(handle_precision(wrapped), handle_precision(&handle));
+        assert_eq!(handle_storage(wrapped), handle_storage(&handle));
+        assert_eq!(
+            object.properties.get("Format"),
+            Some(&Value::String("CB".into()))
+        );
+    });
 }
 
 #[test]

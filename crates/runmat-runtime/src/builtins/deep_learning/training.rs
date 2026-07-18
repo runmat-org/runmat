@@ -115,7 +115,7 @@ pub(super) async fn trainnet_builtin(_args: Vec<Value>) -> BuiltinResult<Value> 
 #[runtime_builtin(
     name = "dlarray",
     category = "deep_learning",
-    summary = "Create a dlarray compatibility object around host numeric data.",
+    summary = "Create a dlarray compatibility object around numeric or gpuArray data.",
     keywords = "dlarray,deep learning,array,labels",
     type_resolver(any_type),
     descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
@@ -127,12 +127,6 @@ pub(super) async fn dlarray_builtin(data: Value, rest: Vec<Value>) -> BuiltinRes
         return Err(deep_learning_error(
             "dlarray",
             "dlarray: only the optional dimension-label format argument is supported",
-        ));
-    }
-    if matches!(data, Value::GpuTensor(_)) {
-        return Err(deep_learning_error(
-            "dlarray",
-            "dlarray: gpuArray-backed dlarray values require deep-learning GPU array semantics not implemented in this slice",
         ));
     }
     let format = text_or_missing(gathered.first(), "", "dlarray")?;
