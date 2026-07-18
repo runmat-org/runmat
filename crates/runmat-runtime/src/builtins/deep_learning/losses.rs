@@ -1,5 +1,6 @@
 use runmat_accelerate_api::{
-    GpuTensorStorage, ProviderCrossentropyMode, ProviderCrossentropyRequest,
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderCrossentropyMode,
+    ProviderCrossentropyRequest,
 };
 use runmat_builtins::{NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -59,7 +60,7 @@ pub(super) async fn crossentropy_builtin(
         .first()
         .is_some_and(|value| !is_crossentropy_option_name(value))
     {
-        Some(LossWeights::parse(&args.remove(0), &predictions, None)?)
+        Some(LossWeights::parse(&args.remove(0), "weights")?)
     } else {
         None
     };
@@ -108,15 +109,6 @@ async fn try_crossentropy_gpu(
     let (Value::GpuTensor(predictions), Value::GpuTensor(targets)) = (predictions, targets) else {
         return Ok(None);
     };
-    if rest
-        .iter()
-        .any(|value| matches!(value, Value::GpuTensor(_)))
-        || rest
-            .first()
-            .is_some_and(|value| !is_crossentropy_option_name(value))
-    {
-        return Ok(None);
-    }
     if runmat_accelerate_api::handle_storage(predictions) == GpuTensorStorage::ComplexInterleaved
         || runmat_accelerate_api::handle_storage(targets) == GpuTensorStorage::ComplexInterleaved
     {
@@ -156,12 +148,15 @@ async fn try_crossentropy_gpu(
         return Ok(None);
     }
 
-    let result = match provider.crossentropy_terms(&ProviderCrossentropyRequest {
-        predictions,
-        targets,
-        mode: options.mode.into_provider(),
-    }) {
-        Ok(result) => result,
+    let mut temporary_inputs = Vec::new();
+    let weights = match materialize_gpu_loss_factor(
+        provider,
+        options.weights.as_ref(),
+        &predictions.shape,
+        "weights",
+        &mut temporary_inputs,
+    ) {
+        Ok(handle) => handle,
         Err(err) if provider_is_unsupported(&err) => return Ok(None),
         Err(err) => {
             return Err(deep_learning_error(
@@ -170,18 +165,64 @@ async fn try_crossentropy_gpu(
             ))
         }
     };
+    let mask = match materialize_gpu_loss_factor(
+        provider,
+        options.mask.as_ref(),
+        &predictions.shape,
+        "mask",
+        &mut temporary_inputs,
+    ) {
+        Ok(handle) => handle,
+        Err(err) if provider_is_unsupported(&err) => {
+            free_temporary_gpu_inputs(provider, temporary_inputs);
+            return Ok(None);
+        }
+        Err(err) => {
+            free_temporary_gpu_inputs(provider, temporary_inputs);
+            return Err(deep_learning_error(
+                "crossentropy",
+                format!("crossentropy: {err}"),
+            ));
+        }
+    };
+
+    let result = match provider.crossentropy_terms(&ProviderCrossentropyRequest {
+        predictions,
+        targets,
+        weights: weights.as_ref(),
+        mask: mask.as_ref(),
+        mode: options.mode.into_provider(),
+    }) {
+        Ok(result) => result,
+        Err(err) if provider_is_unsupported(&err) => {
+            free_temporary_gpu_inputs(provider, temporary_inputs);
+            return Ok(None);
+        }
+        Err(err) => {
+            free_temporary_gpu_inputs(provider, temporary_inputs);
+            return Err(deep_learning_error(
+                "crossentropy",
+                format!("crossentropy: {err}"),
+            ));
+        }
+    };
 
     match options.reduction {
-        CrossentropyReduction::None => Ok(Some(Value::GpuTensor(result.losses))),
+        CrossentropyReduction::None => {
+            free_temporary_gpu_inputs(provider, temporary_inputs);
+            Ok(Some(Value::GpuTensor(result.losses)))
+        }
         CrossentropyReduction::Sum => {
             let sum = match provider.reduce_sum(&result.losses).await {
                 Ok(sum) => sum,
                 Err(err) if provider_is_unsupported(&err) => {
                     let _ = provider.free(&result.losses);
+                    free_temporary_gpu_inputs(provider, temporary_inputs);
                     return Ok(None);
                 }
                 Err(err) => {
                     let _ = provider.free(&result.losses);
+                    free_temporary_gpu_inputs(provider, temporary_inputs);
                     return Err(deep_learning_error(
                         "crossentropy",
                         format!("crossentropy: {err}"),
@@ -193,11 +234,13 @@ async fn try_crossentropy_gpu(
                 Err(err) if provider_is_unsupported(&err) => {
                     let _ = provider.free(&result.losses);
                     let _ = provider.free(&sum);
+                    free_temporary_gpu_inputs(provider, temporary_inputs);
                     return Ok(None);
                 }
                 Err(err) => {
                     let _ = provider.free(&result.losses);
                     let _ = provider.free(&sum);
+                    free_temporary_gpu_inputs(provider, temporary_inputs);
                     return Err(deep_learning_error(
                         "crossentropy",
                         format!("crossentropy: {err}"),
@@ -206,6 +249,7 @@ async fn try_crossentropy_gpu(
             };
             let _ = provider.free(&result.losses);
             let _ = provider.free(&sum);
+            free_temporary_gpu_inputs(provider, temporary_inputs);
             if !scalar.is_finite() {
                 return Err(deep_learning_error(
                     "crossentropy",
@@ -511,17 +555,23 @@ struct GpuCrossentropyOptions {
     reduction: CrossentropyReduction,
     normalization: NormalizationFactor,
     data_format: Option<String>,
+    weights: Option<GpuLossFactor>,
+    mask: Option<GpuLossFactor>,
 }
 
 impl GpuCrossentropyOptions {
     fn from_args(args: Vec<Value>, shape: &[usize]) -> BuiltinResult<Option<Self>> {
-        let mut parsed = parse_name_values(args, "crossentropy")?;
-        if parsed.remove("weights").is_some()
-            || parsed.remove("weightsformat").is_some()
-            || parsed.remove("mask").is_some()
+        let len = shape.iter().copied().product::<usize>();
+        let mut args = args;
+        let positional_weights = if args
+            .first()
+            .is_some_and(|value| !is_crossentropy_option_name(value))
         {
-            return Ok(None);
-        }
+            Some(args.remove(0))
+        } else {
+            None
+        };
+        let mut parsed = parse_name_values(args, "crossentropy")?;
         let mode = parsed
             .remove("classificationmode")
             .or_else(|| parsed.remove("targetcategories"))
@@ -538,6 +588,33 @@ impl GpuCrossentropyOptions {
             .map(|value| scalar_text(&value, "crossentropy"))
             .transpose()?
             .filter(|format| !format.is_empty());
+        let weights_format = parsed
+            .remove("weightsformat")
+            .map(|value| scalar_text(&value, "crossentropy"))
+            .transpose()?
+            .filter(|format| !format.is_empty());
+        validate_format_for_shape(data_format.as_deref(), shape, "DataFormat")?;
+        let weights_value = positional_weights.or_else(|| parsed.remove("weights"));
+        let weights = match weights_value {
+            Some(value) => match GpuLossFactor::weights(
+                value,
+                shape,
+                len,
+                data_format.as_deref(),
+                weights_format.as_deref(),
+            )? {
+                GpuLossFactorParse::Supported(factor) => factor,
+                GpuLossFactorParse::Unsupported => return Ok(None),
+            },
+            None => None,
+        };
+        let mask = match parsed.remove("mask") {
+            Some(value) => match GpuLossFactor::mask(value, shape, len)? {
+                GpuLossFactorParse::Supported(factor) => factor,
+                GpuLossFactorParse::Unsupported => return Ok(None),
+            },
+            None => None,
+        };
         let normalization = parsed
             .remove("normalizationfactor")
             .map(|value| NormalizationFactor::parse(&value))
@@ -559,12 +636,13 @@ impl GpuCrossentropyOptions {
                 format!("crossentropy: unsupported option '{first}'"),
             ));
         }
-        validate_format_for_shape(data_format.as_deref(), shape, "DataFormat")?;
         Ok(Some(Self {
             mode,
             reduction,
             normalization,
             data_format,
+            weights,
+            mask,
         }))
     }
 
@@ -581,6 +659,93 @@ impl GpuCrossentropyOptions {
             NormalizationFactor::None => Ok(1.0),
             NormalizationFactor::Scalar(value) => Ok(value),
         }
+    }
+}
+
+enum GpuLossFactor {
+    Host(Vec<f64>),
+    Resident(GpuTensorHandle),
+}
+
+enum GpuLossFactorParse {
+    Supported(Option<GpuLossFactor>),
+    Unsupported,
+}
+
+impl GpuLossFactor {
+    fn weights(
+        value: Value,
+        shape: &[usize],
+        len: usize,
+        data_format: Option<&str>,
+        weights_format: Option<&str>,
+    ) -> BuiltinResult<GpuLossFactorParse> {
+        match value {
+            Value::GpuTensor(handle) => {
+                if weights_format.is_some()
+                    || runmat_accelerate_api::handle_storage(&handle)
+                        == GpuTensorStorage::ComplexInterleaved
+                    || handle.shape != shape
+                {
+                    return Ok(GpuLossFactorParse::Unsupported);
+                }
+                Ok(GpuLossFactorParse::Supported(Some(Self::Resident(handle))))
+            }
+            other => {
+                let weights = LossWeights::parse(&other, "weights")?;
+                let materialized =
+                    weights.materialize_for_layout(shape, len, data_format, weights_format)?;
+                Ok(GpuLossFactorParse::Supported(Some(Self::Host(
+                    materialized,
+                ))))
+            }
+        }
+    }
+
+    fn mask(value: Value, shape: &[usize], len: usize) -> BuiltinResult<GpuLossFactorParse> {
+        match value {
+            Value::GpuTensor(handle) => {
+                if runmat_accelerate_api::handle_storage(&handle)
+                    == GpuTensorStorage::ComplexInterleaved
+                    || handle.shape != shape
+                {
+                    return Ok(GpuLossFactorParse::Unsupported);
+                }
+                Ok(GpuLossFactorParse::Supported(Some(Self::Resident(handle))))
+            }
+            other => Ok(GpuLossFactorParse::Supported(Some(Self::Host(
+                mask_values_for_layout(&other, shape, len)?,
+            )))),
+        }
+    }
+}
+
+fn materialize_gpu_loss_factor(
+    provider: &dyn AccelProvider,
+    factor: Option<&GpuLossFactor>,
+    shape: &[usize],
+    label: &'static str,
+    temporary_inputs: &mut Vec<GpuTensorHandle>,
+) -> anyhow::Result<Option<GpuTensorHandle>> {
+    match factor {
+        Some(GpuLossFactor::Resident(handle)) => Ok(Some(handle.clone())),
+        Some(GpuLossFactor::Host(data)) => {
+            let expected = shape.iter().copied().product::<usize>();
+            anyhow::ensure!(
+                data.len() == expected,
+                "{label} length does not match prediction shape"
+            );
+            let handle = provider.upload(&HostTensorView { data, shape })?;
+            temporary_inputs.push(handle.clone());
+            Ok(Some(handle))
+        }
+        None => Ok(None),
+    }
+}
+
+fn free_temporary_gpu_inputs(provider: &dyn AccelProvider, handles: Vec<GpuTensorHandle>) {
+    for handle in handles {
+        let _ = provider.free(&handle);
     }
 }
 
@@ -631,7 +796,7 @@ impl CrossentropyOptions {
             .filter(|format| !format.is_empty());
         let weights = parsed
             .remove("weights")
-            .map(|value| LossWeights::parse(&value, predictions, weights_format.as_deref()))
+            .map(|value| LossWeights::parse(&value, "weights"))
             .transpose()?;
         let mask = parsed
             .remove("mask")
@@ -704,11 +869,7 @@ struct LossWeights {
 }
 
 impl LossWeights {
-    fn parse(
-        value: &Value,
-        _predictions: &LossPayload,
-        _format: Option<&str>,
-    ) -> BuiltinResult<Self> {
+    fn parse(value: &Value, label: &'static str) -> BuiltinResult<Self> {
         match value {
             Value::Bool(flag) => Ok(Self {
                 data: vec![if *flag { 1.0 } else { 0.0 }],
@@ -719,7 +880,7 @@ impl LossWeights {
                 shape: array.shape.clone(),
             }),
             _ => {
-                let payload = LossPayload::parse(value, "weights")?;
+                let payload = LossPayload::parse(value, label)?;
                 Ok(Self {
                     data: payload.data,
                     shape: payload.shape,
@@ -734,6 +895,22 @@ impl LossWeights {
         data_format: Option<&str>,
         weights_format: Option<&str>,
     ) -> BuiltinResult<Vec<f64>> {
+        let format = predictions.format_or_default(data_format);
+        self.materialize_for_layout(
+            &predictions.shape,
+            predictions.data.len(),
+            format.as_deref(),
+            weights_format,
+        )
+    }
+
+    fn materialize_for_layout(
+        &self,
+        prediction_shape: &[usize],
+        prediction_len: usize,
+        data_format: Option<&str>,
+        weights_format: Option<&str>,
+    ) -> BuiltinResult<Vec<f64>> {
         if self
             .data
             .iter()
@@ -745,19 +922,24 @@ impl LossWeights {
             ));
         }
         if self.data.len() == 1 {
-            return Ok(vec![self.data[0]; predictions.data.len()]);
+            return Ok(vec![self.data[0]; prediction_len]);
         }
         if let Some(weights_format) = weights_format {
-            return self.materialize_by_format(predictions, data_format, weights_format);
+            return self.materialize_by_format(
+                prediction_shape,
+                prediction_len,
+                data_format,
+                weights_format,
+            );
         }
-        if self.data.len() == predictions.data.len() {
+        if self.data.len() == prediction_len {
             return Ok(self.data.clone());
         }
-        if let Some(channel) = label_index(predictions, data_format, 'C') {
-            return self.materialize_along_dimension(predictions, channel);
+        if let Some(channel) = label_index_for_shape(data_format, 'C') {
+            return self.materialize_along_dimension(prediction_shape, prediction_len, channel);
         }
-        if let Some(batch) = label_index(predictions, data_format, 'B') {
-            return self.materialize_along_dimension(predictions, batch);
+        if let Some(batch) = label_index_for_shape(data_format, 'B') {
+            return self.materialize_along_dimension(prediction_shape, prediction_len, batch);
         }
         Err(deep_learning_error(
             "crossentropy",
@@ -767,19 +949,20 @@ impl LossWeights {
 
     fn materialize_along_dimension(
         &self,
-        predictions: &LossPayload,
+        prediction_shape: &[usize],
+        prediction_len: usize,
         dimension: usize,
     ) -> BuiltinResult<Vec<f64>> {
-        if self.data.len() != predictions.shape[dimension] {
+        if self.data.len() != prediction_shape[dimension] {
             return Err(deep_learning_error(
                 "crossentropy",
                 "crossentropy: weights size is not compatible with predictions",
             ));
         }
-        let pred_strides = column_major_strides(&predictions.shape);
-        let mut out = Vec::with_capacity(predictions.data.len());
-        for idx in 0..predictions.data.len() {
-            let coord = (idx / pred_strides[dimension]) % predictions.shape[dimension];
+        let pred_strides = column_major_strides(prediction_shape);
+        let mut out = Vec::with_capacity(prediction_len);
+        for idx in 0..prediction_len {
+            let coord = (idx / pred_strides[dimension]) % prediction_shape[dimension];
             out.push(self.data[coord]);
         }
         Ok(out)
@@ -787,12 +970,13 @@ impl LossWeights {
 
     fn materialize_by_format(
         &self,
-        predictions: &LossPayload,
+        prediction_shape: &[usize],
+        prediction_len: usize,
         data_format: Option<&str>,
         weights_format: &str,
     ) -> BuiltinResult<Vec<f64>> {
         validate_format_for_shape(Some(weights_format), &self.shape, "WeightsFormat")?;
-        let data_format = predictions.format_or_default(data_format).ok_or_else(|| {
+        let data_format = data_format.ok_or_else(|| {
             deep_learning_error(
                 "crossentropy",
                 "crossentropy: DataFormat is required when WeightsFormat is supplied",
@@ -800,10 +984,10 @@ impl LossWeights {
         })?;
         let pred_labels = data_format.chars().collect::<Vec<_>>();
         let weight_labels = weights_format.chars().collect::<Vec<_>>();
-        let pred_strides = column_major_strides(&predictions.shape);
+        let pred_strides = column_major_strides(prediction_shape);
         let weight_strides = column_major_strides(&self.shape);
-        let mut out = Vec::with_capacity(predictions.data.len());
-        for pred_idx in 0..predictions.data.len() {
+        let mut out = Vec::with_capacity(prediction_len);
+        for pred_idx in 0..prediction_len {
             let mut weight_idx = 0usize;
             for (weight_dim, label) in weight_labels.iter().enumerate() {
                 if label.eq_ignore_ascii_case(&'U') {
@@ -820,7 +1004,7 @@ impl LossWeights {
                             ),
                         )
                     })?;
-                let pred_extent = predictions.shape[pred_dim];
+                let pred_extent = prediction_shape[pred_dim];
                 let weight_extent = self.shape[weight_dim];
                 if weight_extent != 1 && weight_extent != pred_extent {
                     return Err(deep_learning_error(
@@ -876,6 +1060,41 @@ impl LossMask {
         }
         Ok(Self { data })
     }
+}
+
+fn mask_values_for_layout(value: &Value, shape: &[usize], len: usize) -> BuiltinResult<Vec<f64>> {
+    let (data, mask_shape) = match value {
+        Value::Bool(flag) => (vec![if *flag { 1.0 } else { 0.0 }], vec![1, 1]),
+        Value::LogicalArray(array) => (
+            array.data.iter().map(|value| f64::from(*value)).collect(),
+            array.shape.clone(),
+        ),
+        Value::Tensor(tensor) => (tensor.data.clone(), tensor.shape.clone()),
+        other => {
+            return Err(deep_learning_error(
+                "crossentropy",
+                format!(
+                    "crossentropy: Mask must be a logical or binary numeric array, got {other:?}"
+                ),
+            ));
+        }
+    };
+    if mask_shape != shape || data.len() != len {
+        return Err(deep_learning_error(
+            "crossentropy",
+            "crossentropy: Mask must have the same size as predictions",
+        ));
+    }
+    if data
+        .iter()
+        .any(|value| !value.is_finite() || (*value != 0.0 && *value != 1.0))
+    {
+        return Err(deep_learning_error(
+            "crossentropy",
+            "crossentropy: Mask must contain binary 0 or 1 values",
+        ));
+    }
+    Ok(data)
 }
 
 fn batch_size(predictions: &LossPayload, format: Option<&str>) -> BuiltinResult<f64> {
@@ -945,6 +1164,14 @@ fn reduce_mask_included(
 
 fn label_index(predictions: &LossPayload, format: Option<&str>, label: char) -> Option<usize> {
     predictions.format_or_default(format).and_then(|format| {
+        format
+            .chars()
+            .position(|candidate| candidate.eq_ignore_ascii_case(&label))
+    })
+}
+
+fn label_index_for_shape(format: Option<&str>, label: char) -> Option<usize> {
+    format.and_then(|format| {
         format
             .chars()
             .position(|candidate| candidate.eq_ignore_ascii_case(&label))

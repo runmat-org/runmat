@@ -3223,6 +3223,8 @@ pub enum ProviderCrossentropyMode {
 pub struct ProviderCrossentropyRequest<'a> {
     pub predictions: &'a GpuTensorHandle,
     pub targets: &'a GpuTensorHandle,
+    pub weights: Option<&'a GpuTensorHandle>,
+    pub mask: Option<&'a GpuTensorHandle>,
     pub mode: ProviderCrossentropyMode,
 }
 

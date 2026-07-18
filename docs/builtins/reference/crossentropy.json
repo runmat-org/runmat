@@ -14,9 +14,9 @@
     "`Reduction` supports `sum` and `none`; unreduced output preserves the prediction shape.",
     "`NormalizationFactor` supports `all-elements`, `batch-size`, `mask-included`, `none`, and positive numeric scalars.",
     "`Mask` must be a full-size logical or binary numeric array.",
-    "Plain real `gpuArray` prediction and target tensors use provider-side cross-entropy kernels for unweighted same-shape losses. `Reduction=\"none\"` returns a resident `gpuArray`; scalar reductions reduce on the provider and read back only the scalar result.",
+    "Plain real `gpuArray` prediction and target tensors use provider-side cross-entropy kernels for same-shape losses. Scalar, prediction-sized, channel-sized, and observation-sized host weights are materialized as temporary provider inputs; full prediction-sized resident real `gpuArray` weights and masks are consumed directly. `Reduction=\"none\"` returns a resident `gpuArray`; scalar reductions reduce on the provider and read back only the scalar result.",
     "Host `dlarray` inputs return host `dlarray` compatibility outputs; reduced scalar losses and unreduced loss arrays are returned as unformatted `dlarray` objects.",
-    "Datastore/category target expansion, automatic differentiation, GPU-backed `dlarray`, and provider-resident weighted/masked loss forms remain future work."
+    "Datastore/category target expansion, automatic differentiation, GPU-backed `dlarray`, `NormalizationFactor=\"mask-included\"` for GPU inputs, and non-full-size resident GPU weight remapping with `WeightsFormat` remain future work."
   ],
   "examples": [
     {
@@ -42,5 +42,5 @@
       "output": "Numeric or `dlarray` loss."
     }
   },
-  "gpu_residency": "`crossentropy` preserves residency for plain real `gpuArray` prediction and target tensors through the `runmat-accelerate` `crossentropy_terms` provider hook when no weights, mask, or `WeightsFormat` remapping is required. Unreduced losses remain resident; scalar reductions use provider reduction and read back only the scalar."
+  "gpu_residency": "`crossentropy` preserves residency for plain real `gpuArray` prediction and target tensors through the `runmat-accelerate` `crossentropy_terms` provider hook. Unreduced losses remain resident; scalar reductions use provider reduction and read back only the scalar. Host weights and masks that can be expanded from scalar, prediction-sized, channel-sized, or observation-sized forms are uploaded as temporary provider tensors. Resident GPU weights and masks stay on the provider when they are real and exactly prediction-sized; `WeightsFormat` remapping and `NormalizationFactor=\"mask-included\"` still fall back to the host path."
 }

@@ -987,6 +987,8 @@ fn provider_adam_update_values(
 fn provider_crossentropy_terms(
     predictions: &[f64],
     targets: &[f64],
+    weights: Option<&[f64]>,
+    mask: Option<&[f64]>,
     mode: ProviderCrossentropyMode,
 ) -> Result<Vec<f64>> {
     ensure!(
@@ -1002,21 +1004,50 @@ fn provider_crossentropy_terms(
             && targets.iter().all(|value| value.is_finite()),
         "crossentropy_terms: inputs must contain finite values"
     );
+    if let Some(weights) = weights {
+        ensure!(
+            weights.len() == predictions.len(),
+            "crossentropy_terms: weights must match prediction shape"
+        );
+        ensure!(
+            weights
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0),
+            "crossentropy_terms: weights must contain finite nonnegative values"
+        );
+    }
+    if let Some(mask) = mask {
+        ensure!(
+            mask.len() == predictions.len(),
+            "crossentropy_terms: mask must match prediction shape"
+        );
+        ensure!(
+            mask.iter()
+                .all(|value| value.is_finite() && (*value == 0.0 || *value == 1.0)),
+            "crossentropy_terms: mask must contain binary 0 or 1 values"
+        );
+    }
 
     let eps = 1.0e-12;
     let mut losses = Vec::with_capacity(predictions.len());
-    for (&prediction, &target) in predictions.iter().zip(targets.iter()) {
+    for (idx, (&prediction, &target)) in predictions.iter().zip(targets.iter()).enumerate() {
         ensure!(
             (0.0..=1.0).contains(&target),
             "crossentropy_terms: targets must be probabilities in the range [0, 1]"
         );
         let clipped = prediction.clamp(eps, 1.0 - eps);
-        let loss = match mode {
+        let mut loss = match mode {
             ProviderCrossentropyMode::SingleLabel => -target * clipped.ln(),
             ProviderCrossentropyMode::MultiLabel => {
                 -target * clipped.ln() - (1.0 - target) * (1.0 - clipped).ln()
             }
         };
+        if let Some(weights) = weights {
+            loss *= weights[idx];
+        }
+        if let Some(mask) = mask {
+            loss *= mask[idx];
+        }
         ensure!(
             loss.is_finite(),
             "crossentropy_terms: loss produced a non-finite value"
@@ -2337,14 +2368,27 @@ impl AccelProvider for InProcessProvider {
             "crossentropy_terms: targets must match prediction shape"
         );
         ensure!(
+            request.weights.is_none_or(|handle| handle.shape == shape)
+                && request.mask.is_none_or(|handle| handle.shape == shape),
+            "crossentropy_terms: weights and mask must match prediction shape"
+        );
+        ensure!(
             runmat_accelerate_api::handle_storage(request.predictions)
                 != GpuTensorStorage::ComplexInterleaved
                 && runmat_accelerate_api::handle_storage(request.targets)
-                    != GpuTensorStorage::ComplexInterleaved,
+                    != GpuTensorStorage::ComplexInterleaved
+                && request.weights.is_none_or(|handle| {
+                    runmat_accelerate_api::handle_storage(handle)
+                        != GpuTensorStorage::ComplexInterleaved
+                })
+                && request.mask.is_none_or(|handle| {
+                    runmat_accelerate_api::handle_storage(handle)
+                        != GpuTensorStorage::ComplexInterleaved
+                }),
             "crossentropy_terms: complex inputs are not supported"
         );
 
-        let (predictions, targets) = {
+        let (predictions, targets, weights, mask) = {
             let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
             let predictions = guard
                 .get(&request.predictions.buffer_id)
@@ -2354,16 +2398,43 @@ impl AccelProvider for InProcessProvider {
                 .get(&request.targets.buffer_id)
                 .cloned()
                 .ok_or_else(|| anyhow!("crossentropy_terms: unknown targets buffer"))?;
-            (predictions, targets)
+            let weights = request
+                .weights
+                .map(|handle| {
+                    guard
+                        .get(&handle.buffer_id)
+                        .cloned()
+                        .ok_or_else(|| anyhow!("crossentropy_terms: unknown weights buffer"))
+                })
+                .transpose()?;
+            let mask = request
+                .mask
+                .map(|handle| {
+                    guard
+                        .get(&handle.buffer_id)
+                        .cloned()
+                        .ok_or_else(|| anyhow!("crossentropy_terms: unknown mask buffer"))
+                })
+                .transpose()?;
+            (predictions, targets, weights, mask)
         };
         ensure!(
-            predictions.len() == len && targets.len() == len,
+            predictions.len() == len
+                && targets.len() == len
+                && weights.as_ref().is_none_or(|data| data.len() == len)
+                && mask.as_ref().is_none_or(|data| data.len() == len),
             "crossentropy_terms: tensor shapes do not match buffer lengths"
         );
 
         Ok(ProviderCrossentropyResult {
             losses: self.allocate_tensor(
-                provider_crossentropy_terms(&predictions, &targets, request.mode)?,
+                provider_crossentropy_terms(
+                    &predictions,
+                    &targets,
+                    weights.as_deref(),
+                    mask.as_deref(),
+                    request.mode,
+                )?,
                 shape,
             ),
         })
@@ -7640,6 +7711,8 @@ mod tests {
             .crossentropy_terms(&ProviderCrossentropyRequest {
                 predictions: &predictions,
                 targets: &targets,
+                weights: None,
+                mask: None,
                 mode: ProviderCrossentropyMode::SingleLabel,
             })
             .expect("crossentropy terms");
@@ -7649,6 +7722,8 @@ mod tests {
             .crossentropy_terms(&ProviderCrossentropyRequest {
                 predictions: &predictions,
                 targets: &targets,
+                weights: None,
+                mask: None,
                 mode: ProviderCrossentropyMode::MultiLabel,
             })
             .expect("multilabel crossentropy terms");
@@ -7656,6 +7731,24 @@ mod tests {
             &provider,
             &result.losses,
             &[-0.8_f64.ln(), -0.8_f64.ln()],
+            &shape,
+        );
+
+        let weights = real_handle(&provider, &[2.0, 3.0], &shape);
+        let mask = real_handle(&provider, &[1.0, 0.0], &shape);
+        let result = provider
+            .crossentropy_terms(&ProviderCrossentropyRequest {
+                predictions: &predictions,
+                targets: &targets,
+                weights: Some(&weights),
+                mask: Some(&mask),
+                mode: ProviderCrossentropyMode::MultiLabel,
+            })
+            .expect("weighted masked crossentropy terms");
+        assert_real_close(
+            &provider,
+            &result.losses,
+            &[-2.0 * 0.8_f64.ln(), 0.0],
             &shape,
         );
     }

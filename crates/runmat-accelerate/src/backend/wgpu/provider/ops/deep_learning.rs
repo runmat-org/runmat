@@ -36,6 +36,10 @@ struct CrossentropyParams {
     offset: u32,
     chunk: u32,
     mode: u32,
+    weights_enabled: u32,
+    mask_enabled: u32,
+    _pad0: u32,
+    _pad1: u32,
 }
 
 impl WgpuProvider {
@@ -54,9 +58,31 @@ impl WgpuProvider {
                 && targets_entry.len == predictions_entry.len,
             "crossentropy_terms: targets must match prediction shape"
         );
+        let weights_entry = request
+            .weights
+            .map(|handle| self.get_entry(handle))
+            .transpose()?;
+        let mask_entry = request
+            .mask
+            .map(|handle| self.get_entry(handle))
+            .transpose()?;
+        ensure!(
+            weights_entry.as_ref().is_none_or(|entry| {
+                entry.shape == predictions_entry.shape && entry.len == predictions_entry.len
+            }) && mask_entry.as_ref().is_none_or(|entry| {
+                entry.shape == predictions_entry.shape && entry.len == predictions_entry.len
+            }),
+            "crossentropy_terms: weights and mask must match prediction shape"
+        );
         ensure!(
             predictions_entry.storage != GpuTensorStorage::ComplexInterleaved
-                && targets_entry.storage != GpuTensorStorage::ComplexInterleaved,
+                && targets_entry.storage != GpuTensorStorage::ComplexInterleaved
+                && weights_entry
+                    .as_ref()
+                    .is_none_or(|entry| entry.storage != GpuTensorStorage::ComplexInterleaved)
+                && mask_entry
+                    .as_ref()
+                    .is_none_or(|entry| entry.storage != GpuTensorStorage::ComplexInterleaved),
             "crossentropy_terms: complex inputs are not supported"
         );
         ensure!(
@@ -106,6 +132,14 @@ impl WgpuProvider {
             ProviderCrossentropyMode::SingleLabel => 0,
             ProviderCrossentropyMode::MultiLabel => 1,
         };
+        let weights_buffer = weights_entry
+            .as_ref()
+            .map(|entry| entry.buffer.as_ref())
+            .unwrap_or_else(|| predictions_entry.buffer.as_ref());
+        let mask_buffer = mask_entry
+            .as_ref()
+            .map(|entry| entry.buffer.as_ref())
+            .unwrap_or_else(|| predictions_entry.buffer.as_ref());
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
@@ -117,6 +151,10 @@ impl WgpuProvider {
                     offset: offset as u32,
                     chunk: chunk_len as u32,
                     mode,
+                    weights_enabled: u32::from(weights_entry.is_some()),
+                    mask_enabled: u32::from(mask_entry.is_some()),
+                    _pad0: 0,
+                    _pad1: 0,
                 },
                 "runmat-crossentropy-params",
             );
@@ -136,14 +174,22 @@ impl WgpuProvider {
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: out_losses.as_ref().as_entire_binding(),
+                            resource: weights_buffer.as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 3,
-                            resource: params_buffer.as_entire_binding(),
+                            resource: mask_buffer.as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 4,
+                            resource: out_losses.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
                             resource: error_buffer.as_entire_binding(),
                         },
                     ],
@@ -204,6 +250,16 @@ impl WgpuProvider {
             3 => {
                 return Err(anyhow!(
                     "crossentropy_terms: loss produced a non-finite value"
+                ))
+            }
+            4 => {
+                return Err(anyhow!(
+                    "crossentropy_terms: weights must contain finite nonnegative values"
+                ))
+            }
+            5 => {
+                return Err(anyhow!(
+                    "crossentropy_terms: mask must contain binary 0 or 1 values"
                 ))
             }
             other => {
@@ -511,13 +567,13 @@ impl WgpuProvider {
     }
 }
 
-fn crossentropy_terms_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 5] {
+fn crossentropy_terms_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 7] {
     std::array::from_fn(|binding| {
-        let read_only = binding <= 1;
+        let read_only = binding <= 3;
         wgpu::BindGroupLayoutEntry {
             binding: binding as u32,
             visibility: wgpu::ShaderStages::COMPUTE,
-            ty: if binding == 3 {
+            ty: if binding == 5 {
                 wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -557,6 +613,10 @@ struct Params {{
   offset: u32,
   chunk: u32,
   mode: u32,
+  weights_enabled: u32,
+  mask_enabled: u32,
+  pad0: u32,
+  pad1: u32,
 }};
 
 struct ErrorState {{
@@ -565,9 +625,11 @@ struct ErrorState {{
 
 @group(0) @binding(0) var<storage, read> predictions_in: Tensor;
 @group(0) @binding(1) var<storage, read> targets_in: Tensor;
-@group(0) @binding(2) var<storage, read_write> losses_out: Tensor;
-@group(0) @binding(3) var<uniform> params: Params;
-@group(0) @binding(4) var<storage, read_write> errors: ErrorState;
+@group(0) @binding(2) var<storage, read> weights_in: Tensor;
+@group(0) @binding(3) var<storage, read> mask_in: Tensor;
+@group(0) @binding(4) var<storage, read_write> losses_out: Tensor;
+@group(0) @binding(5) var<uniform> params: Params;
+@group(0) @binding(6) var<storage, read_write> errors: ErrorState;
 
 fn is_finite_crossentropy(x: {ty}) -> bool {{
   return (x == x) && (abs(x) < MAX_FINITE_CROSSENTROPY);
@@ -602,6 +664,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
   var loss = -target * log(clipped);
   if (params.mode == 1u) {{
     loss = loss - ({ty}(1.0) - target) * log({ty}(1.0) - clipped);
+  }}
+  if (params.weights_enabled != 0u) {{
+    let weight = weights_in.data[idx];
+    if (!(is_finite_crossentropy(weight) && weight >= {ty}(0.0))) {{
+      flag_error(4u);
+      return;
+    }}
+    loss = loss * weight;
+  }}
+  if (params.mask_enabled != 0u) {{
+    let mask = mask_in.data[idx];
+    if (!(is_finite_crossentropy(mask) && (mask == {ty}(0.0) || mask == {ty}(1.0)))) {{
+      flag_error(5u);
+      return;
+    }}
+    loss = loss * mask;
   }}
   if (!is_finite_crossentropy(loss)) {{
     flag_error(3u);
@@ -845,11 +923,25 @@ mod tests {
                 shape: &shape,
             })
             .expect("upload targets");
+        let weights = provider
+            .upload(&HostTensorView {
+                data: &[2.0, 3.0],
+                shape: &shape,
+            })
+            .expect("upload weights");
+        let mask = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 0.0],
+                shape: &shape,
+            })
+            .expect("upload mask");
 
         let result = provider
             .crossentropy_terms(&ProviderCrossentropyRequest {
                 predictions: &predictions,
                 targets: &targets,
+                weights: Some(&weights),
+                mask: Some(&mask),
                 mode: ProviderCrossentropyMode::MultiLabel,
             })
             .expect("crossentropy terms");
@@ -859,15 +951,16 @@ mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-10,
             runmat_accelerate_api::ProviderPrecision::F32 => 1.0e-5,
         };
+        let expected = [-2.0 * 0.8_f64.ln(), 0.0];
         for (idx, actual) in losses.data.iter().enumerate() {
-            let expected = -0.8_f64.ln();
             assert!(
-                (*actual - expected).abs() < tol,
-                "loss lane {idx}: got {actual}, expected {expected}"
+                (*actual - expected[idx]).abs() < tol,
+                "loss lane {idx}: got {actual}, expected {}",
+                expected[idx]
             );
         }
 
-        for handle in [&predictions, &targets, &result.losses] {
+        for handle in [&predictions, &targets, &weights, &mask, &result.losses] {
             provider.free(handle).ok();
         }
     }
