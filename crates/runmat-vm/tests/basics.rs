@@ -55,6 +55,29 @@ fn bare_random_builtin_identifiers_execute_as_zero_arg_calls() {
 }
 
 #[test]
+fn rand_legacy_seed_forms_execute_from_source() {
+    let input = "\
+        rand(\"seed\", 2026);
+        prefix = rand(1, 4);
+        s = rand('seed');
+        a = rand(1, 4);
+        rand('seed', s);
+        b = rand(1, 4);
+        result = [sum(abs(a - b)), abs(s - 2026)];
+    ";
+    let vars = execute_source(input);
+    let result = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 2] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected result tensor");
+    assert!(result.data[0].abs() < 1.0e-12);
+    assert!(result.data[1] > 1.0);
+}
+
+#[test]
 fn opentoline_dispatches_editor_navigation_request() {
     let mut path = std::env::temp_dir();
     path.push(format!(

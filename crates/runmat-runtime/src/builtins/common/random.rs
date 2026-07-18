@@ -1,3 +1,4 @@
+use std::collections::{HashMap, VecDeque};
 use std::f64::consts::PI;
 use std::sync::{Mutex, OnceLock};
 
@@ -81,9 +82,47 @@ impl From<RngSnapshot> for GlobalRng {
 }
 
 static RNG_STATE: OnceLock<Mutex<GlobalRng>> = OnceLock::new();
+const LEGACY_TOKEN_BASE: u64 = (1_u64 << 52) + 0x5eed;
+const LEGACY_TOKEN_CAPACITY: usize = 1024;
+
+struct LegacyTokenState {
+    next: u64,
+    entries: HashMap<u64, RngSnapshot>,
+    order: VecDeque<u64>,
+}
+
+impl LegacyTokenState {
+    fn new() -> Self {
+        Self {
+            next: 0,
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+
+    fn insert(&mut self, snapshot: RngSnapshot) -> u64 {
+        let token = LEGACY_TOKEN_BASE + self.next;
+        self.next = self.next.wrapping_add(1);
+        if self.entries.insert(token, snapshot).is_none() {
+            self.order.push_back(token);
+        }
+        while self.order.len() > LEGACY_TOKEN_CAPACITY {
+            if let Some(oldest) = self.order.pop_front() {
+                self.entries.remove(&oldest);
+            }
+        }
+        token
+    }
+}
+
+static LEGACY_TOKENS: OnceLock<Mutex<LegacyTokenState>> = OnceLock::new();
 
 fn rng_state() -> &'static Mutex<GlobalRng> {
     RNG_STATE.get_or_init(|| Mutex::new(GlobalRng::new()))
+}
+
+fn legacy_tokens() -> &'static Mutex<LegacyTokenState> {
+    LEGACY_TOKENS.get_or_init(|| Mutex::new(LegacyTokenState::new()))
 }
 
 fn mix_seed(seed: u64) -> u64 {
@@ -122,6 +161,33 @@ pub(crate) fn apply_snapshot(snapshot: RngSnapshot) -> BuiltinResult<RngSnapshot
 pub(crate) fn set_seed(seed: u64) -> BuiltinResult<RngSnapshot> {
     let state = mix_seed(seed);
     apply_snapshot(RngSnapshot::new(state, Some(seed), RngAlgorithm::RunMatLcg))
+}
+
+pub(crate) fn legacy_seed_value() -> BuiltinResult<u64> {
+    let snapshot = snapshot()?;
+    if let Some(seed) = snapshot.seed {
+        if snapshot.state == mix_seed(seed) {
+            return Ok(seed);
+        }
+    }
+    let mut tokens = legacy_tokens()
+        .lock()
+        .map_err(|_| random_error("rand", "rand: failed to acquire legacy RNG token lock"))?;
+    Ok(tokens.insert(snapshot))
+}
+
+pub(crate) fn set_legacy_seed(seed_or_token: u64) -> BuiltinResult<RngSnapshot> {
+    if let Some(snapshot) = legacy_tokens()
+        .lock()
+        .map_err(|_| random_error("rand", "rand: failed to acquire legacy RNG token lock"))?
+        .entries
+        .get(&seed_or_token)
+        .copied()
+    {
+        apply_snapshot(snapshot)
+    } else {
+        set_seed(seed_or_token)
+    }
 }
 
 pub(crate) fn set_default() -> BuiltinResult<RngSnapshot> {
@@ -496,6 +562,11 @@ pub(crate) fn reset_rng() {
         }
     } else {
         let _ = RNG_STATE.set(Mutex::new(GlobalRng::new()));
+    }
+    if let Some(mutex) = LEGACY_TOKENS.get() {
+        if let Ok(mut guard) = mutex.lock() {
+            *guard = LegacyTokenState::new();
+        }
     }
 }
 
