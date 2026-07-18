@@ -7,8 +7,8 @@
     "elementwise": false,
     "reduction": false,
     "precisions": ["f64"],
-    "broadcasting": "scalar expansion over matching nonscalar inputs",
-    "notes": "`blsprice` gathers gpuArray inputs and evaluates the host scalar/vectorized Black-Scholes formula. A provider-resident elementwise fast path is deferred to the queued runmat-accelerate GPU audit."
+    "broadcasting": "MATLAB implicit expansion",
+    "notes": "Resident real gpuArray inputs route through the provider `black_scholes_price` hook and return resident call/put gpuArray outputs. Host scalar/tensor inputs in a mixed GPU call are uploaded as temporary provider inputs; providers without the hook fall back to the host implementation."
   },
   "fusion": {
     "elementwise": false,
@@ -23,7 +23,7 @@
   "description": "`blsprice(Price,Strike,Rate,Time,Volatility)` computes European call and put option prices using the Black-Scholes model. An optional `Yield` argument defaults to zero.",
   "behaviors": [
     "Returns the call price as the single-output value and `[Call, Put]` under two-output semantics.",
-    "Each input may be scalar or a vector/matrix. Scalars expand across all options; nonscalar inputs must have matching dimensions.",
+    "Each input may be scalar or an array. Inputs use MATLAB implicit expansion, so compatible nonscalar dimensions expand elementwise.",
     "The optional `Yield` argument represents a continuously compounded dividend or foreign risk-free yield; an empty `Yield` uses the default zero yield.",
     "Invalid financial domains and `NaN` inputs produce elementwise `NaN` outputs rather than aborting the full call."
   ],

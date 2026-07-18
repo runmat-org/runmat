@@ -398,14 +398,14 @@ impl WgpuProvider {
                     bind_group_layouts: &[&bind_layout],
                     push_constant_ranges: &[],
                 });
-        let pipeline =
-            self.device_ref()
-                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("runmat-ndgrid-pipeline"),
-                    layout: Some(&pipeline_layout),
-                    module: &shader_module,
-                    entry_point: "main",
-                });
+        let pipeline = self.device_ref().create_compute_pipeline(
+            &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                label: Some("runmat-ndgrid-pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader_module,
+                entry_point: "main",
+            },
+        );
 
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;

@@ -9,7 +9,8 @@ use runmat_accelerate_api::{
     ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, CovNormalization, CovRows,
     CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage,
     HostTensorOwned, HostTensorView, ImfilterOptions, IsMemberOptions, IsMemberResult,
-    MeshgridAxisView, PagefunOp, PagefunRequest, ProviderBandwidth, ProviderCholResult,
+    MeshgridAxisView, PagefunOp, PagefunRequest, ProviderBandwidth,
+    ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult, ProviderCholResult,
     ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
     ProviderCummaxResult, ProviderCumminResult, ProviderEigResult, ProviderFindResult,
     ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
@@ -68,6 +69,8 @@ mod core;
 mod elementwise;
 #[path = "ops/fft/mod.rs"]
 mod fft;
+#[path = "ops/finance.rs"]
+mod finance;
 #[path = "helpers.rs"]
 mod helpers;
 #[path = "ops/image.rs"]

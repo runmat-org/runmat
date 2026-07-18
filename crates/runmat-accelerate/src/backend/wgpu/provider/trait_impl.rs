@@ -1,6 +1,7 @@
 use super::*;
 use runmat_accelerate_api::{
-    ProviderBitModulationRequest, ProviderEnvelopeRequest, ProviderEnvelopeResult,
+    ProviderBitModulationRequest, ProviderBlackScholesPriceRequest,
+    ProviderBlackScholesPriceResult, ProviderEnvelopeRequest, ProviderEnvelopeResult,
     ProviderHilbertRequest, ProviderModulationRequest, ProviderNdgridRequest, ProviderNdgridResult,
 };
 
@@ -73,6 +74,13 @@ impl AccelProvider for WgpuProvider {
 
     fn ndgrid(&self, request: &ProviderNdgridRequest<'_>) -> Result<ProviderNdgridResult> {
         self.ndgrid_exec(request)
+    }
+
+    fn black_scholes_price(
+        &self,
+        request: &ProviderBlackScholesPriceRequest<'_>,
+    ) -> Result<ProviderBlackScholesPriceResult> {
+        self.black_scholes_price_exec(request)
     }
 
     fn linspace(&self, start: f64, stop: f64, count: usize) -> Result<GpuTensorHandle> {

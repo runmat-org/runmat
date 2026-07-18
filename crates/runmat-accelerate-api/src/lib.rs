@@ -1400,6 +1400,16 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!("ndgrid not supported by provider"))
     }
 
+    /// Compute vectorized Black-Scholes European call and put prices on resident GPU inputs.
+    fn black_scholes_price(
+        &self,
+        _request: &ProviderBlackScholesPriceRequest<'_>,
+    ) -> anyhow::Result<ProviderBlackScholesPriceResult> {
+        Err(anyhow::anyhow!(
+            "black_scholes_price not supported by provider"
+        ))
+    }
+
     /// Construct a diagonal matrix from a vector-like tensor. `offset` matches MATLAB semantics.
     fn diag_from_vector(
         &self,
@@ -3115,6 +3125,32 @@ pub struct ProviderNdgridRequest<'a> {
 #[derive(Debug, Clone)]
 pub struct ProviderNdgridResult {
     pub outputs: Vec<GpuTensorHandle>,
+}
+
+/// Single broadcastable resident GPU input supplied to provider-side Black-Scholes pricing.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderBlackScholesPriceInput<'a> {
+    pub handle: &'a GpuTensorHandle,
+    /// Input shape aligned to `output_shape` rank using MATLAB implicit-expansion rules.
+    pub shape: &'a [usize],
+    /// Column-major strides for `shape`.
+    pub strides: &'a [usize],
+}
+
+/// Provider-side Black-Scholes price request. Inputs are ordered as
+/// Price, Strike, Rate, Time, Volatility, Yield.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderBlackScholesPriceRequest<'a> {
+    pub inputs: &'a [ProviderBlackScholesPriceInput<'a>],
+    pub output_shape: &'a [usize],
+    pub len: usize,
+}
+
+/// Provider-side Black-Scholes price result containing call and put handles.
+#[derive(Debug, Clone)]
+pub struct ProviderBlackScholesPriceResult {
+    pub call: GpuTensorHandle,
+    pub put: GpuTensorHandle,
 }
 
 /// Descriptor for GEMM epilogues applied to `C = A * B` before storing to `C`.

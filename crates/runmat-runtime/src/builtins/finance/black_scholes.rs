@@ -1,5 +1,9 @@
 //! Black-Scholes option pricing and implied volatility builtins.
 
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView,
+    ProviderBlackScholesPriceInput, ProviderBlackScholesPriceRequest,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -9,8 +13,9 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::{broadcast, gpu_helpers};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BLSPRICE: &str = "blsprice";
@@ -206,14 +211,14 @@ pub const BLSPRICE_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("black-scholes-price"),
     supported_precisions: &[ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[],
+    provider_hooks: &[ProviderHook::Custom("black_scholes_price")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Black-Scholes pricing currently gathers gpuArray inputs and runs the scalar/vectorized host implementation.",
+    notes: "Resident real gpuArray inputs use the provider black_scholes_price hook for vectorized call/put pricing; providers without the hook fall back to the host implementation.",
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::finance::black_scholes")]
@@ -273,6 +278,10 @@ async fn blsprice_builtin(
     volatility: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    let requested_outputs = crate::output_count::current_output_count();
+    if matches!(requested_outputs, Some(0)) {
+        return Ok(Value::OutputList(Vec::new()));
+    }
     if rest.len() > 1 {
         return Err(error(
             BLSPRICE,
@@ -284,11 +293,17 @@ async fn blsprice_builtin(
         Some(value) if !is_empty_value(&value) => value,
         _ => Value::Num(DEFAULT_YIELD),
     };
-    let values = gather_values(
-        BLSPRICE,
-        vec![price, strike, rate, time, volatility, yield_value],
-    )
-    .await?;
+    let raw_values = vec![price, strike, rate, time, volatility, yield_value];
+    if raw_values
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        if let Some(eval) = try_blsprice_gpu(&raw_values).await? {
+            return eval.output(requested_outputs);
+        }
+    }
+
+    let values = gather_values(BLSPRICE, raw_values).await?;
     let inputs = BroadcastInputs::from_values(BLSPRICE, values)?;
     let mut call = Vec::with_capacity(inputs.len);
     let mut put = Vec::with_capacity(inputs.len);
@@ -308,8 +323,7 @@ async fn blsprice_builtin(
 
     let call = output_value(call, inputs.shape.clone(), BLSPRICE)?;
     let put = output_value(put, inputs.shape, BLSPRICE)?;
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+    match requested_outputs {
         Some(1) => Ok(Value::OutputList(vec![call])),
         Some(2) => Ok(Value::OutputList(vec![call, put])),
         Some(_) => Err(error(
@@ -387,6 +401,8 @@ fn black_scholes_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 struct NumericInput {
     values: Vec<f64>,
     shape: Vec<usize>,
+    aligned_shape: Vec<usize>,
+    strides: Vec<usize>,
     is_scalar: bool,
 }
 
@@ -398,26 +414,19 @@ struct BroadcastInputs {
 
 impl BroadcastInputs {
     fn from_values(builtin: &'static str, values: Vec<Value>) -> BuiltinResult<Self> {
-        let inputs = values
+        let mut inputs = values
             .into_iter()
             .map(|value| numeric_input(builtin, value))
             .collect::<BuiltinResult<Vec<_>>>()?;
         let mut shape = vec![1, 1];
-        let mut len = 1usize;
         for input in &inputs {
-            if input.is_scalar {
-                continue;
-            }
-            if len == 1 {
-                shape = input.shape.clone();
-                len = input.values.len();
-            } else if input.shape != shape {
-                return Err(error(
-                    builtin,
-                    format!("{builtin}: nonscalar inputs must have matching dimensions"),
-                    &ERROR_INVALID_INPUT,
-                ));
-            }
+            shape = broadcast::broadcast_shapes(builtin, &shape, &input.shape)
+                .map_err(|err| error(builtin, format!("{builtin}: {err}"), &ERROR_INVALID_INPUT))?;
+        }
+        let len = shape_len_checked(builtin, &shape)?;
+        for input in &mut inputs {
+            input.aligned_shape = align_shape(&input.shape, shape.len());
+            input.strides = broadcast::compute_strides(&input.aligned_shape);
         }
         Ok(Self { inputs, shape, len })
     }
@@ -427,7 +436,13 @@ impl BroadcastInputs {
         if input.is_scalar {
             input.values[0]
         } else {
-            input.values[index]
+            let source_index = broadcast::broadcast_index(
+                index,
+                &self.shape,
+                &input.aligned_shape,
+                &input.strides,
+            );
+            input.values[source_index]
         }
     }
 }
@@ -459,10 +474,189 @@ fn numeric_input(builtin: &'static str, value: Value) -> BuiltinResult<NumericIn
         }
     };
     let is_scalar = values.len() == 1;
+    let expected_len = shape_len_checked(builtin, &shape)?;
+    if values.len() != expected_len {
+        return Err(error(
+            builtin,
+            format!("{builtin}: numeric input data length does not match shape"),
+            &ERROR_INVALID_INPUT,
+        ));
+    }
     Ok(NumericInput {
         values,
         shape,
+        aligned_shape: Vec::new(),
+        strides: Vec::new(),
         is_scalar,
+    })
+}
+
+struct BlsPriceGpuEval {
+    provider: &'static dyn AccelProvider,
+    call: GpuTensorHandle,
+    put: GpuTensorHandle,
+}
+
+impl BlsPriceGpuEval {
+    fn output(self, requested_outputs: Option<usize>) -> BuiltinResult<Value> {
+        match requested_outputs {
+            Some(0) => {
+                let _ = self.provider.free(&self.call);
+                let _ = self.provider.free(&self.put);
+                Ok(Value::OutputList(Vec::new()))
+            }
+            Some(1) => {
+                let _ = self.provider.free(&self.put);
+                Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
+                    self.call,
+                )]))
+            }
+            Some(2) => Ok(Value::OutputList(vec![
+                gpu_helpers::resident_gpu_value(self.call),
+                gpu_helpers::resident_gpu_value(self.put),
+            ])),
+            Some(_) => {
+                let _ = self.provider.free(&self.call);
+                let _ = self.provider.free(&self.put);
+                Err(error(
+                    BLSPRICE,
+                    "blsprice: too many output arguments",
+                    &ERROR_INVALID_ARGUMENT,
+                ))
+            }
+            None => {
+                let _ = self.provider.free(&self.put);
+                Ok(gpu_helpers::resident_gpu_value(self.call))
+            }
+        }
+    }
+}
+
+struct GpuPreparedNumericInput {
+    handle: GpuTensorHandle,
+    shape: Vec<usize>,
+    aligned_shape: Vec<usize>,
+    strides: Vec<usize>,
+    temporary: bool,
+}
+
+impl GpuPreparedNumericInput {
+    fn free_if_temporary(&self, provider: &'static dyn AccelProvider) {
+        if self.temporary {
+            let _ = provider.free(&self.handle);
+        }
+    }
+}
+
+async fn try_blsprice_gpu(values: &[Value]) -> BuiltinResult<Option<BlsPriceGpuEval>> {
+    let Some(anchor) = values.iter().find_map(|value| match value {
+        Value::GpuTensor(handle) => Some(handle),
+        _ => None,
+    }) else {
+        return Ok(None);
+    };
+
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(anchor) else {
+        return Ok(None);
+    };
+
+    let mut prepared = Vec::with_capacity(values.len());
+    for value in values {
+        prepared.push(prepare_blsprice_gpu_input(provider, value)?);
+    }
+
+    let mut output_shape = vec![1, 1];
+    for input in &prepared {
+        output_shape = broadcast::broadcast_shapes(BLSPRICE, &output_shape, &input.shape)
+            .map_err(|err| error(BLSPRICE, format!("{BLSPRICE}: {err}"), &ERROR_INVALID_INPUT))?;
+    }
+    let len = shape_len_checked(BLSPRICE, &output_shape)?;
+    let rank = output_shape.len();
+    for input in &mut prepared {
+        input.aligned_shape = align_shape(&input.shape, rank);
+        input.strides = broadcast::compute_strides(&input.aligned_shape);
+    }
+
+    let request_inputs = prepared
+        .iter()
+        .map(|input| ProviderBlackScholesPriceInput {
+            handle: &input.handle,
+            shape: &input.aligned_shape,
+            strides: &input.strides,
+        })
+        .collect::<Vec<_>>();
+    let result = provider.black_scholes_price(&ProviderBlackScholesPriceRequest {
+        inputs: &request_inputs,
+        output_shape: &output_shape,
+        len,
+    });
+
+    for input in &prepared {
+        input.free_if_temporary(provider);
+    }
+
+    match result {
+        Ok(result) => Ok(Some(BlsPriceGpuEval {
+            provider,
+            call: result.call,
+            put: result.put,
+        })),
+        Err(_) => Ok(None),
+    }
+}
+
+fn prepare_blsprice_gpu_input(
+    provider: &'static dyn AccelProvider,
+    value: &Value,
+) -> BuiltinResult<GpuPreparedNumericInput> {
+    match value {
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved
+            {
+                return Err(error(
+                    BLSPRICE,
+                    "blsprice: complex gpuArray inputs are not supported",
+                    &ERROR_INVALID_INPUT,
+                ));
+            }
+            Ok(GpuPreparedNumericInput {
+                handle: handle.clone(),
+                shape: canonical_shape(&handle.shape),
+                aligned_shape: Vec::new(),
+                strides: Vec::new(),
+                temporary: false,
+            })
+        }
+        other => {
+            let numeric = numeric_input(BLSPRICE, other.clone())?;
+            upload_blsprice_gpu_input(provider, numeric.values, numeric.shape)
+        }
+    }
+}
+
+fn upload_blsprice_gpu_input(
+    provider: &'static dyn AccelProvider,
+    data: Vec<f64>,
+    shape: Vec<usize>,
+) -> BuiltinResult<GpuPreparedNumericInput> {
+    let handle = provider
+        .upload(&HostTensorView {
+            data: &data,
+            shape: &shape,
+        })
+        .map_err(|err| {
+            error(
+                BLSPRICE,
+                format!("blsprice: gpu upload failed: {err}"),
+                &ERROR_INTERNAL,
+            )
+        })?;
+    Ok(GpuPreparedNumericInput {
+        handle,
+        shape,
+        aligned_shape: Vec::new(),
+        strides: Vec::new(),
+        temporary: true,
     })
 }
 
@@ -480,13 +674,36 @@ fn tensor_shape(shape: &[usize], rows: usize, cols: usize) -> Vec<usize> {
 }
 
 fn logical_shape(shape: &[usize]) -> Vec<usize> {
-    if shape.is_empty() {
-        vec![1, 1]
-    } else if shape.len() == 1 {
-        vec![shape[0], 1]
-    } else {
-        shape.to_vec()
+    canonical_shape(shape)
+}
+
+fn canonical_shape(shape: &[usize]) -> Vec<usize> {
+    match shape.len() {
+        0 => vec![1, 1],
+        1 => vec![shape[0], 1],
+        _ => shape.to_vec(),
     }
+}
+
+fn align_shape(shape: &[usize], rank: usize) -> Vec<usize> {
+    let mut out = Vec::with_capacity(rank);
+    out.extend(std::iter::repeat_n(1, rank.saturating_sub(shape.len())));
+    out.extend_from_slice(shape);
+    out
+}
+
+fn shape_len_checked(builtin: &'static str, shape: &[usize]) -> BuiltinResult<usize> {
+    shape
+        .iter()
+        .copied()
+        .try_fold(1usize, |acc, extent| acc.checked_mul(extent))
+        .ok_or_else(|| {
+            error(
+                builtin,
+                format!("{builtin}: output size exceeds runtime limits"),
+                &ERROR_INVALID_INPUT,
+            )
+        })
 }
 
 fn output_value(
@@ -1035,6 +1252,7 @@ fn with_context(builtin: &'static str, mut err: RuntimeError) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
@@ -1064,6 +1282,13 @@ mod tests {
             Value::Tensor(tensor) => tensor,
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    fn assert_close(actual: f64, expected: f64, tolerance: f64) {
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "expected {expected}, got {actual}"
+        );
     }
 
     #[test]
@@ -1106,6 +1331,106 @@ mod tests {
         assert_eq!(put.shape, vec![2, 1]);
         assert!(call.data[0] > call.data[1]);
         assert!(put.data[0] < put.data[1]);
+    }
+
+    #[test]
+    fn blsprice_implicitly_expands_nonscalar_inputs() {
+        let guard = crate::output_count::push_output_count(Some(2));
+        let out = output_list(
+            block_on(blsprice_builtin(
+                tensor(vec![100.0, 110.0], 2, 1),
+                tensor(vec![90.0, 100.0, 110.0], 1, 3),
+                Value::Num(0.05),
+                Value::Num(0.5),
+                Value::Num(0.2),
+                Vec::new(),
+            ))
+            .unwrap(),
+        );
+        drop(guard);
+
+        let call = as_tensor(&out[0]);
+        let put = as_tensor(&out[1]);
+        assert_eq!(call.shape, vec![2, 3]);
+        assert_eq!(put.shape, vec![2, 3]);
+        for idx in 0..call.data.len() {
+            let price = [100.0, 110.0][idx % 2];
+            let strike = [90.0, 100.0, 110.0][idx / 2];
+            let expected = price_pair(PriceParams {
+                price,
+                strike,
+                rate: 0.05,
+                time: 0.5,
+                volatility: 0.2,
+                yield_rate: 0.0,
+            });
+            assert_close(call.data[idx], expected.call, 1e-12);
+            assert_close(put.data[idx], expected.put, 1e-12);
+        }
+    }
+
+    #[test]
+    fn blsprice_gpu_resident_inputs_preserve_residency() {
+        test_support::with_test_provider(|provider| {
+            let price = Tensor::new(vec![100.0, 110.0], vec![2, 1]).unwrap();
+            let strike = Tensor::new(vec![90.0, 100.0, 110.0], vec![1, 3]).unwrap();
+            let rate = Tensor::new(vec![0.05], vec![1, 1]).unwrap();
+            let time = Tensor::new(vec![0.5], vec![1, 1]).unwrap();
+            let volatility = Tensor::new(vec![0.2], vec![1, 1]).unwrap();
+            let yield_rate = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+            let upload = |tensor: &Tensor| {
+                provider
+                    .upload(&HostTensorView {
+                        data: &tensor.data,
+                        shape: &tensor.shape,
+                    })
+                    .expect("upload")
+            };
+            let price_gpu = upload(&price);
+            let strike_gpu = upload(&strike);
+            let rate_gpu = upload(&rate);
+            let time_gpu = upload(&time);
+            let volatility_gpu = upload(&volatility);
+            let yield_gpu = upload(&yield_rate);
+
+            provider.reset_telemetry();
+            let guard = crate::output_count::push_output_count(Some(2));
+            let out = output_list(
+                block_on(blsprice_builtin(
+                    Value::GpuTensor(price_gpu.clone()),
+                    Value::GpuTensor(strike_gpu.clone()),
+                    Value::GpuTensor(rate_gpu.clone()),
+                    Value::GpuTensor(time_gpu.clone()),
+                    Value::GpuTensor(volatility_gpu.clone()),
+                    vec![Value::GpuTensor(yield_gpu.clone())],
+                ))
+                .unwrap(),
+            );
+            drop(guard);
+
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.upload_bytes, 0);
+            assert_eq!(telemetry.download_bytes, 0);
+            assert!(matches!(out[0], Value::GpuTensor(_)));
+            assert!(matches!(out[1], Value::GpuTensor(_)));
+
+            let call = test_support::gather(out[0].clone()).expect("gather call");
+            let put = test_support::gather(out[1].clone()).expect("gather put");
+            assert_eq!(call.shape, vec![2, 3]);
+            assert_eq!(put.shape, vec![2, 3]);
+            for idx in 0..call.data.len() {
+                let expected = price_pair(PriceParams {
+                    price: price.data[idx % 2],
+                    strike: strike.data[idx / 2],
+                    rate: rate.data[0],
+                    time: time.data[0],
+                    volatility: volatility.data[0],
+                    yield_rate: yield_rate.data[0],
+                });
+                assert_close(call.data[idx], expected.call, 1e-12);
+                assert_close(put.data[idx], expected.put, 1e-12);
+            }
+        });
     }
 
     #[test]

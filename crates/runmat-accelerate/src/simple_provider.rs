@@ -7,7 +7,8 @@ use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, CorrcoefOptions, CovarianceOptions,
     FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage, HostTensorOwned,
     HostTensorView, ImfilterOptions, PagefunRequest, ProviderBandwidth,
-    ProviderBitModulationRequest, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
+    ProviderBitModulationRequest, ProviderBlackScholesPriceRequest,
+    ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
     ProviderConvMode, ProviderConvOrientation, ProviderEigResult, ProviderFindResult,
     ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
     ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderModulationRequest,
@@ -713,6 +714,91 @@ fn compute_strides(shape: &[usize]) -> Vec<usize> {
         stride = stride.saturating_mul(dim);
     }
     strides
+}
+
+fn provider_broadcast_index(
+    mut linear: usize,
+    request: &ProviderBlackScholesPriceRequest<'_>,
+    input_idx: usize,
+) -> Result<usize> {
+    let input = request
+        .inputs
+        .get(input_idx)
+        .ok_or_else(|| anyhow!("black_scholes_price: missing input {}", input_idx + 1))?;
+    ensure!(
+        input.shape.len() == request.output_shape.len()
+            && input.strides.len() == request.output_shape.len(),
+        "black_scholes_price: input {} broadcast metadata rank mismatch",
+        input_idx + 1
+    );
+    let mut offset = 0usize;
+    for dim in 0..request.output_shape.len() {
+        let out_extent = request.output_shape[dim];
+        let coord = if out_extent == 0 {
+            0
+        } else {
+            linear % out_extent
+        };
+        if out_extent != 0 {
+            linear /= out_extent;
+        }
+        let in_extent = input.shape[dim];
+        let mapped = if in_extent == 1 || out_extent == 0 {
+            0
+        } else {
+            coord
+        };
+        offset = offset
+            .checked_add(mapped.saturating_mul(input.strides[dim]))
+            .ok_or_else(|| anyhow!("black_scholes_price: broadcast offset overflow"))?;
+    }
+    Ok(offset)
+}
+
+fn provider_black_scholes_price_pair(
+    price: f64,
+    strike: f64,
+    rate: f64,
+    time: f64,
+    volatility: f64,
+    yield_rate: f64,
+) -> (f64, f64) {
+    if !(price.is_finite()
+        && strike.is_finite()
+        && rate.is_finite()
+        && time.is_finite()
+        && volatility.is_finite()
+        && yield_rate.is_finite()
+        && price >= 0.0
+        && strike > 0.0
+        && time >= 0.0
+        && volatility >= 0.0)
+    {
+        return (f64::NAN, f64::NAN);
+    }
+    if time == 0.0 || volatility == 0.0 {
+        let forward_price = price * (-yield_rate * time).exp();
+        let discounted_strike = strike * (-rate * time).exp();
+        return (
+            (forward_price - discounted_strike).max(0.0),
+            (discounted_strike - forward_price).max(0.0),
+        );
+    }
+
+    let sqrt_time = time.sqrt();
+    let d1 = ((price / strike).ln() + (rate - yield_rate + 0.5 * volatility * volatility) * time)
+        / (volatility * sqrt_time);
+    let d2 = d1 - volatility * sqrt_time;
+    let discounted_price = price * (-yield_rate * time).exp();
+    let discounted_strike = strike * (-rate * time).exp();
+    (
+        discounted_price * provider_normcdf(d1) - discounted_strike * provider_normcdf(d2),
+        discounted_strike * provider_normcdf(-d2) - discounted_price * provider_normcdf(-d1),
+    )
+}
+
+fn provider_normcdf(value: f64) -> f64 {
+    0.5 * (1.0 + libm::erf(value / std::f64::consts::SQRT_2))
 }
 
 fn product(shape: &[usize]) -> usize {
@@ -1856,6 +1942,73 @@ impl AccelProvider for InProcessProvider {
         }
 
         Ok(ProviderNdgridResult { outputs })
+    }
+
+    fn black_scholes_price(
+        &self,
+        request: &ProviderBlackScholesPriceRequest<'_>,
+    ) -> Result<ProviderBlackScholesPriceResult> {
+        ensure!(
+            request.inputs.len() == 6,
+            "black_scholes_price: expected six inputs"
+        );
+        let expected_len = request
+            .output_shape
+            .iter()
+            .copied()
+            .try_fold(1usize, |acc, extent| acc.checked_mul(extent))
+            .ok_or_else(|| anyhow!("black_scholes_price: output size exceeds provider limits"))?;
+        ensure!(
+            expected_len == request.len,
+            "black_scholes_price: output length does not match shape"
+        );
+
+        let input_data = {
+            let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
+            let mut inputs = Vec::with_capacity(request.inputs.len());
+            for (idx, input) in request.inputs.iter().enumerate() {
+                ensure!(
+                    runmat_accelerate_api::handle_storage(input.handle)
+                        != GpuTensorStorage::ComplexInterleaved,
+                    "black_scholes_price: complex input {} is not supported",
+                    idx + 1
+                );
+                let data = guard.get(&input.handle.buffer_id).cloned().ok_or_else(|| {
+                    anyhow!(
+                        "black_scholes_price: unknown buffer {}",
+                        input.handle.buffer_id
+                    )
+                })?;
+                ensure!(
+                    data.len() == product(input.shape),
+                    "black_scholes_price: input {} shape does not match buffer length",
+                    idx + 1
+                );
+                inputs.push(data);
+            }
+            inputs
+        };
+
+        let mut call = Vec::with_capacity(request.len);
+        let mut put = Vec::with_capacity(request.len);
+        for linear_idx in 0..request.len {
+            let price = input_data[0][provider_broadcast_index(linear_idx, request, 0)?];
+            let strike = input_data[1][provider_broadcast_index(linear_idx, request, 1)?];
+            let rate = input_data[2][provider_broadcast_index(linear_idx, request, 2)?];
+            let time = input_data[3][provider_broadcast_index(linear_idx, request, 3)?];
+            let volatility = input_data[4][provider_broadcast_index(linear_idx, request, 4)?];
+            let yield_rate = input_data[5][provider_broadcast_index(linear_idx, request, 5)?];
+            let priced = provider_black_scholes_price_pair(
+                price, strike, rate, time, volatility, yield_rate,
+            );
+            call.push(priced.0);
+            put.push(priced.1);
+        }
+
+        Ok(ProviderBlackScholesPriceResult {
+            call: self.allocate_tensor(call, request.output_shape.to_vec()),
+            put: self.allocate_tensor(put, request.output_shape.to_vec()),
+        })
     }
 
     fn telemetry_snapshot(&self) -> runmat_accelerate_api::ProviderTelemetry {
@@ -6866,7 +7019,7 @@ pub fn reset_inprocess_rng() {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_accelerate_api::ProviderNdgridAxis;
+    use runmat_accelerate_api::{ProviderBlackScholesPriceInput, ProviderNdgridAxis};
 
     fn complex_handle(
         provider: &InProcessProvider,
@@ -6981,6 +7134,74 @@ mod tests {
             &result.outputs[1],
             &[10.0, 10.0, 20.0, 20.0, 30.0, 30.0],
             &[2, 3],
+        );
+    }
+
+    #[test]
+    fn black_scholes_price_expands_resident_inputs() {
+        let provider = InProcessProvider::new();
+        let shape = [1, 2];
+        let price = real_handle(&provider, &[100.0, 105.0], &shape);
+        let strike = real_handle(&provider, &[95.0, 95.0], &shape);
+        let rate = real_handle(&provider, &[0.10], &[1, 1]);
+        let time = real_handle(&provider, &[0.25], &[1, 1]);
+        let volatility = real_handle(&provider, &[0.50], &[1, 1]);
+        let yield_rate = real_handle(&provider, &[0.0], &[1, 1]);
+        let scalar_shape = [1, 1];
+        let scalar_strides = compute_strides(&scalar_shape);
+        let vector_strides = compute_strides(&shape);
+        let inputs = [
+            ProviderBlackScholesPriceInput {
+                handle: &price,
+                shape: &shape,
+                strides: &vector_strides,
+            },
+            ProviderBlackScholesPriceInput {
+                handle: &strike,
+                shape: &shape,
+                strides: &vector_strides,
+            },
+            ProviderBlackScholesPriceInput {
+                handle: &rate,
+                shape: &scalar_shape,
+                strides: &scalar_strides,
+            },
+            ProviderBlackScholesPriceInput {
+                handle: &time,
+                shape: &scalar_shape,
+                strides: &scalar_strides,
+            },
+            ProviderBlackScholesPriceInput {
+                handle: &volatility,
+                shape: &scalar_shape,
+                strides: &scalar_strides,
+            },
+            ProviderBlackScholesPriceInput {
+                handle: &yield_rate,
+                shape: &scalar_shape,
+                strides: &scalar_strides,
+            },
+        ];
+
+        let result = provider
+            .black_scholes_price(&ProviderBlackScholesPriceRequest {
+                inputs: &inputs,
+                output_shape: &shape,
+                len: 2,
+            })
+            .expect("black scholes price");
+
+        assert_real_close(
+            &provider,
+            &result.call,
+            &[13.695272738608132, 17.20102099239761],
+            &shape,
+        );
+        assert_real_close(
+            &provider,
+            &result.put,
+            &[6.3497143812997265, 4.855462635089204],
+            &shape,
         );
     }
 
