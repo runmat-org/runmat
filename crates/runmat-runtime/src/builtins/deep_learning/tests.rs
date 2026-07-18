@@ -3,7 +3,7 @@ use super::layers::*;
 use super::sequences::*;
 use super::training::*;
 use futures::executor::block_on;
-use runmat_builtins::{CellArray, Tensor, Value};
+use runmat_builtins::{CellArray, NumericDType, Tensor, Value};
 
 fn layer_name(value: &Value) -> String {
     let Value::Object(object) = value else {
@@ -255,6 +255,158 @@ fn crossentropy_computes_mean_loss() {
         panic!("expected scalar");
     };
     assert!((loss - 0.11157177565710488).abs() < 1.0e-12);
+}
+
+#[test]
+fn adamupdate_computes_bias_corrected_tensor_step() {
+    let _guard = crate::output_count::push_output_count(Some(3));
+    let out = block_on(adamupdate_builtin(vec![
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.1, -0.2], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()),
+        Value::Num(1.0),
+    ]))
+    .expect("adamupdate");
+    let Value::OutputList(outputs) = out else {
+        panic!("expected output list");
+    };
+    assert_eq!(outputs.len(), 3);
+    let Value::Tensor(parameters) = &outputs[0] else {
+        panic!("expected tensor parameters");
+    };
+    assert!((parameters.data[0] - 0.9990000001).abs() < 1.0e-9);
+    assert!((parameters.data[1] - 2.00099999995).abs() < 1.0e-9);
+    let Value::Tensor(average_grad) = &outputs[1] else {
+        panic!("expected tensor averageGrad");
+    };
+    assert!((average_grad.data[0] - 0.01).abs() < 1.0e-12);
+    assert!((average_grad.data[1] + 0.02).abs() < 1.0e-12);
+    let Value::Tensor(average_sq_grad) = &outputs[2] else {
+        panic!("expected tensor averageSqGrad");
+    };
+    assert!((average_sq_grad.data[0] - 0.00001).abs() < 1.0e-12);
+    assert!((average_sq_grad.data[1] - 0.00004).abs() < 1.0e-12);
+}
+
+#[test]
+fn adamupdate_default_call_returns_updated_parameters_directly() {
+    let out = block_on(adamupdate_builtin(vec![
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.1], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Num(1.0),
+    ]))
+    .expect("adamupdate");
+    let Value::Tensor(parameters) = out else {
+        panic!("expected direct tensor output");
+    };
+    assert!((parameters.data[0] - 0.9990000001).abs() < 1.0e-9);
+}
+
+#[test]
+fn adamupdate_preserves_dlarray_wrapper_for_state_outputs() {
+    let _guard = crate::output_count::push_output_count(Some(3));
+    let params = block_on(dlarray_builtin(
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        vec![Value::String("CB".into())],
+    ))
+    .unwrap();
+    let out = block_on(adamupdate_builtin(vec![
+        params,
+        Value::Tensor(Tensor::new(vec![0.5], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+        Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+        Value::Num(1.0),
+    ]))
+    .expect("adamupdate");
+    let Value::OutputList(outputs) = out else {
+        panic!("expected output list");
+    };
+    let Value::Object(updated) = &outputs[0] else {
+        panic!("expected dlarray object");
+    };
+    assert_eq!(updated.class_name, "dlarray");
+    assert_eq!(
+        updated.properties.get("Format"),
+        Some(&Value::String("CB".into()))
+    );
+    for value in &outputs[1..] {
+        let Value::Object(state) = value else {
+            panic!("expected dlarray state object");
+        };
+        assert_eq!(state.class_name, "dlarray");
+        assert_eq!(
+            state.properties.get("Format"),
+            Some(&Value::String("CB".into()))
+        );
+    }
+}
+
+#[test]
+fn adamupdate_rejects_invalid_shapes_outputs_and_hyperparameters() {
+    let err = block_on(adamupdate_builtin(vec![
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.1], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()),
+        Value::Num(1.0),
+    ]))
+    .unwrap_err();
+    assert!(err.to_string().contains("grad must match"));
+
+    let err = block_on(adamupdate_builtin(vec![
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.1], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Num(1.0),
+        Value::Num(-0.001),
+    ]))
+    .unwrap_err();
+    assert!(err.to_string().contains("learnRate must be positive"));
+
+    let _guard = crate::output_count::push_output_count(Some(4));
+    let err = block_on(adamupdate_builtin(vec![
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.1], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Num(1.0),
+    ]))
+    .unwrap_err();
+    assert!(err.to_string().contains("at most 3"));
+}
+
+#[test]
+fn adamupdate_accepts_zero_decay_and_rejects_integer_tensor_state() {
+    let out = block_on(adamupdate_builtin(vec![
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.1], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Num(10_000_000_000.0),
+        Value::Num(0.001),
+        Value::Num(0.0),
+        Value::Num(0.0),
+    ]))
+    .expect("zero decay and large iteration");
+    let Value::Tensor(parameters) = out else {
+        panic!("expected tensor parameters");
+    };
+    assert!(parameters.data[0].is_finite());
+
+    let integer_params = Tensor::new_with_dtype(vec![1.0], vec![1, 1], NumericDType::U8).unwrap();
+    let err = block_on(adamupdate_builtin(vec![
+        Value::Tensor(integer_params),
+        Value::Tensor(Tensor::new(vec![0.1], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Num(1.0),
+    ]))
+    .unwrap_err();
+    assert!(err.to_string().contains("double or single"));
 }
 
 #[test]

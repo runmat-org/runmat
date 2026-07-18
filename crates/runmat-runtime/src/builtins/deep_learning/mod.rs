@@ -64,6 +64,43 @@ const ARRAY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     outputs: &OUT_ARRAY,
 }];
 
+const OUT_ADAMUPDATE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "params",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Updated numeric parameters.",
+    },
+    BuiltinParamDescriptor {
+        name: "averageGrad",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Updated first-moment moving average.",
+    },
+    BuiltinParamDescriptor {
+        name: "averageSqGrad",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Updated second-moment moving average.",
+    },
+];
+
+const ADAMUPDATE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "[params, averageGrad, averageSqGrad] = adamupdate(params, grad, averageGrad, averageSqGrad, iteration)",
+        inputs: &IN_REST,
+        outputs: &OUT_ADAMUPDATE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[params, averageGrad, averageSqGrad] = adamupdate(params, grad, averageGrad, averageSqGrad, iteration, learnRate, gradDecay, sqGradDecay, epsilon)",
+        inputs: &IN_REST,
+        outputs: &OUT_ADAMUPDATE,
+    },
+];
+
 pub const OBJECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &OBJECT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -74,6 +111,13 @@ pub const OBJECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 pub const ARRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ARRAY_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+pub const ADAMUPDATE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ADAMUPDATE_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
