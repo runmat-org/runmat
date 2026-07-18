@@ -347,6 +347,7 @@ fn parse_marker(value: &Value) -> BuiltinResult<Value> {
         builtin_name: BUILTIN_NAME,
         forbid_leading_numeric: true,
         forbid_interleaved_numeric: true,
+        accepts_handle_visibility: false,
     };
     parse_line_style_args(std::slice::from_ref(value), &opts).map_err(|err| {
         scatterplot_error(

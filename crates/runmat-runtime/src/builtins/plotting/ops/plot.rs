@@ -26,7 +26,7 @@ use super::state::{
     set_line_style_order_for_axes, PlotRenderOptions,
 };
 use super::style::{
-    looks_like_option_name, marker_metadata_from_appearance, parse_line_style_args,
+    looks_like_plot_option_name, marker_metadata_from_appearance, parse_line_style_args,
     value_as_string, LineAppearance, LineStyleParseOptions, MarkerAppearance, MarkerColor,
     MarkerKind, DEFAULT_LINE_MARKER_SIZE,
 };
@@ -598,6 +598,7 @@ pub(super) fn build_line_plot_for_builtin(
     let mut plot = LinePlot::new(x, y)
         .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?
         .with_label(label)
+        .with_handle_visibility(appearance.handle_visibility.clone())
         .with_style(
             appearance.color,
             appearance.line_width,
@@ -664,7 +665,7 @@ fn parse_series_specs(
             let lower = token_text.trim().to_ascii_lowercase();
             style_tokens.push(token);
 
-            if looks_like_option_name(&lower) {
+            if looks_like_plot_option_name(&lower) {
                 if idx >= args.len() {
                     return Err(plot_err("name-value arguments must come in pairs"));
                 }
@@ -909,9 +910,12 @@ pub(super) async fn build_line_gpu_plot_async_for_builtin(
         line_width: appearance.line_width,
         line_style: appearance.line_style,
         marker: marker_meta.clone(),
+        handle_visibility: appearance.handle_visibility.clone(),
     };
     let mut plot = LinePlot::from_gpu_xy(inputs, gpu_style, bounds, marker_gpu_vertices);
-    plot = plot.with_label(label);
+    plot = plot
+        .with_label(label)
+        .with_handle_visibility(appearance.handle_visibility.clone());
     Ok(plot)
 }
 
@@ -1129,6 +1133,134 @@ pub(crate) mod tests {
         assert_eq!(plans.len(), 2);
         assert!(order.is_none());
         assert_eq!(plans[1].appearance.line_style, LineStyle::Dashed);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn plot_builtin_accepts_multi_series_with_per_series_color_tokens() {
+        let _guard = setup_plot_tests();
+        block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])),
+            Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])),
+            Value::String("r".into()),
+            Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])),
+            Value::Tensor(tensor_from(&[2.0, 3.0, 4.0])),
+            Value::String("b".into()),
+            Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])),
+            Value::Tensor(tensor_from(&[-2.0, -3.0, -4.0])),
+            Value::String("b".into()),
+        ]))
+        .expect("multi-series plot should parse");
+
+        let fig = clone_figure(current_figure_handle()).expect("figure exists");
+        let lines = fig.plots().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 3);
+        let PlotElement::Line(first) = lines[0] else {
+            panic!("expected first line plot");
+        };
+        let PlotElement::Line(second) = lines[1] else {
+            panic!("expected second line plot");
+        };
+        assert_eq!(first.color, glam::Vec4::new(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(second.color, glam::Vec4::new(0.0, 0.0, 1.0, 1.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn plot_builtin_accepts_linespec_after_name_value_pairs() {
+        let _guard = setup_plot_tests();
+        let handle = block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&[0.0, 1.0, 2.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0, 0.0])),
+            Value::String("LineWidth".into()),
+            Value::Num(1.2),
+            Value::String("b".into()),
+        ]))
+        .expect("plot should accept trailing color linespec");
+
+        let width = get_builtin(vec![Value::Num(handle), Value::String("LineWidth".into())])
+            .expect("LineWidth property");
+        assert!(matches!(width, Value::Num(value) if (value - 1.2).abs() < 1.0e-6));
+        let fig = clone_figure(current_figure_handle()).expect("figure exists");
+        let PlotElement::Line(line) = fig.plots().next().expect("line exists") else {
+            panic!("expected line plot");
+        };
+        assert_eq!(line.color, glam::Vec4::new(0.0, 0.0, 1.0, 1.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn plot_handle_visibility_off_hides_line_from_automatic_legend() {
+        let _guard = setup_plot_tests();
+        let handle = block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::String("DisplayName".into()),
+            Value::String("hidden".into()),
+            Value::String("HandleVisibility".into()),
+            Value::String("off".into()),
+        ]))
+        .expect("plot should accept HandleVisibility");
+
+        assert_eq!(
+            get_builtin(vec![
+                Value::Num(handle),
+                Value::String("HandleVisibility".into())
+            ])
+            .unwrap(),
+            Value::String("off".into())
+        );
+        let fig = clone_figure(current_figure_handle()).expect("figure exists");
+        assert!(fig.legend_entries().is_empty());
+        assert_eq!(
+            get_builtin(vec![
+                Value::Num(handle),
+                Value::String("DisplayName".into())
+            ])
+            .unwrap(),
+            Value::String("hidden".into())
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn set_rejects_invalid_handle_visibility_for_line_handles() {
+        let _guard = setup_plot_tests();
+        let handle = block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+        ]))
+        .expect("plot should return a handle");
+
+        let err = set_builtin(vec![
+            Value::Num(handle),
+            Value::String("HandleVisibility".into()),
+            Value::String("maybe".into()),
+        ])
+        .expect_err("invalid HandleVisibility should fail");
+        assert!(err.to_string().contains("HandleVisibility"));
+        assert_eq!(
+            get_builtin(vec![
+                Value::Num(handle),
+                Value::String("HandleVisibility".into())
+            ])
+            .unwrap(),
+            Value::String("on".into())
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn parse_series_specs_rejects_duplicate_standalone_linespec_tokens() {
+        let _guard = setup_plot_tests();
+        let args = vec![
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::String("r".into()),
+            Value::String("b".into()),
+        ];
+        let err = parse_series_specs(args).expect_err("duplicate LineSpec tokens should fail");
+        assert!(err.to_string().contains("only one LineSpec"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

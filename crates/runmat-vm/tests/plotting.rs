@@ -114,6 +114,31 @@ fn copyobj_dispatches_plot_child_copies() {
 }
 
 #[test]
+fn plot_accepts_multiseries_linespec_source_forms() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        x = 1:3; \
+        y = [1 2 3]; \
+        figure; \
+        plot(x, y, 'r', x, y + 1, 'b', x, -y, 'b'); \
+        out = 1;";
+    execute_source(input).expect("execute multiseries LineSpec plot script");
+}
+
+#[test]
+fn plot_accepts_trailing_linespec_and_handle_visibility_from_source() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        t = 0:0.1:1; \
+        y = sin(t); \
+        h = plot(t, y, 'LineWidth', 1.2, 'b', 'DisplayName', 'hidden', 'HandleVisibility', 'off'); \
+        if abs(get(h, 'LineWidth') - 1.2) > 1e-6; error('linewidth mismatch'); end; \
+        if ~strcmp(get(h, 'HandleVisibility'), 'off'); error('handle visibility mismatch'); end; \
+        out = h;";
+    execute_source(input).expect("execute mixed LineSpec/name-value plot script");
+}
+
+#[test]
 fn barh_dispatches_and_sets_horizontal_bars() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

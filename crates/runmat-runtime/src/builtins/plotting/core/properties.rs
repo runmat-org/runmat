@@ -21,8 +21,8 @@ use super::state::{
     set_text_properties_for_axes, FigureHandle, PlotObjectKind, RootPropertyValue,
 };
 use super::style::{
-    color_from_name_or_token, parse_color_value, value_as_bool, value_as_f64, value_as_string,
-    LineStyleParseOptions,
+    color_from_name_or_token, parse_color_value, parse_handle_visibility, value_as_bool,
+    value_as_f64, value_as_string, LineStyleParseOptions,
 };
 use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::common::tensor;
@@ -2817,6 +2817,10 @@ fn get_line_property(
                 Value::String(line.label.clone().unwrap_or_default()),
             );
             st.insert(
+                "HandleVisibility",
+                Value::String(line.handle_visibility.clone()),
+            );
+            st.insert(
                 "Visible",
                 Value::String(if line.visible { "on" } else { "off" }.into()),
             );
@@ -2835,6 +2839,7 @@ fn get_line_property(
         Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
         Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
+        Some("handlevisibility") => Ok(Value::String(line.handle_visibility)),
         Some("visible") => Ok(Value::String(
             if line.visible { "on" } else { "off" }.into(),
         )),
@@ -5019,6 +5024,11 @@ fn apply_line_properties(
             format!("{builtin}: XData and YData must contain the same number of elements"),
         ));
     }
+    for (key, value) in &style_pairs {
+        if *key == "handlevisibility" {
+            parse_handle_visibility(&LineStyleParseOptions::generic(builtin), value)?;
+        }
+    }
 
     super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
         if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
@@ -6186,6 +6196,13 @@ fn apply_line_plot_properties(
         }
         "displayname" => {
             line.label = value_as_string(value).map(|s| s.to_string());
+        }
+        "handlevisibility" => {
+            if let Ok(visibility) =
+                parse_handle_visibility(&LineStyleParseOptions::generic(builtin), value)
+            {
+                line.handle_visibility = visibility;
+            }
         }
         "marker" => {
             if let Some(s) = value_as_string(value) {

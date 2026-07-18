@@ -605,6 +605,7 @@ pub(super) async fn build_scatter_plot_from_args_async(
             builtin_name: context,
             forbid_leading_numeric: true,
             forbid_interleaved_numeric: true,
+            accepts_handle_visibility: false,
         },
     )?;
     let mut resolved_style = resolve_scatter_style_async(x.len(), &style_args, context).await?;

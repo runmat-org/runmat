@@ -30,6 +30,7 @@ pub struct LinePlot {
 
     /// Metadata
     pub label: Option<String>,
+    pub handle_visibility: String,
     pub visible: bool,
 
     /// Generated rendering data (cached)
@@ -62,6 +63,7 @@ pub struct LineGpuStyle {
     pub line_width: f32,
     pub line_style: LineStyle,
     pub marker: Option<LineMarkerAppearance>,
+    pub handle_visibility: String,
 }
 
 /// Line rendering styles
@@ -186,6 +188,7 @@ impl LinePlot {
             line_cap: LineCap::default(),
             marker: None,
             label: None,
+            handle_visibility: "on".to_string(),
             visible: true,
             vertices: None,
             bounds: None,
@@ -221,6 +224,7 @@ impl LinePlot {
             line_cap: LineCap::Butt,
             marker: style.marker,
             label: None,
+            handle_visibility: style.handle_visibility,
             visible: true,
             vertices: None,
             bounds: Some(bounds),
@@ -257,6 +261,7 @@ impl LinePlot {
             line_cap: LineCap::Butt,
             marker: style.marker,
             label: None,
+            handle_visibility: style.handle_visibility,
             visible: true,
             vertices: None,
             bounds: Some(bounds),
@@ -308,6 +313,11 @@ impl LinePlot {
     /// Set the plot label for legends
     pub fn with_label<S: Into<String>>(mut self, label: S) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    pub fn with_handle_visibility<S: Into<String>>(mut self, visibility: S) -> Self {
+        self.handle_visibility = visibility.into();
         self
     }
 

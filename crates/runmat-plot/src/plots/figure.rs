@@ -1828,6 +1828,9 @@ impl Figure {
         let mut entries = Vec::new();
 
         for plot in &self.plots {
+            if plot.is_hidden_from_legend() {
+                continue;
+            }
             if let Some(label) = plot.label() {
                 entries.push(LegendEntry {
                     label,
@@ -1858,6 +1861,9 @@ impl Figure {
                     }
                 }
                 _ => {
+                    if plot.is_hidden_from_legend() {
+                        continue;
+                    }
                     if let Some(label) = plot.label() {
                         entries.push(LegendEntry {
                             label,
@@ -2123,6 +2129,13 @@ impl PlotElement {
             PlotElement::ContourFill(plot) => plot.label.clone(),
             PlotElement::ReferenceLine(plot) => plot.label_for_legend(),
         }
+    }
+
+    fn is_hidden_from_legend(&self) -> bool {
+        matches!(
+            self,
+            PlotElement::Line(plot) if plot.handle_visibility.eq_ignore_ascii_case("off")
+        )
     }
 
     /// Mutate label

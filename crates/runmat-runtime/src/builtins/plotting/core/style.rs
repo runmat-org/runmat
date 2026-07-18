@@ -63,6 +63,7 @@ pub struct LineStyleParseOptions {
     pub builtin_name: &'static str,
     pub forbid_leading_numeric: bool,
     pub forbid_interleaved_numeric: bool,
+    pub accepts_handle_visibility: bool,
 }
 
 impl LineStyleParseOptions {
@@ -71,6 +72,7 @@ impl LineStyleParseOptions {
             builtin_name: "plot",
             forbid_leading_numeric: true,
             forbid_interleaved_numeric: false,
+            accepts_handle_visibility: true,
         }
     }
 
@@ -79,6 +81,7 @@ impl LineStyleParseOptions {
             builtin_name: "scatter",
             forbid_leading_numeric: true,
             forbid_interleaved_numeric: true,
+            accepts_handle_visibility: false,
         }
     }
 
@@ -87,6 +90,7 @@ impl LineStyleParseOptions {
             builtin_name: "scatter3",
             forbid_leading_numeric: true,
             forbid_interleaved_numeric: true,
+            accepts_handle_visibility: false,
         }
     }
 
@@ -95,6 +99,7 @@ impl LineStyleParseOptions {
             builtin_name: "stairs",
             forbid_leading_numeric: true,
             forbid_interleaved_numeric: true,
+            accepts_handle_visibility: false,
         }
     }
 
@@ -103,6 +108,7 @@ impl LineStyleParseOptions {
             builtin_name: name,
             forbid_leading_numeric: false,
             forbid_interleaved_numeric: false,
+            accepts_handle_visibility: false,
         }
     }
 }
@@ -122,6 +128,7 @@ pub struct LineAppearance {
     pub line_width: f32,
     pub line_style: LineStyle,
     pub marker: Option<MarkerAppearance>,
+    pub handle_visibility: String,
 }
 
 impl Default for LineAppearance {
@@ -131,6 +138,7 @@ impl Default for LineAppearance {
             line_width: DEFAULT_LINE_WIDTH,
             line_style: LineStyle::Solid,
             marker: None,
+            handle_visibility: "on".to_string(),
         }
     }
 }
@@ -305,6 +313,7 @@ struct LineStyleOptions {
     marker_face_color: Option<MarkerColor>,
     line_style_order: Option<Vec<LineStyle>>,
     label: Option<String>,
+    handle_visibility: Option<String>,
 }
 
 impl LineStyleOptions {
@@ -341,6 +350,9 @@ impl LineStyleOptions {
         if other.label.is_some() {
             self.label = other.label;
         }
+        if other.handle_visibility.is_some() {
+            self.handle_visibility = other.handle_visibility;
+        }
     }
 
     fn resolve(&self) -> LineAppearance {
@@ -363,6 +375,9 @@ impl LineStyleOptions {
                     face_color: self.marker_face_color.clone().unwrap_or(MarkerColor::Auto),
                 });
             }
+        }
+        if let Some(handle_visibility) = &self.handle_visibility {
+            appearance.handle_visibility = handle_visibility.clone();
         }
         appearance
     }
@@ -402,25 +417,35 @@ pub fn parse_line_style_args(
 
     let mut options = LineStyleOptions::default();
     let mut idx = 0usize;
-    if let Some(token) = rest.first().and_then(value_as_string) {
-        if is_style_token(&token) {
-            options.merge(parse_style_string(opts, &token)?);
-            idx = 1;
-        }
-    }
-
-    let remaining = &rest[idx..];
-    if !remaining.is_empty() {
-        if opts.forbid_interleaved_numeric && begins_with_numeric(remaining) {
+    let mut saw_style_token = false;
+    while idx < rest.len() {
+        if opts.forbid_interleaved_numeric && begins_with_numeric(&rest[idx..]) {
             return Err(ctx_err(
                 opts,
                 "per-series styles interleaved with data are not supported yet",
             ));
         }
-        if !remaining.len().is_multiple_of(2) {
-            return Err(ctx_err(opts, "name-value arguments must come in pairs"));
+
+        if let Some(token) = value_as_string(&rest[idx]) {
+            if is_style_token(opts, &token) {
+                if saw_style_token {
+                    return Err(ctx_err(
+                        opts,
+                        "only one LineSpec string is supported per data series",
+                    ));
+                }
+                options.merge(parse_style_string(opts, &token)?);
+                saw_style_token = true;
+                idx += 1;
+                continue;
+            }
         }
-        options.merge(parse_name_value_pairs(opts, remaining)?);
+
+        let pair = rest
+            .get(idx..=idx + 1)
+            .ok_or_else(|| ctx_err(opts, "name-value arguments must come in pairs"))?;
+        options.merge(parse_name_value_pairs(opts, pair)?);
+        idx += 2;
     }
 
     let appearance = options.resolve();
@@ -618,6 +643,9 @@ fn parse_name_value_pairs(
                     return Err(ctx_err(opts, "DisplayName must be a char array or string"));
                 };
                 options.label = Some(name);
+            }
+            "handlevisibility" if opts.accepts_handle_visibility => {
+                options.handle_visibility = Some(parse_handle_visibility(opts, &pair[1])?);
             }
             other => {
                 return Err(ctx_err(opts, format!("unsupported option `{other}`")));
@@ -822,11 +850,35 @@ pub(crate) fn color_from_token(token: char) -> Option<Vec4> {
     }
 }
 
-fn is_style_token(token: &str) -> bool {
-    !token.trim().is_empty() && !looks_like_option_name(token)
+fn is_style_token(opts: &LineStyleParseOptions, token: &str) -> bool {
+    !token.trim().is_empty() && !looks_like_option_name_for(opts, token)
 }
 
 pub fn looks_like_option_name(token: &str) -> bool {
+    looks_like_generic_line_option_name(token)
+}
+
+fn looks_like_option_name_for(opts: &LineStyleParseOptions, token: &str) -> bool {
+    matches!(
+        token.trim().to_ascii_lowercase().as_str(),
+        "linewidth"
+            | "color"
+            | "linestyle"
+            | "marker"
+            | "markersize"
+            | "markeredgecolor"
+            | "markerfacecolor"
+            | "linestyleorder"
+            | "displayname"
+            | "label"
+    ) || (opts.accepts_handle_visibility && token.trim().eq_ignore_ascii_case("handlevisibility"))
+}
+
+pub fn looks_like_plot_option_name(token: &str) -> bool {
+    looks_like_option_name_for(&LineStyleParseOptions::plot(), token)
+}
+
+pub fn looks_like_generic_line_option_name(token: &str) -> bool {
     matches!(
         token.trim().to_ascii_lowercase().as_str(),
         "linewidth"
@@ -840,6 +892,26 @@ pub fn looks_like_option_name(token: &str) -> bool {
             | "displayname"
             | "label"
     )
+}
+
+pub(crate) fn parse_handle_visibility(
+    opts: &LineStyleParseOptions,
+    value: &Value,
+) -> BuiltinResult<String> {
+    let Some(text) = value_as_string(value) else {
+        return Err(ctx_err(
+            opts,
+            "HandleVisibility must be a char array or string",
+        ));
+    };
+    let lower = text.trim().to_ascii_lowercase();
+    match lower.as_str() {
+        "on" | "off" | "callback" => Ok(lower),
+        other => Err(ctx_err(
+            opts,
+            format!("HandleVisibility must be 'on', 'off', or 'callback', got `{other}`"),
+        )),
+    }
 }
 
 pub fn value_as_string(value: &Value) -> Option<String> {
@@ -1328,6 +1400,22 @@ pub(crate) mod tests {
         let opts = LineStyleParseOptions::plot();
         let color = parse_marker_color_value(&opts, &Value::String("flat".into())).unwrap();
         assert_eq!(color, MarkerColor::Flat);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn line_style_accepts_handle_visibility_only_for_plot() {
+        let rest = vec![
+            Value::String("HandleVisibility".into()),
+            Value::String("off".into()),
+        ];
+
+        let parsed =
+            parse_line_style_args(&rest, &LineStyleParseOptions::plot()).expect("plot parses");
+        assert_eq!(parsed.appearance.handle_visibility, "off");
+
+        parse_line_style_args(&rest, &LineStyleParseOptions::stairs())
+            .expect_err("stairs should not accept plot-only HandleVisibility");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
