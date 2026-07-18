@@ -623,3 +623,19 @@ fn cvpartition_surface_executes_from_scripts() {
     assert!(has_num(&vars, 3.0));
     assert!(has_num(&vars, 2.0));
 }
+
+#[test]
+fn crossvalind_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "rng(2026); idx = crossvalind('HoldOut', 10, 0.3); ntrain = sum(idx); ntest = sum(~idx); rng(7); fold = crossvalind('KFold', 9, 3); fmin = min(fold); fmax = max(fold); [tr,te] = crossvalind('LeaveMOut', 6, 2); ltrain = sum(tr); ltest = sum(te);",
+    )
+    .expect("crossvalind script");
+    assert!(has_logical_shape(&vars, &[10, 1]));
+    assert!(has_tensor_shape(&vars, &[9, 1]));
+    assert!(has_logical_shape(&vars, &[6, 1]));
+    assert!(has_num(&vars, 7.0));
+    assert!(has_num(&vars, 3.0));
+    assert!(has_num(&vars, 1.0));
+    assert!(has_num(&vars, 4.0));
+    assert!(has_num(&vars, 2.0));
+}
