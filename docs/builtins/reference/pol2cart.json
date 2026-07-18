@@ -12,11 +12,14 @@
   ],
   "summary": "Transform polar or cylindrical coordinates to Cartesian coordinates.",
   "gpu_support": {
-    "elementwise": false,
+    "elementwise": true,
     "reduction": false,
-    "precisions": [],
+    "precisions": [
+      "f32",
+      "f64"
+    ],
     "broadcasting": "matlab",
-    "notes": "gpuArray inputs are gathered to the host and evaluated with the same implementation as CPU inputs."
+    "notes": "Real gpuArray inputs stay resident when the active provider implements unary sin/cos and broadcasted elementwise multiply. Providers without those hooks fall back to the host implementation."
   },
   "fusion": {
     "elementwise": false,
@@ -28,7 +31,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::math::trigonometry::pol2cart::tests",
-    "integration": "builtins::math::trigonometry::pol2cart::tests::gpu_inputs_gather_and_return_host_outputs"
+    "integration": "builtins::math::trigonometry::pol2cart::tests::gpu_inputs_keep_resident_outputs"
   },
   "description": "`[x,y] = pol2cart(theta,rho)` converts polar coordinates to Cartesian coordinates. `[x,y,z] = pol2cart(theta,rho,z)` converts cylindrical coordinates and returns the elevation after MATLAB-style implicit expansion.",
   "behaviors": [
@@ -67,7 +70,7 @@
     },
     {
       "question": "Does RunMat keep `pol2cart` on the GPU?",
-      "answer": "Not yet. RunMat accepts gpuArray inputs, gathers them, computes the outputs on the host, and returns host arrays."
+      "answer": "Yes for real gpuArray inputs when the active provider supports the required sin, cos, and broadcasted multiply hooks. The returned `x`, `y`, and requested `z` outputs remain gpuArray values. Providers without those hooks fall back to host evaluation."
     }
   ],
   "links": [

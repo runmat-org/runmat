@@ -362,6 +362,12 @@ enum ElementwiseBinaryOp {
     Div,
 }
 
+struct BinaryOperand<'a> {
+    data: &'a [f64],
+    storage: GpuTensorStorage,
+    shape: &'a [usize],
+}
+
 fn logical_len_for_shape(context: &str, shape: &[usize]) -> Result<usize> {
     shape
         .iter()
@@ -396,22 +402,20 @@ fn storage_pair(data: &[f64], storage: &GpuTensorStorage, idx: usize) -> (f64, f
     }
 }
 
-fn elementwise_binary_data(
+fn elementwise_binary_broadcast_data(
     context: &str,
-    lhs: &[f64],
-    lhs_storage: GpuTensorStorage,
-    rhs: &[f64],
-    rhs_storage: GpuTensorStorage,
-    shape: &[usize],
+    lhs: BinaryOperand<'_>,
+    rhs: BinaryOperand<'_>,
     op: ElementwiseBinaryOp,
-) -> Result<(Vec<f64>, GpuTensorStorage)> {
-    let logical_len = ensure_storage_len(context, lhs, shape, &lhs_storage)?;
-    ensure!(
-        ensure_storage_len(context, rhs, shape, &rhs_storage)? == logical_len,
-        "{context}: rhs logical length does not match lhs"
-    );
-    let output_storage = if lhs_storage == GpuTensorStorage::ComplexInterleaved
-        || rhs_storage == GpuTensorStorage::ComplexInterleaved
+) -> Result<(Vec<f64>, Vec<usize>, GpuTensorStorage)> {
+    ensure_storage_len(context, lhs.data, lhs.shape, &lhs.storage)?;
+    ensure_storage_len(context, rhs.data, rhs.shape, &rhs.storage)?;
+    let shape = runtime_broadcast_shapes(context, lhs.shape, rhs.shape).map_err(|e| anyhow!(e))?;
+    let logical_len = shape.iter().copied().product::<usize>();
+    let lhs_strides = runtime_compute_strides(lhs.shape);
+    let rhs_strides = runtime_compute_strides(rhs.shape);
+    let output_storage = if lhs.storage == GpuTensorStorage::ComplexInterleaved
+        || rhs.storage == GpuTensorStorage::ComplexInterleaved
     {
         GpuTensorStorage::ComplexInterleaved
     } else {
@@ -421,21 +425,25 @@ fn elementwise_binary_data(
     if output_storage == GpuTensorStorage::Real {
         let mut out = Vec::with_capacity(logical_len);
         for idx in 0..logical_len {
+            let lhs_idx = runtime_broadcast_index(idx, &shape, lhs.shape, &lhs_strides);
+            let rhs_idx = runtime_broadcast_index(idx, &shape, rhs.shape, &rhs_strides);
             let value = match op {
-                ElementwiseBinaryOp::Add => lhs[idx] + rhs[idx],
-                ElementwiseBinaryOp::Sub => lhs[idx] - rhs[idx],
-                ElementwiseBinaryOp::Mul => lhs[idx] * rhs[idx],
-                ElementwiseBinaryOp::Div => lhs[idx] / rhs[idx],
+                ElementwiseBinaryOp::Add => lhs.data[lhs_idx] + rhs.data[rhs_idx],
+                ElementwiseBinaryOp::Sub => lhs.data[lhs_idx] - rhs.data[rhs_idx],
+                ElementwiseBinaryOp::Mul => lhs.data[lhs_idx] * rhs.data[rhs_idx],
+                ElementwiseBinaryOp::Div => lhs.data[lhs_idx] / rhs.data[rhs_idx],
             };
             out.push(value);
         }
-        return Ok((out, GpuTensorStorage::Real));
+        return Ok((out, shape, GpuTensorStorage::Real));
     }
 
     let mut out = Vec::with_capacity(logical_len * 2);
     for idx in 0..logical_len {
-        let (ar, ai) = storage_pair(lhs, &lhs_storage, idx);
-        let (br, bi) = storage_pair(rhs, &rhs_storage, idx);
+        let lhs_idx = runtime_broadcast_index(idx, &shape, lhs.shape, &lhs_strides);
+        let rhs_idx = runtime_broadcast_index(idx, &shape, rhs.shape, &rhs_strides);
+        let (ar, ai) = storage_pair(lhs.data, &lhs.storage, lhs_idx);
+        let (br, bi) = storage_pair(rhs.data, &rhs.storage, rhs_idx);
         let (re, im) = match op {
             ElementwiseBinaryOp::Add => (ar + br, ai + bi),
             ElementwiseBinaryOp::Sub => (ar - br, ai - bi),
@@ -448,7 +456,35 @@ fn elementwise_binary_data(
         out.push(re);
         out.push(im);
     }
-    Ok((out, GpuTensorStorage::ComplexInterleaved))
+    Ok((out, shape, GpuTensorStorage::ComplexInterleaved))
+}
+
+fn elementwise_pow_broadcast_data(
+    context: &str,
+    lhs: &[f64],
+    lhs_storage: GpuTensorStorage,
+    lhs_shape: &[usize],
+    rhs: &[f64],
+    rhs_storage: GpuTensorStorage,
+    rhs_shape: &[usize],
+) -> Result<(Vec<f64>, Vec<usize>)> {
+    ensure!(
+        lhs_storage == GpuTensorStorage::Real && rhs_storage == GpuTensorStorage::Real,
+        "{context}: complex pow is not supported by the simple provider"
+    );
+    ensure_storage_len(context, lhs, lhs_shape, &lhs_storage)?;
+    ensure_storage_len(context, rhs, rhs_shape, &rhs_storage)?;
+    let shape = runtime_broadcast_shapes(context, lhs_shape, rhs_shape).map_err(|e| anyhow!(e))?;
+    let logical_len = shape.iter().copied().product::<usize>();
+    let lhs_strides = runtime_compute_strides(lhs_shape);
+    let rhs_strides = runtime_compute_strides(rhs_shape);
+    let mut out = Vec::with_capacity(logical_len);
+    for idx in 0..logical_len {
+        let lhs_idx = runtime_broadcast_index(idx, &shape, lhs_shape, &lhs_strides);
+        let rhs_idx = runtime_broadcast_index(idx, &shape, rhs_shape, &rhs_strides);
+        out.push(lhs[lhs_idx].powf(rhs[rhs_idx]));
+    }
+    Ok((out, shape))
 }
 
 fn poly_convolve_real(a: &[f64], b: &[f64]) -> Vec<f64> {
@@ -2469,10 +2505,7 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            if a.shape != b.shape {
-                return Err(anyhow::anyhow!("shape mismatch"));
-            }
-            let (out, storage) = {
+            let (out, shape, storage) = {
                 let guard = registry().lock().unwrap();
                 let abuf = guard
                     .get(&a.buffer_id)
@@ -2480,17 +2513,22 @@ impl AccelProvider for InProcessProvider {
                 let bbuf = guard
                     .get(&b.buffer_id)
                     .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
-                elementwise_binary_data(
+                elementwise_binary_broadcast_data(
                     "elem_add",
-                    abuf,
-                    runmat_accelerate_api::handle_storage(a),
-                    bbuf,
-                    runmat_accelerate_api::handle_storage(b),
-                    &a.shape,
+                    BinaryOperand {
+                        data: abuf,
+                        storage: runmat_accelerate_api::handle_storage(a),
+                        shape: &a.shape,
+                    },
+                    BinaryOperand {
+                        data: bbuf,
+                        storage: runmat_accelerate_api::handle_storage(b),
+                        shape: &b.shape,
+                    },
                     ElementwiseBinaryOp::Add,
                 )?
             };
-            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
+            Ok(self.allocate_tensor_with_storage(out, shape, storage))
         })
     }
 
@@ -2500,10 +2538,7 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            if a.shape != b.shape {
-                return Err(anyhow::anyhow!("shape mismatch"));
-            }
-            let (out, storage) = {
+            let (out, shape, storage) = {
                 let guard = registry().lock().unwrap();
                 let abuf = guard
                     .get(&a.buffer_id)
@@ -2511,17 +2546,22 @@ impl AccelProvider for InProcessProvider {
                 let bbuf = guard
                     .get(&b.buffer_id)
                     .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
-                elementwise_binary_data(
+                elementwise_binary_broadcast_data(
                     "elem_mul",
-                    abuf,
-                    runmat_accelerate_api::handle_storage(a),
-                    bbuf,
-                    runmat_accelerate_api::handle_storage(b),
-                    &a.shape,
+                    BinaryOperand {
+                        data: abuf,
+                        storage: runmat_accelerate_api::handle_storage(a),
+                        shape: &a.shape,
+                    },
+                    BinaryOperand {
+                        data: bbuf,
+                        storage: runmat_accelerate_api::handle_storage(b),
+                        shape: &b.shape,
+                    },
                     ElementwiseBinaryOp::Mul,
                 )?
             };
-            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
+            Ok(self.allocate_tensor_with_storage(out, shape, storage))
         })
     }
 
@@ -2531,10 +2571,7 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            if a.shape != b.shape {
-                return Err(anyhow::anyhow!("shape mismatch"));
-            }
-            let (out, storage) = {
+            let (out, shape, storage) = {
                 let guard = registry().lock().unwrap();
                 let abuf = guard
                     .get(&a.buffer_id)
@@ -2542,17 +2579,22 @@ impl AccelProvider for InProcessProvider {
                 let bbuf = guard
                     .get(&b.buffer_id)
                     .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
-                elementwise_binary_data(
+                elementwise_binary_broadcast_data(
                     "elem_sub",
-                    abuf,
-                    runmat_accelerate_api::handle_storage(a),
-                    bbuf,
-                    runmat_accelerate_api::handle_storage(b),
-                    &a.shape,
+                    BinaryOperand {
+                        data: abuf,
+                        storage: runmat_accelerate_api::handle_storage(a),
+                        shape: &a.shape,
+                    },
+                    BinaryOperand {
+                        data: bbuf,
+                        storage: runmat_accelerate_api::handle_storage(b),
+                        shape: &b.shape,
+                    },
                     ElementwiseBinaryOp::Sub,
                 )?
             };
-            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
+            Ok(self.allocate_tensor_with_storage(out, shape, storage))
         })
     }
 
@@ -2562,10 +2604,7 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            if a.shape != b.shape {
-                return Err(anyhow::anyhow!("shape mismatch"));
-            }
-            let (out, storage) = {
+            let (out, shape, storage) = {
                 let guard = registry().lock().unwrap();
                 let abuf = guard
                     .get(&a.buffer_id)
@@ -2573,17 +2612,22 @@ impl AccelProvider for InProcessProvider {
                 let bbuf = guard
                     .get(&b.buffer_id)
                     .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
-                elementwise_binary_data(
+                elementwise_binary_broadcast_data(
                     "elem_div",
-                    abuf,
-                    runmat_accelerate_api::handle_storage(a),
-                    bbuf,
-                    runmat_accelerate_api::handle_storage(b),
-                    &a.shape,
+                    BinaryOperand {
+                        data: abuf,
+                        storage: runmat_accelerate_api::handle_storage(a),
+                        shape: &a.shape,
+                    },
+                    BinaryOperand {
+                        data: bbuf,
+                        storage: runmat_accelerate_api::handle_storage(b),
+                        shape: &b.shape,
+                    },
                     ElementwiseBinaryOp::Div,
                 )?
             };
-            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
+            Ok(self.allocate_tensor_with_storage(out, shape, storage))
         })
     }
 
@@ -2593,29 +2637,25 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let guard = registry().lock().unwrap();
-            let abuf = guard
-                .get(&a.buffer_id)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let bbuf = guard
-                .get(&b.buffer_id)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
-            if a.shape != b.shape {
-                return Err(anyhow::anyhow!("shape mismatch"));
-            }
-            let mut out = vec![0.0; abuf.len()];
-            for i in 0..abuf.len() {
-                out[i] = abuf[i].powf(bbuf[i]);
-            }
-            drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: 0,
-                buffer_id: id,
-            })
+            let (out, shape) = {
+                let guard = registry().lock().unwrap();
+                let abuf = guard
+                    .get(&a.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+                let bbuf = guard
+                    .get(&b.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
+                elementwise_pow_broadcast_data(
+                    "elem_pow",
+                    abuf,
+                    runmat_accelerate_api::handle_storage(a),
+                    &a.shape,
+                    bbuf,
+                    runmat_accelerate_api::handle_storage(b),
+                    &b.shape,
+                )?
+            };
+            Ok(self.allocate_tensor(out, shape))
         })
     }
 
@@ -6817,6 +6857,28 @@ mod tests {
         }
     }
 
+    fn assert_real_close(
+        provider: &InProcessProvider,
+        handle: &GpuTensorHandle,
+        expected: &[f64],
+        expected_shape: &[usize],
+    ) {
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(handle),
+            GpuTensorStorage::Real
+        );
+        let host = block_on(provider.download(handle)).expect("download real");
+        assert_eq!(host.storage, GpuTensorStorage::Real);
+        assert_eq!(host.shape, expected_shape);
+        assert_eq!(host.data.len(), expected.len());
+        for (idx, (&actual, &expected)) in host.data.iter().zip(expected.iter()).enumerate() {
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "lane {idx}: got {actual}, expected {expected}"
+            );
+        }
+    }
+
     #[test]
     fn upload_overwrites_stale_handle_metadata() {
         let provider = InProcessProvider::new();
@@ -6902,6 +6964,65 @@ mod tests {
             &[(0.2, -0.6), (32.0 / 17.0, 8.0 / 17.0)],
             &shape,
         );
+    }
+
+    #[test]
+    fn real_elementwise_arithmetic_supports_matlab_broadcasting() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(9_000_250, Ordering::Relaxed);
+        let a = real_handle(&provider, &[1.0, 2.0], &[2, 1]);
+        let b = real_handle(&provider, &[10.0, 20.0, 30.0], &[1, 3]);
+
+        let add = block_on(provider.elem_add(&a, &b)).expect("add");
+        let sub = block_on(provider.elem_sub(&a, &b)).expect("sub");
+        let mul = block_on(provider.elem_mul(&a, &b)).expect("mul");
+        let div = block_on(provider.elem_div(&a, &b)).expect("div");
+        let pow = block_on(provider.elem_pow(&a, &b)).expect("pow");
+
+        assert_real_close(
+            &provider,
+            &add,
+            &[11.0, 12.0, 21.0, 22.0, 31.0, 32.0],
+            &[2, 3],
+        );
+        assert_real_close(
+            &provider,
+            &sub,
+            &[-9.0, -8.0, -19.0, -18.0, -29.0, -28.0],
+            &[2, 3],
+        );
+        assert_real_close(
+            &provider,
+            &mul,
+            &[10.0, 20.0, 20.0, 40.0, 30.0, 60.0],
+            &[2, 3],
+        );
+        assert_real_close(
+            &provider,
+            &div,
+            &[0.1, 0.2, 0.05, 0.1, 1.0 / 30.0, 2.0 / 30.0],
+            &[2, 3],
+        );
+        assert_real_close(
+            &provider,
+            &pow,
+            &[1.0, 1024.0, 1.0, 1_048_576.0, 1.0, 1_073_741_824.0],
+            &[2, 3],
+        );
+    }
+
+    #[test]
+    fn complex_elementwise_arithmetic_supports_scalar_broadcasting() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(9_000_260, Ordering::Relaxed);
+        let complex = complex_handle(&provider, &[(1.0, 2.0), (-3.0, 0.5)], &[1, 2]);
+        let scalar = real_handle(&provider, &[2.0], &[1, 1]);
+
+        let add = block_on(provider.elem_add(&complex, &scalar)).expect("add");
+        let mul = block_on(provider.elem_mul(&scalar, &complex)).expect("mul");
+
+        assert_complex_close(&provider, &add, &[(3.0, 2.0), (-1.0, 0.5)], &[1, 2]);
+        assert_complex_close(&provider, &mul, &[(2.0, 4.0), (-6.0, 1.0)], &[1, 2]);
     }
 
     #[test]

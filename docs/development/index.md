@@ -22,6 +22,7 @@ The root `Cargo.toml` owns the crate list and shared dependency versions. Intern
 | [Testing Strategy](/docs/runtime/development/testing) | What the CI baseline runs, where tests live, and which focused suites to run for common changes. |
 | [Benchmarking](/docs/runtime/development/benchmarking) | CLI benchmarks, cross-language benchmark harnesses, GPU telemetry, and performance smoke tests. |
 | [Telemetry](/docs/runtime/development/telemetry) | Runtime analytics envelope, consent, delivery, local provider telemetry, and opt-out behavior. |
+| [GPU Fast-Path Audit](/docs/runtime/development/gpu-fast-path-audit) | Eval-loop coverage matrix for builtin GPU residency, layer ownership, tests, and remaining follow-ups. |
 
 ## Local Baseline
 

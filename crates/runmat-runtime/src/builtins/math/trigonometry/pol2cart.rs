@@ -1,6 +1,6 @@
 //! MATLAB-compatible `pol2cart` builtin for RunMat.
 
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -11,7 +11,7 @@ use runmat_macros::runtime_builtin;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -128,17 +128,24 @@ pub const POL2CART_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::pol2cart")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
-    op_kind: GpuOpKind::Custom("coordinate-transform"),
-    supported_precisions: &[],
+    op_kind: GpuOpKind::Elementwise,
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[],
+    provider_hooks: &[
+        ProviderHook::Unary { name: "unary_cos" },
+        ProviderHook::Unary { name: "unary_sin" },
+        ProviderHook::Binary {
+            name: "elem_mul",
+            commutative: true,
+        },
+    ],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "RunMat gathers gpuArray inputs and evaluates pol2cart on the host because the builtin returns multiple arrays.",
+    notes: "RunMat keeps real gpuArray coordinate transforms resident by composing provider sin/cos and broadcasted multiply hooks. Providers without those hooks fall back to the host implementation.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -167,11 +174,26 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn pol2cart_builtin(theta: Value, rho: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let requested_outputs = crate::output_count::current_output_count();
     let mut inputs = Vec::with_capacity(2 + rest.len());
-    inputs.push(gather_if_gpu(theta).await?);
-    inputs.push(gather_if_gpu(rho).await?);
-    for value in rest {
-        inputs.push(gather_if_gpu(value).await?);
+    inputs.push(theta);
+    inputs.push(rho);
+    inputs.extend(rest);
+
+    let wants_z_output = matches!(requested_outputs, Some(count) if count >= 3);
+    if inputs
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        if let Some(eval) = try_pol2cart_gpu(&inputs, wants_z_output).await? {
+            return match requested_outputs {
+                Some(0) => Ok(Value::OutputList(Vec::new())),
+                Some(count) => eval.output_list(count),
+                None => eval.x_value(),
+            };
+        }
     }
+
+    let mut inputs: Vec<Value> =
+        futures::future::try_join_all(inputs.into_iter().map(gather_if_gpu)).await?;
 
     let eval = match inputs.len() {
         2 => {
@@ -183,12 +205,7 @@ async fn pol2cart_builtin(theta: Value, rho: Value, rest: Vec<Value>) -> Builtin
             let z = inputs.pop().expect("z");
             let rho = inputs.pop().expect("rho");
             let theta = inputs.pop().expect("theta");
-            Pol2CartEval::cylindrical(
-                theta,
-                rho,
-                z,
-                matches!(requested_outputs, Some(count) if count >= 3),
-            )?
+            Pol2CartEval::cylindrical(theta, rho, z, wants_z_output)?
         }
         _ => {
             return Err(pol2cart_error(
@@ -203,6 +220,197 @@ async fn pol2cart_builtin(theta: Value, rho: Value, rest: Vec<Value>) -> Builtin
         Some(count) => eval.output_list(count),
         None => eval.x_value(),
     }
+}
+
+async fn try_pol2cart_gpu(
+    inputs: &[Value],
+    include_z_output: bool,
+) -> BuiltinResult<Option<Pol2CartGpuEval>> {
+    if !(2..=3).contains(&inputs.len()) {
+        return Err(pol2cart_error(
+            &ERROR_INVALID_INPUT,
+            "expected two or three inputs",
+        ));
+    }
+
+    let Some(anchor) = inputs.iter().find_map(|value| match value {
+        Value::GpuTensor(handle) => Some(handle),
+        _ => None,
+    }) else {
+        return Ok(None);
+    };
+
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(anchor) else {
+        return Ok(None);
+    };
+
+    let theta = prepare_gpu_input(provider, &inputs[0])?;
+    let rho = prepare_gpu_input(provider, &inputs[1])?;
+    let z = if inputs.len() == 3 {
+        Some(prepare_gpu_input(provider, &inputs[2])?)
+    } else {
+        None
+    };
+
+    let theta_rho = matlab_broadcast_shape(&theta.handle.shape, &rho.handle.shape)?;
+    let final_shape = match &z {
+        Some(z_input) => matlab_broadcast_shape(&theta_rho, &z_input.handle.shape)?,
+        None => theta_rho,
+    };
+
+    let result = try_pol2cart_gpu_ops(
+        provider,
+        &theta.handle,
+        &rho.handle,
+        z.as_ref(),
+        &final_shape,
+    )
+    .await;
+
+    theta.free_if_temporary(provider);
+    rho.free_if_temporary(provider);
+    if let Some(z_input) = z {
+        z_input.free_if_temporary(provider);
+    }
+
+    match result {
+        Ok(eval) => {
+            if include_z_output && eval.z.is_none() {
+                Ok(None)
+            } else {
+                Ok(Some(eval))
+            }
+        }
+        Err(_) => Ok(None),
+    }
+}
+
+async fn try_pol2cart_gpu_ops(
+    provider: &'static dyn AccelProvider,
+    theta: &GpuTensorHandle,
+    rho: &GpuTensorHandle,
+    z: Option<&GpuInput>,
+    final_shape: &[usize],
+) -> anyhow::Result<Pol2CartGpuEval> {
+    let cos_theta = provider.unary_cos(theta).await?;
+    let sin_theta = match provider.unary_sin(theta).await {
+        Ok(handle) => handle,
+        Err(err) => {
+            let _ = provider.free(&cos_theta);
+            return Err(err);
+        }
+    };
+    let x = match provider.elem_mul(rho, &cos_theta).await {
+        Ok(handle) => handle,
+        Err(err) => {
+            let _ = provider.free(&cos_theta);
+            let _ = provider.free(&sin_theta);
+            return Err(err);
+        }
+    };
+    let y = match provider.elem_mul(rho, &sin_theta).await {
+        Ok(handle) => handle,
+        Err(err) => {
+            let _ = provider.free(&cos_theta);
+            let _ = provider.free(&sin_theta);
+            let _ = provider.free(&x);
+            return Err(err);
+        }
+    };
+    let _ = provider.free(&cos_theta);
+    let _ = provider.free(&sin_theta);
+
+    let z_output = match z {
+        Some(z_input) => {
+            let ones = match provider.fill(final_shape, 1.0) {
+                Ok(handle) => handle,
+                Err(err) => {
+                    let _ = provider.free(&x);
+                    let _ = provider.free(&y);
+                    return Err(err);
+                }
+            };
+            let out = match provider.elem_mul(&z_input.handle, &ones).await {
+                Ok(handle) => handle,
+                Err(err) => {
+                    let _ = provider.free(&ones);
+                    let _ = provider.free(&x);
+                    let _ = provider.free(&y);
+                    return Err(err);
+                }
+            };
+            let _ = provider.free(&ones);
+            Some(out)
+        }
+        None => None,
+    };
+
+    Ok(Pol2CartGpuEval {
+        provider,
+        x,
+        y,
+        z: z_output,
+        max_outputs: if z.is_some() { 3 } else { 2 },
+    })
+}
+
+#[derive(Debug)]
+struct GpuInput {
+    handle: GpuTensorHandle,
+    temporary: bool,
+}
+
+impl GpuInput {
+    fn free_if_temporary(self, provider: &'static dyn AccelProvider) {
+        if self.temporary {
+            let _ = provider.free(&self.handle);
+        }
+    }
+}
+
+fn prepare_gpu_input(
+    provider: &'static dyn AccelProvider,
+    value: &Value,
+) -> BuiltinResult<GpuInput> {
+    match value {
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved
+            {
+                return Err(pol2cart_error(&ERROR_COMPLEX_UNSUPPORTED, "complex input"));
+            }
+            Ok(GpuInput {
+                handle: handle.clone(),
+                temporary: false,
+            })
+        }
+        Value::Num(value) => {
+            let data = [*value];
+            upload_gpu_input(provider, &data, &[1, 1])
+        }
+        Value::Tensor(tensor) => upload_gpu_input(provider, &tensor.data, &tensor.shape),
+        Value::Complex(_, _) | Value::ComplexTensor(_) => {
+            Err(pol2cart_error(&ERROR_COMPLEX_UNSUPPORTED, "complex input"))
+        }
+        other => Err(pol2cart_error(
+            &ERROR_INVALID_INPUT,
+            format!("expected real single or double input, got {other:?}"),
+        )),
+    }
+}
+
+fn upload_gpu_input(
+    provider: &'static dyn AccelProvider,
+    data: &[f64],
+    shape: &[usize],
+) -> BuiltinResult<GpuInput> {
+    let view = HostTensorView { data, shape };
+    let handle = provider
+        .upload(&view)
+        .map_err(|err| pol2cart_error(&ERROR_INTERNAL, format!("gpu upload failed: {err}")))?;
+    Ok(GpuInput {
+        handle,
+        temporary: true,
+    })
 }
 
 fn pol2cart_type(args: &[Type], _context: &runmat_builtins::ResolveContext) -> Type {
@@ -256,6 +464,74 @@ struct Pol2CartEval {
     y: Tensor,
     z: Option<Tensor>,
     max_outputs: usize,
+}
+
+struct Pol2CartGpuEval {
+    provider: &'static dyn AccelProvider,
+    x: GpuTensorHandle,
+    y: GpuTensorHandle,
+    z: Option<GpuTensorHandle>,
+    max_outputs: usize,
+}
+
+impl Pol2CartGpuEval {
+    fn x_value(self) -> BuiltinResult<Value> {
+        let Self {
+            provider,
+            x,
+            y,
+            z,
+            max_outputs: _,
+        } = self;
+        let _ = provider.free(&y);
+        if let Some(z) = &z {
+            let _ = provider.free(z);
+        }
+        Ok(gpu_helpers::resident_gpu_value(x))
+    }
+
+    fn output_list(self, count: usize) -> BuiltinResult<Value> {
+        let Self {
+            provider,
+            x,
+            y,
+            z,
+            max_outputs,
+        } = self;
+        if count > max_outputs {
+            let _ = provider.free(&x);
+            let _ = provider.free(&y);
+            if let Some(z) = &z {
+                let _ = provider.free(z);
+            }
+            return Err(pol2cart_error(
+                &ERROR_OUTPUT_COUNT,
+                format!(
+                    "requested {count} outputs but this syntax supports at most {}",
+                    max_outputs
+                ),
+            ));
+        }
+        let mut outputs = Vec::with_capacity(count);
+        if count >= 1 {
+            outputs.push(gpu_helpers::resident_gpu_value(x));
+        } else {
+            let _ = provider.free(&x);
+        }
+        if count >= 2 {
+            outputs.push(gpu_helpers::resident_gpu_value(y));
+        } else {
+            let _ = provider.free(&y);
+        }
+        if count >= 3 {
+            outputs.push(gpu_helpers::resident_gpu_value(
+                z.expect("z output available"),
+            ));
+        } else if let Some(z) = &z {
+            let _ = provider.free(z);
+        }
+        Ok(Value::OutputList(outputs))
+    }
 }
 
 impl Pol2CartEval {
@@ -546,6 +822,11 @@ mod tests {
         match value {
             Value::Num(n) => vec![*n],
             Value::Tensor(tensor) => tensor.data.clone(),
+            Value::GpuTensor(handle) => {
+                test_support::gather(Value::GpuTensor(handle.clone()))
+                    .expect("gather gpu output")
+                    .data
+            }
             other => panic!("expected numeric output, got {other:?}"),
         }
     }
@@ -787,7 +1068,7 @@ mod tests {
     }
 
     #[test]
-    fn gpu_inputs_gather_and_return_host_outputs() {
+    fn gpu_inputs_keep_resident_outputs() {
         test_support::with_test_provider(|provider| {
             let theta_view = HostTensorView {
                 data: &[0.0, std::f64::consts::FRAC_PI_2],
@@ -803,8 +1084,37 @@ mod tests {
             let outputs = output_list(
                 call(Value::GpuTensor(theta), Value::GpuTensor(rho), Vec::new()).expect("pol2cart"),
             );
+            assert!(matches!(outputs[0], Value::GpuTensor(_)));
+            assert!(matches!(outputs[1], Value::GpuTensor(_)));
             assert_close(&data(&outputs[0]), &[2.0, 0.0]);
             assert_close(&data(&outputs[1]), &[0.0, 3.0]);
+        });
+    }
+
+    #[test]
+    fn gpu_mixed_cylindrical_broadcasts_z_output() {
+        test_support::with_test_provider(|provider| {
+            let theta_view = HostTensorView {
+                data: &[0.0, std::f64::consts::FRAC_PI_2],
+                shape: &[2, 1],
+            };
+            let theta = provider.upload(&theta_view).expect("upload theta");
+            let rho = tensor(vec![1.0, 2.0, 3.0], vec![1, 3]);
+            let _guard = crate::output_count::push_output_count(Some(3));
+            let outputs = output_list(
+                call(
+                    Value::GpuTensor(theta),
+                    Value::Tensor(rho),
+                    vec![Value::Num(7.0)],
+                )
+                .expect("pol2cart"),
+            );
+            assert!(matches!(outputs[0], Value::GpuTensor(_)));
+            assert!(matches!(outputs[1], Value::GpuTensor(_)));
+            assert!(matches!(outputs[2], Value::GpuTensor(_)));
+            assert_close(&data(&outputs[0]), &[1.0, 0.0, 2.0, 0.0, 3.0, 0.0]);
+            assert_close(&data(&outputs[1]), &[0.0, 1.0, 0.0, 2.0, 0.0, 3.0]);
+            assert_close(&data(&outputs[2]), &[7.0, 7.0, 7.0, 7.0, 7.0, 7.0]);
         });
     }
 }
