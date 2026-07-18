@@ -32,7 +32,7 @@ const OPTIMOPTIONS_INPUTS_SOLVER: [BuiltinParamDescriptor; 1] = [BuiltinParamDes
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Solver name, such as fminbnd, fminunc, fzero, fsolve, or lsqcurvefit.",
+    description: "Solver name, such as fminbnd, fminunc, fzero, fsolve, lsqcurvefit, or lsqnonlin.",
 }];
 
 const OPTIMOPTIONS_INPUTS_SOLVER_PAIRS: [BuiltinParamDescriptor; 3] = [
@@ -41,7 +41,8 @@ const OPTIMOPTIONS_INPUTS_SOLVER_PAIRS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Solver name, such as fminbnd, fminunc, fzero, fsolve, or lsqcurvefit.",
+        description:
+            "Solver name, such as fminbnd, fminunc, fzero, fsolve, lsqcurvefit, or lsqnonlin.",
     },
     BuiltinParamDescriptor {
         name: "name",
@@ -191,8 +192,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "optimoptions",
     category = "math/optim",
-    summary = "Create or update a typed optimization options structure for fminbnd, fminunc, fzero, fsolve, and lsqcurvefit.",
-    keywords = "optimoptions,options,TolX,TolFun,FunctionTolerance,StepTolerance,MaxIter,MaxFunEvals,Display,Algorithm,SpecifyObjectiveGradient",
+    summary = "Create or update a typed optimization options structure for fminbnd, fminunc, fzero, fsolve, lsqcurvefit, and lsqnonlin.",
+    keywords = "optimoptions,options,TolX,TolFun,FunctionTolerance,StepTolerance,MaxIter,MaxFunEvals,Display,Algorithm,SpecifyObjectiveGradient,lsqnonlin",
     accel = "cpu",
     type_resolver(optim_options_type),
     descriptor(crate::builtins::math::optim::optimoptions::OPTIMOPTIONS_DESCRIPTOR),
@@ -325,6 +326,7 @@ enum Solver {
     Fzero,
     Fsolve,
     Lsqcurvefit,
+    Lsqnonlin,
     Generic,
 }
 
@@ -336,6 +338,7 @@ impl Solver {
             Self::Fzero => "fzero",
             Self::Fsolve => "fsolve",
             Self::Lsqcurvefit => "lsqcurvefit",
+            Self::Lsqnonlin => "lsqnonlin",
             Self::Generic => "",
         }
     }
@@ -343,14 +346,19 @@ impl Solver {
     fn default_display(self) -> &'static str {
         match self {
             Self::Fminbnd => "notify",
-            Self::Fminunc | Self::Fzero | Self::Fsolve | Self::Lsqcurvefit | Self::Generic => "off",
+            Self::Fminunc
+            | Self::Fzero
+            | Self::Fsolve
+            | Self::Lsqcurvefit
+            | Self::Lsqnonlin
+            | Self::Generic => "off",
         }
     }
 
     fn accepts_tol_fun(self) -> bool {
         matches!(
             self,
-            Self::Fminunc | Self::Fsolve | Self::Lsqcurvefit | Self::Generic
+            Self::Fminunc | Self::Fsolve | Self::Lsqcurvefit | Self::Lsqnonlin | Self::Generic
         )
     }
 
@@ -358,7 +366,10 @@ impl Solver {
         match canonical {
             "TolX" | "MaxIter" | "MaxFunEvals" | "Display" => true,
             "TolFun" => self.accepts_tol_fun(),
-            "Algorithm" => matches!(self, Self::Fminunc | Self::Lsqcurvefit | Self::Generic),
+            "Algorithm" => matches!(
+                self,
+                Self::Fminunc | Self::Lsqcurvefit | Self::Lsqnonlin | Self::Generic
+            ),
             "SpecifyObjectiveGradient" => matches!(self, Self::Fminunc | Self::Generic),
             _ => false,
         }
@@ -369,7 +380,7 @@ impl Solver {
             Self::Fminbnd | Self::Fminunc | Self::Generic => {
                 matches!(display, "off" | "none" | "iter" | "notify" | "final")
             }
-            Self::Fzero | Self::Fsolve | Self::Lsqcurvefit => {
+            Self::Fzero | Self::Fsolve | Self::Lsqcurvefit | Self::Lsqnonlin => {
                 matches!(display, "off" | "none" | "iter" | "final")
             }
         }
@@ -378,7 +389,7 @@ impl Solver {
     fn accepts_algorithm(self, algorithm: &str) -> bool {
         match self {
             Self::Fminunc => matches!(algorithm, "quasi-newton" | "bfgs"),
-            Self::Lsqcurvefit | Self::Generic => {
+            Self::Lsqcurvefit | Self::Lsqnonlin | Self::Generic => {
                 matches!(
                     algorithm,
                     "quasi-newton" | "bfgs" | "levenberg-marquardt" | "trust-region-reflective"
@@ -405,6 +416,7 @@ fn parse_solver_name(text: &str) -> BuiltinResult<Solver> {
         "fzero" => Ok(Solver::Fzero),
         "fsolve" => Ok(Solver::Fsolve),
         "lsqcurvefit" => Ok(Solver::Lsqcurvefit),
+        "lsqnonlin" => Ok(Solver::Lsqnonlin),
         other => Err(optimoptions_error_with(
             &OPTIMOPTIONS_ERROR_INVALID_SOLVER,
             format!("optimoptions: unsupported solver '{other}'"),
@@ -455,6 +467,14 @@ fn default_options(solver: Solver) -> StructValue {
         }
         Solver::Lsqcurvefit => {
             out.insert("Algorithm", Value::from("levenberg-marquardt"));
+            out.insert("TolX", Value::Num(1.0e-6));
+            out.insert("TolFun", Value::Num(1.0e-6));
+            out.insert("MaxIter", Value::Num(400.0));
+            out.insert("MaxFunEvals", Value::Num(40000.0));
+            out.insert("Display", Value::from(solver.default_display()));
+        }
+        Solver::Lsqnonlin => {
+            out.insert("Algorithm", Value::from("trust-region-reflective"));
             out.insert("TolX", Value::Num(1.0e-6));
             out.insert("TolFun", Value::Num(1.0e-6));
             out.insert("MaxIter", Value::Num(400.0));
@@ -938,6 +958,30 @@ mod tests {
             string_field(&options, "Algorithm"),
             "trust-region-reflective"
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn optimoptions_lsqnonlin_defaults_and_aliases_match_solver() {
+        let options = struct_result(
+            run_optimoptions(vec![
+                Value::from("lsqnonlin"),
+                Value::from("FunctionTolerance"),
+                Value::Num(1.0e-9),
+                Value::from("StepTolerance"),
+                Value::Num(1.0e-8),
+                Value::from("Algorithm"),
+                Value::from("levenberg-marquardt"),
+            ])
+            .expect("optimoptions lsqnonlin"),
+        );
+        assert_eq!(string_field(&options, "Solver"), "lsqnonlin");
+        assert_eq!(string_field(&options, "Algorithm"), "levenberg-marquardt");
+        assert_eq!(num_field(&options, "TolFun"), 1.0e-9);
+        assert_eq!(num_field(&options, "TolX"), 1.0e-8);
+        assert_eq!(num_field(&options, "MaxIter"), 400.0);
+        assert_eq!(num_field(&options, "MaxFunEvals"), 40000.0);
+        assert_eq!(string_field(&options, "Display"), "off");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

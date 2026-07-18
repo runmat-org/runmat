@@ -439,6 +439,15 @@ fn lsqcurvefit_accepts_anonymous_curve_model() {
 }
 
 #[test]
+fn lsqnonlin_accepts_anonymous_residual_function() {
+    let vars =
+        execute_source("r = @(x) [x(1)-2; x(2)-3; x(1)+x(2)-5]; x = lsqnonlin(r, [0;0]);").unwrap();
+    assert!(vars.iter().any(|v| {
+        matches!(v, runmat_builtins::Value::Tensor(t) if t.shape == vec![2, 1] && (t.data[0] - 2.0).abs() < 1e-5 && (t.data[1] - 3.0).abs() < 1e-5)
+    }));
+}
+
+#[test]
 fn fminbnd_accepts_anonymous_function() {
     let vars = execute_source("x = fminbnd(@(x) (x-2).^2, 0, 5);").unwrap();
     assert!(vars
