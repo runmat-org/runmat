@@ -171,6 +171,14 @@ pub fn save_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
+pub fn matfile_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Unknown
+}
+
+pub fn matfile_subsref_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Unknown
+}
+
 pub fn accept_type(args: &[Type], ctx: &ResolveContext) -> Type {
     struct_type(args, ctx)
 }
