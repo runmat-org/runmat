@@ -11,6 +11,21 @@ fn disable_interactive_plots_for_test() -> runmat_runtime::builtins::plotting::P
 }
 
 #[test]
+fn plot_keeps_gpu_input_alive_across_anonymous_function_call() {
+    let _guard = disable_interactive_plots_for_test();
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let input = "\
+        t = gpuArray(-6:0.0005:6); \
+        x = @(t) exp(-3*abs(t)); \
+        figure; \
+        h = plot(t, x(t), 'r-', 'DisplayName', '$x(t)=e^{-3|t|}$'); \
+        out = numel(h);";
+    let vars =
+        execute_source(input).expect("plot should gather fallback without stale GPU handles");
+    assert!(vars.iter().any(|value| value == &Value::Num(1.0)));
+}
+
+#[test]
 fn heatmap_dot_property_assignment_routes_to_graphics_set() {
     let _guard = disable_interactive_plots_for_test();
     let input = "cdata = [45 60 32; 43 54 76; 32 94 68; 23 95 58]; \

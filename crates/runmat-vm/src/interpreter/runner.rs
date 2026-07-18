@@ -270,7 +270,7 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
         .map(|slot| result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)))
         .collect::<Vec<_>>();
     #[cfg(feature = "native-accel")]
-    clear_semantic_function_temp_residency(&result_vars, &output_values, &updated_captures);
+    clear_semantic_function_temp_residency(&result_vars, args, &output_values, &updated_captures);
     Ok((
         output_value(output_values, requested_outputs),
         updated_captures,
@@ -820,10 +820,14 @@ fn output_value(output_values: Vec<Value>, requested_outputs: usize) -> Value {
 #[cfg(feature = "native-accel")]
 fn clear_semantic_function_temp_residency(
     result_vars: &[Value],
+    args: &[Value],
     output_values: &[Value],
     updated_captures: &[Value],
 ) {
     let mut keep_values = output_values.to_vec();
+    // Function input slots are borrowed aliases of caller values. Releasing them
+    // here can invalidate handles still live in the caller expression.
+    keep_values.extend(args.iter().cloned());
     keep_values.extend(updated_captures.iter().cloned());
     keep_values.extend(runtime_globals::collect_thread_roots());
     let keep = Value::OutputList(keep_values);
