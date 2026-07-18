@@ -1,0 +1,11 @@
+{
+  "title": "bfsearch",
+  "category": "graph",
+  "keywords": ["bfsearch", "graph", "breadth first search"],
+  "summary": "Return breadth-first search order.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`bfsearch(G,start)` returns the reachable nodes in breadth-first order. Directed graphs follow outgoing edges.",
+  "signatures": [{"label": "nodes = bfsearch(G, start)", "description": "Return BFS visit order."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

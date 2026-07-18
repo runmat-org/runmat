@@ -1,0 +1,11 @@
+{
+  "title": "findedge",
+  "category": "graph",
+  "keywords": ["findedge", "graph", "edges"],
+  "summary": "Find the index of an edge between two nodes.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`findedge(G,s,t)` returns the one-based edge index for the first matching edge, or `0` when no edge exists.",
+  "signatures": [{"label": "idx = findedge(G, s, t)", "description": "Find an edge by endpoint nodes."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

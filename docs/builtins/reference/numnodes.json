@@ -1,0 +1,11 @@
+{
+  "title": "numnodes",
+  "category": "graph",
+  "keywords": ["numnodes", "graph", "nodes"],
+  "summary": "Return the number of nodes in a graph or digraph.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`numnodes(G)` returns the node count stored on a RunMat `graph` or `digraph` object.",
+  "signatures": [{"label": "n = numnodes(G)", "description": "Return the node count as a scalar double."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

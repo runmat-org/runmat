@@ -1,0 +1,14 @@
+{
+  "title": "distances",
+  "category": "graph",
+  "keywords": ["distances", "graph", "dijkstra"],
+  "summary": "Compute shortest-path distance matrices.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`distances(G)` computes all-pairs shortest-path distances. Optional source and target node lists restrict the rows and columns.",
+  "signatures": [
+    {"label": "D = distances(G)", "description": "Return all-pairs shortest-path distances."},
+    {"label": "D = distances(G, s, t)", "description": "Return distances from source nodes `s` to target nodes `t`."}
+  ],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

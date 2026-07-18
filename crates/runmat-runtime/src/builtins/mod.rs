@@ -16,6 +16,7 @@ pub mod duration;
 pub mod fea;
 pub mod finance;
 pub mod geometry;
+pub mod graph;
 pub mod image;
 pub mod introspection;
 pub mod io;

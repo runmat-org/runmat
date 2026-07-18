@@ -1,0 +1,11 @@
+{
+  "title": "conncomp",
+  "category": "graph",
+  "keywords": ["conncomp", "graph", "components"],
+  "summary": "Return connected-component bins.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`conncomp(G)` returns one-based component ids. For digraphs, RunMat computes weak components over the underlying undirected connectivity.",
+  "signatures": [{"label": "bins = conncomp(G)", "description": "Return component ids for each node."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}
