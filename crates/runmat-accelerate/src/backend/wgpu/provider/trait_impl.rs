@@ -1,8 +1,9 @@
 use super::*;
 use runmat_accelerate_api::{
     ProviderBitModulationRequest, ProviderBlackScholesPriceRequest,
-    ProviderBlackScholesPriceResult, ProviderEnvelopeRequest, ProviderEnvelopeResult,
-    ProviderHilbertRequest, ProviderModulationRequest, ProviderNdgridRequest, ProviderNdgridResult,
+    ProviderBlackScholesPriceResult, ProviderCovarianceToCorrelationResult,
+    ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderHilbertRequest,
+    ProviderModulationRequest, ProviderNdgridRequest, ProviderNdgridResult,
 };
 
 impl AccelProvider for WgpuProvider {
@@ -1079,6 +1080,14 @@ impl AccelProvider for WgpuProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.corrcoef_exec(matrix, options).await })
     }
+
+    fn covariance_to_correlation(
+        &self,
+        matrix: &GpuTensorHandle,
+    ) -> Result<ProviderCovarianceToCorrelationResult> {
+        self.covariance_to_correlation_exec(matrix)
+    }
+
     fn linsolve<'a>(
         &'a self,
         lhs: &'a GpuTensorHandle,

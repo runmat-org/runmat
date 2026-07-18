@@ -9,13 +9,14 @@ use runmat_accelerate_api::{
     HostTensorView, ImfilterOptions, PagefunRequest, ProviderBandwidth,
     ProviderBitModulationRequest, ProviderBlackScholesPriceRequest,
     ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
-    ProviderConvMode, ProviderConvOrientation, ProviderEigResult, ProviderFindResult,
-    ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
-    ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderModulationRequest,
-    ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder,
-    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions,
-    ProviderQrPivot, ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind, SetdiffOptions,
-    SetdiffResult, SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
+    ProviderEigResult, ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions,
+    ProviderIirFilterResult, ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult,
+    ProviderLuResult, ProviderModulationRequest, ProviderNanMode, ProviderNdgridRequest,
+    ProviderNdgridResult, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
+    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrResult, ProviderScanDirection,
+    ProviderSymmetryKind, SetdiffOptions, SetdiffResult, SortComparison, SortResult,
+    SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -799,6 +800,98 @@ fn provider_black_scholes_price_pair(
 
 fn provider_normcdf(value: f64) -> f64 {
     0.5 * (1.0 + libm::erf(value / std::f64::consts::SQRT_2))
+}
+
+fn provider_covariance_shape(shape: &[usize]) -> Result<(usize, usize)> {
+    match shape.len() {
+        0 => Ok((1, 1)),
+        1 => Ok((shape[0], 1)),
+        2 => Ok((shape[0], shape[1])),
+        _ => Err(anyhow!(
+            "covariance_to_correlation: covariance matrix must be two-dimensional"
+        )),
+    }
+}
+
+fn provider_validate_covariance_matrix(data: &[f64], rows: usize, cols: usize) -> Result<()> {
+    ensure!(
+        rows == cols,
+        "covariance_to_correlation: covariance matrix must be square"
+    );
+    ensure!(
+        data.len()
+            == rows
+                .checked_mul(cols)
+                .ok_or_else(|| anyhow!("covariance_to_correlation: matrix size overflow"))?,
+        "covariance_to_correlation: shape does not match buffer length"
+    );
+    for value in data {
+        if value.is_nan() {
+            continue;
+        }
+        ensure!(
+            value.is_finite(),
+            "covariance_to_correlation: covariance matrix must contain finite values or NaN"
+        );
+    }
+    for idx in 0..rows {
+        let variance = data[idx + idx * rows];
+        ensure!(
+            variance >= 0.0,
+            "covariance_to_correlation: covariance matrix diagonal entries must be nonnegative"
+        );
+    }
+    for col in 0..cols {
+        for row in 0..col {
+            let a = data[row + col * rows];
+            let b = data[col + row * rows];
+            if a.is_nan() && b.is_nan() {
+                continue;
+            }
+            ensure!(
+                !(a.is_nan() || b.is_nan()),
+                "covariance_to_correlation: covariance matrix must be symmetric"
+            );
+            let tol = 1.0e-10 * a.abs().max(b.abs()).max(1.0);
+            ensure!(
+                (a - b).abs() <= tol,
+                "covariance_to_correlation: covariance matrix must be symmetric"
+            );
+            let variance_row = data[row + row * rows];
+            let variance_col = data[col + col * rows];
+            if variance_row.is_nan() || variance_col.is_nan() {
+                continue;
+            }
+            let max_covariance = (variance_row * variance_col).sqrt();
+            let bound_tol = 1.0e-10 * max_covariance.max(a.abs()).max(1.0);
+            ensure!(
+                a.abs() <= max_covariance + bound_tol,
+                "covariance_to_correlation: covariance magnitude exceeds variance bounds"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn provider_covariance_to_correlation(data: &[f64], n: usize) -> (Vec<f64>, Vec<f64>) {
+    let mut sigma = Vec::with_capacity(n);
+    for idx in 0..n {
+        sigma.push(data[idx + idx * n].sqrt());
+    }
+
+    let mut correlation = vec![0.0; n * n];
+    for col in 0..n {
+        for row in 0..n {
+            let denom = sigma[row] * sigma[col];
+            let idx = row + col * n;
+            correlation[idx] = if denom == 0.0 {
+                f64::NAN
+            } else {
+                data[idx] / denom
+            };
+        }
+    }
+    (correlation, sigma)
 }
 
 fn product(shape: &[usize]) -> usize {
@@ -2720,6 +2813,31 @@ impl AccelProvider for InProcessProvider {
                 shape: &result.shape,
             };
             self.upload(&view)
+        })
+    }
+
+    fn covariance_to_correlation(
+        &self,
+        matrix: &GpuTensorHandle,
+    ) -> Result<ProviderCovarianceToCorrelationResult> {
+        ensure!(
+            runmat_accelerate_api::handle_storage(matrix) != GpuTensorStorage::ComplexInterleaved,
+            "covariance_to_correlation: complex covariance matrices are not supported"
+        );
+        let (data, shape) = {
+            let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
+            let data = guard
+                .get(&matrix.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("covariance_to_correlation: unknown buffer"))?;
+            (data, matrix.shape.clone())
+        };
+        let (rows, cols) = provider_covariance_shape(&shape)?;
+        provider_validate_covariance_matrix(&data, rows, cols)?;
+        let (correlation, sigma) = provider_covariance_to_correlation(&data, rows);
+        Ok(ProviderCovarianceToCorrelationResult {
+            correlation: self.allocate_tensor(correlation, vec![rows, cols]),
+            sigma: self.allocate_tensor(sigma, vec![rows, 1]),
         })
     }
 
@@ -7203,6 +7321,40 @@ mod tests {
             &[6.3497143812997265, 4.855462635089204],
             &shape,
         );
+    }
+
+    #[test]
+    fn covariance_to_correlation_returns_resident_outputs() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(8_100_000, Ordering::Relaxed);
+        let shape = [2, 2];
+        let covariance = real_handle(&provider, &[4.0, 2.0, 2.0, 9.0], &shape);
+
+        let result = provider
+            .covariance_to_correlation(&covariance)
+            .expect("covariance to correlation");
+
+        assert_real_close(
+            &provider,
+            &result.correlation,
+            &[1.0, 1.0 / 3.0, 1.0 / 3.0, 1.0],
+            &shape,
+        );
+        assert_real_close(&provider, &result.sigma, &[2.0, 3.0], &[2, 1]);
+    }
+
+    #[test]
+    fn covariance_to_correlation_rejects_invalid_covariance() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(8_200_000, Ordering::Relaxed);
+        let shape = [2, 2];
+        let asymmetric = real_handle(&provider, &[1.0, 0.1, 0.2, 1.0], &shape);
+
+        let err = provider
+            .covariance_to_correlation(&asymmetric)
+            .expect_err("invalid covariance");
+
+        assert!(err.to_string().contains("symmetric"));
     }
 
     #[test]

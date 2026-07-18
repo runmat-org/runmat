@@ -1,5 +1,8 @@
 //! Convert covariance matrices to correlation matrices.
 
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderCovarianceToCorrelationResult,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -9,9 +12,9 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const OUTPUT_R: BuiltinParamDescriptor = BuiltinParamDescriptor {
@@ -296,6 +299,107 @@ fn output_values(name: &'static str, r: Value, sigma: Value) -> BuiltinResult<Va
     }
 }
 
+struct CovarianceGpuEval {
+    provider: &'static dyn AccelProvider,
+    correlation: GpuTensorHandle,
+    sigma: GpuTensorHandle,
+}
+
+impl CovarianceGpuEval {
+    fn from_provider(
+        provider: &'static dyn AccelProvider,
+        result: ProviderCovarianceToCorrelationResult,
+    ) -> Self {
+        Self {
+            provider,
+            correlation: result.correlation,
+            sigma: result.sigma,
+        }
+    }
+
+    fn output(self, name: &'static str) -> BuiltinResult<Value> {
+        match crate::output_count::current_output_count() {
+            Some(0) => {
+                let _ = self.provider.free(&self.correlation);
+                let _ = self.provider.free(&self.sigma);
+                Ok(Value::OutputList(Vec::new()))
+            }
+            Some(1) => {
+                let _ = self.provider.free(&self.sigma);
+                Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
+                    self.correlation,
+                )]))
+            }
+            Some(2) => Ok(Value::OutputList(vec![
+                gpu_helpers::resident_gpu_value(self.correlation),
+                gpu_helpers::resident_gpu_value(self.sigma),
+            ])),
+            Some(_) => {
+                let _ = self.provider.free(&self.correlation);
+                let _ = self.provider.free(&self.sigma);
+                Err(conversion_error(
+                    name,
+                    format!("{name}: too many output arguments; maximum is 2"),
+                ))
+            }
+            None => {
+                let _ = self.provider.free(&self.sigma);
+                Ok(gpu_helpers::resident_gpu_value(self.correlation))
+            }
+        }
+    }
+}
+
+fn provider_is_unsupported(err: &anyhow::Error) -> bool {
+    let message = err.to_string();
+    message.contains("not supported") || message.contains("unsupported")
+}
+
+fn try_covariance_gpu(
+    name: &'static str,
+    value: &Value,
+) -> BuiltinResult<Option<CovarianceGpuEval>> {
+    let Value::GpuTensor(handle) = value else {
+        return Ok(None);
+    };
+    if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved {
+        return Err(conversion_error(
+            name,
+            format!("{name}: complex covariance matrices are not supported"),
+        ));
+    }
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
+        return Ok(None);
+    };
+    match provider.covariance_to_correlation(handle) {
+        Ok(result) => Ok(Some(CovarianceGpuEval::from_provider(provider, result))),
+        Err(err) if provider_is_unsupported(&err) => Ok(None),
+        Err(err) => Err(conversion_error(name, format!("{name}: {err}"))),
+    }
+}
+
+async fn covariance_conversion_builtin(
+    name: &'static str,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    if !rest.is_empty() {
+        return Err(conversion_error(
+            name,
+            format!("{name}: expected exactly one input argument"),
+        ));
+    }
+    if matches!(crate::output_count::current_output_count(), Some(0)) {
+        return Ok(Value::OutputList(Vec::new()));
+    }
+    if let Some(eval) = try_covariance_gpu(name, &value)? {
+        return eval.output(name);
+    }
+    let covariance = covariance_tensor(name, value, Vec::new()).await?;
+    let (r, sigma) = covariance_to_correlation(name, covariance)?;
+    output_values(name, r, sigma)
+}
+
 pub mod corrcov {
     use super::*;
 
@@ -309,14 +413,14 @@ pub mod corrcov {
         op_kind: GpuOpKind::Custom("summary-stats"),
         supported_precisions: &[ScalarType::F32, ScalarType::F64],
         broadcast: BroadcastSemantics::None,
-        provider_hooks: &[],
+        provider_hooks: &[ProviderHook::Custom("covariance_to_correlation")],
         constant_strategy: ConstantStrategy::InlineLiteral,
-        residency: ResidencyPolicy::GatherImmediately,
+        residency: ResidencyPolicy::NewHandle,
         nan_mode: ReductionNaN::Include,
         two_pass_threshold: None,
         workgroup_size: None,
         accepts_nan_mode: false,
-        notes: "RunMat accepts gpuArray inputs and currently gathers them to the CPU reference path for covariance-to-correlation conversion.",
+        notes: "Resident real gpuArray covariance matrices use the provider covariance_to_correlation hook and return resident correlation/sigma outputs; unsupported providers fall back to the host reference path.",
     };
 
     #[runmat_macros::register_fusion_spec(
@@ -343,9 +447,7 @@ pub mod corrcov {
         builtin_path = "crate::builtins::stats::summary::covariance_conversion::corrcov"
     )]
     pub(crate) async fn corrcov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let covariance = covariance_tensor("corrcov", value, rest).await?;
-        let (r, sigma) = covariance_to_correlation("corrcov", covariance)?;
-        output_values("corrcov", r, sigma)
+        covariance_conversion_builtin("corrcov", value, rest).await
     }
 }
 
@@ -362,14 +464,14 @@ pub mod cov2corr {
         op_kind: GpuOpKind::Custom("summary-stats"),
         supported_precisions: &[ScalarType::F32, ScalarType::F64],
         broadcast: BroadcastSemantics::None,
-        provider_hooks: &[],
+        provider_hooks: &[ProviderHook::Custom("covariance_to_correlation")],
         constant_strategy: ConstantStrategy::InlineLiteral,
-        residency: ResidencyPolicy::GatherImmediately,
+        residency: ResidencyPolicy::NewHandle,
         nan_mode: ReductionNaN::Include,
         two_pass_threshold: None,
         workgroup_size: None,
         accepts_nan_mode: false,
-        notes: "Compatibility alias for corrcov; gpuArray inputs are gathered to the CPU reference path.",
+        notes: "Compatibility alias for corrcov; resident real gpuArray covariance matrices use the provider covariance_to_correlation hook.",
     };
 
     #[runmat_macros::register_fusion_spec(
@@ -396,15 +498,14 @@ pub mod cov2corr {
         builtin_path = "crate::builtins::stats::summary::covariance_conversion::cov2corr"
     )]
     pub(crate) async fn cov2corr_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let covariance = covariance_tensor("cov2corr", value, rest).await?;
-        let (r, sigma) = covariance_to_correlation("cov2corr", covariance)?;
-        output_values("cov2corr", r, sigma)
+        covariance_conversion_builtin("cov2corr", value, rest).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
 
     fn assert_close(actual: f64, expected: f64) {
@@ -443,6 +544,67 @@ mod tests {
             }
             other => panic!("expected output list, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn corrcov_gpu_input_returns_resident_outputs() {
+        test_support::with_test_provider(|provider| {
+            let covariance = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[4.0, 2.0, 2.0, 9.0],
+                    shape: &[2, 2],
+                })
+                .expect("upload covariance");
+            provider.reset_telemetry();
+
+            let _guard = crate::output_count::push_output_count(Some(2));
+            let out = block_on(corrcov::corrcov_builtin(
+                Value::GpuTensor(covariance),
+                Vec::new(),
+            ))
+            .expect("corrcov gpu");
+            let Value::OutputList(values) = out else {
+                panic!("expected output list");
+            };
+
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.upload_bytes, 0);
+            assert_eq!(telemetry.download_bytes, 0);
+            assert!(matches!(values[0], Value::GpuTensor(_)));
+            assert!(matches!(values[1], Value::GpuTensor(_)));
+
+            let correlation = test_support::gather(values[0].clone()).expect("correlation");
+            let sigma = test_support::gather(values[1].clone()).expect("sigma");
+            assert_eq!(correlation.shape, vec![2, 2]);
+            assert_eq!(sigma.shape, vec![2, 1]);
+            assert_close(correlation.data[0], 1.0);
+            assert_close(correlation.data[1], 1.0 / 3.0);
+            assert_close(correlation.data[2], 1.0 / 3.0);
+            assert_close(correlation.data[3], 1.0);
+            assert_close(sigma.data[0], 2.0);
+            assert_close(sigma.data[1], 3.0);
+        });
+    }
+
+    #[test]
+    fn cov2corr_gpu_input_preserves_invalid_covariance_error() {
+        test_support::with_test_provider(|provider| {
+            let covariance = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0, 0.1, 0.2, 1.0],
+                    shape: &[2, 2],
+                })
+                .expect("upload covariance");
+
+            let err = block_on(cov2corr::cov2corr_builtin(
+                Value::GpuTensor(covariance),
+                Vec::new(),
+            ))
+            .expect_err("invalid covariance");
+
+            assert_eq!(err.identifier(), Some("RunMat:cov2corr:InvalidArgument"));
+            assert!(err.message().contains("symmetric"));
+        });
     }
 
     #[test]

@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": ["f32", "f64"],
     "broadcasting": "none",
-    "notes": "RunMat accepts gpuArray inputs and currently gathers them to the CPU reference path."
+    "notes": "Resident real gpuArray covariance matrices route through the provider `covariance_to_correlation` hook and return resident correlation and sigma gpuArray outputs. Providers without the hook fall back to the host reference path."
   },
   "fusion": {
     "elementwise": false,
@@ -34,7 +34,8 @@
     "RunMat validates symmetry within floating-point tolerance before converting.",
     "RunMat rejects covariance entries whose magnitude exceeds the variance-implied pairwise bound `sqrt(C(i,i)*C(j,j))`.",
     "Entries involving a zero-variance variable produce `NaN` because the correlation denominator is zero.",
-    "Logical inputs are promoted to double precision."
+    "Logical inputs are promoted to double precision.",
+    "Real gpuArray inputs stay resident when the active provider implements covariance-to-correlation conversion."
   ],
   "examples": [
     {

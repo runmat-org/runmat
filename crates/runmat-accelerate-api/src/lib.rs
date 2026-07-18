@@ -1672,6 +1672,16 @@ pub trait AccelProvider: Send + Sync {
         unsupported_future("corrcoef not supported by provider")
     }
 
+    /// Convert a resident covariance matrix into correlation and sigma outputs.
+    fn covariance_to_correlation(
+        &self,
+        _matrix: &GpuTensorHandle,
+    ) -> anyhow::Result<ProviderCovarianceToCorrelationResult> {
+        Err(anyhow::anyhow!(
+            "covariance_to_correlation not supported by provider"
+        ))
+    }
+
     // Optional operator hooks (default to unsupported)
     fn linspace(&self, _start: f64, _stop: f64, _count: usize) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("linspace not supported by provider"))
@@ -3151,6 +3161,14 @@ pub struct ProviderBlackScholesPriceRequest<'a> {
 pub struct ProviderBlackScholesPriceResult {
     pub call: GpuTensorHandle,
     pub put: GpuTensorHandle,
+}
+
+/// Provider-side covariance-to-correlation result containing the correlation
+/// matrix and column-vector standard deviations.
+#[derive(Debug, Clone)]
+pub struct ProviderCovarianceToCorrelationResult {
+    pub correlation: GpuTensorHandle,
+    pub sigma: GpuTensorHandle,
 }
 
 /// Descriptor for GEMM epilogues applied to `C = A * B` before storing to `C`.

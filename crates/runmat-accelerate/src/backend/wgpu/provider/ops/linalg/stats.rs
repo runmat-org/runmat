@@ -1,5 +1,14 @@
 use super::*;
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct CovarianceToCorrelationParams {
+    n: u32,
+    total: u32,
+    offset: u32,
+    chunk: u32,
+}
+
 impl WgpuProvider {
     pub(crate) async fn covariance_with_optional_exec(
         &self,
@@ -731,5 +740,399 @@ impl WgpuProvider {
         let _ = self.free_exec(&std_outer);
 
         Ok(correlation)
+    }
+
+    pub(crate) fn covariance_to_correlation_exec(
+        &self,
+        matrix: &GpuTensorHandle,
+    ) -> Result<ProviderCovarianceToCorrelationResult> {
+        let entry = self.get_entry(matrix)?;
+        ensure!(
+            entry.storage != GpuTensorStorage::ComplexInterleaved,
+            "covariance_to_correlation: complex covariance matrices are not supported"
+        );
+        let shape = entry.shape.clone();
+        let (rows, cols) = match shape.len() {
+            0 => (1usize, 1usize),
+            1 => (shape[0], 1usize),
+            2 => (shape[0], shape[1]),
+            _ => {
+                return Err(anyhow!(
+                    "covariance_to_correlation: covariance matrix must be two-dimensional"
+                ))
+            }
+        };
+        ensure!(
+            rows == cols,
+            "covariance_to_correlation: covariance matrix must be square"
+        );
+        let total = rows
+            .checked_mul(cols)
+            .ok_or_else(|| anyhow!("covariance_to_correlation: matrix size overflow"))?;
+        ensure!(
+            total == entry.len,
+            "covariance_to_correlation: shape does not match buffer length"
+        );
+        ensure!(
+            total <= u32::MAX as usize && rows <= u32::MAX as usize,
+            "covariance_to_correlation: matrix exceeds GPU dispatch limits"
+        );
+
+        let correlation_buffer =
+            self.create_storage_buffer_checked(total, "runmat-cov2corr-correlation-out")?;
+        let sigma_buffer = self.create_storage_buffer_checked(rows, "runmat-cov2corr-sigma-out")?;
+
+        if total > 0 {
+            let error_buffer =
+                self.device_ref()
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-cov2corr-error"),
+                        contents: bytes_of(&0u32),
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                    });
+            let shader = covariance_to_correlation_shader(self.precision);
+            let shader_module =
+                self.device_ref()
+                    .create_shader_module(wgpu::ShaderModuleDescriptor {
+                        label: Some("runmat-cov2corr-shader"),
+                        source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
+                    });
+            let bind_layout =
+                self.device_ref()
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("runmat-cov2corr-layout"),
+                        entries: &covariance_to_correlation_bind_layout_entries(),
+                    });
+            let pipeline_layout =
+                self.device_ref()
+                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("runmat-cov2corr-pipeline-layout"),
+                        bind_group_layouts: &[&bind_layout],
+                        push_constant_ranges: &[],
+                    });
+            let pipeline = self.device_ref().create_compute_pipeline(
+                &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                    label: Some("runmat-cov2corr-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: &shader_module,
+                    entry_point: "main",
+                },
+            );
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+            let mut offset = 0usize;
+            while offset < total {
+                let chunk_len = (total - offset).min(chunk_capacity);
+                let params = CovarianceToCorrelationParams {
+                    n: rows as u32,
+                    total: total as u32,
+                    offset: offset as u32,
+                    chunk: chunk_len as u32,
+                };
+                let params_buffer =
+                    self.device_ref()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("runmat-cov2corr-params"),
+                            contents: bytes_of(&params),
+                            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                        });
+                let bind_group = self
+                    .device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-cov2corr-bind"),
+                        layout: &bind_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: correlation_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: sigma_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: error_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::creation::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-cov2corr-encoder",
+                    "runmat-cov2corr-pass",
+                );
+                offset += chunk_len;
+            }
+
+            let error_size = std::mem::size_of::<u32>() as u64;
+            let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-cov2corr-error-staging"),
+                size: error_size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder =
+                self.device_ref()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-cov2corr-error-copy"),
+                    });
+            encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
+            self.submit(encoder);
+            let bytes = self.map_readback_bytes_sync(staging, error_size, "cov2corr")?;
+            let code = u32::from_le_bytes(
+                bytes
+                    .get(..4)
+                    .ok_or_else(|| anyhow!("covariance_to_correlation: short error readback"))?
+                    .try_into()
+                    .map_err(|_| anyhow!("covariance_to_correlation: invalid error readback"))?,
+            );
+            match code {
+                0 => {}
+                1 => {
+                    return Err(anyhow!(
+                        "covariance_to_correlation: covariance matrix must contain finite values or NaN"
+                    ))
+                }
+                2 => {
+                    return Err(anyhow!(
+                        "covariance_to_correlation: covariance matrix diagonal entries must be nonnegative"
+                    ))
+                }
+                3 => {
+                    return Err(anyhow!(
+                        "covariance_to_correlation: covariance matrix must be symmetric"
+                    ))
+                }
+                4 => {
+                    return Err(anyhow!(
+                        "covariance_to_correlation: covariance magnitude exceeds variance bounds"
+                    ))
+                }
+                other => {
+                    return Err(anyhow!(
+                        "covariance_to_correlation: validation failed with code {other}"
+                    ))
+                }
+            }
+        }
+
+        Ok(ProviderCovarianceToCorrelationResult {
+            correlation: self.register_existing_buffer(correlation_buffer, vec![rows, cols], total),
+            sigma: self.register_existing_buffer(sigma_buffer, vec![rows, 1], rows),
+        })
+    }
+}
+
+fn covariance_to_correlation_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 5] {
+    std::array::from_fn(|binding| {
+        let read_only = binding == 0;
+        wgpu::BindGroupLayoutEntry {
+            binding: binding as u32,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: if binding == 4 {
+                wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                }
+            } else {
+                wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                }
+            },
+            count: None,
+        }
+    })
+}
+
+fn covariance_to_correlation_shader(precision: NumericPrecision) -> String {
+    let ty = precision.as_str();
+    let tol = match precision {
+        NumericPrecision::F64 => "1.0e-10",
+        NumericPrecision::F32 => "1.0e-5",
+    };
+    let max_finite = match precision {
+        NumericPrecision::F64 => "1.7976931348623157e308",
+        NumericPrecision::F32 => "3.4028234663852886e38",
+    };
+    let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
+    format!(
+        r#"
+const MAX_FINITE_COV2CORR: {ty} = {ty}({max_finite});
+
+struct Tensor {{
+  data: array<{ty}>,
+}};
+
+struct ErrorState {{
+  code: atomic<u32>,
+}};
+
+struct Params {{
+  n: u32,
+  total: u32,
+  offset: u32,
+  chunk: u32,
+}};
+
+@group(0) @binding(0) var<storage, read> covariance: Tensor;
+@group(0) @binding(1) var<storage, read_write> correlation: Tensor;
+@group(0) @binding(2) var<storage, read_write> sigma: Tensor;
+@group(0) @binding(3) var<storage, read_write> errors: ErrorState;
+@group(0) @binding(4) var<uniform> params: Params;
+
+fn is_nan_cov2corr(x: {ty}) -> bool {{
+  return x != x;
+}}
+
+fn is_finite_cov2corr(x: {ty}) -> bool {{
+  return (x == x) && (abs(x) < MAX_FINITE_COV2CORR);
+}}
+
+fn nan_cov2corr() -> {ty} {{
+  let zero = {ty}(0.0);
+  return zero / zero;
+}}
+
+fn flag_error(code: u32) {{
+  atomicMax(&errors.code, code);
+}}
+
+@compute @workgroup_size({workgroup})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+  if (gid.x >= params.chunk) {{
+    return;
+  }}
+  let idx = gid.x + params.offset;
+  if (idx >= params.total) {{
+    return;
+  }}
+
+  let n = params.n;
+  let row = idx % n;
+  let col = idx / n;
+  let value = covariance.data[idx];
+  let diag_row = covariance.data[row + row * n];
+  let diag_col = covariance.data[col + col * n];
+
+  if (!is_nan_cov2corr(value) && !is_finite_cov2corr(value)) {{
+    flag_error(1u);
+  }}
+  if (row == col && value < {ty}(0.0)) {{
+    flag_error(2u);
+  }}
+  if (row < col) {{
+    let mirror = covariance.data[col + row * n];
+    if ((is_nan_cov2corr(value) && !is_nan_cov2corr(mirror)) || (!is_nan_cov2corr(value) && is_nan_cov2corr(mirror))) {{
+      flag_error(3u);
+    }}
+    if (!is_nan_cov2corr(value) && !is_nan_cov2corr(mirror)) {{
+      let symmetry_tol = {ty}({tol}) * max(max(abs(value), abs(mirror)), {ty}(1.0));
+      if (abs(value - mirror) > symmetry_tol) {{
+        flag_error(3u);
+      }}
+      if (!is_nan_cov2corr(diag_row) && !is_nan_cov2corr(diag_col)) {{
+        let max_covariance = sqrt(diag_row * diag_col);
+        let bound_tol = {ty}({tol}) * max(max_covariance, max(abs(value), {ty}(1.0)));
+        if (abs(value) > max_covariance + bound_tol) {{
+          flag_error(4u);
+        }}
+      }}
+    }}
+  }}
+
+  if (idx < n) {{
+    sigma.data[idx] = sqrt(covariance.data[idx + idx * n]);
+  }}
+
+  let denom = sqrt(diag_row) * sqrt(diag_col);
+  if (denom == {ty}(0.0)) {{
+    correlation.data[idx] = nan_cov2corr();
+  }} else {{
+    correlation.data[idx] = value / denom;
+  }}
+}}
+"#,
+        ty = ty,
+        max_finite = max_finite,
+        tol = tol,
+        workgroup = workgroup,
+    )
+}
+
+#[cfg(test)]
+mod covariance_conversion_tests {
+    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use runmat_accelerate_api::{AccelProvider, HostTensorView};
+
+    #[test]
+    fn covariance_to_correlation_wgpu_returns_resident_outputs() {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let covariance = provider
+            .upload(&HostTensorView {
+                data: &[4.0, 2.0, 2.0, 9.0],
+                shape: &[2, 2],
+            })
+            .expect("upload covariance");
+
+        let result = provider
+            .covariance_to_correlation(&covariance)
+            .expect("covariance to correlation");
+        let correlation =
+            pollster::block_on(provider.download(&result.correlation)).expect("correlation");
+        let sigma = pollster::block_on(provider.download(&result.sigma)).expect("sigma");
+
+        assert_eq!(correlation.shape, vec![2, 2]);
+        assert_eq!(sigma.shape, vec![2, 1]);
+        let expected = [1.0, 1.0 / 3.0, 1.0 / 3.0, 1.0];
+        for (actual, expected) in correlation.data.iter().zip(expected) {
+            assert!((actual - expected).abs() < 1.0e-8);
+        }
+        assert!((sigma.data[0] - 2.0).abs() < 1.0e-8);
+        assert!((sigma.data[1] - 3.0).abs() < 1.0e-8);
+
+        provider.free(&covariance).ok();
+        provider.free(&result.correlation).ok();
+        provider.free(&result.sigma).ok();
+    }
+
+    #[test]
+    fn covariance_to_correlation_wgpu_rejects_invalid_covariance() {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let covariance = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 0.1, 0.2, 1.0],
+                shape: &[2, 2],
+            })
+            .expect("upload covariance");
+
+        let err = provider
+            .covariance_to_correlation(&covariance)
+            .expect_err("invalid covariance");
+
+        assert!(err.to_string().contains("symmetric"));
+        provider.free(&covariance).ok();
     }
 }

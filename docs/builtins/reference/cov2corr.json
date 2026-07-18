@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": ["f32", "f64"],
     "broadcasting": "none",
-    "notes": "RunMat alias for `corrcov`; gpuArray inputs are gathered to the CPU reference path."
+    "notes": "RunMat alias for `corrcov`; resident real gpuArray covariance matrices route through the provider `covariance_to_correlation` hook and return resident correlation and sigma gpuArray outputs."
   },
   "fusion": {
     "elementwise": false,
@@ -33,7 +33,8 @@
     "The diagonal entries of `C` are interpreted as variances and must be nonnegative.",
     "RunMat validates symmetry within floating-point tolerance before converting.",
     "RunMat rejects covariance entries whose magnitude exceeds the variance-implied pairwise bound `sqrt(C(i,i)*C(j,j))`.",
-    "Entries involving a zero-variance variable produce `NaN` because the correlation denominator is zero."
+    "Entries involving a zero-variance variable produce `NaN` because the correlation denominator is zero.",
+    "Real gpuArray inputs stay resident when the active provider implements covariance-to-correlation conversion."
   ],
   "examples": [
     {
