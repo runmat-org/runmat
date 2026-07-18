@@ -1,0 +1,26 @@
+{
+  "title": "dlfeval",
+  "category": "deep_learning",
+  "keywords": ["dlfeval", "deep learning", "automatic differentiation"],
+  "summary": "Report unsupported automatic differentiation evaluation with a deterministic error.",
+  "description": "`dlfeval` is registered but requires automatic differentiation and traced function-handle invocation that are outside this slice.",
+  "behaviors": [
+    "The builtin returns a deterministic unsupported-autodiff error without materializing inputs.",
+    "Function-handle execution over traced `dlarray` values remains future Deep Learning infrastructure work."
+  ],
+  "examples": [
+    {
+      "description": "Deferred Autodiff Evaluation",
+      "input": "[loss,gradients] = dlfeval(@modelLoss, net, X, T)",
+      "output": "RunMat reports that automatic differentiation is not yet implemented."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Registered form",
+      "input": "varargout = dlfeval(fun, args...)",
+      "output": "Unsupported-autodiff error in this slice."
+    }
+  },
+  "gpu_residency": "Autodiff execution is not implemented in this slice; provider-resident gradients remain future work."
+}

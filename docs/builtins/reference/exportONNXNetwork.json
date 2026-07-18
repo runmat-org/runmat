@@ -1,0 +1,26 @@
+{
+  "title": "exportONNXNetwork",
+  "category": "deep_learning",
+  "keywords": ["exportONNXNetwork", "deep learning", "ONNX", "export"],
+  "summary": "Report unsupported ONNX export with a deterministic error.",
+  "description": "`exportONNXNetwork` is registered but ONNX graph serialization and trained-network execution metadata remain outside this slice.",
+  "behaviors": [
+    "The builtin returns a deterministic unsupported-export error without materializing inputs.",
+    "ONNX operator mapping, file writing, and trained-network graph serialization remain future work."
+  ],
+  "examples": [
+    {
+      "description": "Deferred ONNX Export",
+      "input": "exportONNXNetwork(net, 'model.onnx')",
+      "output": "RunMat reports that ONNX export is not yet implemented."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Registered form",
+      "input": "exportONNXNetwork(args...)",
+      "output": "Unsupported-export error in this slice."
+    }
+  },
+  "gpu_residency": "ONNX export is host serialization work, but it depends on trained-network metadata that remains future work."
+}

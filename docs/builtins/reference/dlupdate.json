@@ -1,0 +1,26 @@
+{
+  "title": "dlupdate",
+  "category": "deep_learning",
+  "keywords": ["dlupdate", "deep learning", "model update"],
+  "summary": "Report unsupported model parameter tree updates with a deterministic error.",
+  "description": "`dlupdate` is registered but full model/tree traversal with function-handle invocation remains outside this slice.",
+  "behaviors": [
+    "The builtin returns a deterministic unsupported-update error without materializing inputs.",
+    "Structure, table, dlnetwork, and learnable-parameter traversal remains future Deep Learning infrastructure work."
+  ],
+  "examples": [
+    {
+      "description": "Deferred Model Update",
+      "input": "net = dlupdate(@plus, net, gradients)",
+      "output": "RunMat reports that parameter tree updates are not yet implemented."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Registered form",
+      "input": "out = dlupdate(fun, args...)",
+      "output": "Unsupported-update error in this slice."
+    }
+  },
+  "gpu_residency": "Model update execution is not implemented in this slice; provider-resident updates remain future work."
+}

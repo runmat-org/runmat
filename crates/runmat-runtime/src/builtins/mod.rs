@@ -10,6 +10,7 @@ pub mod constants;
 pub mod containers;
 pub mod control;
 pub mod datetime;
+pub mod deep_learning;
 pub mod diagnostics;
 pub mod duration;
 pub mod fea;

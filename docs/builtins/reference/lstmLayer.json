@@ -1,0 +1,27 @@
+{
+  "title": "lstmLayer",
+  "category": "deep_learning",
+  "keywords": ["lstmLayer", "deep learning", "LSTM"],
+  "summary": "Create an LSTM layer compatibility object.",
+  "description": "`lstmLayer(numHiddenUnits)` creates metadata for LSTM recurrent layers.",
+  "behaviors": [
+    "`numHiddenUnits` must be a positive integer.",
+    "`OutputMode` defaults to `last` and can be overridden with a name-value option.",
+    "Common recurrent-layer options are preserved as properties."
+  ],
+  "examples": [
+    {
+      "description": "Create LSTM Layer",
+      "input": "layer = lstmLayer(64, 'OutputMode', 'sequence', 'Name', 'lstm')",
+      "output": "LSTM layer compatibility object."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "layer = lstmLayer(numHiddenUnits)\nlayer = lstmLayer(numHiddenUnits, Name, Value)",
+      "output": "Layer compatibility object."
+    }
+  },
+  "gpu_residency": "Layer construction is host metadata work and has no provider kernel."
+}

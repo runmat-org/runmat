@@ -1,0 +1,26 @@
+{
+  "title": "trainNetwork",
+  "category": "deep_learning",
+  "keywords": ["trainNetwork", "deep learning", "training"],
+  "summary": "Report unsupported full neural-network training with a deterministic error.",
+  "description": "`trainNetwork` is registered so client scripts fail with a clear RunMat diagnostic instead of an undefined-builtin error.",
+  "behaviors": [
+    "The builtin returns a deterministic unsupported-training error without materializing training inputs.",
+    "Full optimizer, autodiff, datastore, GPU execution, and trained-network object semantics remain in the Deep Learning training slice."
+  ],
+  "examples": [
+    {
+      "description": "Deferred Training",
+      "input": "net = trainNetwork(X, Y, layers, options)",
+      "output": "RunMat reports that training infrastructure is not yet implemented."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Registered form",
+      "input": "net = trainNetwork(args...)",
+      "output": "Unsupported-training error in this slice."
+    }
+  },
+  "gpu_residency": "Training execution is not implemented in this slice; GPU training kernels remain future work."
+}

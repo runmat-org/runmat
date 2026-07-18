@@ -1,0 +1,28 @@
+{
+  "title": "crossentropy",
+  "category": "deep_learning",
+  "keywords": ["crossentropy", "deep learning", "loss"],
+  "summary": "Compute cross-entropy loss for numeric predictions and targets.",
+  "description": "`crossentropy(Y,T)` computes mean cross-entropy over same-sized numeric prediction and target arrays.",
+  "behaviors": [
+    "Inputs must be finite, non-empty numeric arrays with the same number of elements.",
+    "Predictions are clipped to a small open interval before taking logs.",
+    "Optional format/reduction arguments are rejected with explicit compatibility errors.",
+    "Advanced options, dlarray label-aware reductions, and weighting remain future work."
+  ],
+  "examples": [
+    {
+      "description": "Compute Loss",
+      "input": "loss = crossentropy([0.8 0.2], [1 0])",
+      "output": "Scalar loss."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "loss = crossentropy(Y, T)",
+      "output": "Numeric scalar."
+    }
+  },
+  "gpu_residency": "`crossentropy` runs on host tensors in this slice; provider kernels remain future GPU work."
+}

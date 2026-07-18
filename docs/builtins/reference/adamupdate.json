@@ -1,0 +1,26 @@
+{
+  "title": "adamupdate",
+  "category": "deep_learning",
+  "keywords": ["adamupdate", "deep learning", "Adam", "optimizer"],
+  "summary": "Report unsupported Adam optimizer state updates with a deterministic error.",
+  "description": "`adamupdate` is registered but full optimizer-state semantics over model gradients remain outside this slice.",
+  "behaviors": [
+    "The builtin returns a deterministic unsupported-optimizer error without materializing inputs.",
+    "Adam state updates for numeric arrays, dlarray values, model parameter structures, and GPU residency remain future work."
+  ],
+  "examples": [
+    {
+      "description": "Deferred Optimizer Update",
+      "input": "[params,avg,avgSq] = adamupdate(params, gradients, avg, avgSq, iteration)",
+      "output": "RunMat reports that optimizer updates are not yet implemented."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Registered form",
+      "input": "varargout = adamupdate(args...)",
+      "output": "Unsupported-optimizer error in this slice."
+    }
+  },
+  "gpu_residency": "Optimizer execution is not implemented in this slice; provider-resident update kernels remain future work."
+}

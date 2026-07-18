@@ -1,0 +1,26 @@
+{
+  "title": "featureInputLayer",
+  "category": "deep_learning",
+  "keywords": ["featureInputLayer", "deep learning", "input layer"],
+  "summary": "Create a feature input layer compatibility object.",
+  "description": "`featureInputLayer(inputSize)` creates host metadata for feature-input network definitions.",
+  "behaviors": [
+    "`inputSize` may be a positive integer scalar or numeric vector of positive integers.",
+    "`Name`, `Description`, `Normalization`, and other common name-value options are stored as properties."
+  ],
+  "examples": [
+    {
+      "description": "Create Feature Input",
+      "input": "layer = featureInputLayer(4, 'Name', 'features')",
+      "output": "`layer.InputSize` stores `4`."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "layer = featureInputLayer(inputSize)\nlayer = featureInputLayer(inputSize, Name, Value)",
+      "output": "Layer compatibility object."
+    }
+  },
+  "gpu_residency": "Layer construction is host metadata work and has no provider kernel."
+}

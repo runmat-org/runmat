@@ -1,0 +1,35 @@
+{
+  "title": "padsequences",
+  "category": "deep_learning",
+  "keywords": ["padsequences", "deep learning", "sequence", "padding"],
+  "summary": "Pad or truncate numeric sequence cell arrays.",
+  "description": "`padsequences(sequences, paddingDim)` pads or truncates numeric sequences stored in a cell array along the requested dimension.",
+  "behaviors": [
+    "`sequences` must be a cell array of numeric scalar/vector/tensor sequences.",
+    "`paddingDim` is a required positive integer dimension.",
+    "`PaddingDirection` accepts `left`, `right`, or `both`; the default is `right`.",
+    "`Length` accepts `longest`, `shortest`, or a positive integer.",
+    "`PaddingValue` accepts a finite numeric scalar and defaults to `0`.",
+    "`UniformOutput` defaults to `true` and stacks padded sequences into a numeric tensor; `false` preserves the input cell shape."
+  ],
+  "examples": [
+    {
+      "description": "Right Pad Sequences",
+      "input": "Y = padsequences({[1 2], 3}, 2, 'PaddingValue', -1)",
+      "output": "A numeric tensor with right-padded row sequences."
+    },
+    {
+      "description": "Preserve Cell Shape",
+      "input": "C = padsequences({[1 2 3], [4 5]}, 2, 'Length', 2, 'PaddingDirection', 'left', 'UniformOutput', false)",
+      "output": "A cell array whose first sequence keeps the tail `[2 3]`."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "Y = padsequences(sequences, paddingDim)\nY = padsequences(sequences, paddingDim, Name, Value)",
+      "output": "Numeric tensor by default, or cell array when `UniformOutput` is false."
+    }
+  },
+  "gpu_residency": "`padsequences` materializes host sequence tensors in this slice; provider-resident sequence padding remains future GPU work."
+}

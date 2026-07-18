@@ -1,0 +1,28 @@
+{
+  "title": "dlarray",
+  "category": "deep_learning",
+  "keywords": ["dlarray", "deep learning", "array labels"],
+  "summary": "Create a dlarray compatibility object around host data.",
+  "description": "`dlarray(X)` wraps host data and optional dimension labels in a RunMat compatibility object.",
+  "behaviors": [
+    "The underlying `Data` value is preserved without conversion.",
+    "A second text argument is stored as `Format` and `Labels`.",
+    "Additional constructor options and provider-resident gpuArray data are rejected with explicit compatibility errors.",
+    "Automatic differentiation and labeled arithmetic are not implemented in this slice."
+  ],
+  "examples": [
+    {
+      "description": "Wrap Data",
+      "input": "X = dlarray(rand(3,4), 'CB')",
+      "output": "dlarray compatibility object."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "X = dlarray(data)\nX = dlarray(data, fmt)",
+      "output": "dlarray compatibility object."
+    }
+  },
+  "gpu_residency": "`dlarray` currently wraps host values; provider-resident labeled tensor execution remains future work."
+}
