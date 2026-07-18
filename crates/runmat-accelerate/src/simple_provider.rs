@@ -10,13 +10,14 @@ use runmat_accelerate_api::{
     ProviderAdamUpdateResult, ProviderBandwidth, ProviderBitModulationRequest,
     ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult, ProviderCholResult,
     ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
-    ProviderCovarianceToCorrelationResult, ProviderEigResult, ProviderFindResult,
-    ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
-    ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderModulationRequest,
-    ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder,
-    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions,
-    ProviderQrPivot, ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind, SetdiffOptions,
-    SetdiffResult, SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    ProviderCovarianceToCorrelationResult, ProviderCrossentropyMode, ProviderCrossentropyRequest,
+    ProviderCrossentropyResult, ProviderEigResult, ProviderFindResult, ProviderHermitianKind,
+    ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions, ProviderLinsolveOptions,
+    ProviderLinsolveResult, ProviderLuResult, ProviderModulationRequest, ProviderNanMode,
+    ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder, ProviderPinvOptions,
+    ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions, ProviderQrPivot,
+    ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind, SetdiffOptions, SetdiffResult,
+    SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -981,6 +982,48 @@ fn provider_adam_update_values(
         updated_average_grad,
         updated_average_sq_grad,
     ))
+}
+
+fn provider_crossentropy_terms(
+    predictions: &[f64],
+    targets: &[f64],
+    mode: ProviderCrossentropyMode,
+) -> Result<Vec<f64>> {
+    ensure!(
+        predictions.len() == targets.len(),
+        "crossentropy_terms: predictions and targets must have the same length"
+    );
+    ensure!(
+        !predictions.is_empty(),
+        "crossentropy_terms: predictions must not be empty"
+    );
+    ensure!(
+        predictions.iter().all(|value| value.is_finite())
+            && targets.iter().all(|value| value.is_finite()),
+        "crossentropy_terms: inputs must contain finite values"
+    );
+
+    let eps = 1.0e-12;
+    let mut losses = Vec::with_capacity(predictions.len());
+    for (&prediction, &target) in predictions.iter().zip(targets.iter()) {
+        ensure!(
+            (0.0..=1.0).contains(&target),
+            "crossentropy_terms: targets must be probabilities in the range [0, 1]"
+        );
+        let clipped = prediction.clamp(eps, 1.0 - eps);
+        let loss = match mode {
+            ProviderCrossentropyMode::SingleLabel => -target * clipped.ln(),
+            ProviderCrossentropyMode::MultiLabel => {
+                -target * clipped.ln() - (1.0 - target) * (1.0 - clipped).ln()
+            }
+        };
+        ensure!(
+            loss.is_finite(),
+            "crossentropy_terms: loss produced a non-finite value"
+        );
+        losses.push(loss);
+    }
+    Ok(losses)
 }
 
 fn product(shape: &[usize]) -> usize {
@@ -2279,6 +2322,50 @@ impl AccelProvider for InProcessProvider {
             parameters: self.allocate_tensor(parameters, parameters_entry_shape.clone()),
             average_grad: self.allocate_tensor(average_grad, parameters_entry_shape.clone()),
             average_sq_grad: self.allocate_tensor(average_sq_grad, parameters_entry_shape),
+        })
+    }
+
+    fn crossentropy_terms(
+        &self,
+        request: &ProviderCrossentropyRequest<'_>,
+    ) -> Result<ProviderCrossentropyResult> {
+        let shape = request.predictions.shape.clone();
+        let len = product(&shape);
+        ensure!(len > 0, "crossentropy_terms: predictions must not be empty");
+        ensure!(
+            request.targets.shape == shape,
+            "crossentropy_terms: targets must match prediction shape"
+        );
+        ensure!(
+            runmat_accelerate_api::handle_storage(request.predictions)
+                != GpuTensorStorage::ComplexInterleaved
+                && runmat_accelerate_api::handle_storage(request.targets)
+                    != GpuTensorStorage::ComplexInterleaved,
+            "crossentropy_terms: complex inputs are not supported"
+        );
+
+        let (predictions, targets) = {
+            let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
+            let predictions = guard
+                .get(&request.predictions.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("crossentropy_terms: unknown predictions buffer"))?;
+            let targets = guard
+                .get(&request.targets.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("crossentropy_terms: unknown targets buffer"))?;
+            (predictions, targets)
+        };
+        ensure!(
+            predictions.len() == len && targets.len() == len,
+            "crossentropy_terms: tensor shapes do not match buffer lengths"
+        );
+
+        Ok(ProviderCrossentropyResult {
+            losses: self.allocate_tensor(
+                provider_crossentropy_terms(&predictions, &targets, request.mode)?,
+                shape,
+            ),
         })
     }
 
@@ -7538,6 +7625,37 @@ mod tests {
             &provider,
             &result.average_sq_grad,
             &[0.00001, 0.00004, 0.00009],
+            &shape,
+        );
+    }
+
+    #[test]
+    fn crossentropy_terms_return_resident_losses() {
+        let provider = InProcessProvider::new();
+        let shape = [1, 2];
+        let predictions = real_handle(&provider, &[0.8, 0.2], &shape);
+        let targets = real_handle(&provider, &[1.0, 0.0], &shape);
+
+        let result = provider
+            .crossentropy_terms(&ProviderCrossentropyRequest {
+                predictions: &predictions,
+                targets: &targets,
+                mode: ProviderCrossentropyMode::SingleLabel,
+            })
+            .expect("crossentropy terms");
+        assert_real_close(&provider, &result.losses, &[-0.8_f64.ln(), 0.0], &shape);
+
+        let result = provider
+            .crossentropy_terms(&ProviderCrossentropyRequest {
+                predictions: &predictions,
+                targets: &targets,
+                mode: ProviderCrossentropyMode::MultiLabel,
+            })
+            .expect("multilabel crossentropy terms");
+        assert_real_close(
+            &provider,
+            &result.losses,
+            &[-0.8_f64.ln(), -0.8_f64.ln()],
             &shape,
         );
     }

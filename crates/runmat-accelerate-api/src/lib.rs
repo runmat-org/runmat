@@ -1418,6 +1418,16 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!("adam_update not supported by provider"))
     }
 
+    /// Compute per-element cross-entropy loss terms for resident prediction and target tensors.
+    fn crossentropy_terms(
+        &self,
+        _request: &ProviderCrossentropyRequest<'_>,
+    ) -> anyhow::Result<ProviderCrossentropyResult> {
+        Err(anyhow::anyhow!(
+            "crossentropy_terms not supported by provider"
+        ))
+    }
+
     /// Construct a diagonal matrix from a vector-like tensor. `offset` matches MATLAB semantics.
     fn diag_from_vector(
         &self,
@@ -3199,6 +3209,27 @@ pub struct ProviderAdamUpdateResult {
     pub parameters: GpuTensorHandle,
     pub average_grad: GpuTensorHandle,
     pub average_sq_grad: GpuTensorHandle,
+}
+
+/// Provider-side cross-entropy mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderCrossentropyMode {
+    SingleLabel,
+    MultiLabel,
+}
+
+/// Provider-side cross-entropy request.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderCrossentropyRequest<'a> {
+    pub predictions: &'a GpuTensorHandle,
+    pub targets: &'a GpuTensorHandle,
+    pub mode: ProviderCrossentropyMode,
+}
+
+/// Provider-side cross-entropy result containing per-element loss terms.
+#[derive(Debug, Clone)]
+pub struct ProviderCrossentropyResult {
+    pub losses: GpuTensorHandle,
 }
 
 /// Descriptor for GEMM epilogues applied to `C = A * B` before storing to `C`.

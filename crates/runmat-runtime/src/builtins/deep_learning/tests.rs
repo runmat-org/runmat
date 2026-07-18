@@ -295,6 +295,77 @@ fn crossentropy_computes_mean_loss() {
 }
 
 #[test]
+fn crossentropy_gpu_inputs_use_provider_for_scalar_reduction() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let shape = [1usize, 2usize];
+        let predictions = provider
+            .upload(&HostTensorView {
+                data: &[0.8, 0.2],
+                shape: &shape,
+            })
+            .expect("upload predictions");
+        let targets = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 0.0],
+                shape: &shape,
+            })
+            .expect("upload targets");
+
+        provider.reset_telemetry();
+        let out = block_on(crossentropy_builtin(
+            Value::GpuTensor(predictions),
+            Value::GpuTensor(targets),
+            vec![],
+        ))
+        .expect("crossentropy gpu");
+        let Value::Num(loss) = out else {
+            panic!("expected scalar");
+        };
+        assert!((loss - 0.11157177565710488).abs() < 1.0e-12);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn crossentropy_gpu_reduction_none_returns_resident_losses() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let shape = [1usize, 2usize];
+        let predictions = provider
+            .upload(&HostTensorView {
+                data: &[0.8, 0.2],
+                shape: &shape,
+            })
+            .expect("upload predictions");
+        let targets = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 0.0],
+                shape: &shape,
+            })
+            .expect("upload targets");
+
+        provider.reset_telemetry();
+        let out = block_on(crossentropy_builtin(
+            Value::GpuTensor(predictions),
+            Value::GpuTensor(targets),
+            vec![
+                Value::String("ClassificationMode".into()),
+                Value::String("multi-label".into()),
+                Value::String("Reduction".into()),
+                Value::String("none".into()),
+            ],
+        ))
+        .expect("crossentropy gpu unreduced");
+        assert!(matches!(out, Value::GpuTensor(_)));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let gathered = crate::builtins::common::test_support::gather(out).expect("gather losses");
+        assert_eq!(gathered.shape, shape);
+        assert!((gathered.data[0] + 0.8_f64.ln()).abs() < 1.0e-12);
+        assert!((gathered.data[1] + 0.8_f64.ln()).abs() < 1.0e-12);
+    });
+}
+
+#[test]
 fn crossentropy_supports_dataformat_class_weights_and_batch_normalization() {
     let out = block_on(crossentropy_builtin(
         Value::Tensor(Tensor::new(vec![0.8, 0.2, 0.25, 0.75], vec![2, 2]).unwrap()),

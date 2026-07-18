@@ -1,3 +1,6 @@
+use runmat_accelerate_api::{
+    GpuTensorStorage, ProviderCrossentropyMode, ProviderCrossentropyRequest,
+};
 use runmat_builtins::{NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -22,6 +25,21 @@ pub(super) async fn crossentropy_builtin(
     targets: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    let has_gpu = matches!(&predictions, Value::GpuTensor(_))
+        || matches!(&targets, Value::GpuTensor(_))
+        || rest
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)));
+    let (predictions, targets) = if has_gpu {
+        if let Some(value) = try_crossentropy_gpu(&predictions, &targets, &rest).await? {
+            return Ok(value);
+        }
+        let mut gathered = gather_args(vec![predictions, targets]).await?;
+        (gathered.remove(0), gathered.remove(0))
+    } else {
+        (predictions, targets)
+    };
+
     let predictions = LossPayload::parse(&predictions, "predictions")?;
     let targets = LossPayload::parse(&targets, "targets")?;
     if predictions.data.len() != targets.data.len() {
@@ -79,6 +97,123 @@ pub(super) async fn crossentropy_builtin(
             predictions.materialize_scalar(normalized)
         }
         CrossentropyReduction::None => predictions.materialize_array(weighted_losses, false),
+    }
+}
+
+async fn try_crossentropy_gpu(
+    predictions: &Value,
+    targets: &Value,
+    rest: &[Value],
+) -> BuiltinResult<Option<Value>> {
+    let (Value::GpuTensor(predictions), Value::GpuTensor(targets)) = (predictions, targets) else {
+        return Ok(None);
+    };
+    if rest
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+        || rest
+            .first()
+            .is_some_and(|value| !is_crossentropy_option_name(value))
+    {
+        return Ok(None);
+    }
+    if runmat_accelerate_api::handle_storage(predictions) == GpuTensorStorage::ComplexInterleaved
+        || runmat_accelerate_api::handle_storage(targets) == GpuTensorStorage::ComplexInterleaved
+    {
+        return Err(deep_learning_error(
+            "crossentropy",
+            "crossentropy: complex gpuArray inputs are not supported",
+        ));
+    }
+    if predictions.shape != targets.shape {
+        return Err(deep_learning_error(
+            "crossentropy",
+            format!(
+                "crossentropy: targets must match prediction shape {:?}, got {:?}",
+                predictions.shape, targets.shape
+            ),
+        ));
+    }
+    let len = predictions.shape.iter().copied().product::<usize>();
+    if len == 0 {
+        return Err(deep_learning_error(
+            "crossentropy",
+            "crossentropy: predictions and targets must not be empty",
+        ));
+    }
+
+    let Some(options) = GpuCrossentropyOptions::from_args(rest.to_vec(), &predictions.shape)?
+    else {
+        return Ok(None);
+    };
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(predictions) else {
+        return Ok(None);
+    };
+    let Some(target_provider) = runmat_accelerate_api::provider_for_handle(targets) else {
+        return Ok(None);
+    };
+    if !std::ptr::eq(provider, target_provider) {
+        return Ok(None);
+    }
+
+    let result = match provider.crossentropy_terms(&ProviderCrossentropyRequest {
+        predictions,
+        targets,
+        mode: options.mode.into_provider(),
+    }) {
+        Ok(result) => result,
+        Err(err) if provider_is_unsupported(&err) => return Ok(None),
+        Err(err) => {
+            return Err(deep_learning_error(
+                "crossentropy",
+                format!("crossentropy: {err}"),
+            ))
+        }
+    };
+
+    match options.reduction {
+        CrossentropyReduction::None => Ok(Some(Value::GpuTensor(result.losses))),
+        CrossentropyReduction::Sum => {
+            let sum = match provider.reduce_sum(&result.losses).await {
+                Ok(sum) => sum,
+                Err(err) if provider_is_unsupported(&err) => {
+                    let _ = provider.free(&result.losses);
+                    return Ok(None);
+                }
+                Err(err) => {
+                    let _ = provider.free(&result.losses);
+                    return Err(deep_learning_error(
+                        "crossentropy",
+                        format!("crossentropy: {err}"),
+                    ));
+                }
+            };
+            let scalar = match provider.read_scalar(&sum, 0) {
+                Ok(value) => value / options.normalization_denominator(len, &predictions.shape)?,
+                Err(err) if provider_is_unsupported(&err) => {
+                    let _ = provider.free(&result.losses);
+                    let _ = provider.free(&sum);
+                    return Ok(None);
+                }
+                Err(err) => {
+                    let _ = provider.free(&result.losses);
+                    let _ = provider.free(&sum);
+                    return Err(deep_learning_error(
+                        "crossentropy",
+                        format!("crossentropy: {err}"),
+                    ));
+                }
+            };
+            let _ = provider.free(&result.losses);
+            let _ = provider.free(&sum);
+            if !scalar.is_finite() {
+                return Err(deep_learning_error(
+                    "crossentropy",
+                    "crossentropy: reduction produced a non-finite loss",
+                ));
+            }
+            Ok(Some(Value::Num(scalar)))
+        }
     }
 }
 
@@ -278,6 +413,7 @@ impl LossPayload {
     }
 }
 
+#[derive(Clone, Copy)]
 enum ClassificationMode {
     SingleLabel,
     MultiLabel,
@@ -297,8 +433,16 @@ impl ClassificationMode {
             )),
         }
     }
+
+    fn into_provider(self) -> ProviderCrossentropyMode {
+        match self {
+            Self::SingleLabel => ProviderCrossentropyMode::SingleLabel,
+            Self::MultiLabel => ProviderCrossentropyMode::MultiLabel,
+        }
+    }
 }
 
+#[derive(Clone, Copy)]
 enum CrossentropyReduction {
     Sum,
     None,
@@ -320,6 +464,7 @@ impl CrossentropyReduction {
     }
 }
 
+#[derive(Clone, Copy)]
 enum NormalizationFactor {
     AllElements,
     BatchSize,
@@ -357,6 +502,84 @@ impl NormalizationFactor {
                 }
                 Ok(Self::Scalar(scalar))
             }
+        }
+    }
+}
+
+struct GpuCrossentropyOptions {
+    mode: ClassificationMode,
+    reduction: CrossentropyReduction,
+    normalization: NormalizationFactor,
+    data_format: Option<String>,
+}
+
+impl GpuCrossentropyOptions {
+    fn from_args(args: Vec<Value>, shape: &[usize]) -> BuiltinResult<Option<Self>> {
+        let mut parsed = parse_name_values(args, "crossentropy")?;
+        if parsed.remove("weights").is_some()
+            || parsed.remove("weightsformat").is_some()
+            || parsed.remove("mask").is_some()
+        {
+            return Ok(None);
+        }
+        let mode = parsed
+            .remove("classificationmode")
+            .or_else(|| parsed.remove("targetcategories"))
+            .map(|value| ClassificationMode::parse(&value, "ClassificationMode"))
+            .transpose()?
+            .unwrap_or(ClassificationMode::SingleLabel);
+        let reduction = parsed
+            .remove("reduction")
+            .map(|value| CrossentropyReduction::parse(&value))
+            .transpose()?
+            .unwrap_or(CrossentropyReduction::Sum);
+        let data_format = parsed
+            .remove("dataformat")
+            .map(|value| scalar_text(&value, "crossentropy"))
+            .transpose()?
+            .filter(|format| !format.is_empty());
+        let normalization = parsed
+            .remove("normalizationfactor")
+            .map(|value| NormalizationFactor::parse(&value))
+            .transpose()?
+            .unwrap_or_else(|| {
+                if data_format.is_some() {
+                    NormalizationFactor::BatchSize
+                } else {
+                    NormalizationFactor::AllElements
+                }
+            });
+        if matches!(normalization, NormalizationFactor::MaskIncluded) {
+            return Ok(None);
+        }
+        if !parsed.is_empty() {
+            let first = parsed.keys().next().cloned().unwrap_or_default();
+            return Err(deep_learning_error(
+                "crossentropy",
+                format!("crossentropy: unsupported option '{first}'"),
+            ));
+        }
+        validate_format_for_shape(data_format.as_deref(), shape, "DataFormat")?;
+        Ok(Some(Self {
+            mode,
+            reduction,
+            normalization,
+            data_format,
+        }))
+    }
+
+    fn normalization_denominator(&self, len: usize, shape: &[usize]) -> BuiltinResult<f64> {
+        match self.normalization {
+            NormalizationFactor::AllElements => Ok(len as f64),
+            NormalizationFactor::BatchSize => {
+                Ok(batch_size_for_shape(shape, self.data_format.as_deref()))
+            }
+            NormalizationFactor::MaskIncluded => Err(deep_learning_error(
+                "crossentropy",
+                "crossentropy: gpuArray MaskIncluded normalization requires host fallback",
+            )),
+            NormalizationFactor::None => Ok(1.0),
+            NormalizationFactor::Scalar(value) => Ok(value),
         }
     }
 }
@@ -668,6 +891,19 @@ fn batch_size(predictions: &LossPayload, format: Option<&str>) -> BuiltinResult<
     Ok(predictions.shape.get(batch_dim).copied().unwrap_or(1) as f64)
 }
 
+fn batch_size_for_shape(shape: &[usize], format: Option<&str>) -> f64 {
+    let Some(format) = format else {
+        return shape.iter().copied().product::<usize>() as f64;
+    };
+    let Some(batch_dim) = format
+        .chars()
+        .position(|label| label.eq_ignore_ascii_case(&'B'))
+    else {
+        return 1.0;
+    };
+    shape.get(batch_dim).copied().unwrap_or(1) as f64
+}
+
 fn reduce_mask_included(
     predictions: &LossPayload,
     weighted_losses: &[f64],
@@ -763,4 +999,9 @@ fn column_major_strides(shape: &[usize]) -> Vec<usize> {
         stride = stride.saturating_mul(*dim);
     }
     strides
+}
+
+fn provider_is_unsupported(err: &anyhow::Error) -> bool {
+    let message = err.to_string();
+    message.contains("not supported") || message.contains("unsupported")
 }

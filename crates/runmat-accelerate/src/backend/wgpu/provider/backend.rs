@@ -13,6 +13,7 @@ use runmat_accelerate_api::{
     ProviderAdamUpdateResult, ProviderBandwidth, ProviderBlackScholesPriceRequest,
     ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
     ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
+    ProviderCrossentropyMode, ProviderCrossentropyRequest, ProviderCrossentropyResult,
     ProviderCummaxResult, ProviderCumminResult, ProviderEigResult, ProviderFindResult,
     ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
     ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderMeshgridResult,
