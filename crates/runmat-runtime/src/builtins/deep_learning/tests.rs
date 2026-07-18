@@ -4,7 +4,9 @@ use super::losses::*;
 use super::sequences::*;
 use super::training::*;
 use futures::executor::block_on;
-use runmat_builtins::{CellArray, LogicalArray, NumericDType, Tensor, Value};
+use runmat_builtins::{
+    CellArray, LogicalArray, NumericDType, StringArray, StructValue, Tensor, Value,
+};
 
 fn layer_name(value: &Value) -> String {
     let Value::Object(object) = value else {
@@ -699,6 +701,203 @@ fn dlfeval_rejects_missing_or_non_callable_function() {
 
     let err = block_on(dlfeval_builtin(vec![Value::String("@plus".into())])).unwrap_err();
     assert!(err.to_string().contains("expected a function handle"));
+}
+
+#[test]
+fn dlupdate_maps_matching_struct_and_cell_trees() {
+    let mut left = StructValue::new();
+    left.insert(
+        "Weights",
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+    );
+    left.insert(
+        "Bias",
+        Value::Cell(CellArray::new(vec![Value::Num(3.0)], 1, 1).unwrap()),
+    );
+    let mut right = StructValue::new();
+    right.insert(
+        "Weights",
+        Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap()),
+    );
+    right.insert(
+        "Bias",
+        Value::Cell(CellArray::new(vec![Value::Num(4.0)], 1, 1).unwrap()),
+    );
+
+    let out = block_on(dlupdate_builtin(vec![
+        Value::FunctionHandle("plus".into()),
+        Value::Struct(left),
+        Value::Struct(right),
+    ]))
+    .expect("dlupdate plus");
+    let Value::Struct(out) = out else {
+        panic!("expected struct output");
+    };
+    let Value::Tensor(weights) = out.fields.get("Weights").unwrap() else {
+        panic!("expected tensor weights");
+    };
+    assert_eq!(weights.data, vec![11.0, 22.0]);
+    let Value::Cell(bias) = out.fields.get("Bias").unwrap() else {
+        panic!("expected cell bias");
+    };
+    assert_eq!(bias.data, vec![Value::Num(7.0)]);
+}
+
+#[test]
+fn dlupdate_reconstructs_multiple_output_trees() {
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let first = Value::Cell(CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).unwrap());
+    let second =
+        Value::Cell(CellArray::new(vec![Value::Num(10.0), Value::Num(20.0)], 1, 2).unwrap());
+
+    let out = block_on(dlupdate_builtin(vec![
+        Value::FunctionHandle("deal".into()),
+        first.clone(),
+        second.clone(),
+    ]))
+    .expect("dlupdate deal");
+    let Value::OutputList(outputs) = out else {
+        panic!("expected output list");
+    };
+    assert_eq!(outputs, vec![first, second]);
+}
+
+#[test]
+fn dlupdate_maps_learnables_table_value_variable_only() {
+    let left = crate::builtins::table::table_from_columns(
+        vec!["Layer".into(), "Parameter".into(), "Value".into()],
+        vec![
+            Value::StringArray(
+                StringArray::new(vec!["fc".into(), "fc".into()], vec![2, 1]).unwrap(),
+            ),
+            Value::StringArray(
+                StringArray::new(vec!["Weights".into(), "Bias".into()], vec![2, 1]).unwrap(),
+            ),
+            Value::Cell(
+                CellArray::new(
+                    vec![
+                        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+                        Value::Num(3.0),
+                    ],
+                    2,
+                    1,
+                )
+                .unwrap(),
+            ),
+        ],
+    )
+    .expect("left table");
+    let right = crate::builtins::table::table_from_columns(
+        vec!["Layer".into(), "Parameter".into(), "Value".into()],
+        vec![
+            Value::StringArray(
+                StringArray::new(vec!["fc".into(), "fc".into()], vec![2, 1]).unwrap(),
+            ),
+            Value::StringArray(
+                StringArray::new(vec!["Weights".into(), "Bias".into()], vec![2, 1]).unwrap(),
+            ),
+            Value::Cell(
+                CellArray::new(
+                    vec![
+                        Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap()),
+                        Value::Num(4.0),
+                    ],
+                    2,
+                    1,
+                )
+                .unwrap(),
+            ),
+        ],
+    )
+    .expect("right table");
+
+    let out = block_on(dlupdate_builtin(vec![
+        Value::FunctionHandle("plus".into()),
+        left,
+        right,
+    ]))
+    .expect("dlupdate table");
+    let Value::Object(object) = out else {
+        panic!("expected table object");
+    };
+    let vars = crate::builtins::table::table_variables(&object).expect("table variables");
+    assert_eq!(
+        vars.fields.get("Layer"),
+        Some(&Value::StringArray(
+            StringArray::new(vec!["fc".into(), "fc".into()], vec![2, 1]).unwrap()
+        ))
+    );
+    let Value::Cell(values) = vars.fields.get("Value").unwrap() else {
+        panic!("expected Value cell");
+    };
+    let Value::Tensor(weights) = &values.data[0] else {
+        panic!("expected weights tensor");
+    };
+    assert_eq!(weights.data, vec![11.0, 22.0]);
+    assert_eq!(values.data[1], Value::Num(7.0));
+}
+
+#[test]
+fn dlupdate_treats_dlarray_objects_as_leaves() {
+    let data = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+    let dlarray = block_on(dlarray_builtin(
+        data.clone(),
+        vec![Value::String("CB".into())],
+    ))
+    .expect("dlarray");
+
+    let out = block_on(dlupdate_builtin(vec![
+        Value::FunctionHandle("class".into()),
+        dlarray.clone(),
+    ]))
+    .expect("dlupdate dlarray");
+    assert_eq!(out, Value::String("dlarray".into()));
+}
+
+#[test]
+fn dlupdate_rejects_non_callable_and_mismatched_trees() {
+    let err = block_on(dlupdate_builtin(vec![
+        Value::String("@plus".into()),
+        Value::Num(1.0),
+    ]))
+    .unwrap_err();
+    assert!(err.to_string().contains("expected a function handle"));
+
+    let err = block_on(dlupdate_builtin(vec![
+        Value::FunctionHandle("plus".into()),
+        Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+        Value::Cell(CellArray::new(vec![Value::Num(2.0), Value::Num(3.0)], 1, 2).unwrap()),
+    ]))
+    .unwrap_err();
+    assert!(err.to_string().contains("same shape"));
+
+    let generic_table = crate::builtins::table::table_from_columns(
+        vec!["A".into(), "B".into()],
+        vec![Value::Num(1.0), Value::Num(2.0)],
+    )
+    .expect("generic table");
+    let err = block_on(dlupdate_builtin(vec![
+        Value::FunctionHandle("plus".into()),
+        generic_table,
+    ]))
+    .unwrap_err();
+    assert!(err.to_string().contains("learnables tables"));
+
+    let malformed_learnables = crate::builtins::table::table_from_columns(
+        vec!["Layer".into(), "Parameter".into(), "Value".into()],
+        vec![
+            Value::StringArray(StringArray::new(vec!["fc".into()], vec![1, 1]).unwrap()),
+            Value::StringArray(StringArray::new(vec!["Weights".into()], vec![1, 1]).unwrap()),
+            Value::Num(1.0),
+        ],
+    )
+    .expect("malformed learnables table");
+    let err = block_on(dlupdate_builtin(vec![
+        Value::FunctionHandle("plus".into()),
+        malformed_learnables,
+    ]))
+    .unwrap_err();
+    assert!(err.to_string().contains("Value variable must be a cell"));
 }
 
 #[test]

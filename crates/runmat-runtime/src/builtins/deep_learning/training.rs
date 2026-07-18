@@ -1,4 +1,4 @@
-use runmat_builtins::{NumericDType, Tensor, Value};
+use runmat_builtins::{CellArray, NumericDType, ObjectInstance, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::BuiltinResult;
@@ -7,6 +7,8 @@ use super::{
     any_type, deep_learning_error, gather_args, object, parse_name_values, scalar_text,
     text_or_missing, unsupported_error,
 };
+
+const DLUPDATE_MAX_DEPTH: usize = 256;
 
 #[runtime_builtin(
     name = "trainingOptions",
@@ -209,17 +211,44 @@ pub(super) async fn adamupdate_builtin(args: Vec<Value>) -> BuiltinResult<Value>
 #[runtime_builtin(
     name = "dlupdate",
     category = "deep_learning",
-    summary = "Report that model parameter tree updates are not yet implemented.",
+    summary = "Apply a function handle across matching parameter trees.",
     keywords = "dlupdate,deep learning,model update",
     type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    descriptor(crate::builtins::deep_learning::DLUPDATE_DESCRIPTOR),
     builtin_path = "crate::builtins::deep_learning::training"
 )]
-pub(super) async fn dlupdate_builtin(_args: Vec<Value>) -> BuiltinResult<Value> {
-    Err(unsupported_error(
-        "dlupdate",
-        "dlupdate requires model parameter tree traversal and function-handle invocation semantics",
-    ))
+pub(super) async fn dlupdate_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let Some((function, rest)) = args.split_first() else {
+        return Err(deep_learning_error(
+            "dlupdate",
+            "dlupdate: expected a function handle followed by one or more parameter trees",
+        ));
+    };
+    if !is_function_handle(function) {
+        return Err(deep_learning_error(
+            "dlupdate",
+            format!("dlupdate: expected a function handle, got {function:?}"),
+        ));
+    }
+    if rest.is_empty() {
+        return Err(deep_learning_error(
+            "dlupdate",
+            "dlupdate: expected at least one parameter tree",
+        ));
+    }
+
+    let trees = rest.to_vec();
+    let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
+    if requested_outputs == 0 {
+        return Ok(Value::OutputList(Vec::new()));
+    }
+
+    let outputs = dlupdate_node(function, &trees, requested_outputs, 0).await?;
+    if requested_outputs == 1 {
+        Ok(outputs.into_iter().next().unwrap())
+    } else {
+        Ok(Value::OutputList(outputs))
+    }
 }
 
 #[runtime_builtin(
@@ -236,6 +265,345 @@ pub(super) async fn export_onnx_network_builtin(_args: Vec<Value>) -> BuiltinRes
         "exportONNXNetwork",
         "exportONNXNetwork requires ONNX graph serialization and trained-network execution metadata",
     ))
+}
+
+fn is_function_handle(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
+            | Value::BoundFunctionHandle { .. }
+            | Value::Closure(_)
+    )
+}
+
+#[async_recursion::async_recursion(?Send)]
+async fn dlupdate_node(
+    function: &Value,
+    values: &[Value],
+    requested_outputs: usize,
+    depth: usize,
+) -> BuiltinResult<Vec<Value>> {
+    if depth > DLUPDATE_MAX_DEPTH {
+        return Err(deep_learning_error(
+            "dlupdate",
+            "dlupdate: parameter tree nesting exceeds supported recursion depth",
+        ));
+    }
+    let Some(first) = values.first() else {
+        return Err(deep_learning_error(
+            "dlupdate",
+            "dlupdate: internal empty parameter-tree node",
+        ));
+    };
+
+    match first {
+        Value::Struct(reference) => {
+            dlupdate_struct(function, reference, values, requested_outputs, depth + 1).await
+        }
+        Value::Cell(reference) => {
+            dlupdate_cell(function, reference, values, requested_outputs, depth + 1).await
+        }
+        Value::Object(object) if crate::builtins::table::is_tabular_object(object) => {
+            dlupdate_table(function, object, values, requested_outputs, depth + 1).await
+        }
+        Value::Object(object) if is_leaf_object(object) => {
+            if values.iter().any(is_tree_container) {
+                return Err(deep_learning_error(
+                    "dlupdate",
+                    "dlupdate: all parameter trees must have matching container structure",
+                ));
+            }
+            dlupdate_leaf(function, values, requested_outputs).await
+        }
+        Value::Object(object) => Err(unsupported_error(
+            "dlupdate",
+            format!(
+                "dlupdate: traversal for '{}' objects requires dlnetwork/model metadata infrastructure",
+                object.class_name
+            ),
+        )),
+        _ => {
+            if values.iter().any(is_tree_container) {
+                return Err(deep_learning_error(
+                    "dlupdate",
+                    "dlupdate: all parameter trees must have matching container structure",
+                ));
+            }
+            dlupdate_leaf(function, values, requested_outputs).await
+        }
+    }
+}
+
+async fn dlupdate_struct(
+    function: &Value,
+    reference: &StructValue,
+    values: &[Value],
+    requested_outputs: usize,
+    depth: usize,
+) -> BuiltinResult<Vec<Value>> {
+    let field_names = reference.field_names().cloned().collect::<Vec<_>>();
+    let structs = values
+        .iter()
+        .map(|value| match value {
+            Value::Struct(st) => {
+                let names = st.field_names().cloned().collect::<Vec<_>>();
+                if names == field_names {
+                    Ok(st)
+                } else {
+                    Err(deep_learning_error(
+                        "dlupdate",
+                        "dlupdate: struct parameter trees must have the same fields in the same order",
+                    ))
+                }
+            }
+            other => Err(deep_learning_error(
+                "dlupdate",
+                format!("dlupdate: expected matching struct tree, got {other:?}"),
+            )),
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+
+    let mut outputs = (0..requested_outputs)
+        .map(|_| StructValue::new())
+        .collect::<Vec<_>>();
+    for name in field_names {
+        let field_values = structs
+            .iter()
+            .map(|st| {
+                st.fields
+                    .get(&name)
+                    .cloned()
+                    .unwrap_or(Value::Num(f64::NAN))
+            })
+            .collect::<Vec<_>>();
+        let updated = dlupdate_node(function, &field_values, requested_outputs, depth).await?;
+        for (out, value) in outputs.iter_mut().zip(updated.into_iter()) {
+            out.insert(name.clone(), value);
+        }
+    }
+
+    Ok(outputs.into_iter().map(Value::Struct).collect())
+}
+
+async fn dlupdate_cell(
+    function: &Value,
+    reference: &CellArray,
+    values: &[Value],
+    requested_outputs: usize,
+    depth: usize,
+) -> BuiltinResult<Vec<Value>> {
+    let cells = values
+        .iter()
+        .map(|value| match value {
+            Value::Cell(cell) if cell.shape == reference.shape => Ok(cell),
+            Value::Cell(_) => Err(deep_learning_error(
+                "dlupdate",
+                "dlupdate: cell parameter trees must have the same shape",
+            )),
+            other => Err(deep_learning_error(
+                "dlupdate",
+                format!("dlupdate: expected matching cell tree, got {other:?}"),
+            )),
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+
+    let mut outputs = (0..requested_outputs)
+        .map(|_| Vec::with_capacity(reference.data.len()))
+        .collect::<Vec<_>>();
+    for idx in 0..reference.data.len() {
+        let elements = cells
+            .iter()
+            .map(|cell| cell.data[idx].clone())
+            .collect::<Vec<_>>();
+        let updated = dlupdate_node(function, &elements, requested_outputs, depth).await?;
+        for (out, value) in outputs.iter_mut().zip(updated.into_iter()) {
+            out.push(value);
+        }
+    }
+
+    outputs
+        .into_iter()
+        .map(|data| {
+            CellArray::new_with_shape(data, reference.shape.clone())
+                .map(Value::Cell)
+                .map_err(|err| deep_learning_error("dlupdate", err))
+        })
+        .collect()
+}
+
+async fn dlupdate_table(
+    function: &Value,
+    reference: &ObjectInstance,
+    values: &[Value],
+    requested_outputs: usize,
+    depth: usize,
+) -> BuiltinResult<Vec<Value>> {
+    let variable_names = crate::builtins::table::table_variable_names_from_object(reference)
+        .map_err(|err| deep_learning_error("dlupdate", err.to_string()))?;
+    require_learnables_table(&variable_names)?;
+    let reference_height = crate::builtins::table::table_height(reference)
+        .map_err(|err| deep_learning_error("dlupdate", err.to_string()))?;
+    let tables = values
+        .iter()
+        .map(|value| match value {
+            Value::Object(object) if crate::builtins::table::is_tabular_object(object) => {
+                if object.class_name != reference.class_name {
+                    return Err(deep_learning_error(
+                        "dlupdate",
+                        "dlupdate: table parameter trees must have the same tabular class",
+                    ));
+                }
+                let names = crate::builtins::table::table_variable_names_from_object(object)
+                    .map_err(|err| deep_learning_error("dlupdate", err.to_string()))?;
+                if names != variable_names {
+                    return Err(deep_learning_error(
+                        "dlupdate",
+                        "dlupdate: table parameter trees must have the same variable names",
+                    ));
+                }
+                let height = crate::builtins::table::table_height(object)
+                    .map_err(|err| deep_learning_error("dlupdate", err.to_string()))?;
+                if height != reference_height {
+                    return Err(deep_learning_error(
+                        "dlupdate",
+                        "dlupdate: table parameter trees must have the same height",
+                    ));
+                }
+                Ok(object)
+            }
+            other => Err(deep_learning_error(
+                "dlupdate",
+                format!("dlupdate: expected matching table tree, got {other:?}"),
+            )),
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let table_variables = tables
+        .iter()
+        .map(|object| {
+            crate::builtins::table::table_variables(object)
+                .map_err(|err| deep_learning_error("dlupdate", err.to_string()))
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+
+    require_matching_learnable_metadata(&table_variables)?;
+    let value_columns = table_variables
+        .iter()
+        .map(|vars| {
+            vars.fields.get("Value").cloned().ok_or_else(|| {
+                deep_learning_error("dlupdate", "dlupdate: learnables table is missing Value")
+            })
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    if !value_columns
+        .iter()
+        .all(|value| matches!(value, Value::Cell(_)))
+    {
+        return Err(deep_learning_error(
+            "dlupdate",
+            "dlupdate: learnables table Value variable must be a cell array",
+        ));
+    }
+    let updated_values = dlupdate_node(function, &value_columns, requested_outputs, depth).await?;
+
+    updated_values
+        .into_iter()
+        .map(|value_column| {
+            let mut variables = table_variables[0].clone();
+            variables.insert("Value", value_column);
+            crate::builtins::table::table_replace_variables_like(reference, variables)
+                .map_err(|err| deep_learning_error("dlupdate", err.to_string()))
+        })
+        .collect()
+}
+
+fn require_learnables_table(variable_names: &[String]) -> BuiltinResult<()> {
+    for required in ["Layer", "Parameter", "Value"] {
+        if !variable_names.iter().any(|name| name == required) {
+            return Err(deep_learning_error(
+                "dlupdate",
+                "dlupdate: learnables tables must contain Layer, Parameter, and Value variables",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn require_matching_learnable_metadata(tables: &[StructValue]) -> BuiltinResult<()> {
+    let Some(reference) = tables.first() else {
+        return Ok(());
+    };
+    for variable in ["Layer", "Parameter"] {
+        let expected = reference.fields.get(variable).ok_or_else(|| {
+            deep_learning_error(
+                "dlupdate",
+                format!("dlupdate: learnables table is missing {variable}"),
+            )
+        })?;
+        for table in tables.iter().skip(1) {
+            let actual = table.fields.get(variable).ok_or_else(|| {
+                deep_learning_error(
+                    "dlupdate",
+                    format!("dlupdate: learnables table is missing {variable}"),
+                )
+            })?;
+            if actual != expected {
+                return Err(deep_learning_error(
+                    "dlupdate",
+                    "dlupdate: learnables table Layer and Parameter metadata must match",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn dlupdate_leaf(
+    function: &Value,
+    values: &[Value],
+    requested_outputs: usize,
+) -> BuiltinResult<Vec<Value>> {
+    let result = crate::call_feval_async_with_outputs(function.clone(), values, requested_outputs)
+        .await
+        .map_err(|err| {
+            deep_learning_error(
+                "dlupdate",
+                format!("dlupdate: function-handle evaluation failed: {err}"),
+            )
+        })?;
+    normalize_dlupdate_outputs(result, requested_outputs)
+}
+
+fn normalize_dlupdate_outputs(value: Value, requested_outputs: usize) -> BuiltinResult<Vec<Value>> {
+    match value {
+        Value::OutputList(values) if values.len() == requested_outputs => Ok(values),
+        Value::OutputList(values) => Err(deep_learning_error(
+            "dlupdate",
+            format!(
+                "dlupdate: function returned {} outputs but {} were requested",
+                values.len(),
+                requested_outputs
+            ),
+        )),
+        other if requested_outputs == 1 => Ok(vec![other]),
+        _ => Err(deep_learning_error(
+            "dlupdate",
+            "dlupdate: function did not return the requested number of outputs",
+        )),
+    }
+}
+
+fn is_leaf_object(object: &ObjectInstance) -> bool {
+    object.class_name == "dlarray"
+}
+
+fn is_tree_container(value: &Value) -> bool {
+    match value {
+        Value::Struct(_) | Value::Cell(_) => true,
+        Value::Object(object) => crate::builtins::table::is_tabular_object(object),
+        _ => false,
+    }
 }
 
 struct AdamUpdateArgs {

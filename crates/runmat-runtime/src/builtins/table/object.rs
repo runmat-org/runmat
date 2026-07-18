@@ -10,7 +10,7 @@ mod structure;
 pub use analytics::sortrows_table;
 pub use structure::{
     is_table_value, is_tabular_object, table_from_columns, table_height,
-    table_variable_names_from_object, table_variables, table_width,
+    table_replace_variables_like, table_variable_names_from_object, table_variables, table_width,
 };
 
 pub(super) use analytics::*;

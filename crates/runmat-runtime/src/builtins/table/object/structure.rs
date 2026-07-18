@@ -4,6 +4,35 @@ pub fn table_from_columns(names: Vec<String>, columns: Vec<Value>) -> BuiltinRes
     table_from_columns_with_properties(names, columns, None)
 }
 
+pub fn table_replace_variables_like(
+    source: &ObjectInstance,
+    variables: StructValue,
+) -> BuiltinResult<Value> {
+    let names = table_variable_names_from_object(source)?;
+    let replacement_names = variables.fields.keys().cloned().collect::<Vec<_>>();
+    if replacement_names != names {
+        return Err(invalid_variable(
+            "table: replacement variables must preserve variable names and order",
+        ));
+    }
+    let columns = names
+        .iter()
+        .filter_map(|name| variables.fields.get(name).cloned())
+        .collect::<Vec<_>>();
+    let height = validate_column_heights(&names, &columns)?;
+    let source_height = table_height(source)?;
+    if height != source_height {
+        return Err(invalid_variable(format!(
+            "table: replacement variables have {height} rows but expected {source_height}"
+        )));
+    }
+    let mut object = source.clone();
+    object
+        .properties
+        .insert(TABLE_VARIABLES_FIELD.to_string(), Value::Struct(variables));
+    Ok(Value::Object(object))
+}
+
 pub(crate) fn table_from_columns_with_properties(
     names: Vec<String>,
     columns: Vec<Value>,

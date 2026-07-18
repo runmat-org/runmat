@@ -2,25 +2,29 @@
   "title": "dlupdate",
   "category": "deep_learning",
   "keywords": ["dlupdate", "deep learning", "model update"],
-  "summary": "Report unsupported model parameter tree updates with a deterministic error.",
-  "description": "`dlupdate` is registered but full model/tree traversal with function-handle invocation remains outside this slice.",
+  "summary": "Apply a function handle across matching Deep Learning parameter trees.",
+  "description": "`dlupdate(fun,args...)` recursively applies a function handle to matching leaves in one or more parameter trees and reconstructs the output tree shape.",
   "behaviors": [
-    "The builtin returns a deterministic unsupported-update error without materializing inputs.",
-    "Structure, table, dlnetwork, and learnable-parameter traversal remains future Deep Learning infrastructure work."
+    "The first argument must be a function handle, bound function handle, method function handle, external function handle, or closure.",
+    "Struct fields and cell elements are traversed recursively; matching inputs must have the same container shape and field names.",
+    "Tables and timetables are supported for Deep Learning learnables tables with `Layer`, `Parameter`, and `Value` variables. `Value` must be a cell array; `Layer` and `Parameter` metadata must match across inputs, and the callback is applied only to entries in `Value`.",
+    "`dlarray` compatibility objects are treated as leaf parameter values, so callbacks can preserve or replace the wrapper intentionally.",
+    "The requested output count is forwarded to the callback for each leaf, and each callback output is reconstructed as its own output tree.",
+    "`dlnetwork`, trained-network objects, and arbitrary layer/model object traversal remain future Deep Learning infrastructure work."
   ],
   "examples": [
     {
-      "description": "Deferred Model Update",
+      "description": "Update Struct Parameters",
       "input": "net = dlupdate(@plus, net, gradients)",
-      "output": "RunMat reports that parameter tree updates are not yet implemented."
+      "output": "A struct, cell, table, or dlarray-compatible tree with updated leaves."
     }
   ],
   "syntax": {
     "example": {
-      "description": "Registered form",
+      "description": "Supported forms",
       "input": "out = dlupdate(fun, args...)",
-      "output": "Unsupported-update error in this slice."
+      "output": "Updated parameter tree."
     }
   },
-  "gpu_residency": "Model update execution is not implemented in this slice; provider-resident updates remain future work."
+  "gpu_residency": "`dlupdate` itself is a tree traversal and callback-dispatch helper and does not gather parameter trees before callback dispatch. GPU residency is preserved when the callback accepts and returns provider-resident values; model-wide provider kernels remain tracked by the queued GPU fast-path audit."
 }

@@ -31,7 +31,7 @@ use names::*;
 use object::*;
 pub use object::{
     is_table_value, is_tabular_object, sortrows_table, table_from_columns, table_height,
-    table_variable_names_from_object, table_variables, table_width,
+    table_replace_variables_like, table_variable_names_from_object, table_variables, table_width,
 };
 pub(crate) use object::{
     parse_variable_selector_for_object, select_rows, selected_row_names, table_from_columns_like,
