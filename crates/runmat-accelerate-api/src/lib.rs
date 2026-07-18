@@ -1395,6 +1395,11 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!("meshgrid not supported by provider"))
     }
 
+    /// Construct MATLAB-style N-D coordinate grids from resident GPU axis vectors.
+    fn ndgrid(&self, _request: &ProviderNdgridRequest<'_>) -> anyhow::Result<ProviderNdgridResult> {
+        Err(anyhow::anyhow!("ndgrid not supported by provider"))
+    }
+
     /// Construct a diagonal matrix from a vector-like tensor. `offset` matches MATLAB semantics.
     fn diag_from_vector(
         &self,
@@ -3088,6 +3093,27 @@ pub struct MeshgridAxisView<'a> {
 /// Provider-side meshgrid result containing coordinate tensor handles.
 #[derive(Debug, Clone)]
 pub struct ProviderMeshgridResult {
+    pub outputs: Vec<GpuTensorHandle>,
+}
+
+/// Single resident GPU axis supplied to provider-side `ndgrid`.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderNdgridAxis<'a> {
+    pub handle: &'a GpuTensorHandle,
+}
+
+/// Provider-side `ndgrid` request. `output_shape` is already MATLAB-normalized
+/// by the runtime, including the single-axis `[n, 1]` case.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderNdgridRequest<'a> {
+    pub axes: &'a [ProviderNdgridAxis<'a>],
+    pub output_shape: &'a [usize],
+    pub output_count: usize,
+}
+
+/// Provider-side ndgrid result containing coordinate tensor handles.
+#[derive(Debug, Clone)]
+pub struct ProviderNdgridResult {
     pub outputs: Vec<GpuTensorHandle>,
 }
 

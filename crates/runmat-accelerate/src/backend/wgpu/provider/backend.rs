@@ -14,14 +14,14 @@ use runmat_accelerate_api::{
     ProviderCummaxResult, ProviderCumminResult, ProviderEigResult, ProviderFindResult,
     ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
     ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderMeshgridResult,
-    ProviderNanMode, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
-    ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision, ProviderQrOptions,
-    ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult, ProviderScanDirection,
-    ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
-    ProviderSpectralResult, ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult,
-    ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison,
-    SortOrder, SortResult, SortRowsColumnSpec, SpawnHandleConcurrency, UnionOptions, UnionResult,
-    UniqueOptions, UniqueResult, WgpuBufferRef,
+    ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder,
+    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions,
+    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult,
+    ProviderQrResult, ProviderScanDirection, ProviderSpectralFrameMode, ProviderSpectralRange,
+    ProviderSpectralRequest, ProviderSpectralResult, ProviderStdNormalization,
+    ProviderSymmetryKind, ReduceDimResult, ReductionFlavor, ReductionTwoPassMode, SetdiffOptions,
+    SetdiffResult, SortComparison, SortOrder, SortResult, SortRowsColumnSpec,
+    SpawnHandleConcurrency, UnionOptions, UnionResult, UniqueOptions, UniqueResult, WgpuBufferRef,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;

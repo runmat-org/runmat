@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "RunMat gathers gpuArray inputs, materializes dense grids on the host, and uploads outputs when GPU residency is requested. Providers may supply a future ndgrid hook to avoid the round trip."
+    "notes": "Resident real/logical gpuArray vector inputs use the provider ndgrid hook when available, producing resident gpuArray coordinate grids without host round-trips. Unsupported providers or complex axes fall back to host materialization."
   },
   "fusion": {
     "elementwise": false,
@@ -28,7 +28,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::array::creation::ndgrid::tests",
-    "integration": "builtins::array::creation::ndgrid::tests::ndgrid_gpu_inputs_roundtrip"
+    "integration": "builtins::array::creation::ndgrid::tests::ndgrid_gpu_inputs_use_provider_resident_outputs"
   },
   "description": "`ndgrid` expands one or more coordinate vectors into dense N-D coordinate arrays. Each output `Xi` contains copies of the ith grid vector along dimension `i`.",
   "behaviors": [
@@ -75,7 +75,7 @@
     },
     {
       "question": "Can `ndgrid` return gpuArray outputs?",
-      "answer": "Yes. gpuArray inputs request gpuArray outputs; RunMat currently gathers inputs, materializes dense grids on the host, and uploads outputs through the owning provider. Upload failures raise an error instead of silently returning host arrays."
+      "answer": "Yes. Resident real/logical gpuArray vectors use the provider ndgrid hook when available, so outputs remain on the GPU. Unsupported providers or complex axes use the host materialization fallback; upload failures raise an error instead of silently returning host arrays."
     }
   ],
   "links": [

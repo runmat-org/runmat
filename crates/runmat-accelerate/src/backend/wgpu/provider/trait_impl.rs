@@ -1,7 +1,7 @@
 use super::*;
 use runmat_accelerate_api::{
     ProviderBitModulationRequest, ProviderEnvelopeRequest, ProviderEnvelopeResult,
-    ProviderHilbertRequest, ProviderModulationRequest,
+    ProviderHilbertRequest, ProviderModulationRequest, ProviderNdgridRequest, ProviderNdgridResult,
 };
 
 impl AccelProvider for WgpuProvider {
@@ -69,6 +69,10 @@ impl AccelProvider for WgpuProvider {
 
     fn meshgrid(&self, axes: &[MeshgridAxisView<'_>]) -> Result<ProviderMeshgridResult> {
         self.meshgrid_exec(axes)
+    }
+
+    fn ndgrid(&self, request: &ProviderNdgridRequest<'_>) -> Result<ProviderNdgridResult> {
+        self.ndgrid_exec(request)
     }
 
     fn linspace(&self, start: f64, stop: f64, count: usize) -> Result<GpuTensorHandle> {

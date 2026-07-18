@@ -11,10 +11,10 @@ use runmat_accelerate_api::{
     ProviderConvMode, ProviderConvOrientation, ProviderEigResult, ProviderFindResult,
     ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
     ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderModulationRequest,
-    ProviderNanMode, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
-    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrResult, ProviderScanDirection,
-    ProviderSymmetryKind, SetdiffOptions, SetdiffResult, SortComparison, SortResult,
-    SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder,
+    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions,
+    ProviderQrPivot, ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind, SetdiffOptions,
+    SetdiffResult, SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -1785,6 +1785,77 @@ impl AccelProvider for InProcessProvider {
             memory_bytes: None,
             backend: Some("inprocess".to_string()),
         }
+    }
+
+    fn ndgrid(&self, request: &ProviderNdgridRequest<'_>) -> Result<ProviderNdgridResult> {
+        ensure!(request.output_count > 0, "ndgrid: missing outputs");
+        ensure!(
+            request.output_count <= request.axes.len(),
+            "ndgrid: too many outputs for axes"
+        );
+        ensure!(!request.output_shape.is_empty(), "ndgrid: missing shape");
+
+        let total = request
+            .output_shape
+            .iter()
+            .copied()
+            .try_fold(1usize, |acc, extent| acc.checked_mul(extent))
+            .ok_or_else(|| anyhow!("ndgrid: tensor size exceeds provider limits"))?;
+        let strides = compute_strides(request.output_shape);
+        let axis_data = {
+            let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
+            let mut axes = Vec::with_capacity(request.output_count);
+            for (dim, axis) in request.axes.iter().take(request.output_count).enumerate() {
+                ensure!(
+                    runmat_accelerate_api::handle_storage(axis.handle)
+                        != GpuTensorStorage::ComplexInterleaved,
+                    "ndgrid: complex axes are not supported"
+                );
+                let data = guard
+                    .get(&axis.handle.buffer_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("ndgrid: unknown buffer {}", axis.handle.buffer_id))?;
+                let expected = request.output_shape.get(dim).copied().unwrap_or(1);
+                ensure!(
+                    data.len() == expected,
+                    "ndgrid: axis {} length {} does not match output extent {}",
+                    dim + 1,
+                    data.len(),
+                    expected
+                );
+                axes.push(data);
+            }
+            axes
+        };
+
+        let mut outputs = Vec::with_capacity(request.output_count);
+        for dim in 0..request.output_count {
+            let axis = &axis_data[dim];
+            let stride = strides[dim];
+            let extent = request.output_shape[dim];
+            let mut out = Vec::with_capacity(total);
+            for linear_idx in 0..total {
+                let coord = if extent == 0 {
+                    0
+                } else {
+                    (linear_idx / stride) % extent
+                };
+                out.push(axis.get(coord).copied().unwrap_or(0.0));
+            }
+
+            let handle = self.allocate_tensor(out, request.output_shape.to_vec());
+            if runmat_accelerate_api::handle_is_logical(request.axes[dim].handle) {
+                runmat_accelerate_api::set_handle_logical(&handle, true);
+            }
+            if let Some(precision) =
+                runmat_accelerate_api::handle_precision(request.axes[dim].handle)
+            {
+                runmat_accelerate_api::set_handle_precision(&handle, precision);
+            }
+            outputs.push(handle);
+        }
+
+        Ok(ProviderNdgridResult { outputs })
     }
 
     fn telemetry_snapshot(&self) -> runmat_accelerate_api::ProviderTelemetry {
@@ -6795,6 +6866,7 @@ pub fn reset_inprocess_rng() {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_accelerate_api::ProviderNdgridAxis;
 
     fn complex_handle(
         provider: &InProcessProvider,
@@ -6877,6 +6949,39 @@ mod tests {
                 "lane {idx}: got {actual}, expected {expected}"
             );
         }
+    }
+
+    #[test]
+    fn ndgrid_expands_resident_axes_column_major() {
+        let provider = InProcessProvider::new();
+        let x = real_handle(&provider, &[1.0, 2.0], &[1, 2]);
+        let y = real_handle(&provider, &[10.0, 20.0, 30.0], &[3, 1]);
+        let axes = [
+            ProviderNdgridAxis { handle: &x },
+            ProviderNdgridAxis { handle: &y },
+        ];
+
+        let result = provider
+            .ndgrid(&ProviderNdgridRequest {
+                axes: &axes,
+                output_shape: &[2, 3],
+                output_count: 2,
+            })
+            .expect("ndgrid");
+
+        assert_eq!(result.outputs.len(), 2);
+        assert_real_close(
+            &provider,
+            &result.outputs[0],
+            &[1.0, 2.0, 1.0, 2.0, 1.0, 2.0],
+            &[2, 3],
+        );
+        assert_real_close(
+            &provider,
+            &result.outputs[1],
+            &[10.0, 10.0, 20.0, 20.0, 30.0, 30.0],
+            &[2, 3],
+        );
     }
 
     #[test]

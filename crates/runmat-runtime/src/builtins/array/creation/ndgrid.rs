@@ -1,6 +1,8 @@
 //! MATLAB-compatible `ndgrid` builtin.
 
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
+use runmat_accelerate_api::{
+    GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderNdgridAxis, ProviderNdgridRequest,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -33,7 +35,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may supply a dedicated ndgrid hook; until then RunMat gathers GPU inputs, materialises dense grids on the host, and uploads outputs when GPU residency is requested.",
+    notes: "Resident real/logical gpuArray vector inputs use the provider ndgrid hook when available; unsupported providers or complex axes fall back to host materialisation.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::ndgrid")]
@@ -206,16 +208,105 @@ pub async fn evaluate(
     let output_shape = output_shape_from_lengths(&parsed.axis_lengths);
     let output_count = parsed.output_count;
 
+    if let Some(outputs) = try_provider_outputs(&parsed, &output_shape)? {
+        return Ok(NdgridEval {
+            outputs,
+            residency: parsed.residency,
+        });
+    }
+
     let mut host_axes = Vec::with_capacity(parsed.axes.len());
     for axis in &parsed.axes {
         host_axes.push(axis_to_host_async(axis).await?);
     }
-    let outputs = build_host_outputs(&host_axes, &output_shape, output_count)?;
+    let outputs = build_host_outputs(&host_axes, &output_shape, output_count)?
+        .into_iter()
+        .map(NdgridOutput::Host)
+        .collect();
 
     Ok(NdgridEval {
         outputs,
         residency: parsed.residency,
     })
+}
+
+fn try_provider_outputs(
+    parsed: &ParsedNdgrid,
+    output_shape: &[usize],
+) -> BuiltinResult<Option<Vec<NdgridOutput>>> {
+    let OutputResidency::Gpu { device_id } = parsed.residency else {
+        return Ok(None);
+    };
+    if parsed.output_count == 0 {
+        return Ok(Some(Vec::new()));
+    }
+
+    let Some(provider) = runmat_accelerate_api::provider_for_device(device_id)
+        .or_else(runmat_accelerate_api::provider)
+    else {
+        return Ok(None);
+    };
+
+    let mut axes = Vec::with_capacity(parsed.output_count);
+    for axis in parsed.axes.iter().take(parsed.output_count) {
+        if axis.class == OutputClass::Complex {
+            return Ok(None);
+        }
+        let Some(handle) = axis.gpu_real.as_ref() else {
+            return Ok(None);
+        };
+        axes.push(ProviderNdgridAxis { handle });
+    }
+
+    let request = ProviderNdgridRequest {
+        axes: &axes,
+        output_shape,
+        output_count: parsed.output_count,
+    };
+    let result = match provider.ndgrid(&request) {
+        Ok(result) => result,
+        Err(_) => return Ok(None),
+    };
+    if result.outputs.len() != parsed.output_count {
+        return Err(ndgrid_error_with_detail(
+            &NDGRID_ERROR_INTERNAL,
+            "provider returned wrong output count",
+        ));
+    }
+
+    let outputs = result
+        .outputs
+        .into_iter()
+        .enumerate()
+        .map(|(dim, handle)| {
+            annotate_provider_output(&handle, parsed.axes[dim].class);
+            NdgridOutput::Gpu(handle)
+        })
+        .collect();
+    Ok(Some(outputs))
+}
+
+fn annotate_provider_output(handle: &GpuTensorHandle, class: OutputClass) {
+    match class {
+        OutputClass::Real(dtype) => {
+            runmat_accelerate_api::set_handle_logical(handle, false);
+            let precision = match dtype {
+                NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+                NumericDType::F64 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
+                    runmat_accelerate_api::ProviderPrecision::F64
+                }
+            };
+            runmat_accelerate_api::set_handle_precision(handle, precision);
+        }
+        OutputClass::Logical => {
+            runmat_accelerate_api::set_handle_logical(handle, true);
+            runmat_accelerate_api::set_handle_precision(
+                handle,
+                runmat_accelerate_api::ProviderPrecision::F64,
+            );
+        }
+        OutputClass::Complex => {}
+    }
 }
 
 struct ParsedNdgrid {
@@ -737,7 +828,7 @@ fn to_complex_gpu_tensor_value(tensor: ComplexTensor, device_id: u32) -> Builtin
 }
 
 pub struct NdgridEval {
-    outputs: Vec<GridOutput>,
+    outputs: Vec<NdgridOutput>,
     residency: OutputResidency,
 }
 
@@ -746,8 +837,16 @@ impl NdgridEval {
         let Some(output) = self.outputs.get(dim) else {
             return Err(ndgrid_error(&NDGRID_ERROR_TOO_MANY_OUTPUTS));
         };
-        output.to_value(self.residency)
+        match output {
+            NdgridOutput::Host(output) => output.to_value(self.residency),
+            NdgridOutput::Gpu(handle) => Ok(Value::GpuTensor(handle.clone())),
+        }
     }
+}
+
+enum NdgridOutput {
+    Host(GridOutput),
+    Gpu(GpuTensorHandle),
 }
 
 fn ndgrid_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -1021,7 +1120,7 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn ndgrid_gpu_inputs_roundtrip() {
+    fn ndgrid_gpu_inputs_use_provider_resident_outputs() {
         test_support::with_test_provider(|provider| {
             let x = tensor(vec![1.0, 2.0], vec![1, 2]);
             let y = tensor(vec![10.0, 20.0, 30.0], vec![1, 3]);
@@ -1037,6 +1136,7 @@ mod tests {
                     shape: &y.shape,
                 })
                 .expect("upload y");
+            provider.reset_telemetry();
             let eval = eval(
                 &[
                     Value::GpuTensor(x_handle.clone()),
@@ -1048,6 +1148,9 @@ mod tests {
             assert!(matches!(output(&eval, 0).expect("X"), Value::GpuTensor(_)));
             let y_out = output(&eval, 1).expect("Y");
             assert!(matches!(y_out, Value::GpuTensor(_)));
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.download_bytes, 0);
+            assert_eq!(telemetry.upload_bytes, 0);
             let gathered = test_support::gather(y_out).expect("gather");
             assert_eq!(gathered.shape, vec![2, 3]);
             assert_eq!(gathered.data, vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]);
