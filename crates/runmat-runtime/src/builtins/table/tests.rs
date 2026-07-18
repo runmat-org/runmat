@@ -1439,6 +1439,70 @@ fn categorical_dictionary_and_selector_objects_materialize() {
 }
 
 #[test]
+fn file_datastore_preserves_constructor_metadata() {
+    let files = Value::StringArray(
+        StringArray::new(vec!["a.txt".into(), "b.log".into()], vec![1, 2]).unwrap(),
+    );
+    let extensions = Value::StringArray(
+        StringArray::new(vec![".txt".into(), ".log".into()], vec![1, 2]).unwrap(),
+    );
+    let datastore = block_on(file_datastore_builtin(vec![
+        files.clone(),
+        Value::from("ReadFcn"),
+        Value::FunctionHandle("readlines".into()),
+        Value::from("FileExtensions"),
+        extensions.clone(),
+        Value::from("IncludeSubfolders"),
+        Value::Bool(true),
+        Value::from("ReadMode"),
+        Value::from("partialfile"),
+    ]))
+    .unwrap();
+    let Value::Object(datastore) = datastore else {
+        panic!("expected fileDatastore object");
+    };
+    assert_eq!(datastore.class_name, FILE_DATASTORE_CLASS);
+    assert_eq!(datastore.properties.get("Files"), Some(&files));
+    assert_eq!(
+        datastore.properties.get("ReadFcn"),
+        Some(&Value::FunctionHandle("readlines".into()))
+    );
+    assert_eq!(
+        datastore.properties.get("FileExtensions"),
+        Some(&extensions)
+    );
+    assert_eq!(
+        datastore.properties.get("IncludeSubfolders"),
+        Some(&Value::Bool(true))
+    );
+    assert_eq!(
+        datastore.properties.get("ReadMode"),
+        Some(&Value::from("partialfile"))
+    );
+}
+
+#[test]
+fn file_datastore_validates_option_pairs_and_modes() {
+    let err = block_on(file_datastore_builtin(Vec::new())).expect_err("missing location");
+    assert!(err.message().contains("location is required"));
+
+    let err = block_on(file_datastore_builtin(vec![
+        Value::from("*.txt"),
+        Value::from("ReadFcn"),
+    ]))
+    .expect_err("unpaired option");
+    assert!(err.message().contains("name-value options"));
+
+    let err = block_on(file_datastore_builtin(vec![
+        Value::from("*.txt"),
+        Value::from("ReadMode"),
+        Value::from("chunk"),
+    ]))
+    .expect_err("invalid ReadMode");
+    assert!(err.message().contains("ReadMode"));
+}
+
+#[test]
 fn ordinal_constructor_sets_ordered_categorical_semantics() {
     let default_ordered = block_on(ordinal_builtin(vec![Value::StringArray(
         StringArray::new(

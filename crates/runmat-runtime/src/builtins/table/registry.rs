@@ -7,9 +7,9 @@ use crate::{OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD};
 
 use super::object::default_properties_for_class;
 use super::{
-    ARRAY_DATASTORE_CLASS, CATEGORICAL_CLASS, DICTIONARY_CLASS, PARQUET_DATASTORE_CLASS,
-    PROPERTIES_MEMBER, ROWFILTER_CLASS, TABLE_CLASS, TIMERANGE_CLASS, TIMETABLE_CLASS,
-    UITABLE_CLASS, VARTYPE_CLASS,
+    ARRAY_DATASTORE_CLASS, CATEGORICAL_CLASS, DICTIONARY_CLASS, FILE_DATASTORE_CLASS,
+    PARQUET_DATASTORE_CLASS, PROPERTIES_MEMBER, ROWFILTER_CLASS, TABLE_CLASS, TIMERANGE_CLASS,
+    TIMETABLE_CLASS, UITABLE_CLASS, VARTYPE_CLASS,
 };
 
 thread_local! {
@@ -29,6 +29,16 @@ pub fn ensure_table_class_registered() {
         register_plain_object_class(VARTYPE_CLASS, &["Type"]);
         register_plain_object_class(ROWFILTER_CLASS, &["Variables", "Predicate"]);
         register_plain_object_class(ARRAY_DATASTORE_CLASS, &["Data", "ReadSize"]);
+        register_plain_object_class(
+            FILE_DATASTORE_CLASS,
+            &[
+                "Files",
+                "ReadFcn",
+                "FileExtensions",
+                "IncludeSubfolders",
+                "ReadMode",
+            ],
+        );
         register_plain_object_class(PARQUET_DATASTORE_CLASS, &["Files"]);
         register_plain_object_class(UITABLE_CLASS, &["Data", "ColumnName", "RowName"]);
         registered.set(true);

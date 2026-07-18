@@ -29,6 +29,7 @@ pub(in crate::builtins::table) const TIMERANGE_CLASS: &str = "timerange";
 pub(in crate::builtins::table) const VARTYPE_CLASS: &str = "vartype";
 pub(in crate::builtins::table) const ROWFILTER_CLASS: &str = "rowfilter";
 pub(in crate::builtins::table) const ARRAY_DATASTORE_CLASS: &str = "arrayDatastore";
+pub(in crate::builtins::table) const FILE_DATASTORE_CLASS: &str = "fileDatastore";
 pub(in crate::builtins::table) const PARQUET_DATASTORE_CLASS: &str = "parquetDatastore";
 pub(in crate::builtins::table) const UITABLE_CLASS: &str = "uitable";
 

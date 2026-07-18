@@ -183,6 +183,78 @@ pub(crate) async fn array_datastore_builtin(args: Vec<Value>) -> BuiltinResult<V
 }
 
 #[runtime_builtin(
+    name = "fileDatastore",
+    category = "io/tabular",
+    summary = "Create a file datastore descriptor.",
+    keywords = "fileDatastore,datastore,file,readfcn",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    builtin_path = "crate::builtins::table::builtins"
+)]
+pub(crate) async fn file_datastore_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_table_class_registered();
+    let args = gather_values(&args).await?;
+    let Some(files) = args.first().cloned() else {
+        return Err(invalid_argument(
+            "fileDatastore: files location is required",
+        ));
+    };
+    if args.len() > 1 && (args.len() - 1) % 2 != 0 {
+        return Err(invalid_argument(
+            "fileDatastore: name-value options must be provided in pairs",
+        ));
+    }
+
+    let mut read_fcn = Value::String(String::new());
+    let mut file_extensions = Value::StringArray(StringArray::new(Vec::new(), vec![0, 1]).unwrap());
+    let mut include_subfolders = Value::Bool(false);
+    let mut read_mode = Value::from("file");
+    let mut idx = 1usize;
+    while idx < args.len() {
+        let name = scalar_text(&args[idx], "fileDatastore option")?;
+        let value = args[idx + 1].clone();
+        if name.eq_ignore_ascii_case("ReadFcn") {
+            read_fcn = value;
+        } else if name.eq_ignore_ascii_case("FileExtensions") {
+            string_list(&value).map_err(|_| {
+                invalid_argument(
+                    "fileDatastore: FileExtensions must be text, a string array, or cellstr",
+                )
+            })?;
+            file_extensions = value;
+        } else if name.eq_ignore_ascii_case("IncludeSubfolders") {
+            include_subfolders = Value::Bool(bool_scalar(&value, "IncludeSubfolders")?);
+        } else if name.eq_ignore_ascii_case("ReadMode") {
+            let mode = scalar_text(&value, "ReadMode")?;
+            let lower = mode.to_ascii_lowercase();
+            if lower != "file" && lower != "partialfile" {
+                return Err(invalid_argument(
+                    "fileDatastore: ReadMode must be 'file' or 'partialfile'",
+                ));
+            }
+            read_mode = Value::String(mode);
+        } else {
+            return Err(invalid_argument(format!(
+                "fileDatastore: unsupported option '{name}'"
+            )));
+        }
+        idx += 2;
+    }
+
+    let mut object = ObjectInstance::new(FILE_DATASTORE_CLASS.to_string());
+    object.properties.insert("Files".to_string(), files);
+    object.properties.insert("ReadFcn".to_string(), read_fcn);
+    object
+        .properties
+        .insert("FileExtensions".to_string(), file_extensions);
+    object
+        .properties
+        .insert("IncludeSubfolders".to_string(), include_subfolders);
+    object.properties.insert("ReadMode".to_string(), read_mode);
+    Ok(Value::Object(object))
+}
+
+#[runtime_builtin(
     name = "parquetDatastore",
     category = "io/tabular",
     summary = "Create a parquet datastore descriptor.",
