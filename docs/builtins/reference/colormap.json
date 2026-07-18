@@ -16,6 +16,7 @@
   "description": "`colormap` sets the active color palette for the current plotting context. It accepts a named palette or an m-by-3 RGB matrix with values in [0, 1], and affects colormap-driven visualizations such as `imagesc`, `surf`, and `contourf`, scoped to the active axes in MATLAB and RunMat.",
   "behaviors": [
     "Supported colormap names include `parula`, `colorcube`, `viridis`, `plasma`, `inferno`, `magma`, `turbo`, `jet`, `hot`, `cool`, `spring`, `summer`, `autumn`, `winter`, `gray`, `bone`, `copper`, `pink`, and `lines`.",
+    "Named colormaps are also available as RGB array generator functions, so MATLAB forms such as `colormap(jet)`, `colormap(gray(64))`, and `c = turbo(128)` are supported.",
     "RGB matrix inputs are validated as m-by-3 numeric arrays with finite values in [0, 1] and are preserved in plotting state and scene serialization.",
     "Unknown colormap names raise errors rather than silently falling back.",
     "Colormap state composes naturally with `colorbar`, `imagesc`, `surf`, and filled contour plots.",
@@ -33,6 +34,10 @@
     {
       "description": "Apply a generated RGB colormap matrix",
       "input": "surf(peaks(40));\ncolormap(parula(128));\ncolorbar;"
+    },
+    {
+      "description": "Apply a MATLAB-style named colormap generator",
+      "input": "mandelbrot();\ncolormap(jet);"
     }
   ],
   "faqs": [

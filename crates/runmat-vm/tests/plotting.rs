@@ -296,6 +296,10 @@ fn colormap_array_generators_round_trip_through_vm() {
         figure('Visible', 'off'); \
         colormap(parula); \
         colormap(colorcube(5)); \
+        colormap(jet); \
+        colormap(jet(16)); \
+        colormap(turbo); \
+        colormap(gray(4)); \
         colormap([0 0 0; 1 0.5 0; 1 1 1]);";
     execute_source(input).expect("execute colormap array generator script");
 }

@@ -11,8 +11,6 @@ use runmat_plot::plots::surface::ColorMap;
 use super::state::current_colormap_length;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const PARULA: &str = "parula";
-const COLORCUBE: &str = "colorcube";
 const MAX_COLORMAP_LENGTH: usize = 1_000_000;
 
 const OUTPUT_CMAP: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -32,32 +30,6 @@ const INPUTS_LENGTH: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Number of colors as a nonnegative integer.",
 }];
 
-const PARULA_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "c = parula()",
-        inputs: &INPUTS_NONE,
-        outputs: &OUTPUT_CMAP,
-    },
-    BuiltinSignatureDescriptor {
-        label: "c = parula(m)",
-        inputs: &INPUTS_LENGTH,
-        outputs: &OUTPUT_CMAP,
-    },
-];
-
-const COLORCUBE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "c = colorcube()",
-        inputs: &INPUTS_NONE,
-        outputs: &OUTPUT_CMAP,
-    },
-    BuiltinSignatureDescriptor {
-        label: "c = colorcube(m)",
-        inputs: &INPUTS_LENGTH,
-        outputs: &OUTPUT_CMAP,
-    },
-];
-
 const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.COLORMAP_ARRAY.INVALID_ARGUMENT",
     identifier: Some("RunMat:colormapArray:InvalidArgument"),
@@ -67,51 +39,268 @@ const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 
 const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_ARGUMENT];
 
-pub const PARULA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PARULA_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-pub const COLORCUBE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COLORCUBE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 fn colormap_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     Type::Tensor { shape: None }
 }
 
-#[runtime_builtin(
-    name = "parula",
-    category = "plotting",
-    summary = "Return the parula colormap as an RGB array.",
-    keywords = "parula,colormap,plotting,rgb",
-    type_resolver(colormap_type),
-    descriptor(crate::builtins::plotting::colormap_arrays::PARULA_DESCRIPTOR),
-    builtin_path = "crate::builtins::plotting::colormap_arrays"
-)]
-pub fn parula_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let len = parse_length_arg(&args, PARULA)?;
-    Ok(Value::Tensor(colormap_tensor(ColorMap::Parula, len)))
+#[rustfmt::skip]
+macro_rules! define_colormap_builtin {
+    (
+        $descriptor:ident,
+        $signatures:ident,
+        $fn_name:ident,
+        $name:literal,
+        $variant:path,
+        $summary:literal,
+        $keywords:literal,
+        $label_none:literal,
+        $label_length:literal
+    ) => {
+        const $signatures: [BuiltinSignatureDescriptor; 2] = [
+            BuiltinSignatureDescriptor {
+                label: $label_none,
+                inputs: &INPUTS_NONE,
+                outputs: &OUTPUT_CMAP,
+            },
+            BuiltinSignatureDescriptor {
+                label: $label_length,
+                inputs: &INPUTS_LENGTH,
+                outputs: &OUTPUT_CMAP,
+            },
+        ];
+
+        pub const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &$signatures,
+            output_mode: BuiltinOutputMode::Fixed,
+            completion_policy: BuiltinCompletionPolicy::Public,
+            errors: &ERRORS,
+        };
+
+        #[runtime_builtin(
+            name = $name,
+            category = "plotting",
+            summary = $summary,
+            keywords = $keywords,
+            type_resolver(colormap_type),
+            descriptor(crate::builtins::plotting::colormap_arrays::$descriptor),
+            builtin_path = "crate::builtins::plotting::colormap_arrays"
+        )]
+        pub fn $fn_name(args: Vec<Value>) -> BuiltinResult<Value> {
+            let len = parse_length_arg(&args, $name)?;
+            Ok(Value::Tensor(colormap_tensor($variant, len)))
+        }
+    };
 }
 
-#[runtime_builtin(
-    name = "colorcube",
-    category = "plotting",
-    summary = "Return the colorcube colormap as an RGB array.",
-    keywords = "colorcube,colormap,plotting,rgb",
-    type_resolver(colormap_type),
-    descriptor(crate::builtins::plotting::colormap_arrays::COLORCUBE_DESCRIPTOR),
-    builtin_path = "crate::builtins::plotting::colormap_arrays"
-)]
-pub fn colorcube_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let len = parse_length_arg(&args, COLORCUBE)?;
-    Ok(Value::Tensor(colormap_tensor(ColorMap::ColorCube, len)))
-}
+define_colormap_builtin!(
+    PARULA_DESCRIPTOR,
+    PARULA_SIGNATURES,
+    parula_builtin,
+    "parula",
+    ColorMap::Parula,
+    "Return the parula colormap as an RGB array.",
+    "parula,colormap,plotting,rgb",
+    "c = parula()",
+    "c = parula(m)"
+);
+define_colormap_builtin!(
+    COLORCUBE_DESCRIPTOR,
+    COLORCUBE_SIGNATURES,
+    colorcube_builtin,
+    "colorcube",
+    ColorMap::ColorCube,
+    "Return the colorcube colormap as an RGB array.",
+    "colorcube,colormap,plotting,rgb",
+    "c = colorcube()",
+    "c = colorcube(m)"
+);
+define_colormap_builtin!(
+    VIRIDIS_DESCRIPTOR,
+    VIRIDIS_SIGNATURES,
+    viridis_builtin,
+    "viridis",
+    ColorMap::Viridis,
+    "Return the viridis colormap as an RGB array.",
+    "viridis,colormap,plotting,rgb",
+    "c = viridis()",
+    "c = viridis(m)"
+);
+define_colormap_builtin!(
+    PLASMA_DESCRIPTOR,
+    PLASMA_SIGNATURES,
+    plasma_builtin,
+    "plasma",
+    ColorMap::Plasma,
+    "Return the plasma colormap as an RGB array.",
+    "plasma,colormap,plotting,rgb",
+    "c = plasma()",
+    "c = plasma(m)"
+);
+define_colormap_builtin!(
+    INFERNO_DESCRIPTOR,
+    INFERNO_SIGNATURES,
+    inferno_builtin,
+    "inferno",
+    ColorMap::Inferno,
+    "Return the inferno colormap as an RGB array.",
+    "inferno,colormap,plotting,rgb",
+    "c = inferno()",
+    "c = inferno(m)"
+);
+define_colormap_builtin!(
+    MAGMA_DESCRIPTOR,
+    MAGMA_SIGNATURES,
+    magma_builtin,
+    "magma",
+    ColorMap::Magma,
+    "Return the magma colormap as an RGB array.",
+    "magma,colormap,plotting,rgb",
+    "c = magma()",
+    "c = magma(m)"
+);
+define_colormap_builtin!(
+    TURBO_DESCRIPTOR,
+    TURBO_SIGNATURES,
+    turbo_builtin,
+    "turbo",
+    ColorMap::Turbo,
+    "Return the turbo colormap as an RGB array.",
+    "turbo,colormap,plotting,rgb",
+    "c = turbo()",
+    "c = turbo(m)"
+);
+define_colormap_builtin!(
+    JET_DESCRIPTOR,
+    JET_SIGNATURES,
+    jet_builtin,
+    "jet",
+    ColorMap::Jet,
+    "Return the jet colormap as an RGB array.",
+    "jet,colormap,plotting,rgb",
+    "c = jet()",
+    "c = jet(m)"
+);
+define_colormap_builtin!(
+    HOT_DESCRIPTOR,
+    HOT_SIGNATURES,
+    hot_builtin,
+    "hot",
+    ColorMap::Hot,
+    "Return the hot colormap as an RGB array.",
+    "hot,colormap,plotting,rgb",
+    "c = hot()",
+    "c = hot(m)"
+);
+define_colormap_builtin!(
+    COOL_DESCRIPTOR,
+    COOL_SIGNATURES,
+    cool_builtin,
+    "cool",
+    ColorMap::Cool,
+    "Return the cool colormap as an RGB array.",
+    "cool,colormap,plotting,rgb",
+    "c = cool()",
+    "c = cool(m)"
+);
+define_colormap_builtin!(
+    SPRING_DESCRIPTOR,
+    SPRING_SIGNATURES,
+    spring_builtin,
+    "spring",
+    ColorMap::Spring,
+    "Return the spring colormap as an RGB array.",
+    "spring,colormap,plotting,rgb",
+    "c = spring()",
+    "c = spring(m)"
+);
+define_colormap_builtin!(
+    SUMMER_DESCRIPTOR,
+    SUMMER_SIGNATURES,
+    summer_builtin,
+    "summer",
+    ColorMap::Summer,
+    "Return the summer colormap as an RGB array.",
+    "summer,colormap,plotting,rgb",
+    "c = summer()",
+    "c = summer(m)"
+);
+define_colormap_builtin!(
+    AUTUMN_DESCRIPTOR,
+    AUTUMN_SIGNATURES,
+    autumn_builtin,
+    "autumn",
+    ColorMap::Autumn,
+    "Return the autumn colormap as an RGB array.",
+    "autumn,colormap,plotting,rgb",
+    "c = autumn()",
+    "c = autumn(m)"
+);
+define_colormap_builtin!(
+    WINTER_DESCRIPTOR,
+    WINTER_SIGNATURES,
+    winter_builtin,
+    "winter",
+    ColorMap::Winter,
+    "Return the winter colormap as an RGB array.",
+    "winter,colormap,plotting,rgb",
+    "c = winter()",
+    "c = winter(m)"
+);
+define_colormap_builtin!(
+    GRAY_DESCRIPTOR,
+    GRAY_SIGNATURES,
+    gray_builtin,
+    "gray",
+    ColorMap::Gray,
+    "Return the gray colormap as an RGB array.",
+    "gray,colormap,plotting,rgb",
+    "c = gray()",
+    "c = gray(m)"
+);
+define_colormap_builtin!(
+    BONE_DESCRIPTOR,
+    BONE_SIGNATURES,
+    bone_builtin,
+    "bone",
+    ColorMap::Bone,
+    "Return the bone colormap as an RGB array.",
+    "bone,colormap,plotting,rgb",
+    "c = bone()",
+    "c = bone(m)"
+);
+define_colormap_builtin!(
+    COPPER_DESCRIPTOR,
+    COPPER_SIGNATURES,
+    copper_builtin,
+    "copper",
+    ColorMap::Copper,
+    "Return the copper colormap as an RGB array.",
+    "copper,colormap,plotting,rgb",
+    "c = copper()",
+    "c = copper(m)"
+);
+define_colormap_builtin!(
+    PINK_DESCRIPTOR,
+    PINK_SIGNATURES,
+    pink_builtin,
+    "pink",
+    ColorMap::Pink,
+    "Return the pink colormap as an RGB array.",
+    "pink,colormap,plotting,rgb",
+    "c = pink()",
+    "c = pink(m)"
+);
+define_colormap_builtin!(
+    LINES_DESCRIPTOR,
+    LINES_SIGNATURES,
+    lines_builtin,
+    "lines",
+    ColorMap::Lines,
+    "Return the lines colormap as an RGB array.",
+    "lines,colormap,plotting,rgb",
+    "c = lines()",
+    "c = lines(m)"
+);
 
 pub(crate) fn colormap_tensor(map: ColorMap, len: usize) -> Tensor {
     let mut colors = Vec::with_capacity(len);
@@ -221,7 +410,11 @@ fn sample_colormap(map: &ColorMap, idx: usize, len: usize) -> [f64; 3] {
         idx as f32 / (len - 1) as f32
     };
     let rgb = map.map_value(t);
-    [rgb.x as f64, rgb.y as f64, rgb.z as f64]
+    [
+        rgb.x.clamp(0.0, 1.0) as f64,
+        rgb.y.clamp(0.0, 1.0) as f64,
+        rgb.z.clamp(0.0, 1.0) as f64,
+    ]
 }
 
 fn invalid(builtin: &'static str, detail: impl AsRef<str>) -> RuntimeError {
@@ -255,41 +448,72 @@ mod tests {
 
     #[test]
     fn descriptors_cover_core_forms() {
-        let parula_labels = PARULA_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect::<Vec<_>>();
-        assert!(parula_labels.contains(&"c = parula()"));
-        assert!(parula_labels.contains(&"c = parula(m)"));
-
-        let colorcube_labels = COLORCUBE_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect::<Vec<_>>();
-        assert!(colorcube_labels.contains(&"c = colorcube()"));
-        assert!(colorcube_labels.contains(&"c = colorcube(m)"));
+        for (name, descriptor) in [
+            ("parula", &PARULA_DESCRIPTOR),
+            ("colorcube", &COLORCUBE_DESCRIPTOR),
+            ("viridis", &VIRIDIS_DESCRIPTOR),
+            ("plasma", &PLASMA_DESCRIPTOR),
+            ("inferno", &INFERNO_DESCRIPTOR),
+            ("magma", &MAGMA_DESCRIPTOR),
+            ("turbo", &TURBO_DESCRIPTOR),
+            ("jet", &JET_DESCRIPTOR),
+            ("hot", &HOT_DESCRIPTOR),
+            ("cool", &COOL_DESCRIPTOR),
+            ("spring", &SPRING_DESCRIPTOR),
+            ("summer", &SUMMER_DESCRIPTOR),
+            ("autumn", &AUTUMN_DESCRIPTOR),
+            ("winter", &WINTER_DESCRIPTOR),
+            ("gray", &GRAY_DESCRIPTOR),
+            ("bone", &BONE_DESCRIPTOR),
+            ("copper", &COPPER_DESCRIPTOR),
+            ("pink", &PINK_DESCRIPTOR),
+            ("lines", &LINES_DESCRIPTOR),
+        ] {
+            let labels = descriptor
+                .signatures
+                .iter()
+                .map(|sig| sig.label)
+                .collect::<Vec<_>>();
+            assert!(labels.contains(&format!("c = {name}()").as_str()));
+            assert!(labels.contains(&format!("c = {name}(m)").as_str()));
+        }
     }
 
     #[test]
-    fn parula_and_colorcube_return_m_by_3_rgb_arrays() {
-        let parula = parula_builtin(vec![Value::Num(4.0)]).expect("parula");
-        let Value::Tensor(parula) = parula else {
-            panic!("expected tensor");
-        };
-        assert_eq!((parula.rows, parula.cols, parula.data.len()), (4, 3, 12));
-        assert!(parula.data.iter().all(|v| (0.0..=1.0).contains(v)));
-
-        let colorcube = colorcube_builtin(vec![Value::Num(6.0)]).expect("colorcube");
-        let Value::Tensor(colorcube) = colorcube else {
-            panic!("expected tensor");
-        };
-        assert_eq!(
-            (colorcube.rows, colorcube.cols, colorcube.data.len()),
-            (6, 3, 18)
-        );
-        assert!(colorcube.data.iter().all(|v| (0.0..=1.0).contains(v)));
+    fn named_colormaps_return_m_by_3_rgb_arrays() {
+        for (name, builtin) in [
+            (
+                "parula",
+                parula_builtin as fn(Vec<Value>) -> BuiltinResult<Value>,
+            ),
+            ("colorcube", colorcube_builtin),
+            ("viridis", viridis_builtin),
+            ("plasma", plasma_builtin),
+            ("inferno", inferno_builtin),
+            ("magma", magma_builtin),
+            ("turbo", turbo_builtin),
+            ("jet", jet_builtin),
+            ("hot", hot_builtin),
+            ("cool", cool_builtin),
+            ("spring", spring_builtin),
+            ("summer", summer_builtin),
+            ("autumn", autumn_builtin),
+            ("winter", winter_builtin),
+            ("gray", gray_builtin),
+            ("bone", bone_builtin),
+            ("copper", copper_builtin),
+            ("pink", pink_builtin),
+            ("lines", lines_builtin),
+        ] {
+            let Value::Tensor(cmap) = builtin(vec![Value::Num(6.0)]).expect(name) else {
+                panic!("expected tensor");
+            };
+            assert_eq!((cmap.rows, cmap.cols, cmap.data.len()), (6, 3, 18));
+            assert!(
+                cmap.data.iter().all(|v| (0.0..=1.0).contains(v)),
+                "{name} produced out-of-range RGB entries"
+            );
+        }
     }
 
     #[test]
