@@ -1410,6 +1410,14 @@ pub trait AccelProvider: Send + Sync {
         ))
     }
 
+    /// Apply the Adam optimizer update to resident parameter and state tensors.
+    fn adam_update(
+        &self,
+        _request: &ProviderAdamUpdateRequest<'_>,
+    ) -> anyhow::Result<ProviderAdamUpdateResult> {
+        Err(anyhow::anyhow!("adam_update not supported by provider"))
+    }
+
     /// Construct a diagonal matrix from a vector-like tensor. `offset` matches MATLAB semantics.
     fn diag_from_vector(
         &self,
@@ -3169,6 +3177,28 @@ pub struct ProviderBlackScholesPriceResult {
 pub struct ProviderCovarianceToCorrelationResult {
     pub correlation: GpuTensorHandle,
     pub sigma: GpuTensorHandle,
+}
+
+/// Provider-side Adam optimizer update request.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderAdamUpdateRequest<'a> {
+    pub parameters: &'a GpuTensorHandle,
+    pub gradient: &'a GpuTensorHandle,
+    pub average_grad: Option<&'a GpuTensorHandle>,
+    pub average_sq_grad: Option<&'a GpuTensorHandle>,
+    pub iteration: usize,
+    pub learn_rate: f64,
+    pub gradient_decay_factor: f64,
+    pub squared_gradient_decay_factor: f64,
+    pub epsilon: f64,
+}
+
+/// Provider-side Adam optimizer update result.
+#[derive(Debug, Clone)]
+pub struct ProviderAdamUpdateResult {
+    pub parameters: GpuTensorHandle,
+    pub average_grad: GpuTensorHandle,
+    pub average_sq_grad: GpuTensorHandle,
 }
 
 /// Descriptor for GEMM epilogues applied to `C = A * B` before storing to `C`.

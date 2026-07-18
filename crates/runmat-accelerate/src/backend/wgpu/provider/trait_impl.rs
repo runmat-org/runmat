@@ -1,9 +1,9 @@
 use super::*;
 use runmat_accelerate_api::{
-    ProviderBitModulationRequest, ProviderBlackScholesPriceRequest,
-    ProviderBlackScholesPriceResult, ProviderCovarianceToCorrelationResult,
-    ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderHilbertRequest,
-    ProviderModulationRequest, ProviderNdgridRequest, ProviderNdgridResult,
+    ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBitModulationRequest,
+    ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult,
+    ProviderCovarianceToCorrelationResult, ProviderEnvelopeRequest, ProviderEnvelopeResult,
+    ProviderHilbertRequest, ProviderModulationRequest, ProviderNdgridRequest, ProviderNdgridResult,
 };
 
 impl AccelProvider for WgpuProvider {
@@ -82,6 +82,13 @@ impl AccelProvider for WgpuProvider {
         request: &ProviderBlackScholesPriceRequest<'_>,
     ) -> Result<ProviderBlackScholesPriceResult> {
         self.black_scholes_price_exec(request)
+    }
+
+    fn adam_update(
+        &self,
+        request: &ProviderAdamUpdateRequest<'_>,
+    ) -> Result<ProviderAdamUpdateResult> {
+        self.adam_update_exec(request)
     }
 
     fn linspace(&self, start: f64, stop: f64, count: usize) -> Result<GpuTensorHandle> {

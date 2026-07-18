@@ -6,17 +6,17 @@ use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, CorrcoefOptions, CovarianceOptions,
     FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage, HostTensorOwned,
-    HostTensorView, ImfilterOptions, PagefunRequest, ProviderBandwidth,
-    ProviderBitModulationRequest, ProviderBlackScholesPriceRequest,
-    ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
-    ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
-    ProviderEigResult, ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions,
-    ProviderIirFilterResult, ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult,
-    ProviderLuResult, ProviderModulationRequest, ProviderNanMode, ProviderNdgridRequest,
-    ProviderNdgridResult, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
-    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrResult, ProviderScanDirection,
-    ProviderSymmetryKind, SetdiffOptions, SetdiffResult, SortComparison, SortResult,
-    SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    HostTensorView, ImfilterOptions, PagefunRequest, ProviderAdamUpdateRequest,
+    ProviderAdamUpdateResult, ProviderBandwidth, ProviderBitModulationRequest,
+    ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult, ProviderCholResult,
+    ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
+    ProviderCovarianceToCorrelationResult, ProviderEigResult, ProviderFindResult,
+    ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
+    ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderModulationRequest,
+    ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder,
+    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions,
+    ProviderQrPivot, ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind, SetdiffOptions,
+    SetdiffResult, SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -892,6 +892,95 @@ fn provider_covariance_to_correlation(data: &[f64], n: usize) -> (Vec<f64>, Vec<
         }
     }
     (correlation, sigma)
+}
+
+struct ProviderAdamUpdateScalars {
+    iteration: usize,
+    learn_rate: f64,
+    gradient_decay_factor: f64,
+    squared_gradient_decay_factor: f64,
+    epsilon: f64,
+}
+
+fn provider_adam_update_values(
+    parameters: &[f64],
+    gradient: &[f64],
+    average_grad: &[f64],
+    average_sq_grad: &[f64],
+    scalars: ProviderAdamUpdateScalars,
+) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>)> {
+    ensure!(
+        scalars.iteration > 0,
+        "adam_update: iteration must be positive"
+    );
+    ensure!(
+        scalars.learn_rate > 0.0 && scalars.learn_rate.is_finite(),
+        "adam_update: learnRate must be positive and finite"
+    );
+    ensure!(
+        (0.0..1.0).contains(&scalars.gradient_decay_factor)
+            && scalars.gradient_decay_factor.is_finite(),
+        "adam_update: gradient decay factor must be in [0, 1)"
+    );
+    ensure!(
+        (0.0..1.0).contains(&scalars.squared_gradient_decay_factor)
+            && scalars.squared_gradient_decay_factor.is_finite(),
+        "adam_update: squared gradient decay factor must be in [0, 1)"
+    );
+    ensure!(
+        scalars.epsilon > 0.0 && scalars.epsilon.is_finite(),
+        "adam_update: epsilon must be positive and finite"
+    );
+    ensure!(
+        parameters.len() == gradient.len()
+            && parameters.len() == average_grad.len()
+            && parameters.len() == average_sq_grad.len(),
+        "adam_update: input lengths must match"
+    );
+    ensure!(
+        parameters.iter().all(|value| value.is_finite())
+            && gradient.iter().all(|value| value.is_finite())
+            && average_grad.iter().all(|value| value.is_finite())
+            && average_sq_grad.iter().all(|value| value.is_finite()),
+        "adam_update: inputs must contain finite values"
+    );
+
+    let iteration = scalars.iteration as f64;
+    let grad_correction = 1.0 - scalars.gradient_decay_factor.powf(iteration);
+    let sq_grad_correction = 1.0 - scalars.squared_gradient_decay_factor.powf(iteration);
+    ensure!(
+        grad_correction > 0.0 && sq_grad_correction > 0.0,
+        "adam_update: decay factors and iteration produced invalid bias correction"
+    );
+
+    let mut updated_parameters = Vec::with_capacity(parameters.len());
+    let mut updated_average_grad = Vec::with_capacity(parameters.len());
+    let mut updated_average_sq_grad = Vec::with_capacity(parameters.len());
+    for idx in 0..parameters.len() {
+        let grad = gradient[idx];
+        let avg_grad = scalars.gradient_decay_factor * average_grad[idx]
+            + (1.0 - scalars.gradient_decay_factor) * grad;
+        let avg_sq_grad = scalars.squared_gradient_decay_factor * average_sq_grad[idx]
+            + (1.0 - scalars.squared_gradient_decay_factor) * grad * grad;
+        let corrected_grad = avg_grad / grad_correction;
+        let corrected_sq_grad = avg_sq_grad / sq_grad_correction;
+        let step =
+            scalars.learn_rate * corrected_grad / (corrected_sq_grad.sqrt() + scalars.epsilon);
+        let updated = parameters[idx] - step;
+        ensure!(
+            updated.is_finite() && avg_grad.is_finite() && avg_sq_grad.is_finite(),
+            "adam_update: update produced a non-finite value"
+        );
+        updated_parameters.push(updated);
+        updated_average_grad.push(avg_grad);
+        updated_average_sq_grad.push(avg_sq_grad);
+    }
+
+    Ok((
+        updated_parameters,
+        updated_average_grad,
+        updated_average_sq_grad,
+    ))
 }
 
 fn product(shape: &[usize]) -> usize {
@@ -2101,6 +2190,95 @@ impl AccelProvider for InProcessProvider {
         Ok(ProviderBlackScholesPriceResult {
             call: self.allocate_tensor(call, request.output_shape.to_vec()),
             put: self.allocate_tensor(put, request.output_shape.to_vec()),
+        })
+    }
+
+    fn adam_update(
+        &self,
+        request: &ProviderAdamUpdateRequest<'_>,
+    ) -> Result<ProviderAdamUpdateResult> {
+        let parameters_entry_shape = request.parameters.shape.clone();
+        let parameter_len = product(&parameters_entry_shape);
+        ensure!(
+            parameter_len > 0,
+            "adam_update: parameters must not be empty"
+        );
+        ensure!(
+            runmat_accelerate_api::handle_storage(request.parameters)
+                != GpuTensorStorage::ComplexInterleaved
+                && runmat_accelerate_api::handle_storage(request.gradient)
+                    != GpuTensorStorage::ComplexInterleaved
+                && request.average_grad.is_none_or(|handle| {
+                    runmat_accelerate_api::handle_storage(handle)
+                        != GpuTensorStorage::ComplexInterleaved
+                })
+                && request.average_sq_grad.is_none_or(|handle| {
+                    runmat_accelerate_api::handle_storage(handle)
+                        != GpuTensorStorage::ComplexInterleaved
+                }),
+            "adam_update: complex optimizer tensors are not supported"
+        );
+
+        let (parameters, gradient, average_grad, average_sq_grad) = {
+            let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
+            let parameters = guard
+                .get(&request.parameters.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("adam_update: unknown parameters buffer"))?;
+            let gradient = guard
+                .get(&request.gradient.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("adam_update: unknown gradient buffer"))?;
+            let average_grad = match request.average_grad {
+                Some(handle) => guard
+                    .get(&handle.buffer_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("adam_update: unknown averageGrad buffer"))?,
+                None => vec![0.0; parameter_len],
+            };
+            let average_sq_grad = match request.average_sq_grad {
+                Some(handle) => guard
+                    .get(&handle.buffer_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("adam_update: unknown averageSqGrad buffer"))?,
+                None => vec![0.0; parameter_len],
+            };
+            (parameters, gradient, average_grad, average_sq_grad)
+        };
+
+        ensure!(
+            parameters.len() == parameter_len,
+            "adam_update: parameter shape does not match buffer length"
+        );
+        ensure!(
+            request.gradient.shape == parameters_entry_shape
+                && request
+                    .average_grad
+                    .is_none_or(|handle| handle.shape == parameters_entry_shape)
+                && request
+                    .average_sq_grad
+                    .is_none_or(|handle| handle.shape == parameters_entry_shape),
+            "adam_update: optimizer tensors must match parameter shape"
+        );
+
+        let (parameters, average_grad, average_sq_grad) = provider_adam_update_values(
+            &parameters,
+            &gradient,
+            &average_grad,
+            &average_sq_grad,
+            ProviderAdamUpdateScalars {
+                iteration: request.iteration,
+                learn_rate: request.learn_rate,
+                gradient_decay_factor: request.gradient_decay_factor,
+                squared_gradient_decay_factor: request.squared_gradient_decay_factor,
+                epsilon: request.epsilon,
+            },
+        )?;
+
+        Ok(ProviderAdamUpdateResult {
+            parameters: self.allocate_tensor(parameters, parameters_entry_shape.clone()),
+            average_grad: self.allocate_tensor(average_grad, parameters_entry_shape.clone()),
+            average_sq_grad: self.allocate_tensor(average_sq_grad, parameters_entry_shape),
         })
     }
 
@@ -7319,6 +7497,47 @@ mod tests {
             &provider,
             &result.put,
             &[6.3497143812997265, 4.855462635089204],
+            &shape,
+        );
+    }
+
+    #[test]
+    fn adam_update_returns_resident_optimizer_state() {
+        let provider = InProcessProvider::new();
+        let shape = [1, 3];
+        let parameters = real_handle(&provider, &[1.0, 2.0, 3.0], &shape);
+        let gradient = real_handle(&provider, &[0.1, -0.2, 0.3], &shape);
+
+        let result = provider
+            .adam_update(&ProviderAdamUpdateRequest {
+                parameters: &parameters,
+                gradient: &gradient,
+                average_grad: None,
+                average_sq_grad: None,
+                iteration: 1,
+                learn_rate: 0.01,
+                gradient_decay_factor: 0.9,
+                squared_gradient_decay_factor: 0.999,
+                epsilon: 1.0e-8,
+            })
+            .expect("adam update");
+
+        assert_real_close(
+            &provider,
+            &result.parameters,
+            &[0.990000001, 2.0099999995, 2.9900000003333334],
+            &shape,
+        );
+        assert_real_close(
+            &provider,
+            &result.average_grad,
+            &[0.01, -0.02, 0.03],
+            &shape,
+        );
+        assert_real_close(
+            &provider,
+            &result.average_sq_grad,
+            &[0.00001, 0.00004, 0.00009],
             &shape,
         );
     }

@@ -9,21 +9,21 @@ use runmat_accelerate_api::{
     ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, CovNormalization, CovRows,
     CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage,
     HostTensorOwned, HostTensorView, ImfilterOptions, IsMemberOptions, IsMemberResult,
-    MeshgridAxisView, PagefunOp, PagefunRequest, ProviderBandwidth,
-    ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult, ProviderCholResult,
-    ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
-    ProviderCovarianceToCorrelationResult, ProviderCummaxResult, ProviderCumminResult,
-    ProviderEigResult, ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions,
-    ProviderIirFilterResult, ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult,
-    ProviderLuResult, ProviderMeshgridResult, ProviderNanMode, ProviderNdgridRequest,
-    ProviderNdgridResult, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
-    ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision, ProviderQrOptions,
-    ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult, ProviderScanDirection,
-    ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
-    ProviderSpectralResult, ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult,
-    ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison,
-    SortOrder, SortResult, SortRowsColumnSpec, SpawnHandleConcurrency, UnionOptions, UnionResult,
-    UniqueOptions, UniqueResult, WgpuBufferRef,
+    MeshgridAxisView, PagefunOp, PagefunRequest, ProviderAdamUpdateRequest,
+    ProviderAdamUpdateResult, ProviderBandwidth, ProviderBlackScholesPriceRequest,
+    ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
+    ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
+    ProviderCummaxResult, ProviderCumminResult, ProviderEigResult, ProviderFindResult,
+    ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
+    ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderMeshgridResult,
+    ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder,
+    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions,
+    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult,
+    ProviderQrResult, ProviderScanDirection, ProviderSpectralFrameMode, ProviderSpectralRange,
+    ProviderSpectralRequest, ProviderSpectralResult, ProviderStdNormalization,
+    ProviderSymmetryKind, ReduceDimResult, ReductionFlavor, ReductionTwoPassMode, SetdiffOptions,
+    SetdiffResult, SortComparison, SortOrder, SortResult, SortRowsColumnSpec,
+    SpawnHandleConcurrency, UnionOptions, UnionResult, UniqueOptions, UniqueResult, WgpuBufferRef,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
@@ -66,6 +66,8 @@ mod constructors;
 mod context;
 #[path = "core.rs"]
 mod core;
+#[path = "ops/deep_learning.rs"]
+mod deep_learning;
 #[path = "ops/elementwise.rs"]
 mod elementwise;
 #[path = "ops/fft/mod.rs"]

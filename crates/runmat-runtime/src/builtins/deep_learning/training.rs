@@ -1,3 +1,7 @@
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderAdamUpdateRequest,
+    ProviderAdamUpdateResult,
+};
 use runmat_builtins::{CellArray, NumericDType, ObjectInstance, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -7,6 +11,7 @@ use super::{
     any_type, deep_learning_error, gather_args, object, parse_name_values, scalar_text,
     text_or_missing, unsupported_error,
 };
+use crate::builtins::common::gpu_helpers;
 
 const DLUPDATE_MAX_DEPTH: usize = 256;
 
@@ -183,7 +188,17 @@ pub(super) async fn dlfeval_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::deep_learning::training"
 )]
 pub(super) async fn adamupdate_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let options = AdamUpdateArgs::parse(args)?;
+    let has_gpu_input = args
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)));
+    let options = if has_gpu_input {
+        match try_adamupdate_gpu(&args)? {
+            Some(eval) => return eval.output(),
+            None => AdamUpdateArgs::parse(gather_args(args).await?)?,
+        }
+    } else {
+        AdamUpdateArgs::parse(args)?
+    };
     let eval = evaluate_adamupdate(options)?;
     match crate::output_count::current_output_count() {
         None => Ok(eval.parameters),
@@ -656,6 +671,200 @@ struct AdamUpdateEval {
     average_sq_grad: Value,
 }
 
+struct AdamUpdateGpuEval {
+    provider: &'static dyn AccelProvider,
+    parameters: GpuTensorHandle,
+    average_grad: GpuTensorHandle,
+    average_sq_grad: GpuTensorHandle,
+}
+
+impl AdamUpdateGpuEval {
+    fn from_provider(
+        provider: &'static dyn AccelProvider,
+        result: ProviderAdamUpdateResult,
+    ) -> Self {
+        Self {
+            provider,
+            parameters: result.parameters,
+            average_grad: result.average_grad,
+            average_sq_grad: result.average_sq_grad,
+        }
+    }
+
+    fn output(self) -> BuiltinResult<Value> {
+        match crate::output_count::current_output_count() {
+            None => {
+                let _ = self.provider.free(&self.average_grad);
+                let _ = self.provider.free(&self.average_sq_grad);
+                Ok(gpu_helpers::resident_gpu_value(self.parameters))
+            }
+            Some(0) => {
+                let _ = self.provider.free(&self.parameters);
+                let _ = self.provider.free(&self.average_grad);
+                let _ = self.provider.free(&self.average_sq_grad);
+                Ok(Value::OutputList(Vec::new()))
+            }
+            Some(1) => {
+                let _ = self.provider.free(&self.average_grad);
+                let _ = self.provider.free(&self.average_sq_grad);
+                Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
+                    self.parameters,
+                )]))
+            }
+            Some(2) => {
+                let _ = self.provider.free(&self.average_sq_grad);
+                Ok(Value::OutputList(vec![
+                    gpu_helpers::resident_gpu_value(self.parameters),
+                    gpu_helpers::resident_gpu_value(self.average_grad),
+                ]))
+            }
+            Some(3) => Ok(Value::OutputList(vec![
+                gpu_helpers::resident_gpu_value(self.parameters),
+                gpu_helpers::resident_gpu_value(self.average_grad),
+                gpu_helpers::resident_gpu_value(self.average_sq_grad),
+            ])),
+            Some(requested) => {
+                let _ = self.provider.free(&self.parameters);
+                let _ = self.provider.free(&self.average_grad);
+                let _ = self.provider.free(&self.average_sq_grad);
+                Err(deep_learning_error(
+                    "adamupdate",
+                    format!(
+                        "adamupdate: requested {requested} outputs, but at most 3 are supported"
+                    ),
+                ))
+            }
+        }
+    }
+}
+
+fn try_adamupdate_gpu(args: &[Value]) -> BuiltinResult<Option<AdamUpdateGpuEval>> {
+    if !(5..=9).contains(&args.len()) {
+        return Err(deep_learning_error(
+            "adamupdate",
+            "adamupdate: expected 5 to 9 positional arguments",
+        ));
+    }
+
+    let Value::GpuTensor(parameters) = &args[0] else {
+        return Ok(None);
+    };
+    let Value::GpuTensor(gradient) = &args[1] else {
+        return Ok(None);
+    };
+    if args[4..]
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        return Ok(None);
+    }
+    let average_grad = match gpu_optimizer_state(&args[2], "averageGrad")? {
+        GpuOptimizerState::Resident(handle) => Some(handle),
+        GpuOptimizerState::Empty => None,
+        GpuOptimizerState::HostFallback => return Ok(None),
+    };
+    let average_sq_grad = match gpu_optimizer_state(&args[3], "averageSqGrad")? {
+        GpuOptimizerState::Resident(handle) => Some(handle),
+        GpuOptimizerState::Empty => None,
+        GpuOptimizerState::HostFallback => return Ok(None),
+    };
+
+    if runmat_accelerate_api::handle_storage(parameters) == GpuTensorStorage::ComplexInterleaved
+        || runmat_accelerate_api::handle_storage(gradient) == GpuTensorStorage::ComplexInterleaved
+        || average_grad.is_some_and(|handle| {
+            runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved
+        })
+        || average_sq_grad.is_some_and(|handle| {
+            runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved
+        })
+    {
+        return Err(deep_learning_error(
+            "adamupdate",
+            "adamupdate: complex gpuArray optimizer tensors are not supported",
+        ));
+    }
+
+    if parameters.shape != gradient.shape
+        || average_grad.is_some_and(|handle| handle.shape != parameters.shape)
+        || average_sq_grad.is_some_and(|handle| handle.shape != parameters.shape)
+    {
+        return Err(deep_learning_error(
+            "adamupdate",
+            format!(
+                "adamupdate: optimizer tensors must match parameter shape {:?}",
+                parameters.shape
+            ),
+        ));
+    }
+
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(parameters) else {
+        return Ok(None);
+    };
+    let Some(gradient_provider) = runmat_accelerate_api::provider_for_handle(gradient) else {
+        return Ok(None);
+    };
+    if !std::ptr::eq(gradient_provider, provider) {
+        return Ok(None);
+    }
+    if average_grad.is_some_and(|handle| {
+        runmat_accelerate_api::provider_for_handle(handle)
+            .is_none_or(|state_provider| !std::ptr::eq(state_provider, provider))
+    }) || average_sq_grad.is_some_and(|handle| {
+        runmat_accelerate_api::provider_for_handle(handle)
+            .is_none_or(|state_provider| !std::ptr::eq(state_provider, provider))
+    }) {
+        return Ok(None);
+    }
+
+    let iteration = positive_iteration(&args[4])?;
+    let request = ProviderAdamUpdateRequest {
+        parameters,
+        gradient,
+        average_grad,
+        average_sq_grad,
+        iteration,
+        learn_rate: optional_positive_scalar(args, 5, 0.001, "learnRate")?,
+        gradient_decay_factor: optional_unit_scalar(args, 6, 0.9, "gradDecay")?,
+        squared_gradient_decay_factor: optional_unit_scalar(args, 7, 0.999, "sqGradDecay")?,
+        epsilon: optional_positive_scalar(args, 8, 1.0e-8, "epsilon")?,
+    };
+
+    match provider.adam_update(&request) {
+        Ok(result) => Ok(Some(AdamUpdateGpuEval::from_provider(provider, result))),
+        Err(err) if provider_is_unsupported(&err) => Ok(None),
+        Err(err) => Err(deep_learning_error(
+            "adamupdate",
+            format!("adamupdate: {err}"),
+        )),
+    }
+}
+
+enum GpuOptimizerState<'a> {
+    Resident(&'a GpuTensorHandle),
+    Empty,
+    HostFallback,
+}
+
+fn gpu_optimizer_state<'a>(
+    value: &'a Value,
+    label: &'static str,
+) -> BuiltinResult<GpuOptimizerState<'a>> {
+    match value {
+        Value::GpuTensor(handle) => Ok(GpuOptimizerState::Resident(handle)),
+        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(GpuOptimizerState::Empty),
+        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => Ok(GpuOptimizerState::HostFallback),
+        other => Err(deep_learning_error(
+            "adamupdate",
+            format!("adamupdate: {label} must be a gpuArray or empty numeric array for resident gpuArray updates, got {other:?}"),
+        )),
+    }
+}
+
+fn provider_is_unsupported(err: &anyhow::Error) -> bool {
+    let message = err.to_string();
+    message.contains("not supported") || message.contains("unsupported")
+}
+
 fn evaluate_adamupdate(args: AdamUpdateArgs) -> BuiltinResult<AdamUpdateEval> {
     let count = args.parameters.data.len();
     let mut updated_parameters = Vec::with_capacity(count);
@@ -932,4 +1141,126 @@ fn optional_unit_scalar(
         ));
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
+
+    fn assert_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1.0e-10,
+            "got {actual}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn adamupdate_gpu_inputs_return_resident_outputs() {
+        test_support::with_test_provider(|provider| {
+            let shape = [1usize, 3usize];
+            let parameters = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, 3.0],
+                    shape: &shape,
+                })
+                .expect("upload parameters");
+            let gradient = provider
+                .upload(&HostTensorView {
+                    data: &[0.1, -0.2, 0.3],
+                    shape: &shape,
+                })
+                .expect("upload gradient");
+            let empty = Tensor::new(Vec::new(), vec![0, 0]).expect("empty");
+
+            provider.reset_telemetry();
+            let _guard = crate::output_count::push_output_count(Some(3));
+            let out = block_on(adamupdate_builtin(vec![
+                Value::GpuTensor(parameters),
+                Value::GpuTensor(gradient),
+                Value::Tensor(empty.clone()),
+                Value::Tensor(empty),
+                Value::Num(1.0),
+                Value::Num(0.01),
+            ]))
+            .expect("adamupdate gpu");
+
+            let Value::OutputList(values) = out else {
+                panic!("expected output list");
+            };
+            assert_eq!(values.len(), 3);
+            assert!(matches!(values[0], Value::GpuTensor(_)));
+            assert!(matches!(values[1], Value::GpuTensor(_)));
+            assert!(matches!(values[2], Value::GpuTensor(_)));
+
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.download_bytes, 0);
+
+            let updated = test_support::gather(values[0].clone()).expect("updated");
+            let avg = test_support::gather(values[1].clone()).expect("avg");
+            let avg_sq = test_support::gather(values[2].clone()).expect("avg sq");
+
+            assert_eq!(updated.shape, shape);
+            assert_eq!(avg.shape, shape);
+            assert_eq!(avg_sq.shape, shape);
+            assert_close(updated.data[0], 0.990000001);
+            assert_close(updated.data[1], 2.0099999995);
+            assert_close(updated.data[2], 2.9900000003333334);
+            assert_close(avg.data[0], 0.01);
+            assert_close(avg.data[1], -0.02);
+            assert_close(avg.data[2], 0.03);
+            assert_close(avg_sq.data[0], 0.00001);
+            assert_close(avg_sq.data[1], 0.00004);
+            assert_close(avg_sq.data[2], 0.00009);
+        });
+    }
+
+    #[test]
+    fn adamupdate_gpu_single_output_frees_state_outputs() {
+        test_support::with_test_provider(|provider| {
+            let shape = [1usize, 1usize];
+            let parameters = provider
+                .upload(&HostTensorView {
+                    data: &[1.0],
+                    shape: &shape,
+                })
+                .expect("upload parameters");
+            let gradient = provider
+                .upload(&HostTensorView {
+                    data: &[0.1],
+                    shape: &shape,
+                })
+                .expect("upload gradient");
+            let average_grad = provider
+                .upload(&HostTensorView {
+                    data: &[0.0],
+                    shape: &shape,
+                })
+                .expect("upload averageGrad");
+            let average_sq_grad = provider
+                .upload(&HostTensorView {
+                    data: &[0.0],
+                    shape: &shape,
+                })
+                .expect("upload averageSqGrad");
+
+            let _guard = crate::output_count::push_output_count(Some(1));
+            let out = block_on(adamupdate_builtin(vec![
+                Value::GpuTensor(parameters),
+                Value::GpuTensor(gradient),
+                Value::GpuTensor(average_grad),
+                Value::GpuTensor(average_sq_grad),
+                Value::Num(1.0),
+            ]))
+            .expect("adamupdate gpu");
+
+            let Value::OutputList(values) = out else {
+                panic!("expected output list");
+            };
+            assert_eq!(values.len(), 1);
+            assert!(matches!(values[0], Value::GpuTensor(_)));
+        });
+    }
 }

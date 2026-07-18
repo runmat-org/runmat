@@ -3,14 +3,15 @@
   "category": "deep_learning",
   "keywords": ["adamupdate", "deep learning", "Adam", "optimizer"],
   "summary": "Update numeric parameters using the Adam optimizer rule.",
-  "description": "`adamupdate(params, grad, averageGrad, averageSqGrad, iteration)` applies the Adam optimizer update to host numeric arrays and dlarray compatibility objects.",
+  "description": "`adamupdate(params, grad, averageGrad, averageSqGrad, iteration)` applies the Adam optimizer update to host numeric arrays, host `dlarray` compatibility objects, and plain resident `gpuArray` tensors.",
   "behaviors": [
     "Parameters, gradients, and non-empty moving-average inputs must have matching shapes.",
     "Empty `averageGrad` or `averageSqGrad` inputs initialize the corresponding moving average to zeros with the parameter shape.",
     "Optional positional arguments are `learnRate`, `gradDecay`, `sqGradDecay`, and `epsilon`; defaults are `0.001`, `0.9`, `0.999`, and `1e-8`; learning rate and epsilon must be positive, and decay factors must be in `[0, 1)`.",
     "A single unbracketed call returns updated parameters directly; bracketed calls return up to three outputs: updated parameters, updated first-moment average, and updated second-moment average.",
     "Tensor inputs must be floating-point tensors; integer tensor optimizer state is rejected rather than relabeled after fractional updates.",
-    "Model parameter structures, tables, function-handle training loops, and GPU-resident optimizer kernels remain future work."
+    "When `params` and `grad` are resident `gpuArray` tensors, matching resident optimizer-state tensors or empty host numeric state route through the acceleration provider and return resident `gpuArray` outputs without downloading full tensors.",
+    "GPU-backed `dlarray` wrappers, model parameter structures, tables, function-handle training loops, and automatic differentiation remain future work."
   ],
   "examples": [
     {
@@ -26,5 +27,5 @@
       "output": "Updated parameter and optimizer-state arrays."
     }
   },
-  "gpu_residency": "`adamupdate` currently runs on host tensors; provider-resident update kernels belong in a future `runmat-accelerate` implementation."
+  "gpu_residency": "`adamupdate` preserves residency for plain real `gpuArray` parameter, gradient, and optimizer-state tensors through the `runmat-accelerate` `adam_update` provider hook. Empty moving-average state is initialized on device. Host-backed `dlarray` remains host-compatible, and GPU-backed `dlarray` metadata/autodiff support remains future work."
 }
