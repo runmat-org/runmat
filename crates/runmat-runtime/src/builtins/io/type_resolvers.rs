@@ -272,6 +272,11 @@ pub fn uigetfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])
 }
 
+pub fn uigetdir_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Union(vec![Type::String, Type::Num])
+}
+
 pub fn uiputfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::Num])
@@ -577,6 +582,12 @@ mod tests {
         uigetfile_type,
         &[],
         Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])
+    );
+    assert_resolver!(
+        uigetdir_type_resolver,
+        uigetdir_type,
+        &[],
+        Type::Union(vec![Type::String, Type::Num])
     );
     assert_resolver!(
         uiputfile_type_resolver,

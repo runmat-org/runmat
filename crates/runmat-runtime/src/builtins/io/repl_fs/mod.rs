@@ -26,6 +26,7 @@ pub mod savepath;
 pub mod setenv;
 pub mod tempdir;
 pub mod tempname;
+pub mod uigetdir;
 pub mod uigetfile;
 pub mod uiputfile;
 use once_cell::sync::Lazy;
