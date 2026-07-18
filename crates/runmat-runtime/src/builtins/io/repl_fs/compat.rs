@@ -280,14 +280,6 @@ simple_descriptor!(
     BuiltinOutputMode::Fixed
 );
 simple_descriptor!(
-    XMLREAD_SIGNATURES,
-    XMLREAD_DESCRIPTOR,
-    "document = xmlread(filename)",
-    &INPUTS_ONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-simple_descriptor!(
     MEMMAPFILE_SIGNATURES,
     MEMMAPFILE_DESCRIPTOR,
     "m = memmapfile(filename, Name, Value)",
@@ -304,7 +296,7 @@ simple_descriptor!(
     BuiltinOutputMode::Fixed
 );
 
-fn compat_error(name: &str, message: impl Into<String>) -> RuntimeError {
+pub(super) fn compat_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
 }
 
@@ -319,7 +311,7 @@ fn map_control_flow(name: &str, err: RuntimeError) -> RuntimeError {
     builder.build()
 }
 
-async fn gather_args(name: &str, args: &[Value]) -> BuiltinResult<Vec<Value>> {
+pub(super) async fn gather_args(name: &str, args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
         out.push(
@@ -331,7 +323,7 @@ async fn gather_args(name: &str, args: &[Value]) -> BuiltinResult<Vec<Value>> {
     Ok(out)
 }
 
-fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
+pub(super) fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(array) if array.rows == 1 => Ok(char_row_to_string(array)),
@@ -351,7 +343,7 @@ fn char_row_to_string(array: &CharArray) -> String {
     text
 }
 
-fn char_value(text: &str) -> Value {
+pub(super) fn char_value(text: &str) -> Value {
     Value::CharArray(CharArray::new_row(text))
 }
 
@@ -367,7 +359,7 @@ fn expand_path_for_builtin(text: &str, name: &str) -> BuiltinResult<PathBuf> {
     Ok(PathBuf::from(expanded))
 }
 
-fn value_to_path(value: &Value, name: &str, arg: &str) -> BuiltinResult<PathBuf> {
+pub(super) fn value_to_path(value: &Value, name: &str, arg: &str) -> BuiltinResult<PathBuf> {
     let text = scalar_text(value, name, arg)?;
     expand_path_for_builtin(&text, name)
 }
@@ -1044,238 +1036,6 @@ async fn restoredefaultpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 #[runtime_builtin(
-    name = "xmlread",
-    category = "io/repl_fs",
-    summary = "Read an XML file into a lightweight DOM-compatible object.",
-    keywords = "xmlread,xml,file,dom",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::struct_type),
-    descriptor(crate::builtins::io::repl_fs::compat::XMLREAD_DESCRIPTOR),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn xmlread_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("xmlread", &args).await?;
-    if args.len() != 1 {
-        return Err(compat_error(
-            "xmlread",
-            "xmlread: expected exactly one filename",
-        ));
-    }
-    let path = value_to_path(&args[0], "xmlread", "filename")?;
-    let text = vfs::read_to_string_async(&path)
-        .await
-        .map_err(|err| compat_error("xmlread", format!("xmlread: {err}")))?;
-    let root = parse_xml_document(&text)?;
-    let mut object = ObjectInstance::new("org.w3c.dom.Document".to_string());
-    object
-        .properties
-        .insert("Filename".to_string(), char_value(&path_to_string(&path)));
-    object
-        .properties
-        .insert("Text".to_string(), Value::String(text.clone()));
-    object
-        .properties
-        .insert("DocumentElementName".to_string(), char_value(&root.name));
-    object.properties.insert(
-        "DocumentElement".to_string(),
-        Value::Object(root.into_object()?),
-    );
-    Ok(Value::Object(object))
-}
-
-#[derive(Clone, Debug)]
-struct XmlNode {
-    name: String,
-    attributes: BTreeMap<String, String>,
-    children: Vec<XmlNode>,
-    text: String,
-}
-
-impl XmlNode {
-    fn new(name: String, attributes: BTreeMap<String, String>) -> Self {
-        Self {
-            name,
-            attributes,
-            children: Vec::new(),
-            text: String::new(),
-        }
-    }
-
-    fn into_object(self) -> BuiltinResult<ObjectInstance> {
-        let mut object = ObjectInstance::new("org.w3c.dom.Element".to_string());
-        object
-            .properties
-            .insert("NodeName".to_string(), char_value(&self.name));
-        object
-            .properties
-            .insert("TagName".to_string(), char_value(&self.name));
-        object
-            .properties
-            .insert("TextContent".to_string(), char_value(self.text.trim()));
-        object.properties.insert(
-            "Attributes".to_string(),
-            Value::Struct(attributes_struct(&self)),
-        );
-        let children = self
-            .children
-            .into_iter()
-            .map(|child| child.into_object().map(Value::Object))
-            .collect::<BuiltinResult<Vec<_>>>()?;
-        object.properties.insert(
-            "ChildNodes".to_string(),
-            Value::Cell(
-                CellArray::new(children.clone(), children.len(), 1)
-                    .map_err(|err| compat_error("xmlread", err))?,
-            ),
-        );
-        Ok(object)
-    }
-}
-
-fn attributes_struct(node: &XmlNode) -> StructValue {
-    let mut st = StructValue::new();
-    for (name, value) in &node.attributes {
-        st.insert(name.clone(), char_value(value));
-    }
-    st
-}
-
-fn parse_xml_document(text: &str) -> BuiltinResult<XmlNode> {
-    let mut stack: Vec<XmlNode> = Vec::new();
-    let mut root: Option<XmlNode> = None;
-    let mut cursor = 0usize;
-    while let Some(open_rel) = text[cursor..].find('<') {
-        let open = cursor + open_rel;
-        let preceding = &text[cursor..open];
-        if !preceding.trim().is_empty() {
-            if let Some(node) = stack.last_mut() {
-                if !node.text.is_empty() {
-                    node.text.push(' ');
-                }
-                node.text.push_str(preceding.trim());
-            }
-        }
-        let close = text[open..]
-            .find('>')
-            .map(|idx| open + idx)
-            .ok_or_else(|| compat_error("xmlread", "xmlread: malformed XML (unterminated tag)"))?;
-        let raw_tag = text[open + 1..close].trim();
-        cursor = close + 1;
-        if raw_tag.is_empty()
-            || raw_tag.starts_with('?')
-            || raw_tag.starts_with("!--")
-            || raw_tag.starts_with("![CDATA[")
-            || raw_tag.starts_with('!')
-        {
-            continue;
-        }
-        if let Some(closing) = raw_tag.strip_prefix('/') {
-            let closing_name = closing.split_whitespace().next().unwrap_or_default();
-            let node = stack.pop().ok_or_else(|| {
-                compat_error("xmlread", "xmlread: malformed XML (unexpected closing tag)")
-            })?;
-            if node.name != closing_name {
-                return Err(compat_error(
-                    "xmlread",
-                    format!(
-                        "xmlread: malformed XML (expected closing tag </{}> but found </{}>)",
-                        node.name, closing_name
-                    ),
-                ));
-            }
-            if let Some(parent) = stack.last_mut() {
-                parent.children.push(node);
-            } else if root.replace(node).is_some() {
-                return Err(compat_error(
-                    "xmlread",
-                    "xmlread: malformed XML (multiple root elements)",
-                ));
-            }
-            continue;
-        }
-        let self_closing = raw_tag.ends_with('/');
-        let tag = raw_tag.trim_end_matches('/').trim();
-        let (name, attributes) = parse_xml_tag(tag)?;
-        let node = XmlNode::new(name, attributes);
-        if self_closing {
-            if let Some(parent) = stack.last_mut() {
-                parent.children.push(node);
-            } else if root.replace(node).is_some() {
-                return Err(compat_error(
-                    "xmlread",
-                    "xmlread: malformed XML (multiple root elements)",
-                ));
-            }
-        } else {
-            stack.push(node);
-        }
-    }
-    let trailing = text[cursor..].trim();
-    if !trailing.is_empty() {
-        if let Some(node) = stack.last_mut() {
-            if !node.text.is_empty() {
-                node.text.push(' ');
-            }
-            node.text.push_str(trailing);
-        }
-    }
-    if let Some(node) = stack.last() {
-        return Err(compat_error(
-            "xmlread",
-            format!("xmlread: malformed XML (unclosed tag <{}>)", node.name),
-        ));
-    }
-    root.ok_or_else(|| compat_error("xmlread", "xmlread: malformed XML (no root element)"))
-}
-
-fn parse_xml_tag(tag: &str) -> BuiltinResult<(String, BTreeMap<String, String>)> {
-    let mut parts = tag.splitn(2, char::is_whitespace);
-    let name = parts.next().unwrap_or_default().to_string();
-    if name.is_empty() {
-        return Err(compat_error(
-            "xmlread",
-            "xmlread: malformed XML (empty tag)",
-        ));
-    }
-    let mut attrs = BTreeMap::new();
-    let mut rest = parts.next().unwrap_or_default().trim();
-    while !rest.is_empty() {
-        let Some(eq) = rest.find('=') else {
-            break;
-        };
-        let key = rest[..eq].trim();
-        rest = rest[eq + 1..].trim_start();
-        let quote = rest.chars().next().ok_or_else(|| {
-            compat_error(
-                "xmlread",
-                "xmlread: malformed XML (attribute missing value)",
-            )
-        })?;
-        if quote != '"' && quote != '\'' {
-            return Err(compat_error(
-                "xmlread",
-                "xmlread: malformed XML (attribute values must be quoted)",
-            ));
-        }
-        rest = &rest[quote.len_utf8()..];
-        let end = rest.find(quote).ok_or_else(|| {
-            compat_error("xmlread", "xmlread: malformed XML (unterminated attribute)")
-        })?;
-        attrs.insert(key.to_string(), xml_unescape(&rest[..end]));
-        rest = rest[end + quote.len_utf8()..].trim_start();
-    }
-    Ok((name, attrs))
-}
-
-fn xml_unescape(text: &str) -> String {
-    text.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
-}
-
-#[runtime_builtin(
     name = "memmapfile",
     category = "io/repl_fs",
     summary = "Map a file into a MATLAB-compatible memmapfile object.",
@@ -1694,47 +1454,6 @@ mod tests {
             .unwrap(),
             Value::Num(42.0)
         );
-    }
-
-    #[test]
-    fn xmlread_returns_lightweight_document_object() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
-        let path = std::env::temp_dir().join("runmat_xmlread_test.xml");
-        std::fs::write(
-            &path,
-            "<?xml version=\"1.0\"?><root id=\"r\"><a>text</a></root>",
-        )
-        .unwrap();
-        let value = run(xmlread_builtin(vec![Value::String(path_to_string(&path))])).unwrap();
-        match value {
-            Value::Object(object) => {
-                assert_eq!(object.class_name, "org.w3c.dom.Document");
-                assert_eq!(
-                    object.properties.get("DocumentElementName"),
-                    Some(&char_value("root"))
-                );
-                let Some(Value::Object(root)) = object.properties.get("DocumentElement") else {
-                    panic!("expected DocumentElement object");
-                };
-                assert_eq!(root.properties.get("TagName"), Some(&char_value("root")));
-                let Some(Value::Struct(attrs)) = root.properties.get("Attributes") else {
-                    panic!("expected attributes struct");
-                };
-                assert_eq!(attrs.fields.get("id"), Some(&char_value("r")));
-            }
-            other => panic!("unexpected value {other:?}"),
-        }
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn xmlread_rejects_mismatched_tags() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
-        let path = std::env::temp_dir().join("runmat_xmlread_bad_test.xml");
-        std::fs::write(&path, "<root><a></root>").unwrap();
-        let err = run(xmlread_builtin(vec![Value::String(path_to_string(&path))])).unwrap_err();
-        assert!(err.message().contains("malformed XML"));
-        let _ = std::fs::remove_file(path);
     }
 
     #[test]
