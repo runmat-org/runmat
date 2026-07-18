@@ -372,6 +372,19 @@ fn regress_surface_executes_from_scripts() {
 }
 
 #[test]
+fn lscov_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "A = [1 0; 1 1; 1 2]; B = [1; 2; 10]; V = [1; 1; 100]; [x,stdx,mse,S] = lscov(A, B, V, 'orth'); intercept = x(1); slope = x(2);",
+    )
+    .expect("lscov script");
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_tensor_shape(&vars, &[1, 1]));
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_num(&vars, -0.3972055888223553));
+    assert!(has_num(&vars, 5.191616766467066));
+}
+
+#[test]
 fn kmeans_surface_executes_from_scripts() {
     let vars = execute_source(
         "X = [0 0; 0.2 0.1; 9.8 9.9; 10 10.1]; [idx,C,sumd,D] = kmeans(X, 2, 'Start', [0 0; 10 10], 'MaxIter', 20); a = idx(1); b = idx(4); c11 = C(1,1); c22 = C(2,2); dshape = size(D);",

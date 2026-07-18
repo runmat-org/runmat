@@ -11,6 +11,7 @@ pub mod lasso;
 pub mod lassoglm;
 pub mod linear_model;
 pub mod linkage;
+pub mod lscov;
 pub mod mnrfit;
 pub mod optimizable_variable;
 pub mod perfcurve;
