@@ -517,6 +517,15 @@ impl AccelProvider for WgpuProvider {
         )
     }
 
+    fn unary_erfcinv<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Erfcinv, a) },
+        )
+    }
+
     fn unary_factorial<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

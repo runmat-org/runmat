@@ -15,7 +15,7 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -75,14 +75,16 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Elementwise,
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[],
+    provider_hooks: &[ProviderHook::Unary {
+        name: "unary_erfcinv",
+    }],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "GPU-aware host fallback only: RunMat gathers GPU tensors, computes erfcinv on the host, and uploads the result when a provider is active.",
+    notes: "Providers may evaluate erfcinv directly on real device buffers; unsupported providers fall back to host evaluation and re-upload when possible.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::erfcinv")]
@@ -94,7 +96,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     reduction: None,
     emits_nan: true,
     notes:
-        "erfcinv currently executes through the runtime path because no provider hook exists yet.",
+        "Fusion planner currently falls back to provider or host elementwise erfcinv evaluation.",
 };
 
 fn error_with_detail(
@@ -179,6 +181,18 @@ async fn erfcinv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     }
 
     let provider = runmat_accelerate_api::provider_for_handle(&handle);
+    if let Some(provider) = provider.as_ref() {
+        match provider.unary_erfcinv(&handle).await {
+            Ok(out) => return Ok(gpu_helpers::resident_gpu_value(out)),
+            Err(err) if is_unsupported_provider_hook(&err) => {}
+            Err(err) => {
+                return Err(internal_error(format!(
+                    "provider unary_erfcinv failed: {err}"
+                )))
+            }
+        }
+    }
+
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
@@ -264,6 +278,10 @@ pub(crate) fn erfcinv_scalar(value: f64) -> f64 {
         return -erfcinv_positive_tail(2.0 - value);
     }
     erfcinv_positive_tail(value)
+}
+
+fn is_unsupported_provider_hook(err: &anyhow::Error) -> bool {
+    err.to_string().contains("unary_erfcinv not supported")
 }
 
 fn erfcinv_positive_tail(target: f64) -> f64 {
@@ -460,5 +478,41 @@ mod tests {
                 assert_close(*actual, *expected, 1e-12);
             }
         });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn wgpu_provider_keeps_erfcinv_resident() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let tensor = Tensor::new(vec![0.25, 0.5, 1.0, 1.5, 1.75], vec![1, 5]).unwrap();
+        let cpu = erfcinv_tensor(tensor.clone()).expect("cpu erfcinv");
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let view = HostTensorView {
+            data: &tensor.data,
+            shape: &tensor.shape,
+        };
+        let handle = provider.upload(&view).expect("upload");
+        let gpu_value = block_on(super::erfcinv_gpu(handle)).expect("gpu erfcinv");
+        assert!(
+            matches!(gpu_value, Value::GpuTensor(_)),
+            "erfcinv should keep WGPU provider results resident"
+        );
+        let gathered = test_support::gather(gpu_value).expect("gather");
+        assert_eq!(gathered.shape, cpu.shape);
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-8,
+            runmat_accelerate_api::ProviderPrecision::F32 => 2e-4,
+        };
+        for (actual, expected) in gathered.data.iter().zip(cpu.data.iter()) {
+            assert_close(*actual, *expected, tol);
+        }
     }
 }

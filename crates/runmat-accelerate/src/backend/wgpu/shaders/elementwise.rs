@@ -1243,6 +1243,85 @@ fn erf_real(a: f64) -> f64 {
     return sign * (1.0 - erfc_tail);
 }
 
+fn erfc_positive_tail_real(a: f64) -> f64 {
+    if (a < 3.5) {
+        return 1.0 - erf_real(a);
+    }
+    let x2 = a * a;
+    var asym_sum = 1.0;
+    var asym_term = 1.0;
+    var previous = 1.0e300;
+    var k: u32 = 1u;
+    loop {
+        if (k >= 60u) {
+            break;
+        }
+        asym_term = asym_term * (-(f64((2u * k) - 1u)) / (2.0 * x2));
+        if (abs(asym_term) > previous) {
+            break;
+        }
+        asym_sum = asym_sum + asym_term;
+        previous = abs(asym_term);
+        if (abs(asym_term) <= 1.0e-16 * abs(asym_sum)) {
+            break;
+        }
+        k = k + 1u;
+    }
+    return exp(-x2) * asym_sum / (a * 1.772453850905516);
+}
+
+fn erfcinv_positive_tail_real(target: f64) -> f64 {
+    var lo = 0.0;
+    var hi = 1.0;
+    loop {
+        if (hi >= 32.0 || erfc_positive_tail_real(hi) <= target) {
+            break;
+        }
+        lo = hi;
+        hi = hi * 2.0;
+    }
+    if (erfc_positive_tail_real(hi) > target) {
+        return hi;
+    }
+
+    var step: u32 = 0u;
+    loop {
+        if (step >= 110u) {
+            break;
+        }
+        let mid = 0.5 * (lo + hi);
+        if (erfc_positive_tail_real(mid) > target) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        step = step + 1u;
+    }
+    return 0.5 * (lo + hi);
+}
+
+fn erfcinv_real(a: f64) -> f64 {
+    if (is_nan64(a)) {
+        return a;
+    }
+    if (a < 0.0 || a > 2.0) {
+        return f64(0.0) / f64(0.0);
+    }
+    if (a == 0.0) {
+        return f64(1.0) / f64(0.0);
+    }
+    if (a == 2.0) {
+        return -f64(1.0) / f64(0.0);
+    }
+    if (a == 1.0) {
+        return 0.0;
+    }
+    if (a > 1.0) {
+        return -erfcinv_positive_tail_real(2.0 - a);
+    }
+    return erfcinv_positive_tail_real(a);
+}
+
 fn apply(a: f64) -> f64 {
     switch params.op {
         case 0u: { return sin(a); }
@@ -1314,6 +1393,7 @@ fn apply(a: f64) -> f64 {
             }
             return ceil(a - 0.5);
         }
+        case 38u: { return erfcinv_real(a); }
         default: { return a; }
     }
 }
@@ -1620,6 +1700,85 @@ fn erf_real(a: f32) -> f32 {
     return sign * (1.0 - erfc_tail);
 }
 
+fn erfc_positive_tail_real(a: f32) -> f32 {
+    if (a < 3.5) {
+        return 1.0 - erf_real(a);
+    }
+    let x2 = a * a;
+    var asym_sum = 1.0;
+    var asym_term = 1.0;
+    var previous = 1.0e30;
+    var k: u32 = 1u;
+    loop {
+        if (k >= 30u) {
+            break;
+        }
+        asym_term = asym_term * (-(f32((2u * k) - 1u)) / (2.0 * x2));
+        if (abs(asym_term) > previous) {
+            break;
+        }
+        asym_sum = asym_sum + asym_term;
+        previous = abs(asym_term);
+        if (abs(asym_term) <= 1.0e-6 * abs(asym_sum)) {
+            break;
+        }
+        k = k + 1u;
+    }
+    return exp(-x2) * asym_sum / (a * 1.7724539);
+}
+
+fn erfcinv_positive_tail_real(target: f32) -> f32 {
+    var lo = 0.0;
+    var hi = 1.0;
+    loop {
+        if (hi >= 32.0 || erfc_positive_tail_real(hi) <= target) {
+            break;
+        }
+        lo = hi;
+        hi = hi * 2.0;
+    }
+    if (erfc_positive_tail_real(hi) > target) {
+        return hi;
+    }
+
+    var step: u32 = 0u;
+    loop {
+        if (step >= 60u) {
+            break;
+        }
+        let mid = 0.5 * (lo + hi);
+        if (erfc_positive_tail_real(mid) > target) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        step = step + 1u;
+    }
+    return 0.5 * (lo + hi);
+}
+
+fn erfcinv_real(a: f32) -> f32 {
+    if (is_nan32(a)) {
+        return a;
+    }
+    if (a < 0.0 || a > 2.0) {
+        return f32(0.0) / f32(0.0);
+    }
+    if (a == 0.0) {
+        return f32(1.0) / f32(0.0);
+    }
+    if (a == 2.0) {
+        return -f32(1.0) / f32(0.0);
+    }
+    if (a == 1.0) {
+        return 0.0;
+    }
+    if (a > 1.0) {
+        return -erfcinv_positive_tail_real(2.0 - a);
+    }
+    return erfcinv_positive_tail_real(a);
+}
+
 fn apply(a: f32) -> f32 {
     switch params.op {
         case 0u: { return sin(a); }
@@ -1691,6 +1850,7 @@ fn apply(a: f32) -> f32 {
             }
             return ceil(a - 0.5);
         }
+        case 38u: { return erfcinv_real(a); }
         default: { return a; }
     }
 }

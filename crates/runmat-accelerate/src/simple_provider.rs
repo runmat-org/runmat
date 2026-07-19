@@ -130,6 +130,50 @@ fn erf_scalar_host(value: f64) -> f64 {
     libm::erf(value)
 }
 
+fn erfcinv_scalar_host(value: f64) -> f64 {
+    if value.is_nan() {
+        return f64::NAN;
+    }
+    if !(0.0..=2.0).contains(&value) {
+        return f64::NAN;
+    }
+    if value == 0.0 {
+        return f64::INFINITY;
+    }
+    if value == 2.0 {
+        return f64::NEG_INFINITY;
+    }
+    if value == 1.0 {
+        return 0.0;
+    }
+    if value > 1.0 {
+        return -erfcinv_positive_tail_host(2.0 - value);
+    }
+    erfcinv_positive_tail_host(value)
+}
+
+fn erfcinv_positive_tail_host(target: f64) -> f64 {
+    let mut lo = 0.0;
+    let mut hi = 1.0;
+    while hi < 32.0 && libm::erfc(hi) > target {
+        lo = hi;
+        hi *= 2.0;
+    }
+    if libm::erfc(hi) > target {
+        return hi;
+    }
+
+    for _ in 0..110 {
+        let mid = 0.5 * (lo + hi);
+        if libm::erfc(mid) > target {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
 fn gammaln_scalar_host(value: f64) -> f64 {
     if value.is_nan() {
         return f64::NAN;
@@ -4501,6 +4545,24 @@ impl AccelProvider for InProcessProvider {
                 device_id: 0,
                 buffer_id: id,
             })
+        })
+    }
+    fn unary_erfcinv<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved,
+                "unary_erfcinv does not support complex-interleaved buffers"
+            );
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out: Vec<f64> = abuf.iter().copied().map(erfcinv_scalar_host).collect();
+            drop(guard);
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn unary_factorial<'a>(

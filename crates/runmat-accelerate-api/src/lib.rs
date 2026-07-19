@@ -1931,6 +1931,12 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("unary_erf not supported by provider")
     }
+    fn unary_erfcinv<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_erfcinv not supported by provider")
+    }
     fn unary_factorial<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,

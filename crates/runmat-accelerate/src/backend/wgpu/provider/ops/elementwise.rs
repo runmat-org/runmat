@@ -2124,6 +2124,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wgpu_erfcinv_matches_erfc_inverse() {
+        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let shape = [9, 1];
+        let input = [0.0, 0.25, 0.5, 1.0, 1.5, 1.75, 2.0, -0.1, 2.1];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &input,
+                shape: &shape,
+            })
+            .expect("upload");
+
+        let result = provider.unary_erfcinv(&handle).await.expect("erfcinv");
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&result),
+            GpuTensorStorage::Real
+        );
+        let host = provider.download(&result).await.expect("download erfcinv");
+        assert_eq!(host.shape, shape.to_vec());
+        assert!(host.data[0].is_infinite() && host.data[0].is_sign_positive());
+        assert_eq!(host.data[3], 0.0);
+        assert!(host.data[6].is_infinite() && host.data[6].is_sign_negative());
+        assert!(host.data[7].is_nan());
+        assert!(host.data[8].is_nan());
+
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-8,
+            runmat_accelerate_api::ProviderPrecision::F32 => 2e-4,
+        };
+        for (idx, (&actual, &expected_input)) in
+            host.data[1..6].iter().zip(input[1..6].iter()).enumerate()
+        {
+            let roundtrip = libm::erfc(actual);
+            assert!(
+                (roundtrip - expected_input).abs() <= tol,
+                "lane {}: erfc(erfcinv({expected_input})) = {roundtrip}, value {actual}",
+                idx + 1
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn wgpu_round_ops_match_cpu() {
         let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),

@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "GPU-resident inputs use a host fallback: RunMat gathers the tensor, evaluates erfcinv on the CPU path, and uploads the result when the active provider accepts it."
+    "notes": "GPU-resident real inputs use the provider unary_erfcinv hook when available; unsupported providers fall back to host evaluation and re-upload."
   },
   "fusion": {
     "elementwise": false,
@@ -71,7 +71,7 @@
     },
     {
       "question": "Does `erfcinv` run on the GPU?",
-      "answer": "GPU-resident inputs are gathered, evaluated on the CPU reference path, and uploaded back to the active provider when possible. A future provider hook can replace this with a device kernel."
+      "answer": "Yes. Providers can evaluate real gpuArray inputs with a unary erfcinv kernel and keep the result resident; unsupported providers fall back to CPU evaluation and re-upload when possible."
     }
   ],
   "links": [
@@ -84,9 +84,9 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/erfcinv.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/erfcinv.rs"
   },
-  "gpu_residency": "```matlab:runnable\nG = gpuArray([0.5 1.5]);\nY = erfcinv(G)\n```\nExpected behavior: `Y` contains the inverse complementary error-function values and remains GPU-resident when the host-fallback result can be uploaded to the active provider.",
+  "gpu_residency": "```matlab:runnable\nG = gpuArray([0.5 1.5]);\nY = erfcinv(G)\n```\nExpected behavior: `Y` contains the inverse complementary error-function values and remains GPU-resident through the active provider.",
   "gpu_behavior": [
-    "The current implementation is a GPU-aware host fallback.",
-    "The fallback preserves shape, NaN, endpoint, and single/double dtype behavior."
+    "WGPU and the simple provider implement unary_erfcinv for real dense buffers.",
+    "The provider path preserves shape, NaN, endpoint, and single/double dtype behavior."
   ]
 }
