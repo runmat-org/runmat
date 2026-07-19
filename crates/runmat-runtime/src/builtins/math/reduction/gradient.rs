@@ -180,13 +180,6 @@ impl GradientSpacing {
     fn is_scalar(&self) -> bool {
         matches!(self, Self::Scalar(_))
     }
-
-    fn scalar(&self) -> Option<f64> {
-        match self {
-            Self::Scalar(spacing) => Some(*spacing),
-            Self::Coordinates(_) => None,
-        }
-    }
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::gradient")]
@@ -195,7 +188,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("numerical-gradient"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[ProviderHook::Custom("gradient_dim")],
+    provider_hooks: &[
+        ProviderHook::Custom("gradient_dim"),
+        ProviderHook::Custom("gradient_dim_with_coordinates"),
+    ],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
@@ -203,7 +199,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Providers may keep scalar-spacing gradients on device via `gradient_dim`; coordinate-vector spacing falls back to the host.",
+        "Providers may keep scalar-spacing gradients on device via `gradient_dim` and coordinate-vector spacing via `gradient_dim_with_coordinates`.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::gradient")]
@@ -350,11 +346,6 @@ async fn gradient_gpu_outputs(
     let complex_storage =
         runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
 
-    if all_spacings.iter().any(|spacing| !spacing.is_scalar()) {
-        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
-        return evaluate_host_gradient_outputs(gathered, requested_dims, all_spacings);
-    }
-
     if let Some(provider) =
         runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
     {
@@ -362,10 +353,39 @@ async fn gradient_gpu_outputs(
         let mut outputs = Vec::with_capacity(requested_dims.len());
         for &dim in requested_dims {
             let spacing = spacing_for_dim(dim, requested_dims, all_spacings);
-            let spacing = spacing
-                .scalar()
-                .expect("gpu gradient path requires scalar spacings");
-            match provider.gradient_dim(&handle, dim.saturating_sub(1), spacing) {
+            let device_result = match spacing {
+                GradientSpacing::Scalar(spacing) => {
+                    provider.gradient_dim(&handle, dim.saturating_sub(1), *spacing)
+                }
+                GradientSpacing::Coordinates(coordinates) => {
+                    let shape = vec![coordinates.len(), 1];
+                    let coord_handle =
+                        match provider.upload(&runmat_accelerate_api::HostTensorView {
+                            data: coordinates,
+                            shape: &shape,
+                        }) {
+                            Ok(handle) => handle,
+                            Err(_) => {
+                                let gathered =
+                                    gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+                                        .await?;
+                                return evaluate_host_gradient_outputs(
+                                    gathered,
+                                    requested_dims,
+                                    all_spacings,
+                                );
+                            }
+                        };
+                    let result = provider.gradient_dim_with_coordinates(
+                        &handle,
+                        dim.saturating_sub(1),
+                        &coord_handle,
+                    );
+                    let _ = provider.free(&coord_handle);
+                    result
+                }
+            };
+            match device_result {
                 Ok(device_result) => {
                     if complex_storage
                         || runmat_accelerate_api::handle_storage(&device_result)
@@ -617,6 +637,16 @@ pub fn gradient_real_tensor_host(
     gradient_real_tensor_host_with_spacing(tensor, dim, &spacing)
 }
 
+#[allow(dead_code)]
+pub fn gradient_real_tensor_host_with_coordinates(
+    tensor: Tensor,
+    dim: usize,
+    coordinates: Vec<f64>,
+) -> BuiltinResult<Tensor> {
+    let spacing = GradientSpacing::Coordinates(coordinates);
+    gradient_real_tensor_host_with_spacing(tensor, dim, &spacing)
+}
+
 fn gradient_real_tensor_host_with_spacing(
     tensor: Tensor,
     dim: usize,
@@ -695,6 +725,16 @@ pub fn gradient_complex_tensor_host(
     spacing: f64,
 ) -> BuiltinResult<ComplexTensor> {
     let spacing = GradientSpacing::Scalar(spacing);
+    gradient_complex_tensor_host_with_spacing(tensor, dim, &spacing)
+}
+
+#[allow(dead_code)]
+pub fn gradient_complex_tensor_host_with_coordinates(
+    tensor: ComplexTensor,
+    dim: usize,
+    coordinates: Vec<f64>,
+) -> BuiltinResult<ComplexTensor> {
+    let spacing = GradientSpacing::Coordinates(coordinates);
     gradient_complex_tensor_host_with_spacing(tensor, dim, &spacing)
 }
 
@@ -1049,6 +1089,42 @@ mod tests {
 
     #[test]
     #[cfg(feature = "wgpu")]
+    fn gradient_gpu_coordinate_spacing_matches_cpu_and_stays_resident() {
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let host =
+            Tensor::new_with_dtype(vec![1.0, 4.0, 9.0], vec![1, 3], NumericDType::F32).unwrap();
+        let view = HostTensorView {
+            data: &host.data,
+            shape: &host.shape,
+        };
+        let handle = provider.upload(&view).expect("upload");
+        let spacing = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
+        let result = gradient_builtin(Value::GpuTensor(handle), vec![Value::Tensor(spacing)])
+            .expect("gradient");
+        match result {
+            Value::GpuTensor(out) => {
+                let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
+                assert_eq!(gathered.shape, vec![1, 3]);
+                assert_eq!(gathered.dtype, NumericDType::F32);
+                let expected = [3.0, 8.0 / 3.0, 2.5];
+                for (idx, (actual, expected)) in gathered.data.iter().zip(expected).enumerate() {
+                    assert!(
+                        (*actual - expected).abs() < 1.0e-5,
+                        "gradient mismatch at {idx}: actual={actual} expected={expected}"
+                    );
+                }
+            }
+            other => panic!("expected gpu tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
     fn gradient_gpu_one_dimensional_shape_matches_matlab_row_vector_semantics() {
         let _guard = test_support::accel_test_lock();
         let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -1097,7 +1173,7 @@ mod tests {
     }
 
     #[test]
-    fn gradient_gpu_coordinate_vector_spacing_falls_back_to_host() {
+    fn gradient_gpu_coordinate_vector_spacing_stays_resident() {
         test_support::with_test_provider(|provider| {
             let host = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
             let view = HostTensorView {
@@ -1109,11 +1185,44 @@ mod tests {
             let result = gradient_builtin(Value::GpuTensor(handle), vec![Value::Tensor(spacing)])
                 .expect("gradient");
             match result {
-                Value::Tensor(out) => {
+                Value::GpuTensor(out_handle) => {
+                    let out = test_support::gather(Value::GpuTensor(out_handle)).expect("gather");
                     assert_eq!(out.shape, vec![1, 3]);
                     assert_eq!(out.data, vec![3.0, 8.0 / 3.0, 2.5]);
                 }
-                other => panic!("expected host tensor fallback, got {other:?}"),
+                other => panic!("expected gpu tensor, got {other:?}"),
+            }
+        });
+    }
+
+    #[test]
+    fn gradient_gpu_mixed_scalar_and_coordinate_outputs_stay_resident() {
+        test_support::with_test_provider(|provider| {
+            let host = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+            let view = HostTensorView {
+                data: &host.data,
+                shape: &host.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let spacing = Tensor::new(vec![0.0, 2.0], vec![2, 1]).unwrap();
+            let _out_guard = crate::output_count::push_output_count(Some(2));
+            let result = gradient_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::Tensor(spacing), Value::Num(2.0)],
+            )
+            .expect("gradient");
+            match result {
+                Value::OutputList(outputs) => {
+                    assert!(matches!(outputs[0], Value::GpuTensor(_)));
+                    assert!(matches!(outputs[1], Value::GpuTensor(_)));
+                    let first = test_support::gather(outputs[0].clone()).expect("gather first");
+                    let second = test_support::gather(outputs[1].clone()).expect("gather second");
+                    assert_eq!(first.shape, vec![2, 2]);
+                    assert_eq!(first.data, vec![0.5, 0.5, 0.5, 0.5]);
+                    assert_eq!(second.shape, vec![2, 2]);
+                    assert_eq!(second.data, vec![1.0, 1.0, 1.0, 1.0]);
+                }
+                other => panic!("expected output list, got {other:?}"),
             }
         });
     }

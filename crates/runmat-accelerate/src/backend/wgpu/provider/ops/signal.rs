@@ -10,6 +10,12 @@ use runmat_accelerate_api::{
     ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderHilbertRequest,
 };
 
+#[derive(Clone, Copy)]
+enum GradientSpacingInput<'a> {
+    Scalar(f64),
+    Coordinates(&'a GpuTensorHandle),
+}
+
 impl WgpuProvider {
     pub(crate) async fn uniform_spectral_estimate_exec(
         &self,
@@ -1016,6 +1022,24 @@ impl WgpuProvider {
         dim: usize,
         spacing: f64,
     ) -> Result<GpuTensorHandle> {
+        self.gradient_exec_with_spacing(handle, dim, GradientSpacingInput::Scalar(spacing))
+    }
+
+    pub(crate) fn gradient_exec_with_coordinates(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        coordinates: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        self.gradient_exec_with_spacing(handle, dim, GradientSpacingInput::Coordinates(coordinates))
+    }
+
+    fn gradient_exec_with_spacing(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        spacing: GradientSpacingInput<'_>,
+    ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(handle)?;
         let complex_storage = entry.storage == GpuTensorStorage::ComplexInterleaved
             || runmat_accelerate_api::handle_storage(handle)
@@ -1039,6 +1063,25 @@ impl WgpuProvider {
         }
 
         let len_dim = ext_shape[dim];
+        let coordinate_entry = match spacing {
+            GradientSpacingInput::Coordinates(coordinates) => {
+                let coordinate_entry = self.get_entry(coordinates)?;
+                ensure!(
+                    coordinate_entry.storage == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_storage(coordinates)
+                            == GpuTensorStorage::Real,
+                    "gradient: coordinate-vector spacing must be real"
+                );
+                ensure!(
+                    coordinate_entry.len == len_dim,
+                    "gradient: coordinate-vector spacing length {} does not match dimension length {}",
+                    coordinate_entry.len,
+                    len_dim
+                );
+                Some(coordinate_entry)
+            }
+            GradientSpacingInput::Scalar(_) => None,
+        };
         let mut out_shape = normalize_gradient_shape(&entry.shape, logical_len);
         if out_shape.is_empty() {
             out_shape = vec![0, 0];
@@ -1112,7 +1155,10 @@ impl WgpuProvider {
                     segment_len: len_dim as u32,
                     block: kernel_block as u32,
                     total: entry.len as u32,
-                    spacing,
+                    spacing: match spacing {
+                        GradientSpacingInput::Scalar(spacing) => spacing,
+                        GradientSpacingInput::Coordinates(_) => 0.0,
+                    },
                     _pad0: 0.0,
                     _pad1: 0.0,
                     _pad2: 0.0,
@@ -1127,32 +1173,71 @@ impl WgpuProvider {
                         kernel_block as u32,
                         entry.len as u32,
                     ]),
-                    meta1: crate::backend::wgpu::params::PackedF32([spacing as f32, 0.0, 0.0, 0.0]),
+                    meta1: crate::backend::wgpu::params::PackedF32([
+                        match spacing {
+                            GradientSpacingInput::Scalar(spacing) => spacing as f32,
+                            GradientSpacingInput::Coordinates(_) => 0.0,
+                        },
+                        0.0,
+                        0.0,
+                        0.0,
+                    ]),
                 },
                 "runmat-gradient-params",
             ),
         };
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-gradient-bind"),
-                layout: &self.pipelines.gradient.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+        let (bind_group, pipeline) = if let Some(coordinate_entry) = coordinate_entry.as_ref() {
+            (
+                self.device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-gradient-coordinates-bind"),
+                        layout: &self.pipelines.gradient_coordinates.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: coordinate_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                        ],
+                    }),
+                &self.pipelines.gradient_coordinates.pipeline,
+            )
+        } else {
+            (
+                self.device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-gradient-bind"),
+                        layout: &self.pipelines.gradient.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    }),
+                &self.pipelines.gradient.pipeline,
+            )
+        };
 
         let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
             entry.len as u32,
@@ -1161,7 +1246,7 @@ impl WgpuProvider {
         crate::backend::wgpu::dispatch::gradient::run(
             self.device_ref(),
             self.queue_ref(),
-            &self.pipelines.gradient.pipeline,
+            pipeline,
             &bind_group,
             workgroups,
         );
@@ -1868,8 +1953,10 @@ mod tests {
         AccelProvider, GpuTensorStorage, HostTensorView, ProviderEnvelopeMethod,
         ProviderEnvelopeRequest, ProviderHilbertRequest,
     };
-    use runmat_builtins::ComplexTensor;
-    use runmat_runtime::builtins::math::reduction::gradient_complex_tensor_host;
+    use runmat_builtins::{ComplexTensor, Tensor};
+    use runmat_runtime::builtins::math::reduction::{
+        gradient_complex_tensor_host, gradient_real_tensor_host_with_coordinates,
+    };
     use rustfft::FftPlanner;
     use std::sync::{Mutex, OnceLock};
 
@@ -2242,5 +2329,43 @@ mod tests {
         )
         .expect("host gradient");
         assert_complex_slices_close(&out, &expected.data, 1.0e-5);
+    }
+
+    #[test]
+    fn gradient_provider_coordinate_spacing_matches_host_and_stays_resident() {
+        with_wgpu_provider(|provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 4.0, 9.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload input");
+            let coordinates = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 1.0, 3.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload coordinates");
+            let output = provider
+                .gradient_dim_with_coordinates(&input, 1, &coordinates)
+                .expect("gradient");
+            let gathered = pollster::block_on(provider.download(&output)).expect("download");
+            let expected = gradient_real_tensor_host_with_coordinates(
+                Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap(),
+                2,
+                vec![0.0, 1.0, 3.0],
+            )
+            .expect("host gradient");
+            provider.free(&input).ok();
+            provider.free(&coordinates).ok();
+            provider.free(&output).ok();
+            assert_eq!(gathered.shape, expected.shape);
+            for (idx, (actual, expected)) in gathered.data.iter().zip(expected.data).enumerate() {
+                assert!(
+                    (*actual - expected).abs() < 1.0e-10,
+                    "gradient mismatch at {idx}: actual={actual} expected={expected}"
+                );
+            }
+        });
     }
 }

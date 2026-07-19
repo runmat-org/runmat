@@ -875,6 +875,15 @@ impl AccelProvider for WgpuProvider {
         self.gradient_exec(handle, dim, spacing)
     }
 
+    fn gradient_dim_with_coordinates(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        coordinates: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        self.gradient_exec_with_coordinates(handle, dim, coordinates)
+    }
+
     fn cumsum_scan(
         &self,
         input: &GpuTensorHandle,

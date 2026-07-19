@@ -2406,6 +2406,16 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("gradient_dim not supported by provider"))
     }
+    fn gradient_dim_with_coordinates(
+        &self,
+        _handle: &GpuTensorHandle,
+        _dim: usize,
+        _coordinates: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "gradient_dim_with_coordinates not supported by provider"
+        ))
+    }
     /// Perform an in-place FFT along a zero-based dimension, optionally padding/truncating to `len`.
     fn fft_dim<'a>(
         &'a self,

@@ -47,7 +47,8 @@ use runmat_runtime::builtins::math::linalg::structure::issymmetric::issymmetric_
 use runmat_runtime::builtins::math::linalg::structure::symrcm::symrcm_host_real_data;
 use runmat_runtime::builtins::math::reduction::{
     compute_median_inplace, diff_tensor_host, gradient_complex_tensor_host,
-    gradient_real_tensor_host,
+    gradient_complex_tensor_host_with_coordinates, gradient_real_tensor_host,
+    gradient_real_tensor_host_with_coordinates,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -5739,6 +5740,74 @@ impl AccelProvider for InProcessProvider {
             Tensor::new(data, handle.shape.clone()).map_err(|e| anyhow!("gradient_dim: {e}"))?;
         let gradiented = gradient_real_tensor_host(tensor, dim + 1, spacing)
             .map_err(|e| anyhow!("gradient_dim: {e}"))?;
+        let Tensor { data, shape, .. } = gradiented;
+        Ok(self.allocate_tensor(data, shape))
+    }
+
+    fn gradient_dim_with_coordinates(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        coordinates: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let (data, coordinate_data) = {
+            let guard = registry().lock().unwrap();
+            let data = guard
+                .get(&handle.buffer_id)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "gradient_dim_with_coordinates: unknown tensor handle {}",
+                        handle.buffer_id
+                    )
+                })?
+                .clone();
+            let coordinate_data = guard
+                .get(&coordinates.buffer_id)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "gradient_dim_with_coordinates: unknown coordinates handle {}",
+                        coordinates.buffer_id
+                    )
+                })?
+                .clone();
+            (data, coordinate_data)
+        };
+        ensure!(
+            runmat_accelerate_api::handle_storage(coordinates) == GpuTensorStorage::Real,
+            "gradient_dim_with_coordinates: coordinates must be real"
+        );
+        if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved {
+            ensure!(
+                data.len() % 2 == 0,
+                "gradient_dim_with_coordinates: complex-interleaved buffer has odd length"
+            );
+            let complex_data = data
+                .chunks_exact(2)
+                .map(|pair| (pair[0], pair[1]))
+                .collect::<Vec<_>>();
+            let tensor = ComplexTensor::new(complex_data, handle.shape.clone())
+                .map_err(|e| anyhow!("gradient_dim_with_coordinates: {e}"))?;
+            let gradiented =
+                gradient_complex_tensor_host_with_coordinates(tensor, dim + 1, coordinate_data)
+                    .map_err(|e| anyhow!("gradient_dim_with_coordinates: {e}"))?;
+            let ComplexTensor { data, shape, .. } = gradiented;
+            let mut interleaved = Vec::with_capacity(data.len() * 2);
+            for (re, im) in data {
+                interleaved.push(re);
+                interleaved.push(im);
+            }
+            return Ok(self.allocate_tensor_with_storage(
+                interleaved,
+                shape,
+                GpuTensorStorage::ComplexInterleaved,
+            ));
+        }
+
+        let tensor = Tensor::new(data, handle.shape.clone())
+            .map_err(|e| anyhow!("gradient_dim_with_coordinates: {e}"))?;
+        let gradiented =
+            gradient_real_tensor_host_with_coordinates(tensor, dim + 1, coordinate_data)
+                .map_err(|e| anyhow!("gradient_dim_with_coordinates: {e}"))?;
         let Tensor { data, shape, .. } = gradiented;
         Ok(self.allocate_tensor(data, shape))
     }

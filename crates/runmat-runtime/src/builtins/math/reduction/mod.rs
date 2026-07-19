@@ -26,7 +26,8 @@ pub(crate) mod var;
 
 pub use self::diff::diff_tensor_host;
 pub use self::gradient::{
-    gradient_complex_tensor_host, gradient_real_tensor_host, matlab_gradient_shape,
+    gradient_complex_tensor_host, gradient_complex_tensor_host_with_coordinates,
+    gradient_real_tensor_host, gradient_real_tensor_host_with_coordinates, matlab_gradient_shape,
 };
 pub use self::median::compute_median_inplace;
 pub use cummax::evaluate as evaluate_cummax;
