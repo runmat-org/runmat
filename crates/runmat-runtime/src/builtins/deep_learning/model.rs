@@ -102,20 +102,28 @@ pub(crate) fn predict_deep_learning_object(
     Ok(vec![Value::Tensor(scores)])
 }
 
-fn layers_from_network_value(value: Value, function: &'static str) -> BuiltinResult<Vec<Value>> {
+pub(super) fn layers_from_network_value(
+    value: Value,
+    function: &'static str,
+) -> BuiltinResult<Vec<Value>> {
     match value {
-        Value::Object(object) if object.class_name == "nnet.cnn.LayerGraph" => Ok(object
-            .properties
-            .get("Layers")
-            .cloned()
-            .map(|value| layers_from_value(value, function))
-            .transpose()?
-            .unwrap_or_default()),
+        Value::Object(object)
+            if object.class_name == "nnet.cnn.LayerGraph"
+                || is_deep_learning_network_object(&object) =>
+        {
+            Ok(object
+                .properties
+                .get("Layers")
+                .cloned()
+                .map(|value| layers_from_value(value, function))
+                .transpose()?
+                .unwrap_or_default())
+        }
         other => layers_from_value(other, function),
     }
 }
 
-fn network_object(
+pub(super) fn network_object(
     class_name: &str,
     layers: Vec<Value>,
     mut options: std::collections::BTreeMap<String, Value>,
@@ -289,7 +297,7 @@ fn learnables_struct(layers: &[Value], function: &'static str) -> BuiltinResult<
     Ok(Value::Struct(st))
 }
 
-fn initialise_fully_connected_layers(
+pub(super) fn initialise_fully_connected_layers(
     layers: &mut [Value],
     function: &'static str,
 ) -> BuiltinResult<()> {
@@ -351,7 +359,10 @@ fn deterministic_weights(
     tensor_value(values, vec![output_size, input_width], function)
 }
 
-fn validate_forward_layers(layers: &[Value], function: &'static str) -> BuiltinResult<()> {
+pub(super) fn validate_forward_layers(
+    layers: &[Value],
+    function: &'static str,
+) -> BuiltinResult<()> {
     if layers.is_empty() {
         return Err(deep_learning_error(
             function,
@@ -622,7 +633,10 @@ fn transpose_2d(tensor: &Tensor, function: &'static str) -> BuiltinResult<Tensor
         .map_err(|err| deep_learning_error(function, err))
 }
 
-fn feature_input_width(object: &ObjectInstance, function: &'static str) -> BuiltinResult<usize> {
+pub(super) fn feature_input_width(
+    object: &ObjectInstance,
+    function: &'static str,
+) -> BuiltinResult<usize> {
     let values = object
         .properties
         .get("InputSize")
@@ -643,7 +657,7 @@ fn feature_input_width(object: &ObjectInstance, function: &'static str) -> Built
     Ok(*width as usize)
 }
 
-fn positive_property_usize(
+pub(super) fn positive_property_usize(
     object: &ObjectInstance,
     name: &str,
     function: &'static str,
@@ -668,7 +682,7 @@ fn positive_property_usize(
     Ok(values[0] as usize)
 }
 
-fn tensor_property(
+pub(super) fn tensor_property(
     object: &ObjectInstance,
     name: &str,
     function: &'static str,
@@ -680,7 +694,7 @@ fn tensor_property(
         .map_err(|err| deep_learning_error(function, format!("{function}: {err}")))
 }
 
-fn layer_name(object: &ObjectInstance) -> String {
+pub(super) fn layer_name(object: &ObjectInstance) -> String {
     object
         .properties
         .get("Name")

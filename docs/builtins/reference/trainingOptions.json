@@ -7,7 +7,8 @@
   "behaviors": [
     "`solver` accepts `sgdm`, `adam`, or `rmsprop`.",
     "Common options such as `MaxEpochs`, `MiniBatchSize`, `InitialLearnRate`, `Shuffle`, `Verbose`, `Plots`, and `ExecutionEnvironment` are stored as properties.",
-    "This object is consumed as metadata in this slice; full optimizer execution remains in the training/autodiff queue."
+    "`trainNetwork` and `trainnet` consume `sgdm` and `adam` options for the supported in-memory feed-forward training slice.",
+    "`rmsprop` options are accepted as metadata, but RMSProp execution is not implemented yet and raises an explicit training error."
   ],
   "examples": [
     {

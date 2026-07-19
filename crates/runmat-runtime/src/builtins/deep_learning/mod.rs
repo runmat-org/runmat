@@ -481,6 +481,7 @@ pub(crate) mod layers;
 pub(crate) mod losses;
 pub(crate) mod model;
 pub(crate) mod sequences;
+pub(crate) mod supervised;
 pub(crate) mod training;
 
 #[cfg(test)]

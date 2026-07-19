@@ -86,38 +86,6 @@ fn canonical_training_option(name: &str) -> String {
 }
 
 #[runtime_builtin(
-    name = "trainNetwork",
-    category = "deep_learning",
-    summary = "Report that full neural-network training is not yet implemented.",
-    keywords = "trainNetwork,deep learning,training,network",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
-    builtin_path = "crate::builtins::deep_learning::training"
-)]
-pub(super) async fn train_network_builtin(_args: Vec<Value>) -> BuiltinResult<Value> {
-    Err(unsupported_error(
-        "trainNetwork",
-        "trainNetwork requires optimizer, autodiff, datastore, and layer execution infrastructure; layer/options compatibility objects are implemented in this slice",
-    ))
-}
-
-#[runtime_builtin(
-    name = "trainnet",
-    category = "deep_learning",
-    summary = "Report that full neural-network training is not yet implemented.",
-    keywords = "trainnet,deep learning,training,network",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
-    builtin_path = "crate::builtins::deep_learning::training"
-)]
-pub(super) async fn trainnet_builtin(_args: Vec<Value>) -> BuiltinResult<Value> {
-    Err(unsupported_error(
-        "trainnet",
-        "trainnet requires optimizer, autodiff, datastore, and layer execution infrastructure; layer/options compatibility objects are implemented in this slice",
-    ))
-}
-
-#[runtime_builtin(
     name = "dlarray",
     category = "deep_learning",
     summary = "Create a dlarray compatibility object around numeric or gpuArray data.",

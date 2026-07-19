@@ -3,11 +3,12 @@ use super::layers::*;
 use super::losses::*;
 use super::model::*;
 use super::sequences::*;
+use super::supervised::*;
 use super::training::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::{handle_precision, handle_storage, HostTensorView};
 use runmat_builtins::{
-    CellArray, LogicalArray, NumericDType, StringArray, StructValue, Tensor, Value,
+    CellArray, LogicalArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor, Value,
 };
 
 fn layer_name(value: &Value) -> String {
@@ -290,6 +291,229 @@ fn dlnetwork_rejects_layers_without_forward_support() {
     assert!(err
         .message
         .contains("is not supported for RunMat forward execution"));
+}
+
+fn regression_training_layers() -> Value {
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(1.0),
+        vec![Value::String("Name".into()), Value::String("x".into())],
+    ))
+    .unwrap();
+    let fc = block_on(fully_connected_layer_builtin(
+        Value::Num(1.0),
+        vec![
+            Value::String("Name".into()),
+            Value::String("fc".into()),
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    let output = block_on(regression_layer_builtin(vec![
+        Value::String("Name".into()),
+        Value::String("out".into()),
+    ]))
+    .unwrap();
+    Value::Cell(CellArray::new(vec![input, fc, output], 3, 1).unwrap())
+}
+
+fn classification_training_layers() -> Value {
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        vec![
+            Value::String("Name".into()),
+            Value::String("features".into()),
+        ],
+    ))
+    .unwrap();
+    let fc = block_on(fully_connected_layer_builtin(
+        Value::Num(2.0),
+        vec![
+            Value::String("Name".into()),
+            Value::String("fc".into()),
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap()),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    let softmax = block_on(softmax_layer_builtin(vec![
+        Value::String("Name".into()),
+        Value::String("prob".into()),
+    ]))
+    .unwrap();
+    let output = block_on(classification_layer_builtin(vec![
+        Value::String("Name".into()),
+        Value::String("class".into()),
+    ]))
+    .unwrap();
+    Value::Cell(CellArray::new(vec![input, fc, softmax, output], 4, 1).unwrap())
+}
+
+fn adam_training_options() -> Value {
+    block_on(training_options_builtin(
+        Value::String("adam".into()),
+        vec![
+            Value::String("MaxEpochs".into()),
+            Value::Num(120.0),
+            Value::String("MiniBatchSize".into()),
+            Value::Num(4.0),
+            Value::String("InitialLearnRate".into()),
+            Value::Num(0.05),
+            Value::String("Shuffle".into()),
+            Value::String("never".into()),
+            Value::String("Verbose".into()),
+            Value::Bool(false),
+        ],
+    ))
+    .unwrap()
+}
+
+#[test]
+fn train_network_regression_updates_weights_and_predicts() {
+    let x = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap());
+    let y = Value::Tensor(Tensor::new(vec![1.0, 3.0, 5.0, 7.0], vec![4, 1]).unwrap());
+    let net = block_on(train_network_builtin(vec![
+        x.clone(),
+        y,
+        regression_training_layers(),
+        adam_training_options(),
+    ]))
+    .unwrap();
+    let Value::Object(object) = &net else {
+        panic!("expected trained network object");
+    };
+    assert_eq!(object.class_name, "SeriesNetwork");
+    assert!(matches!(
+        object.properties.get("TrainingInfo"),
+        Some(Value::Struct(_))
+    ));
+    let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+        net,
+        x,
+        vec![],
+    ))
+    .unwrap();
+    let Value::Tensor(predicted) = predicted else {
+        panic!("expected prediction tensor");
+    };
+    assert_eq!(predicted.shape, vec![4, 1]);
+    assert!((predicted.data[0] - 1.0).abs() < 0.35);
+    assert!((predicted.data[3] - 7.0).abs() < 0.35);
+}
+
+#[test]
+fn train_network_classification_supports_string_labels() {
+    let x = Value::Tensor(
+        Tensor::new(vec![1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0], vec![4, 2]).unwrap(),
+    );
+    let y = Value::StringArray(
+        StringArray::new(
+            vec!["left".into(), "right".into(), "left".into(), "right".into()],
+            vec![4, 1],
+        )
+        .unwrap(),
+    );
+    let net = block_on(train_network_builtin(vec![
+        x.clone(),
+        y,
+        classification_training_layers(),
+        adam_training_options(),
+    ]))
+    .unwrap();
+    let Value::Object(object) = &net else {
+        panic!("expected trained network object");
+    };
+    let Value::StringArray(classes) = object.properties.get("Classes").unwrap() else {
+        panic!("expected classes");
+    };
+    assert_eq!(classes.data, vec!["left", "right"]);
+    let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+        net,
+        x,
+        vec![],
+    ))
+    .unwrap();
+    let Value::Tensor(scores) = predicted else {
+        panic!("expected scores");
+    };
+    assert!(scores.data[0] > scores.data[4]);
+    assert!(scores.data[5] > scores.data[1]);
+}
+
+#[test]
+fn trainnet_crossentropy_supports_categorical_labels() {
+    let x = Value::Tensor(
+        Tensor::new(vec![1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0], vec![4, 2]).unwrap(),
+    );
+    let mut categorical = ObjectInstance::new("categorical".into());
+    categorical.properties.insert(
+        "Codes".into(),
+        Value::Tensor(Tensor::new(vec![1.0, 2.0, 1.0, 2.0], vec![4, 1]).unwrap()),
+    );
+    categorical.properties.insert(
+        "Categories".into(),
+        Value::StringArray(
+            StringArray::new(vec!["left".into(), "right".into()], vec![1, 2]).unwrap(),
+        ),
+    );
+    let net = block_on(dlnetwork_builtin(vec![classification_training_layers()])).unwrap();
+    let trained = block_on(trainnet_builtin(vec![
+        x.clone(),
+        Value::Object(categorical),
+        net,
+        Value::String("crossentropy".into()),
+        adam_training_options(),
+    ]))
+    .unwrap();
+    let Value::Object(object) = &trained else {
+        panic!("expected dlnetwork");
+    };
+    assert_eq!(object.class_name, "dlnetwork");
+    assert!(matches!(
+        object.properties.get("TrainingInfo"),
+        Some(Value::Struct(_))
+    ));
+}
+
+#[test]
+fn trainnet_rejects_custom_loss_until_autodiff_exists() {
+    let err = block_on(trainnet_builtin(vec![
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+        block_on(dlnetwork_builtin(vec![regression_training_layers()])).unwrap(),
+        Value::FunctionHandle("loss".into()),
+        adam_training_options(),
+    ]))
+    .unwrap_err();
+    assert!(err
+        .message
+        .contains("custom loss function handles require autodiff"));
+}
+
+#[test]
+fn train_network_rejects_gpu_execution_environment() {
+    let opts = block_on(training_options_builtin(
+        Value::String("adam".into()),
+        vec![
+            Value::String("ExecutionEnvironment".into()),
+            Value::String("gpu".into()),
+        ],
+    ))
+    .unwrap();
+    let err = block_on(train_network_builtin(vec![
+        Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
+        regression_training_layers(),
+        opts,
+    ]))
+    .unwrap_err();
+    assert!(err
+        .message
+        .contains("ExecutionEnvironment 'gpu' requires native GPU"));
 }
 
 #[test]
@@ -1303,7 +1527,7 @@ fn dlarray_and_crossentropy_reject_unsupported_forms() {
 #[test]
 fn unsupported_training_apis_return_clear_errors() {
     let err = block_on(train_network_builtin(vec![])).unwrap_err();
-    assert!(err.to_string().contains("requires optimizer"));
+    assert!(err.to_string().contains("expected X, Y, layers"));
     let err = block_on(export_onnx_network_builtin(vec![])).unwrap_err();
     assert!(err.to_string().contains("ONNX"));
 }

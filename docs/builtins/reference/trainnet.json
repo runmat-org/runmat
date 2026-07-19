@@ -1,26 +1,32 @@
 {
   "title": "trainnet",
   "category": "deep_learning",
-  "keywords": ["trainnet", "deep learning", "training"],
-  "summary": "Report unsupported full neural-network training with a deterministic error.",
-  "description": "`trainnet` is registered so modern Deep Learning Toolbox scripts fail with a clear RunMat diagnostic instead of an undefined-builtin error.",
+  "keywords": ["trainnet", "deep learning", "training", "dlnetwork"],
+  "summary": "Train a supported dlnetwork with a built-in loss.",
+  "description": "`trainnet(X,Y,net,lossFcn,options)` trains a supported `dlnetwork` compatibility object over in-memory numeric or logical predictor data.",
   "behaviors": [
-    "The builtin returns a deterministic unsupported-training error without materializing training inputs.",
-    "Full optimizer, loss, autodiff, datastore, GPU execution, and trained-network object semantics remain in the Deep Learning training slice."
+    "Supports the five-argument form with 2-D predictor matrices where rows are observations and columns are features.",
+    "`net` may be a `dlnetwork`, trained network compatibility object, simple layerGraph, or supported layer collection.",
+    "`lossFcn` supports `\"mse\"`/`\"mean-squared-error\"` for regression and `\"crossentropy\"` for classification.",
+    "For regression, `Y` must be a numeric or logical matrix with one row per observation and the same output width as the network.",
+    "For classification, `Y` may be numeric integer labels, string labels, categorical labels, or a one-hot/probability matrix. The returned `dlnetwork` stores sorted class labels in `Classes` when labels are provided.",
+    "`trainingOptions` metadata controls `sgdm` and `adam` training, including `MaxEpochs`, `MiniBatchSize`, `InitialLearnRate`, `Momentum`, Adam decay factors, `Epsilon`, deterministic `Shuffle` handling, and CPU/auto `ExecutionEnvironment` values.",
+    "The returned object is a `dlnetwork` compatibility object with updated layer weights, `Learnables`, `TrainingInfo`, `TrainingLoss`, and `TrainedWith` metadata.",
+    "Custom loss function handles, autodiff tracing, datastores, image/sequence/recurrent/convolutional/normalization/custom layers, branching DAG execution, validation data, callbacks, plots, and GPU training remain outside this slice and raise explicit compatibility errors or are stored as inert options."
   ],
   "examples": [
     {
-      "description": "Deferred Training",
-      "input": "net = trainnet(X, Y, net, lossFcn, options)",
-      "output": "RunMat reports that training infrastructure is not yet implemented."
+      "description": "Train a dlnetwork with crossentropy",
+      "input": "net = dlnetwork(layers);\nopts = trainingOptions('adam','MaxEpochs',120,'MiniBatchSize',4,'InitialLearnRate',0.05,'Shuffle','never');\nnet = trainnet(X, labels, net, 'crossentropy', opts)",
+      "output": "net is a trained dlnetwork compatibility object usable with forward or predict."
     }
   ],
   "syntax": {
     "example": {
-      "description": "Registered form",
-      "input": "net = trainnet(args...)",
-      "output": "Unsupported-training error in this slice."
+      "description": "Supported form",
+      "input": "net = trainnet(X, Y, net, lossFcn, options)\n[net, info] = trainnet(X, Y, net, lossFcn, options)",
+      "output": "Trained dlnetwork object and optional training info structure."
     }
   },
-  "gpu_residency": "Training execution is not implemented in this slice; GPU training kernels remain future work."
+  "gpu_residency": "`trainnet` currently gathers `gpuArray` inputs to host before training when the execution environment is `auto` or `cpu`. Explicit `ExecutionEnvironment` values of `gpu`, `multi-gpu`, or `parallel` raise a compatibility error because native GPU training kernels, provider-resident Deep Learning layers, and GPU-backed autodiff remain future acceleration work."
 }
