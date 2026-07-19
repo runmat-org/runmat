@@ -11,6 +11,38 @@ use runmat_builtins::{
     CellArray, LogicalArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor, Value,
 };
 
+#[runmat_macros::runtime_builtin(
+    name = "__deep_learning_square_grad",
+    category = "deep_learning/tests",
+    summary = "Test helper for dlarray autodiff.",
+    keywords = "test,dlgradient",
+    type_resolver(super::any_type),
+    descriptor(crate::builtins::deep_learning::DLFEVAL_DESCRIPTOR),
+    builtin_path = "crate::builtins::deep_learning::tests"
+)]
+async fn deep_learning_square_grad_helper(x: Value) -> crate::BuiltinResult<Value> {
+    let y = crate::call_builtin_async("times", &[x.clone(), x.clone()]).await?;
+    let loss = crate::call_builtin_async("sum", &[y, Value::String("all".into())]).await?;
+    let _guard = crate::output_count::push_output_count(Some(1));
+    let grad = super::autodiff::dlgradient_builtin(loss.clone(), vec![x]).await?;
+    Ok(Value::OutputList(vec![loss, grad]))
+}
+
+#[runmat_macros::runtime_builtin(
+    name = "__deep_learning_network_grad",
+    category = "deep_learning/tests",
+    summary = "Test helper for dlnetwork autodiff.",
+    keywords = "test,dlnetwork,dlgradient",
+    type_resolver(super::any_type),
+    descriptor(crate::builtins::deep_learning::DLFEVAL_DESCRIPTOR),
+    builtin_path = "crate::builtins::deep_learning::tests"
+)]
+async fn deep_learning_network_grad_helper(net: Value, x: Value) -> crate::BuiltinResult<Value> {
+    let y = forward_builtin(net.clone(), x, vec![]).await?;
+    let loss = super::autodiff::dlarray_sum_builtin(y, vec![Value::String("all".into())])?;
+    super::autodiff::dlgradient_builtin(loss, vec![net]).await
+}
+
 fn layer_name(value: &Value) -> String {
     let Value::Object(object) = value else {
         panic!("expected object");
@@ -278,6 +310,147 @@ fn forward_preserves_dlarray_wrapper() {
         object.properties.get("Data"),
         Some(Value::Tensor(_))
     ));
+}
+
+#[test]
+fn dlfeval_dlgradient_differentiates_dlarray_elementwise_loss() {
+    let x = block_on(dlarray_builtin(
+        Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap()),
+        vec![Value::String("CB".into())],
+    ))
+    .expect("dlarray");
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let out = block_on(dlfeval_builtin(vec![
+        Value::FunctionHandle("__deep_learning_square_grad".into()),
+        x,
+    ]))
+    .expect("dlfeval square grad");
+    let Value::OutputList(values) = out else {
+        panic!("expected output list");
+    };
+    let Value::Object(loss) = &values[0] else {
+        panic!("expected traced loss dlarray");
+    };
+    let Value::Tensor(loss_data) = loss.properties.get("Data").unwrap() else {
+        panic!("expected loss tensor");
+    };
+    assert_eq!(loss_data.data, vec![14.0]);
+    let Value::Object(grad) = &values[1] else {
+        panic!("expected gradient dlarray");
+    };
+    let Value::Tensor(grad_data) = grad.properties.get("Data").unwrap() else {
+        panic!("expected gradient tensor");
+    };
+    assert_eq!(grad_data.data, vec![2.0, 4.0, 6.0]);
+    assert_eq!(
+        grad.properties.get("Format"),
+        Some(&Value::String("CB".into()))
+    );
+}
+
+#[test]
+fn dlgradient_returns_dlnetwork_learnable_gradients() {
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        vec![Value::String("Name".into()), Value::String("in".into())],
+    ))
+    .unwrap();
+    let fc = block_on(fully_connected_layer_builtin(
+        Value::Num(2.0),
+        vec![
+            Value::String("Name".into()),
+            Value::String("fc".into()),
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![1.0, -1.0, 0.5, 2.0], vec![2, 2]).unwrap()),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    let net = block_on(dlnetwork_builtin(vec![Value::Cell(
+        CellArray::new(vec![input, fc], 2, 1).unwrap(),
+    )]))
+    .unwrap();
+    let x = block_on(dlarray_builtin(
+        Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap()),
+        vec![Value::String("CB".into())],
+    ))
+    .unwrap();
+
+    let gradients = block_on(dlfeval_builtin(vec![
+        Value::FunctionHandle("__deep_learning_network_grad".into()),
+        net,
+        x,
+    ]))
+    .expect("network gradients");
+    let Value::Struct(st) = gradients else {
+        panic!("expected learnables gradient struct");
+    };
+    let Value::Cell(values) = st.fields.get("Value").unwrap() else {
+        panic!("expected Value cell");
+    };
+    let Value::Object(weight_grad) = &values.data[0] else {
+        panic!("expected dlarray weight gradient");
+    };
+    let Value::Tensor(weight_data) = weight_grad.properties.get("Data").unwrap() else {
+        panic!("expected tensor weight gradient");
+    };
+    assert_eq!(weight_data.data, vec![4.0, 4.0, 6.0, 6.0]);
+    let Value::Object(bias_grad) = &values.data[1] else {
+        panic!("expected dlarray bias gradient");
+    };
+    let Value::Tensor(bias_data) = bias_grad.properties.get("Data").unwrap() else {
+        panic!("expected tensor bias gradient");
+    };
+    assert_eq!(bias_data.data, vec![2.0, 2.0]);
+}
+
+#[test]
+fn dlupdate_traverses_dlnetwork_learnables_and_rebuilds_layers() {
+    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let out = block_on(dlupdate_builtin(vec![
+        Value::FunctionHandle("plus".into()),
+        net.clone(),
+        net,
+    ]))
+    .expect("network dlupdate");
+    let Value::Object(network) = out else {
+        panic!("expected network object");
+    };
+    let Value::Cell(layers) = network.properties.get("Layers").unwrap() else {
+        panic!("expected layer cell");
+    };
+    let Value::Object(fc) = &layers.data[1] else {
+        panic!("expected fc layer");
+    };
+    let Value::Tensor(weights) = fc.properties.get("Weights").unwrap() else {
+        panic!("expected tensor weights");
+    };
+    assert_eq!(weights.data, vec![2.0, -2.0, 0.0, 2.0]);
+}
+
+#[test]
+fn dlgradient_rejects_gpu_backed_dlarray_autodiff_with_provider_gap() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let shape = [1usize, 2usize];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &shape,
+            })
+            .expect("upload");
+        let x = block_on(dlarray_builtin(
+            Value::GpuTensor(handle),
+            vec![Value::String("CB".into())],
+        ))
+        .expect("gpu dlarray");
+        let err = block_on(dlfeval_builtin(vec![
+            Value::FunctionHandle("__deep_learning_square_grad".into()),
+            x,
+        ]))
+        .unwrap_err();
+        assert!(err.to_string().contains("provider-resident tape kernels"));
+    });
 }
 
 #[test]

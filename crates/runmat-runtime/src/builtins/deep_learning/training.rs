@@ -8,8 +8,8 @@ use runmat_macros::runtime_builtin;
 use crate::BuiltinResult;
 
 use super::{
-    any_type, deep_learning_error, gather_args, object, parse_name_values, scalar_text,
-    text_or_missing, unsupported_error,
+    any_type, autodiff, deep_learning_error, ensure_dlarray_class_registered, gather_args, model,
+    object, parse_name_values, scalar_text, text_or_missing, unsupported_error,
 };
 use crate::builtins::common::gpu_helpers;
 
@@ -95,6 +95,7 @@ fn canonical_training_option(name: &str) -> String {
     builtin_path = "crate::builtins::deep_learning::training"
 )]
 pub(super) async fn dlarray_builtin(data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_dlarray_class_registered();
     let gathered = gather_args(rest).await?;
     if gathered.len() > 1 {
         return Err(deep_learning_error(
@@ -103,7 +104,7 @@ pub(super) async fn dlarray_builtin(data: Value, rest: Vec<Value>) -> BuiltinRes
         ));
     }
     let format = text_or_missing(gathered.first(), "", "dlarray")?;
-    Ok(object(
+    autodiff::annotate_dlarray_value(object(
         "dlarray",
         vec![
             ("Data", data),
@@ -143,7 +144,7 @@ pub(super) async fn dlfeval_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
-    crate::call_feval_async_with_outputs(function.clone(), rest, requested_outputs).await
+    autodiff::with_tape_context(function.clone(), rest, requested_outputs).await
 }
 
 #[runtime_builtin(
@@ -277,13 +278,21 @@ async fn dlupdate_node(
 
     match first {
         Value::Struct(reference) => {
-            dlupdate_struct(function, reference, values, requested_outputs, depth + 1).await
+            if is_learnables_struct(reference) {
+                dlupdate_learnables_struct(function, reference, values, requested_outputs, depth + 1)
+                    .await
+            } else {
+                dlupdate_struct(function, reference, values, requested_outputs, depth + 1).await
+            }
         }
         Value::Cell(reference) => {
             dlupdate_cell(function, reference, values, requested_outputs, depth + 1).await
         }
         Value::Object(object) if crate::builtins::table::is_tabular_object(object) => {
             dlupdate_table(function, object, values, requested_outputs, depth + 1).await
+        }
+        Value::Object(object) if model::is_deep_learning_network_object(object) => {
+            dlupdate_network(function, object, values, requested_outputs, depth + 1).await
         }
         Value::Object(object) if is_leaf_object(object) => {
             if values.iter().any(is_tree_container) {
@@ -362,6 +371,44 @@ async fn dlupdate_struct(
     }
 
     Ok(outputs.into_iter().map(Value::Struct).collect())
+}
+
+async fn dlupdate_learnables_struct(
+    function: &Value,
+    reference: &StructValue,
+    values: &[Value],
+    requested_outputs: usize,
+    depth: usize,
+) -> BuiltinResult<Vec<Value>> {
+    let structs = values
+        .iter()
+        .map(|value| match value {
+            Value::Struct(st) if is_learnables_struct(st) => Ok(st),
+            other => Err(deep_learning_error(
+                "dlupdate",
+                format!("dlupdate: expected matching learnables struct tree, got {other:?}"),
+            )),
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let tables = structs.iter().cloned().cloned().collect::<Vec<_>>();
+    require_matching_learnable_metadata(&tables)?;
+    let value_columns = structs
+        .iter()
+        .map(|st| {
+            st.fields.get("Value").cloned().ok_or_else(|| {
+                deep_learning_error("dlupdate", "dlupdate: learnables struct is missing Value")
+            })
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let updated_values = dlupdate_node(function, &value_columns, requested_outputs, depth).await?;
+    updated_values
+        .into_iter()
+        .map(|value_column| {
+            let mut out = reference.clone();
+            out.insert("Value", value_column);
+            Ok(Value::Struct(out))
+        })
+        .collect()
 }
 
 async fn dlupdate_cell(
@@ -495,6 +542,130 @@ async fn dlupdate_table(
         .collect()
 }
 
+async fn dlupdate_network(
+    function: &Value,
+    reference: &ObjectInstance,
+    values: &[Value],
+    requested_outputs: usize,
+    depth: usize,
+) -> BuiltinResult<Vec<Value>> {
+    let networks = values
+        .iter()
+        .map(|value| match value {
+            Value::Object(object) if model::is_deep_learning_network_object(object) => {
+                if object.class_name != reference.class_name {
+                    return Err(deep_learning_error(
+                        "dlupdate",
+                        "dlupdate: dlnetwork parameter trees must have the same network class",
+                    ));
+                }
+                Ok(object)
+            }
+            other => Err(deep_learning_error(
+                "dlupdate",
+                format!("dlupdate: expected matching dlnetwork tree, got {other:?}"),
+            )),
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let learnables = networks
+        .iter()
+        .map(|object| {
+            object.properties.get("Learnables").cloned().ok_or_else(|| {
+                deep_learning_error("dlupdate", "dlupdate: dlnetwork is missing Learnables")
+            })
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let updated = dlupdate_node(function, &learnables, requested_outputs, depth).await?;
+    updated
+        .into_iter()
+        .map(|learnables| apply_learnables_to_network(reference.clone(), learnables))
+        .collect()
+}
+
+fn apply_learnables_to_network(
+    mut network: ObjectInstance,
+    learnables: Value,
+) -> BuiltinResult<Value> {
+    let mut parameter_values = Vec::new();
+    match &learnables {
+        Value::Struct(st) => {
+            let layer_names = string_cells(st.fields.get("Layer"), "Layer")?;
+            let parameter_names = string_cells(st.fields.get("Parameter"), "Parameter")?;
+            let Value::Cell(values) = st.fields.get("Value").ok_or_else(|| {
+                deep_learning_error("dlupdate", "dlupdate: learnables tree is missing Value")
+            })?
+            else {
+                return Err(deep_learning_error(
+                    "dlupdate",
+                    "dlupdate: learnables Value variable must be a cell array",
+                ));
+            };
+            if layer_names.len() != parameter_names.len() || values.data.len() != layer_names.len()
+            {
+                return Err(deep_learning_error(
+                    "dlupdate",
+                    "dlupdate: learnables metadata and Value rows must match",
+                ));
+            }
+            for idx in 0..layer_names.len() {
+                parameter_values.push((
+                    layer_names[idx].clone(),
+                    parameter_names[idx].clone(),
+                    values.data[idx].clone(),
+                ));
+            }
+        }
+        other => {
+            return Err(deep_learning_error(
+                "dlupdate",
+                format!("dlupdate: expected Learnables struct, got {other:?}"),
+            ))
+        }
+    }
+
+    if let Some(Value::Cell(mut layers)) = network.properties.get("Layers").cloned() {
+        for layer in &mut layers.data {
+            let Value::Object(layer_object) = layer else {
+                continue;
+            };
+            let layer_name = model::layer_name(layer_object);
+            for (target_layer, parameter, value) in &parameter_values {
+                if *target_layer == layer_name {
+                    layer_object
+                        .properties
+                        .insert(parameter.clone(), value.clone());
+                }
+            }
+        }
+        network
+            .properties
+            .insert("Layers".to_string(), Value::Cell(layers));
+    }
+    network
+        .properties
+        .insert("Learnables".to_string(), learnables);
+    Ok(Value::Object(network))
+}
+
+fn string_cells(value: Option<&Value>, label: &'static str) -> BuiltinResult<Vec<String>> {
+    let Some(Value::Cell(cell)) = value else {
+        return Err(deep_learning_error(
+            "dlupdate",
+            format!("dlupdate: learnables tree is missing {label} cell metadata"),
+        ));
+    };
+    cell.data
+        .iter()
+        .map(|value| match value {
+            Value::String(text) => Ok(text.clone()),
+            other => Err(deep_learning_error(
+                "dlupdate",
+                format!("dlupdate: learnables {label} entries must be strings, got {other:?}"),
+            )),
+        })
+        .collect()
+}
+
 fn require_learnables_table(variable_names: &[String]) -> BuiltinResult<()> {
     for required in ["Layer", "Parameter", "Value"] {
         if !variable_names.iter().any(|name| name == required) {
@@ -505,6 +676,12 @@ fn require_learnables_table(variable_names: &[String]) -> BuiltinResult<()> {
         }
     }
     Ok(())
+}
+
+fn is_learnables_struct(value: &StructValue) -> bool {
+    ["Layer", "Parameter", "Value"]
+        .iter()
+        .all(|field| value.fields.contains_key(*field))
 }
 
 fn require_matching_learnable_metadata(tables: &[StructValue]) -> BuiltinResult<()> {

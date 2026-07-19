@@ -12,7 +12,7 @@
     "For classification, `Y` may be numeric integer labels, string labels, categorical labels, or a one-hot/probability matrix. The returned `dlnetwork` stores sorted class labels in `Classes` when labels are provided.",
     "`trainingOptions` metadata controls `sgdm` and `adam` training, including `MaxEpochs`, `MiniBatchSize`, `InitialLearnRate`, `Momentum`, Adam decay factors, `Epsilon`, deterministic `Shuffle` handling, and CPU/auto `ExecutionEnvironment` values.",
     "The returned object is a `dlnetwork` compatibility object with updated layer weights, `Learnables`, `TrainingInfo`, `TrainingLoss`, and `TrainedWith` metadata.",
-    "Custom loss function handles, autodiff tracing, datastores, image/sequence/recurrent/convolutional/normalization/custom layers, branching DAG execution, validation data, callbacks, plots, and GPU training remain outside this slice and raise explicit compatibility errors or are stored as inert options."
+    "Custom loss function handles are not executed by `trainnet`; use explicit `dlfeval`/`dlgradient` loops for custom host `dlarray` autodiff. Datastores, image/sequence/recurrent/convolutional/normalization/custom layers, branching DAG execution, validation data, callbacks, plots, and GPU training remain outside this slice and raise explicit compatibility errors or are stored as inert options."
   ],
   "examples": [
     {

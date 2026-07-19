@@ -7,14 +7,14 @@
   "behaviors": [
     "`fun` must be a function handle value, including named handles, method handles, bound handles, and closures.",
     "Requested output count is preserved, so bracketed multi-output calls forward to the invoked function.",
-    "Automatic differentiation tracing and `dlgradient`-style gradient recording are not implemented in this slice.",
+    "A bounded automatic-differentiation tape is installed for the call. Host `dlarray` inputs, supported `dlnetwork` learnables, dlarray arithmetic, scalar sums, and supported `forward` layer chains can be differentiated with `dlgradient` inside `fun`.",
     "Text function names and callable objects are rejected by `dlfeval`; use `feval` for those RunMat extension forms."
   ],
   "examples": [
     {
       "description": "Evaluate Function",
       "input": "[loss,gradients] = dlfeval(@modelLoss, net, X, T)",
-      "output": "Outputs returned by `modelLoss`; automatic differentiation remains future work."
+      "output": "Outputs returned by `modelLoss`, including traced losses and gradients from `dlgradient`."
     }
   ],
   "syntax": {
@@ -24,5 +24,5 @@
       "output": "Outputs returned by `fun`."
     }
   },
-  "gpu_residency": "`dlfeval` preserves callable dispatch behavior; provider-resident autodiff and gradient tracing remain future work."
+  "gpu_residency": "`dlfeval` preserves callable dispatch behavior. GPU-backed `dlarray` values are rejected for automatic differentiation with an explicit provider-gap error because provider-resident tape kernels are not implemented yet."
 }

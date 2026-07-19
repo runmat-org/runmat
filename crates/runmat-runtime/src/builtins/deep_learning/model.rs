@@ -4,8 +4,8 @@ use runmat_macros::runtime_builtin;
 use crate::BuiltinResult;
 
 use super::{
-    any_type, deep_learning_error, gather_args, layer_names, layers_from_value, numeric_values,
-    object, parse_name_values, scalar_text, string_array, tensor_value,
+    any_type, autodiff, deep_learning_error, gather_args, layer_names, layers_from_value,
+    numeric_values, object, parse_name_values, scalar_text, string_array, tensor_value,
 };
 
 pub(crate) const DLNETWORK_CLASS: &str = "dlnetwork";
@@ -63,18 +63,27 @@ pub(super) async fn forward_builtin(
     let input = crate::gather_if_needed_async(&input).await?;
     let wrap_dlarray = matches!(&input, Value::Object(object) if object.class_name == "dlarray");
     let format = dlarray_format(&input);
+    let traced_input = input.clone();
     let tensor = input_tensor(input, "forward")?;
     let network_object = require_network_object(network, "forward")?;
+    if wrap_dlarray && autodiff::tape_is_active() {
+        if let Some(value) =
+            autodiff::record_network_forward(&network_object, &traced_input, "forward")?
+        {
+            return Ok(value);
+        }
+    }
     let output = evaluate_network(&network_object, tensor, "forward")?;
     if wrap_dlarray {
-        Ok(object(
+        let wrapped = object(
             "dlarray",
             vec![
                 ("Data", Value::Tensor(output)),
                 ("Format", Value::String(format.clone())),
                 ("Labels", Value::String(format)),
             ],
-        ))
+        );
+        autodiff::annotate_dlarray_value(wrapped)
     } else {
         Ok(Value::Tensor(output))
     }
@@ -254,7 +263,7 @@ fn logical_scalar(value: &Value, function: &'static str, label: &str) -> Builtin
     }
 }
 
-fn learnables_struct(layers: &[Value], function: &'static str) -> BuiltinResult<Value> {
+pub(super) fn learnables_struct(layers: &[Value], function: &'static str) -> BuiltinResult<Value> {
     let mut layer_names = Vec::new();
     let mut parameter_names = Vec::new();
     let mut values = Vec::new();
@@ -690,6 +699,7 @@ pub(super) fn tensor_property(
     let value = object.properties.get(name).cloned().ok_or_else(|| {
         deep_learning_error(function, format!("{function}: layer is missing {name}"))
     })?;
+    let value = autodiff::dlarray_data(&value, function)?;
     crate::builtins::common::tensor::value_into_tensor_for(function, value)
         .map_err(|err| deep_learning_error(function, format!("{function}: {err}")))
 }

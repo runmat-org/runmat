@@ -1,10 +1,12 @@
 //! Deep Learning Toolbox compatibility builtins.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
+    ClassDef, MethodDef, ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
 };
+use std::cell::Cell;
+use std::collections::HashMap;
 
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -27,6 +29,10 @@ const ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 };
 
 const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_INPUT, ERROR_UNSUPPORTED];
+
+thread_local! {
+    static DLARRAY_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
+}
 
 const OUT_OBJECT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "obj",
@@ -155,6 +161,29 @@ const DLUPDATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
     outputs: &OUT_VARARG,
 }];
 
+const DLGRADIENT_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "loss",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar traced dlarray loss.",
+    },
+    BuiltinParamDescriptor {
+        name: "targets",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Traced dlarray values, learnables, or dlnetworks to differentiate.",
+    },
+];
+
+const DLGRADIENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "varargout = dlgradient(loss, targets...)",
+    inputs: &DLGRADIENT_INPUTS,
+    outputs: &OUT_VARARG,
+}];
+
 pub const OBJECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &OBJECT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -190,6 +219,13 @@ pub const DLUPDATE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+pub const DLGRADIENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DLGRADIENT_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
 pub(super) fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
@@ -220,6 +256,38 @@ pub(super) fn unsupported_error(
         .with_builtin(function)
         .with_identifier("RunMat:deepLearning:Unsupported")
         .build()
+}
+
+pub(super) fn ensure_dlarray_class_registered() {
+    DLARRAY_CLASS_REGISTERED.with(|registered| {
+        if registered.get() {
+            return;
+        }
+        let methods = ["plus", "minus", "times", "rdivide", "mtimes", "sum"]
+            .into_iter()
+            .map(|name| {
+                (
+                    name.to_string(),
+                    MethodDef {
+                        name: name.to_string(),
+                        is_static: false,
+                        is_abstract: false,
+                        is_sealed: false,
+                        access: Access::Public,
+                        function_name: format!("dlarray.{name}"),
+                        implicit_class_argument: None,
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        runmat_builtins::register_class(ClassDef {
+            name: "dlarray".to_string(),
+            parent: None,
+            properties: HashMap::new(),
+            methods,
+        });
+        registered.set(true);
+    });
 }
 
 pub(super) fn scalar_text(value: &Value, function: &'static str) -> BuiltinResult<String> {
@@ -476,6 +544,7 @@ pub(super) fn layer_names(layers: &[Value], function: &'static str) -> BuiltinRe
     Ok(names)
 }
 
+pub(crate) mod autodiff;
 pub(crate) mod graph;
 pub(crate) mod layers;
 pub(crate) mod losses;

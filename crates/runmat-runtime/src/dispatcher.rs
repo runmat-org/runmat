@@ -259,6 +259,10 @@ async fn call_builtin_async_impl(
             .build());
     }
 
+    if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {
+        return Ok(result);
+    }
+
     // Partition into no-category (tests/legacy shims) and categorized (library) builtins.
     let mut no_category: Vec<&runmat_builtins::BuiltinFunction> = Vec::new();
     let mut categorized: Vec<&runmat_builtins::BuiltinFunction> = Vec::new();

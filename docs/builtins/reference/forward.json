@@ -7,8 +7,9 @@
   "behaviors": [
     "Supports sequential feed-forward networks made from `featureInputLayer`, `fullyConnectedLayer`, `reluLayer`, `eluLayer`, `softmaxLayer`, `classificationLayer`, and `regressionLayer`.",
     "Numeric matrix inputs are interpreted as observations in rows and predictors in columns.",
-    "`dlarray` inputs are unwrapped for execution, and the output is wrapped back into a `dlarray` preserving the input format metadata.",
-    "Name-value execution options, recurrent state outputs, branching DAG execution, automatic differentiation, and training-time behavior are not implemented in this slice and raise explicit compatibility errors."
+    "`dlarray` inputs are unwrapped for normal execution, and the output is wrapped back into a `dlarray` preserving the input format metadata.",
+    "Inside `dlfeval`, host `dlarray` inputs and supported dlnetwork learnables are traced through fully-connected, ReLU, ELU, and softmax layers so scalar losses can be differentiated by `dlgradient`.",
+    "Name-value execution options, recurrent state outputs, branching DAG execution, custom layers, and provider-resident autodiff are not implemented in this slice and raise explicit compatibility errors."
   ],
   "examples": [
     {
@@ -24,7 +25,7 @@
       "output": "Network scores or activations."
     }
   },
-  "gpu_residency": "`forward` currently gathers provider-resident `gpuArray` inputs to host before evaluating the supported layer chain. Native Deep Learning provider kernels remain future acceleration work.",
+  "gpu_residency": "`forward` currently gathers plain provider-resident `gpuArray` inputs to host before evaluating the supported layer chain outside autodiff. GPU-backed `dlarray` autodiff is rejected because native Deep Learning provider tape kernels remain future acceleration work.",
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/deep_learning/model.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/model.rs"

@@ -10,7 +10,8 @@
     "Supports forward execution for sequential feed-forward networks made from `featureInputLayer`, `fullyConnectedLayer`, `reluLayer`, `eluLayer`, `softmaxLayer`, `classificationLayer`, and `regressionLayer`.",
     "`fullyConnectedLayer` weights and bias are preserved when supplied. Missing weights are initialized deterministically from the preceding feature width, and missing bias values default to zeros.",
     "`dlnetwork(layers,'Initialize',false)` preserves the uninitialized metadata state and does not synthesize missing learnables; `forward` then raises a clear error until required weights and bias are present.",
-    "Recurrent, convolutional, normalization, sequence, image input, branching DAG execution, training, and autodiff remain separate Deep Learning infrastructure work and raise explicit compatibility errors in this slice."
+    "When passed through `dlfeval`, supported fully-connected learnables are traced so `dlgradient` can return matching learnables-gradient trees for custom training loops.",
+    "Recurrent, convolutional, normalization, sequence, image input, branching DAG execution, custom layers, and provider-resident training remain separate Deep Learning infrastructure work and raise explicit compatibility errors in this slice."
   ],
   "examples": [
     {
@@ -26,7 +27,7 @@
       "output": "dlnetwork compatibility object."
     }
   },
-  "gpu_residency": "`dlnetwork` construction is host metadata work. Forward execution currently gathers `gpuArray` inputs to host; native provider kernels for Deep Learning layers remain future acceleration work.",
+  "gpu_residency": "`dlnetwork` construction is host metadata work. Forward execution currently gathers plain `gpuArray` inputs to host outside autodiff. GPU-backed `dlarray` autodiff is rejected with an explicit provider-gap error until Deep Learning tape kernels are implemented in the acceleration provider.",
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/deep_learning/model.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/model.rs"

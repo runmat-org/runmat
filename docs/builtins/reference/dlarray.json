@@ -8,7 +8,7 @@
     "The underlying `Data` value is preserved without conversion, including provider-resident `gpuArray` handles.",
     "A second text argument is stored as `Format` and `Labels`.",
     "Additional constructor options are rejected with explicit compatibility errors.",
-    "Automatic differentiation and labeled arithmetic are not implemented in this slice."
+    "Inside `dlfeval`, host `dlarray` values become traced leaves for the bounded `dlgradient` tape. Supported arithmetic preserves the wrapper and dimension-label metadata."
   ],
   "examples": [
     {
@@ -24,5 +24,5 @@
       "output": "dlarray compatibility object."
     }
   },
-  "gpu_residency": "`dlarray` preserves provider-resident `gpuArray` data as wrapper metadata. Labeled tensor execution and Deep Learning kernels over those handles remain future work."
+  "gpu_residency": "`dlarray` preserves provider-resident `gpuArray` data as wrapper metadata outside autodiff. GPU-backed `dlarray` tracing is rejected with an explicit provider-gap error until Deep Learning tape kernels are available in the acceleration provider."
 }
