@@ -2,6 +2,8 @@ use super::graph::*;
 use super::layers::*;
 use super::losses::*;
 use super::model::*;
+use super::object;
+use super::onnx::*;
 use super::sequences::*;
 use super::supervised::*;
 use super::training::*;
@@ -310,6 +312,128 @@ fn forward_preserves_dlarray_wrapper() {
         object.properties.get("Data"),
         Some(Value::Tensor(_))
     ));
+}
+
+#[test]
+fn export_onnx_network_writes_supported_feedforward_graph() {
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        vec![Value::String("Name".into()), Value::String("input".into())],
+    ))
+    .unwrap();
+    let fc = block_on(fully_connected_layer_builtin(
+        Value::Num(2.0),
+        vec![
+            Value::String("Name".into()),
+            Value::String("dense".into()),
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![1.0, -1.0, 0.5, 2.0], vec![2, 2]).unwrap()),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::new(vec![0.25, -0.25], vec![2, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    let relu = block_on(relu_layer_builtin(vec![
+        Value::String("Name".into()),
+        Value::String("relu".into()),
+    ]))
+    .unwrap();
+    let elu = block_on(elu_layer_builtin(vec![
+        Value::Num(1.25),
+        Value::String("Name".into()),
+        Value::String("elu".into()),
+    ]))
+    .unwrap();
+    let softmax = block_on(softmax_layer_builtin(vec![
+        Value::String("Name".into()),
+        Value::String("prob".into()),
+    ]))
+    .unwrap();
+    let output = block_on(classification_layer_builtin(vec![
+        Value::String("Name".into()),
+        Value::String("class".into()),
+    ]))
+    .unwrap();
+    let net = block_on(dlnetwork_builtin(vec![Value::Cell(
+        CellArray::new(vec![input, fc, relu, elu, softmax, output], 6, 1).unwrap(),
+    )]))
+    .unwrap();
+
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("network.onnx");
+    let result = block_on(export_onnx_network_builtin(vec![
+        net,
+        Value::String(path.to_string_lossy().into_owned()),
+        Value::String("OpsetVersion".into()),
+        Value::Num(14.0),
+        Value::String("BatchSize".into()),
+        Value::Num(4.0),
+        Value::String("InputNames".into()),
+        Value::String("features".into()),
+        Value::String("OutputNames".into()),
+        Value::String("scores".into()),
+    ]))
+    .unwrap();
+    assert_eq!(result, Value::OutputList(Vec::new()));
+
+    let bytes = std::fs::read(path).unwrap();
+    assert!(bytes.len() > 200);
+    for needle in [
+        "runmat",
+        "RunMatExportedNetwork",
+        "Gemm",
+        "Relu",
+        "Elu",
+        "Softmax",
+        "Identity",
+        "features",
+        "scores",
+        "dense.Weights",
+        "dense.Bias",
+    ] {
+        assert!(
+            contains_bytes(&bytes, needle.as_bytes()),
+            "missing ONNX payload string {needle}"
+        );
+    }
+}
+
+#[test]
+fn export_onnx_network_rejects_unexportable_forms_deterministically() {
+    let input = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let lstm = block_on(lstm_layer_builtin(Value::Num(4.0), vec![])).unwrap();
+    let net = object(
+        "dlnetwork",
+        vec![(
+            "Layers",
+            Value::Cell(CellArray::new(vec![input, lstm], 2, 1).unwrap()),
+        )],
+    );
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("unsupported.onnx");
+    let err = block_on(export_onnx_network_builtin(vec![
+        net,
+        Value::String(path.to_string_lossy().into_owned()),
+    ]))
+    .unwrap_err();
+    assert!(err
+        .message
+        .contains("is not supported for RunMat forward execution"));
+
+    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let _guard = crate::output_count::push_output_count(Some(1));
+    let err = block_on(export_onnx_network_builtin(vec![
+        net,
+        Value::String(tmp.path().join("out.onnx").to_string_lossy().into_owned()),
+    ]))
+    .unwrap_err();
+    assert!(err.message.contains("does not return output arguments"));
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 #[test]

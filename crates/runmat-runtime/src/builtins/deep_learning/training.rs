@@ -229,22 +229,6 @@ pub(super) async fn dlupdate_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-#[runtime_builtin(
-    name = "exportONNXNetwork",
-    category = "deep_learning",
-    summary = "Report that ONNX export is not yet implemented.",
-    keywords = "exportONNXNetwork,deep learning,onnx,export",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
-    builtin_path = "crate::builtins::deep_learning::training"
-)]
-pub(super) async fn export_onnx_network_builtin(_args: Vec<Value>) -> BuiltinResult<Value> {
-    Err(unsupported_error(
-        "exportONNXNetwork",
-        "exportONNXNetwork requires ONNX graph serialization and trained-network execution metadata",
-    ))
-}
-
 fn is_function_handle(value: &Value) -> bool {
     matches!(
         value,
