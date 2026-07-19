@@ -592,9 +592,9 @@ impl MovingOp {
             MovingOp::Prod => Some(ProviderMovingWindowOp::Prod),
             MovingOp::Min => Some(ProviderMovingWindowOp::Min),
             MovingOp::Max => Some(ProviderMovingWindowOp::Max),
+            MovingOp::Median => Some(ProviderMovingWindowOp::Median),
             MovingOp::Std => Some(ProviderMovingWindowOp::Std),
             MovingOp::Var => Some(ProviderMovingWindowOp::Var),
-            MovingOp::Median => None,
         }
     }
 }
@@ -2091,10 +2091,39 @@ mod tests {
             assert_eq!(var.shape, vec![1, 2]);
             assert_eq!(var.data, vec![1.0, 1.0]);
 
+            let median_input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, f64::NAN, 3.0, 9.0],
+                    shape: &[1, 4],
+                })
+                .expect("upload median");
+            let result = call(
+                "movmedian",
+                MovingOp::Median,
+                vec![
+                    Value::GpuTensor(median_input.clone()),
+                    Value::Num(3.0),
+                    Value::from("omitnan"),
+                ],
+            )
+            .expect("movmedian gpu");
+            let Value::GpuTensor(median_handle) = result else {
+                panic!("expected resident gpu median result");
+            };
+            assert!(runmat_accelerate_api::provider_for_handle(&median_handle).is_some());
+            let median = crate::builtins::common::test_support::gather(Value::GpuTensor(
+                median_handle.clone(),
+            ))
+            .expect("gather median");
+            assert_eq!(median.shape, vec![1, 4]);
+            assert_eq!(median.data, vec![1.0, 2.0, 6.0, 6.0]);
+
             provider.free(&input).ok();
             provider.free(&sum_handle).ok();
             provider.free(&var_input).ok();
             provider.free(&var_handle).ok();
+            provider.free(&median_input).ok();
+            provider.free(&median_handle).ok();
         });
     }
 

@@ -53,6 +53,7 @@ use runmat_runtime::builtins::math::reduction::{
     gradient_complex_tensor_host_with_coordinates, gradient_real_tensor_host,
     gradient_real_tensor_host_with_coordinates,
 };
+use std::cmp::Ordering as CmpOrdering;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -1196,6 +1197,7 @@ impl MovingAccum {
                 ProviderMovingWindowOp::Mean
                 | ProviderMovingWindowOp::Min
                 | ProviderMovingWindowOp::Max
+                | ProviderMovingWindowOp::Median
                 | ProviderMovingWindowOp::Std
                 | ProviderMovingWindowOp::Var => f64::NAN,
             };
@@ -1206,6 +1208,7 @@ impl MovingAccum {
             ProviderMovingWindowOp::Prod => self.prod,
             ProviderMovingWindowOp::Min => self.min,
             ProviderMovingWindowOp::Max => self.max,
+            ProviderMovingWindowOp::Median => f64::NAN,
             ProviderMovingWindowOp::Std | ProviderMovingWindowOp::Var => {
                 let denom = match normalization {
                     ProviderStdNormalization::Sample if self.count > 1 => self.count - 1,
@@ -1255,6 +1258,7 @@ fn simple_moving_window(
     let stride_before = product(&input_shape[..request.dim]);
     let stride_after = product(&input_shape[request.dim + 1..]);
     let mut output = vec![0.0; output_len];
+    let mut median_values = matches!(request.op, ProviderMovingWindowOp::Median).then(Vec::new);
 
     for after in 0..stride_after {
         for out_pos in 0..out_axis_len {
@@ -1287,7 +1291,11 @@ fn simple_moving_window(
                 let out_idx =
                     before + out_pos * stride_before + after * stride_before * out_axis_len;
                 let mut acc = MovingAccum::new();
+                if let Some(values) = median_values.as_mut() {
+                    values.clear();
+                }
                 let mut saw_nan = false;
+                let mut median_fill = None;
                 for pos in in_start..in_end {
                     let idx = before + pos * stride_before + after * stride_before * axis_len;
                     let value = input_data[idx];
@@ -1298,7 +1306,11 @@ fn simple_moving_window(
                         }
                         continue;
                     }
-                    acc.push(value);
+                    if let Some(values) = median_values.as_mut() {
+                        values.push(value);
+                    } else {
+                        acc.push(value);
+                    }
                 }
                 if !saw_nan {
                     if let ProviderMovingWindowEndpoints::Fill(fill) = request.endpoints {
@@ -1307,6 +1319,8 @@ fn simple_moving_window(
                                 if request.nan_mode == ProviderNanMode::Include {
                                     saw_nan = true;
                                 }
+                            } else if median_values.is_some() {
+                                median_fill = Some((fill, fill_count));
                             } else {
                                 acc.push_repeated(fill, fill_count);
                             }
@@ -1315,6 +1329,8 @@ fn simple_moving_window(
                 }
                 output[out_idx] = if saw_nan {
                     f64::NAN
+                } else if let Some(values) = median_values.as_mut() {
+                    compute_provider_median(values, median_fill)
                 } else {
                     acc.finish(request.op, request.normalization)
                 };
@@ -1323,6 +1339,35 @@ fn simple_moving_window(
     }
 
     Ok((output, request.output_shape.to_vec()))
+}
+
+fn compute_provider_median(values: &mut [f64], fill: Option<(f64, usize)>) -> f64 {
+    if values.is_empty() && fill.map_or(0, |(_, count)| count) == 0 {
+        return f64::NAN;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(CmpOrdering::Equal));
+    let (fill, fill_count) = fill.unwrap_or((0.0, 0));
+    let total = values.len() + fill_count;
+    let mid = total / 2;
+    if total % 2 == 1 {
+        kth_with_repeated_fill(values, fill, fill_count, mid)
+    } else {
+        (kth_with_repeated_fill(values, fill, fill_count, mid - 1)
+            + kth_with_repeated_fill(values, fill, fill_count, mid))
+            / 2.0
+    }
+}
+
+fn kth_with_repeated_fill(sorted: &[f64], fill: f64, fill_count: usize, k: usize) -> f64 {
+    let less = sorted.partition_point(|value| *value < fill);
+    let equal = sorted[less..].partition_point(|value| *value == fill);
+    if k < less {
+        sorted[k]
+    } else if k < less + equal + fill_count {
+        fill
+    } else {
+        sorted[k - fill_count]
+    }
 }
 
 fn interp1_value(
@@ -8498,6 +8543,21 @@ mod tests {
         }))
         .expect("movvar provider");
         assert_real_close(&provider, &var, &[1.0, 1.0], &[1, 2]);
+
+        let median_input = real_handle(&provider, &[1.0, f64::NAN, 3.0, 9.0], &[1, 4]);
+        let median = block_on(provider.moving_window(&ProviderMovingWindowRequest {
+            input: &median_input,
+            output_shape: &[1, 4],
+            dim: 1,
+            before: 1,
+            after: 1,
+            op: ProviderMovingWindowOp::Median,
+            endpoints: ProviderMovingWindowEndpoints::Shrink,
+            nan_mode: ProviderNanMode::Omit,
+            normalization: ProviderStdNormalization::Sample,
+        }))
+        .expect("movmedian provider");
+        assert_real_close(&provider, &median, &[1.0, 2.0, 6.0, 6.0], &[1, 4]);
     }
 
     #[test]

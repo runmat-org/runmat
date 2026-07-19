@@ -26,6 +26,121 @@ fn nanValue() -> f64 {
     return bitcast<f64>(bits);
 }
 
+fn kthValue(
+    target: u32,
+    in_start: i32,
+    in_end: i32,
+    before_idx: u32,
+    after_idx: u32,
+    fill_count: u32,
+    fill: f64,
+) -> f64 {
+    var selected = 0.0;
+    var found = false;
+
+    if (in_start <= in_end) {
+        var cand_pos = u32(in_start);
+        loop {
+            if (cand_pos > u32(in_end)) {
+                break;
+            }
+            let cand_idx = before_idx + cand_pos * params.meta0.w + after_idx * params.meta0.w * params.meta0.y;
+            let candidate = Input.data[cand_idx];
+            if (!isNan(candidate)) {
+                var less = 0u;
+                var equal = 0u;
+                var pos = u32(in_start);
+                loop {
+                    if (pos > u32(in_end)) {
+                        break;
+                    }
+                    let in_idx = before_idx + pos * params.meta0.w + after_idx * params.meta0.w * params.meta0.y;
+                    let value = Input.data[in_idx];
+                    if (!isNan(value)) {
+                        if (value < candidate) {
+                            less = less + 1u;
+                        } else if (value == candidate) {
+                            equal = equal + 1u;
+                        }
+                    }
+                    pos = pos + 1u;
+                }
+                if (fill_count > 0u) {
+                    if (fill < candidate) {
+                        less = less + fill_count;
+                    } else if (fill == candidate) {
+                        equal = equal + fill_count;
+                    }
+                }
+                if (less <= target && target < less + equal) {
+                    if (!found || candidate < selected) {
+                        selected = candidate;
+                        found = true;
+                    }
+                }
+            }
+            cand_pos = cand_pos + 1u;
+        }
+    }
+
+    if (fill_count > 0u) {
+        let candidate = fill;
+        var less = 0u;
+        var equal = fill_count;
+        if (in_start <= in_end) {
+            var pos = u32(in_start);
+            loop {
+                if (pos > u32(in_end)) {
+                    break;
+                }
+                let in_idx = before_idx + pos * params.meta0.w + after_idx * params.meta0.w * params.meta0.y;
+                let value = Input.data[in_idx];
+                if (!isNan(value)) {
+                    if (value < candidate) {
+                        less = less + 1u;
+                    } else if (value == candidate) {
+                        equal = equal + 1u;
+                    }
+                }
+                pos = pos + 1u;
+            }
+        }
+        if (less <= target && target < less + equal) {
+            if (!found || candidate < selected) {
+                selected = candidate;
+                found = true;
+            }
+        }
+    }
+
+    if (found) {
+        return selected;
+    }
+    return nanValue();
+}
+
+fn medianValue(
+    total_count: u32,
+    in_start: i32,
+    in_end: i32,
+    before_idx: u32,
+    after_idx: u32,
+    fill_count: u32,
+    fill: f64,
+) -> f64 {
+    if (total_count == 0u) {
+        return nanValue();
+    }
+    let lower_rank = (total_count - 1u) / 2u;
+    let upper_rank = total_count / 2u;
+    let lower = kthValue(lower_rank, in_start, in_end, before_idx, after_idx, fill_count, fill);
+    if (lower_rank == upper_rank) {
+        return lower;
+    }
+    let upper = kthValue(upper_rank, in_start, in_end, before_idx, after_idx, fill_count, fill);
+    return (lower + upper) * 0.5;
+}
+
 fn pushValue(
     value: f64,
     count: ptr<function, u32>,
@@ -175,6 +290,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var m2 = 0.0;
     var has_value = false;
     var saw_nan = false;
+    var median_fill_count = 0u;
 
     if (in_start <= in_end) {
         var pos = u32(in_start);
@@ -202,6 +318,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if (params.meta1.y == 0u) {
                 saw_nan = true;
             }
+        } else if (params.meta2.x == 7u) {
+            median_fill_count = fill_count;
         } else {
             pushRepeated(fill, fill_count, &count, &sum, &prod, &min_value, &max_value, &mean, &m2, &has_value);
         }
@@ -209,6 +327,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     if (saw_nan) {
         Output.data[idx] = nanValue();
+    } else if (params.meta2.x == 7u) {
+        Output.data[idx] = medianValue(count + median_fill_count, in_start, in_end, before_idx, after_idx, median_fill_count, params.fill_value);
     } else {
         Output.data[idx] = finishValue(count, sum, prod, min_value, max_value, m2);
     }
@@ -240,6 +360,121 @@ fn isNan(value: f32) -> bool {
 fn nanValue() -> f32 {
     var bits: u32 = 0x7fc00000u;
     return bitcast<f32>(bits);
+}
+
+fn kthValue(
+    target: u32,
+    in_start: i32,
+    in_end: i32,
+    before_idx: u32,
+    after_idx: u32,
+    fill_count: u32,
+    fill: f32,
+) -> f32 {
+    var selected = 0.0f;
+    var found = false;
+
+    if (in_start <= in_end) {
+        var cand_pos = u32(in_start);
+        loop {
+            if (cand_pos > u32(in_end)) {
+                break;
+            }
+            let cand_idx = before_idx + cand_pos * params.meta0.w + after_idx * params.meta0.w * params.meta0.y;
+            let candidate = Input.data[cand_idx];
+            if (!isNan(candidate)) {
+                var less = 0u;
+                var equal = 0u;
+                var pos = u32(in_start);
+                loop {
+                    if (pos > u32(in_end)) {
+                        break;
+                    }
+                    let in_idx = before_idx + pos * params.meta0.w + after_idx * params.meta0.w * params.meta0.y;
+                    let value = Input.data[in_idx];
+                    if (!isNan(value)) {
+                        if (value < candidate) {
+                            less = less + 1u;
+                        } else if (value == candidate) {
+                            equal = equal + 1u;
+                        }
+                    }
+                    pos = pos + 1u;
+                }
+                if (fill_count > 0u) {
+                    if (fill < candidate) {
+                        less = less + fill_count;
+                    } else if (fill == candidate) {
+                        equal = equal + fill_count;
+                    }
+                }
+                if (less <= target && target < less + equal) {
+                    if (!found || candidate < selected) {
+                        selected = candidate;
+                        found = true;
+                    }
+                }
+            }
+            cand_pos = cand_pos + 1u;
+        }
+    }
+
+    if (fill_count > 0u) {
+        let candidate = fill;
+        var less = 0u;
+        var equal = fill_count;
+        if (in_start <= in_end) {
+            var pos = u32(in_start);
+            loop {
+                if (pos > u32(in_end)) {
+                    break;
+                }
+                let in_idx = before_idx + pos * params.meta0.w + after_idx * params.meta0.w * params.meta0.y;
+                let value = Input.data[in_idx];
+                if (!isNan(value)) {
+                    if (value < candidate) {
+                        less = less + 1u;
+                    } else if (value == candidate) {
+                        equal = equal + 1u;
+                    }
+                }
+                pos = pos + 1u;
+            }
+        }
+        if (less <= target && target < less + equal) {
+            if (!found || candidate < selected) {
+                selected = candidate;
+                found = true;
+            }
+        }
+    }
+
+    if (found) {
+        return selected;
+    }
+    return nanValue();
+}
+
+fn medianValue(
+    total_count: u32,
+    in_start: i32,
+    in_end: i32,
+    before_idx: u32,
+    after_idx: u32,
+    fill_count: u32,
+    fill: f32,
+) -> f32 {
+    if (total_count == 0u) {
+        return nanValue();
+    }
+    let lower_rank = (total_count - 1u) / 2u;
+    let upper_rank = total_count / 2u;
+    let lower = kthValue(lower_rank, in_start, in_end, before_idx, after_idx, fill_count, fill);
+    if (lower_rank == upper_rank) {
+        return lower;
+    }
+    let upper = kthValue(upper_rank, in_start, in_end, before_idx, after_idx, fill_count, fill);
+    return (lower + upper) * 0.5f;
 }
 
 fn pushValue(
@@ -391,6 +626,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var m2 = 0.0f;
     var has_value = false;
     var saw_nan = false;
+    var median_fill_count = 0u;
 
     if (in_start <= in_end) {
         var pos = u32(in_start);
@@ -418,6 +654,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if (params.meta1.y == 0u) {
                 saw_nan = true;
             }
+        } else if (params.meta2.x == 7u) {
+            median_fill_count = fill_count;
         } else {
             pushRepeated(fill, fill_count, &count, &sum, &prod, &min_value, &max_value, &mean, &m2, &has_value);
         }
@@ -425,6 +663,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     if (saw_nan) {
         Output.data[idx] = nanValue();
+    } else if (params.meta2.x == 7u) {
+        Output.data[idx] = medianValue(count + median_fill_count, in_start, in_end, before_idx, after_idx, median_fill_count, params.meta3.x);
     } else {
         Output.data[idx] = finishValue(count, sum, prod, min_value, max_value, m2);
     }

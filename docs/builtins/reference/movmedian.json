@@ -11,13 +11,13 @@
   "summary": "Compute moving medians in MATLAB and RunMat.",
   "gpu_support": {
     "elementwise": false,
-    "reduction": false,
+    "reduction": true,
     "precisions": [
       "f32",
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "GPU inputs currently use a resident fallback: gather once to host for the moving-window median pass and re-upload the result when an acceleration provider is active. Median/order-statistics residency needs a dedicated provider hook."
+    "notes": "Real dense gpuArray inputs use the provider moving-window order-statistics hook for count-window `movmedian` forms, preserving residency for shrink, discard, fill, includenan, and omitnan cases. The WGPU provider uses a native rank-selection kernel for windows up to 256 elements; larger windows, SamplePoints, and complex inputs use the host MATLAB-compatible fallback because they require scalable order-statistics kernels, irregular window membership, or complex magnitude/phase ordering."
   },
   "fusion": {
     "elementwise": false,
@@ -40,6 +40,7 @@
     "For even window counts, the median is the average of the two middle values. Complex inputs are ordered by magnitude with phase as the tie breaker.",
     "This implementation covers numeric, logical, complex, and gpuArray inputs; table/timetable `DataVariables` forms are tracked separately."
   ],
+  "gpu_residency": "Count-window real dense gpuArray inputs dispatch through `runmat-accelerate` provider kernels and return a resident gpuArray result when the active provider accepts the request. The simple provider mirrors the same semantics for parity tests, and the WGPU provider runs a native rank-selection shader for each output window up to 256 elements. Unsupported provider forms gather once, run the host reference implementation, and re-upload the result when a provider is active.",
   "examples": [
     {
       "description": "Moving median with an even window",

@@ -36,6 +36,7 @@ fn moving_window_op_code(op: ProviderMovingWindowOp) -> u32 {
         ProviderMovingWindowOp::Max => 4,
         ProviderMovingWindowOp::Std => 5,
         ProviderMovingWindowOp::Var => 6,
+        ProviderMovingWindowOp::Median => 7,
     }
 }
 
@@ -46,6 +47,9 @@ fn moving_window_endpoint_code(endpoint: ProviderMovingWindowEndpoints) -> (u32,
         ProviderMovingWindowEndpoints::Fill(value) => (2, value),
     }
 }
+
+const WGPU_MOVING_MEDIAN_MAX_WINDOW: usize = 256;
+const WGPU_MOVING_WINDOW_I32_LIMIT: usize = i32::MAX as usize;
 
 impl WgpuProvider {
     pub(crate) async fn uniform_spectral_estimate_exec(
@@ -1043,6 +1047,36 @@ impl WgpuProvider {
                 && request.after <= u32::MAX as usize,
             "moving_window: tensor exceeds GPU kernel limits"
         );
+        let max_center = if matches!(request.endpoints, ProviderMovingWindowEndpoints::Discard) {
+            out_axis_len
+                .saturating_sub(1)
+                .checked_add(request.before)
+                .ok_or_else(|| anyhow!("moving_window: center index exceeds GPU kernel limits"))?
+        } else {
+            out_axis_len.saturating_sub(1)
+        };
+        let max_end = max_center
+            .checked_add(request.after)
+            .ok_or_else(|| anyhow!("moving_window: endpoint index exceeds GPU kernel limits"))?;
+        ensure!(
+            axis_len <= WGPU_MOVING_WINDOW_I32_LIMIT
+                && request.before <= WGPU_MOVING_WINDOW_I32_LIMIT
+                && request.after <= WGPU_MOVING_WINDOW_I32_LIMIT
+                && max_center <= WGPU_MOVING_WINDOW_I32_LIMIT
+                && max_end <= WGPU_MOVING_WINDOW_I32_LIMIT,
+            "moving_window: tensor exceeds signed GPU kernel limits"
+        );
+        if matches!(request.op, ProviderMovingWindowOp::Median) {
+            let window_len = request
+                .before
+                .checked_add(request.after)
+                .and_then(|sum| sum.checked_add(1))
+                .ok_or_else(|| anyhow!("moving_window: median window exceeds GPU kernel limits"))?;
+            ensure!(
+                window_len <= WGPU_MOVING_MEDIAN_MAX_WINDOW,
+                "moving_window: median windows above {WGPU_MOVING_MEDIAN_MAX_WINDOW} elements use host fallback"
+            );
+        }
 
         let out_shape = request.output_shape.to_vec();
         let out_buffer =
@@ -2590,10 +2624,50 @@ mod tests {
             assert!((host.data[0] - 1.0).abs() < 1e-12);
             assert!((host.data[1] - 1.0).abs() < 1e-12);
 
+            let median_input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, f64::NAN, 3.0, 9.0],
+                    shape: &[1, 4],
+                })
+                .expect("upload median input");
+            let median = pollster::block_on(provider.moving_window(&ProviderMovingWindowRequest {
+                input: &median_input,
+                output_shape: &[1, 4],
+                dim: 1,
+                before: 1,
+                after: 1,
+                op: ProviderMovingWindowOp::Median,
+                endpoints: ProviderMovingWindowEndpoints::Shrink,
+                nan_mode: ProviderNanMode::Omit,
+                normalization: ProviderStdNormalization::Sample,
+            }))
+            .expect("moving median");
+            let host = pollster::block_on(provider.download(&median)).expect("download median");
+            assert_eq!(host.shape, vec![1, 4]);
+            for (actual, expected) in host.data.iter().zip([1.0, 2.0, 6.0, 6.0]) {
+                assert!((*actual - expected).abs() < 1e-12);
+            }
+
+            let oversized =
+                pollster::block_on(provider.moving_window(&ProviderMovingWindowRequest {
+                    input: &median_input,
+                    output_shape: &[1, 4],
+                    dim: 1,
+                    before: super::WGPU_MOVING_MEDIAN_MAX_WINDOW,
+                    after: 0,
+                    op: ProviderMovingWindowOp::Median,
+                    endpoints: ProviderMovingWindowEndpoints::Shrink,
+                    nan_mode: ProviderNanMode::Omit,
+                    normalization: ProviderStdNormalization::Sample,
+                }));
+            assert!(oversized.is_err());
+
             provider.free(&input).ok();
             provider.free(&sum).ok();
             provider.free(&var_input).ok();
             provider.free(&var).ok();
+            provider.free(&median_input).ok();
+            provider.free(&median).ok();
         }) else {
             return;
         };

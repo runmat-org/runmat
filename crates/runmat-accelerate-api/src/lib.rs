@@ -956,6 +956,7 @@ pub enum ProviderMovingWindowOp {
     Prod,
     Min,
     Max,
+    Median,
     Std,
     Var,
 }
@@ -981,6 +982,52 @@ pub struct ProviderMovingWindowRequest<'a> {
     pub endpoints: ProviderMovingWindowEndpoints,
     pub nan_mode: ProviderNanMode,
     pub normalization: ProviderStdNormalization,
+}
+
+/// Dimension selection for provider-backed `mode` reductions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderModeAxes {
+    /// First non-singleton dimension selected by MATLAB default rules.
+    Default,
+    /// Zero-based dimension supplied by `mode(A, dim)`.
+    Dim(usize),
+    /// Collapse every element, as in `mode(A, "all")`.
+    All,
+}
+
+/// Request for provider-backed modal reductions.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderModeRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    pub axes: ProviderModeAxes,
+    pub want_frequency: bool,
+    pub want_ties: bool,
+}
+
+/// Sorted tied modal values for each output slice.
+///
+/// `values` stores all tied values for all slices in ascending per-slice order.
+/// `offsets` and `counts` are one entry per output slice and describe the
+/// slice-local range inside `values`. Runtime callers convert this ragged
+/// representation into MATLAB cell output `C`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderModeTiedSets {
+    pub values: HostTensorOwned,
+    pub offsets: Vec<usize>,
+    pub counts: Vec<usize>,
+}
+
+/// Result of a provider-backed `mode` reduction.
+///
+/// `values` is the MATLAB `M` output and stays resident. `frequencies`, when
+/// requested, is the MATLAB `F` output and stays resident. `ties`, when
+/// requested, carries the MATLAB `C` tied-set data in a host ragged form because
+/// the public runtime value is a cell array.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderModeResult {
+    pub values: GpuTensorHandle,
+    pub frequencies: Option<GpuTensorHandle>,
+    pub ties: Option<ProviderModeTiedSets>,
 }
 
 /// Direction used when computing prefix sums on the device.
@@ -2777,6 +2824,12 @@ pub trait AccelProvider: Send + Sync {
         _dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("reduce_median_dim not supported by provider")
+    }
+    fn mode_values<'a>(
+        &'a self,
+        _request: &'a ProviderModeRequest<'a>,
+    ) -> AccelProviderFuture<'a, ProviderModeResult> {
+        unsupported_future("mode_values not supported by provider")
     }
     fn moving_window<'a>(
         &'a self,
