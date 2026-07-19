@@ -1198,6 +1198,11 @@ pub struct ProviderIirFilterOptions {
     pub dim: usize,
     /// Optional initial conditions (state vector) residing on the device.
     pub zi: Option<GpuTensorHandle>,
+    /// Caller has already validated that `a` is the scalar denominator `[1]`.
+    ///
+    /// Providers may use this FIR-only path to avoid reading coefficient buffers
+    /// back to the host for normalization.
+    pub unit_denominator: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

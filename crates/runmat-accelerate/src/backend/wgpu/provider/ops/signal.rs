@@ -18,6 +18,11 @@ enum GradientSpacingInput<'a> {
     Coordinates(&'a GpuTensorHandle),
 }
 
+enum IirCoefficientPlan {
+    UnitDenominatorFir,
+    Normalized { b: Vec<f64>, a: Vec<f64> },
+}
+
 impl WgpuProvider {
     pub(crate) async fn uniform_spectral_estimate_exec(
         &self,
@@ -549,14 +554,29 @@ impl WgpuProvider {
         x: &GpuTensorHandle,
         options: ProviderIirFilterOptions,
     ) -> Result<ProviderIirFilterResult> {
-        let ProviderIirFilterOptions { dim, zi } = options;
+        let ProviderIirFilterOptions {
+            dim,
+            zi,
+            unit_denominator,
+        } = options;
 
         let entry_b = self.get_entry(b)?;
         let entry_a = self.get_entry(a)?;
         let entry_x = self.get_entry(x)?;
+        let effective_storage = |handle: &GpuTensorHandle, entry_storage: GpuTensorStorage| match (
+            runmat_accelerate_api::handle_storage(handle),
+            entry_storage,
+        ) {
+            (GpuTensorStorage::ComplexInterleaved, _)
+            | (_, GpuTensorStorage::ComplexInterleaved) => GpuTensorStorage::ComplexInterleaved,
+            _ => GpuTensorStorage::Real,
+        };
+        let b_storage = effective_storage(b, entry_b.storage);
+        let a_storage = effective_storage(a, entry_a.storage);
+        let x_storage = effective_storage(x, entry_x.storage);
 
         ensure!(
-            entry_b.storage == GpuTensorStorage::Real && entry_a.storage == GpuTensorStorage::Real,
+            b_storage == GpuTensorStorage::Real && a_storage == GpuTensorStorage::Real,
             "iir_filter: complex filter coefficients are not supported"
         );
         ensure!(
@@ -577,35 +597,47 @@ impl WgpuProvider {
             "iir_filter: denominator coefficients must not be empty"
         );
 
-        let b_host = self.download_exec(b).await?;
-        let a_host = self.download_exec(a).await?;
-        let a0 = *a_host
-            .data
-            .first()
-            .ok_or_else(|| anyhow!("iir_filter: denominator coefficients cannot be empty"))?;
-        ensure!(
-            a0 != 0.0,
-            "iir_filter: denominator coefficient a(1) must be non-zero"
-        );
-
         let order = nb.max(na);
         ensure!(
             order <= u32::MAX as usize,
             "iir_filter: filter order exceeds GPU limits"
         );
 
-        let mut b_norm = vec![0.0f64; order];
-        let mut a_norm = vec![0.0f64; order];
-        for i in 0..order {
-            let b_coeff = if i < nb { b_host.data[i] } else { 0.0 };
-            b_norm[i] = b_coeff / a0;
-            if i == 0 {
-                a_norm[0] = 1.0;
-            } else {
-                let a_coeff = if i < na { a_host.data[i] } else { 0.0 };
-                a_norm[i] = a_coeff / a0;
+        let coefficient_plan = if unit_denominator {
+            ensure!(
+                na == 1,
+                "iir_filter: unit-denominator FIR path requires scalar denominator"
+            );
+            IirCoefficientPlan::UnitDenominatorFir
+        } else {
+            let b_host = self.download_exec(b).await?;
+            let a_host = self.download_exec(a).await?;
+            let a0 = *a_host
+                .data
+                .first()
+                .ok_or_else(|| anyhow!("iir_filter: denominator coefficients cannot be empty"))?;
+            ensure!(
+                a0 != 0.0,
+                "iir_filter: denominator coefficient a(1) must be non-zero"
+            );
+
+            let mut b_norm = vec![0.0f64; order];
+            let mut a_norm = vec![0.0f64; order];
+            for i in 0..order {
+                let b_coeff = if i < nb { b_host.data[i] } else { 0.0 };
+                b_norm[i] = b_coeff / a0;
+                if i == 0 {
+                    a_norm[0] = 1.0;
+                } else {
+                    let a_coeff = if i < na { a_host.data[i] } else { 0.0 };
+                    a_norm[i] = a_coeff / a0;
+                }
             }
-        }
+            IirCoefficientPlan::Normalized {
+                b: b_norm,
+                a: a_norm,
+            }
+        };
 
         let state_len = order.saturating_sub(1);
 
@@ -619,7 +651,7 @@ impl WgpuProvider {
         );
         let dim_idx = dim;
         let dim_len = shape_ext[dim_idx];
-        let x_lane_factor = match entry_x.storage {
+        let x_lane_factor = match x_storage {
             GpuTensorStorage::Real => 1usize,
             GpuTensorStorage::ComplexInterleaved => 2usize,
         };
@@ -676,8 +708,9 @@ impl WgpuProvider {
                 zi_entry.precision == self.precision,
                 "iir_filter: initial conditions use incompatible precision"
             );
+            let zi_storage = effective_storage(zi_handle, zi_entry.storage);
             ensure!(
-                zi_entry.storage == entry_x.storage,
+                zi_storage == x_storage,
                 "iir_filter: initial conditions storage must match the signal"
             );
             ensure!(
@@ -763,21 +796,31 @@ impl WgpuProvider {
 
         let mut cleanup_handles: Vec<GpuTensorHandle> = Vec::new();
         let result = (|| -> Result<ProviderIirFilterResult> {
-            let b_shape = [order, 1usize];
-            let b_view = HostTensorView {
-                data: &b_norm,
-                shape: &b_shape,
-            };
-            let b_norm_handle = self.upload_exec(&b_view)?;
-            cleanup_handles.push(b_norm_handle.clone());
+            let (b_norm_handle, a_norm_handle) = match &coefficient_plan {
+                IirCoefficientPlan::UnitDenominatorFir => {
+                    let a_norm_handle = self.zeros_exec(&[order, 1usize])?;
+                    cleanup_handles.push(a_norm_handle.clone());
+                    (b.clone(), a_norm_handle)
+                }
+                IirCoefficientPlan::Normalized { b, a } => {
+                    let b_shape = [order, 1usize];
+                    let b_view = HostTensorView {
+                        data: b,
+                        shape: &b_shape,
+                    };
+                    let b_norm_handle = self.upload_exec(&b_view)?;
+                    cleanup_handles.push(b_norm_handle.clone());
 
-            let a_shape = [order, 1usize];
-            let a_view = HostTensorView {
-                data: &a_norm,
-                shape: &a_shape,
+                    let a_shape = [order, 1usize];
+                    let a_view = HostTensorView {
+                        data: a,
+                        shape: &a_shape,
+                    };
+                    let a_norm_handle = self.upload_exec(&a_view)?;
+                    cleanup_handles.push(a_norm_handle.clone());
+                    (b_norm_handle, a_norm_handle)
+                }
             };
-            let a_norm_handle = self.upload_exec(&a_view)?;
-            cleanup_handles.push(a_norm_handle.clone());
 
             let b_norm_entry = self.get_entry(&b_norm_handle)?;
             let a_norm_entry = self.get_entry(&a_norm_handle)?;
@@ -887,13 +930,13 @@ impl WgpuProvider {
                 out_buffer,
                 entry_x.shape.clone(),
                 entry_x.len,
-                entry_x.storage,
+                x_storage,
             );
             let final_state_handle = self.register_existing_buffer_with_storage(
                 final_state_buffer,
                 state_shape.clone(),
                 state_total_raw,
-                entry_x.storage,
+                x_storage,
             );
 
             Ok(ProviderIirFilterResult {
@@ -2692,7 +2735,11 @@ mod tests {
                 &b,
                 &a,
                 &x,
-                ProviderIirFilterOptions { dim: 1, zi: None },
+                ProviderIirFilterOptions {
+                    dim: 1,
+                    zi: None,
+                    unit_denominator: false,
+                },
             ))
             .expect("iir filter");
             let output = pollster::block_on(provider.download(&result.output)).expect("download");
@@ -2711,6 +2758,54 @@ mod tests {
             assert_eq!(final_state.storage, GpuTensorStorage::ComplexInterleaved);
             assert_eq!(final_state.shape, vec![1, 1]);
             assert_eq!(final_state.data, vec![3.0, 30.0]);
+        });
+    }
+
+    #[test]
+    fn iir_filter_unit_denominator_uses_resident_numerator_without_download() {
+        with_wgpu_provider(|provider| {
+            let b = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 1.0],
+                    shape: &[1, 2],
+                })
+                .expect("upload numerator");
+            let a = provider
+                .upload(&HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .expect("upload denominator");
+            let x = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, 3.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload signal");
+            provider.reset_telemetry();
+
+            let result = pollster::block_on(provider.iir_filter(
+                &b,
+                &a,
+                &x,
+                ProviderIirFilterOptions {
+                    dim: 1,
+                    zi: None,
+                    unit_denominator: true,
+                },
+            ))
+            .expect("iir filter");
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let output = pollster::block_on(provider.download(&result.output)).expect("download");
+            provider.free(&b).ok();
+            provider.free(&a).ok();
+            provider.free(&x).ok();
+            provider.free(&result.output).ok();
+            provider.free(result.final_state.as_ref().unwrap()).ok();
+
+            assert_eq!(output.shape, vec![1, 3]);
+            assert_eq!(output.data, vec![1.0, 3.0, 5.0]);
         });
     }
 

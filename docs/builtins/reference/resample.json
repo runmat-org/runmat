@@ -8,7 +8,7 @@
     "reduction": false,
     "precisions": ["f32", "f64"],
     "broadcasting": "none",
-    "notes": "Real, logical, and complex-interleaved GPU signal inputs use provider zeros_with_storage, scatter_linear, iir_filter, and gather_linear hooks to keep the resampled signal resident when the filter coefficients are host real values. GPU-resident custom filter coefficients fall back to host materialization."
+    "notes": "Real, logical, and complex-interleaved GPU signal inputs use provider zeros_with_storage, scatter_linear, iir_filter, and gather_linear hooks to keep the resampled signal resident. Host real filter coefficients are uploaded as temporary provider buffers, and same-provider GPU-resident real custom filter coefficients are consumed directly without host materialization. Requesting the second output gathers the filter coefficients to return them as a host tensor."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 6, "constants": "inline" },
   "requires_feature": null,

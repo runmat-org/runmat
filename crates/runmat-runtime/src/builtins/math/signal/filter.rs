@@ -1069,6 +1069,7 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
     let options = ProviderIirFilterOptions {
         dim: args.dim_idx,
         zi: zi_handle_opt,
+        unit_denominator: false,
     };
 
     let result = provider

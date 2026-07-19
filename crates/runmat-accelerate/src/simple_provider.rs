@@ -5875,7 +5875,11 @@ impl AccelProvider for InProcessProvider {
         options: ProviderIirFilterOptions,
     ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
         Box::pin(async move {
-            let ProviderIirFilterOptions { dim, zi } = options;
+            let ProviderIirFilterOptions {
+                dim,
+                zi,
+                unit_denominator,
+            } = options;
 
             let nb = product(&b.shape);
             let na = product(&a.shape);
@@ -5928,6 +5932,12 @@ impl AccelProvider for InProcessProvider {
                     na,
                     a_buf.len()
                 );
+                if unit_denominator {
+                    ensure!(
+                        na == 1,
+                        "iir_filter: unit-denominator FIR path requires scalar denominator"
+                    );
+                }
                 ensure!(
                     x_buf.len() == signal_lanes,
                     "iir_filter: signal raw length mismatch (shape implies {} logical elements, buffer has {}, lane factor {})",
@@ -5949,7 +5959,8 @@ impl AccelProvider for InProcessProvider {
                 } else {
                     None
                 };
-                (b_buf, a_buf, x_buf, zi_buf)
+                let a_data = if unit_denominator { vec![1.0] } else { a_buf };
+                (b_buf, a_data, x_buf, zi_buf)
             };
 
             ensure!(
@@ -8600,7 +8611,11 @@ mod tests {
             &b,
             &a,
             &x,
-            ProviderIirFilterOptions { dim: 1, zi: None },
+            ProviderIirFilterOptions {
+                dim: 1,
+                zi: None,
+                unit_denominator: false,
+            },
         ))
         .expect("iir filter");
 
