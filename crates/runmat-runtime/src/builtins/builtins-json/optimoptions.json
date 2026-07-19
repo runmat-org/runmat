@@ -10,11 +10,12 @@
     "MaxFunEvals",
     "Display",
     "Algorithm",
+    "coneprog",
     "StepTolerance",
     "FunctionTolerance",
     "OptimalityTolerance"
   ],
-  "summary": "Create or update solver-specific optimization options for fminbnd, fzero, fsolve, lsqcurvefit, and lsqnonlin.",
+  "summary": "Create or update solver-specific optimization options for coneprog, fminbnd, fzero, fsolve, lsqcurvefit, and lsqnonlin.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -34,16 +35,21 @@
   },
   "description": "`optimoptions(solver)` creates a solver-specific options struct with RunMat defaults. `optimoptions(solver, name, value, ...)` applies validated name-value overrides, and `optimoptions(oldOptions, name, value, ...)` copies an existing options struct before applying later values.",
   "behaviors": [
-    "Supported solvers are `fminbnd`, `fzero`, `fsolve`, `lsqcurvefit`, and `lsqnonlin`.",
+    "Supported solvers are `coneprog`, `fminbnd`, `fzero`, `fsolve`, `lsqcurvefit`, and `lsqnonlin`.",
     "Option names are case-insensitive and stored with canonical field names: `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, `Display`, and `Algorithm`.",
     "Modern aliases are accepted: `StepTolerance` maps to `TolX`, and `FunctionTolerance` and `OptimalityTolerance` map to `TolFun`.",
     "`TolX` and `TolFun` must be finite positive numeric scalars. `MaxIter` and `MaxFunEvals` must be finite positive integer scalars.",
-    "`Display` accepts `off`, `none`, `iter`, and `final` for `fzero`, `fsolve`, `lsqcurvefit`, and `lsqnonlin`; `fminbnd` also accepts `notify` and defaults to it.",
-    "`lsqcurvefit` and `lsqnonlin` accept `Algorithm` values `levenberg-marquardt` and `trust-region-reflective`; both currently configure RunMat's projected Levenberg-Marquardt solver.",
+    "`Display` accepts `off`, `none`, `iter`, and `final` for `coneprog`, `fzero`, `fsolve`, `lsqcurvefit`, and `lsqnonlin`; `fminbnd` also accepts `notify` and defaults to it.",
+    "`coneprog` accepts `Algorithm` values `interior-point` and `interior-point-convex`; `lsqcurvefit` and `lsqnonlin` accept `levenberg-marquardt` and `trust-region-reflective`; both least-squares algorithms currently configure RunMat's projected Levenberg-Marquardt solver.",
     "Unknown options are rejected so solver configuration mistakes fail before the solver starts.",
-    "The returned struct can be passed directly to `fminbnd`, `fzero`, `fsolve`, `lsqcurvefit`, and `lsqnonlin`."
+    "The returned struct can be passed directly to `coneprog`, `fminbnd`, `fzero`, `fsolve`, `lsqcurvefit`, and `lsqnonlin`."
   ],
   "examples": [
+    {
+      "description": "Construct coneprog options",
+      "input": "opts = optimoptions(\"coneprog\", \"TolFun\", 1e-8, \"Display\", \"off\");\nsoc = secondordercone(eye(2), [0; 0], [0; 0], 1);\nx = coneprog([-1; 0], soc, [1 0], 0.75, [], [], [], [], opts)",
+      "output": "x =\n    0.7500\n         0"
+    },
     {
       "description": "Construct fminbnd options",
       "input": "opts = optimoptions(\"fminbnd\", \"TolX\", 1e-10, \"Display\", \"off\");\nx = fminbnd(@cos, 0, pi, opts)",
@@ -86,10 +92,14 @@
     },
     {
       "question": "Can I pass optimoptions output to existing solvers?",
-      "answer": "Yes. `fminbnd`, `fzero`, `fsolve`, `lsqcurvefit`, and `lsqnonlin` consume the canonical option fields returned by `optimoptions`."
+      "answer": "Yes. `coneprog`, `fminbnd`, `fzero`, `fsolve`, `lsqcurvefit`, and `lsqnonlin` consume the canonical option fields returned by `optimoptions`."
     }
   ],
   "links": [
+    {
+      "label": "coneprog",
+      "url": "./coneprog"
+    },
     {
       "label": "optimset",
       "url": "./optimset"

@@ -2,6 +2,7 @@
 
 pub(crate) mod brent;
 pub(crate) mod common;
+pub mod coneprog;
 pub mod fminbnd;
 pub mod fminunc;
 pub mod fsolve;
