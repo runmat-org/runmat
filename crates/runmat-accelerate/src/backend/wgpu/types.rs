@@ -65,6 +65,7 @@ pub enum UnaryOpCode {
     Heaviside = 34,
     Erf = 35,
     Gammaln = 36,
+    Round = 37,
 }
 
 #[derive(Clone, Copy)]

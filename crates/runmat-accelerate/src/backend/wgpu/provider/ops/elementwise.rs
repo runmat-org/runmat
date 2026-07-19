@@ -12,7 +12,8 @@ use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::resources::UniformBufferKey;
 use crate::backend::wgpu::shaders::elementwise::{
     complex_binary_broadcast_shader, complex_binary_shader, complex_from_real_imag_shader,
-    complex_from_real_shader, complex_unary_shader, ComplexBinaryOp, ComplexUnaryOp,
+    complex_from_real_shader, complex_unary_shader, round_digits_shader, ComplexBinaryOp,
+    ComplexUnaryOp,
 };
 use crate::backend::wgpu::shaders::logical::{
     ELEM_EQ_SHADER_F32, ELEM_EQ_SHADER_F64, ELEM_GE_SHADER_F32, ELEM_GE_SHADER_F64,
@@ -325,6 +326,130 @@ impl WgpuProvider {
         if let Ok(mut map) = self.pow2_of.lock() {
             map.insert(out.buffer_id, a.buffer_id);
         }
+        Ok(out)
+    }
+
+    pub(crate) fn round_digits_exec(
+        &self,
+        a: &GpuTensorHandle,
+        digits: i32,
+        significant: bool,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        let len = entry.len;
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-round-digits-out")?;
+        let input_is_complex = runmat_accelerate_api::handle_storage(a)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
+        if len == 0 {
+            let out = self.register_existing_buffer(out_buffer, entry.shape, entry.len);
+            if input_is_complex {
+                runmat_accelerate_api::set_handle_storage(
+                    &out,
+                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+                );
+            }
+            return Ok(out);
+        }
+        if len > (u32::MAX as usize) {
+            return Err(gpu_dispatch_length_limit_error("round_digits", len));
+        }
+
+        let shader = round_digits_shader(self.precision, significant);
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-round-digits-shader",
+            &shader,
+        );
+        let layout = &self.pipelines.unary.layout;
+        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+            self.device_ref(),
+            "runmat-round-digits-pipeline-layout",
+            layout,
+        );
+        let layout_tag = if significant {
+            "runmat-round-significant"
+        } else {
+            "runmat-round-decimals"
+        };
+        let shader_hash = self.compute_pipeline_hash_bytes(
+            shader.as_bytes(),
+            layout_tag,
+            Some(crate::backend::wgpu::config::effective_workgroup_size()),
+        );
+        let pipeline = self.get_or_create_pipeline(
+            shader_hash,
+            &pipeline_layout,
+            &module,
+            "runmat-round-digits-pipeline",
+            Some(shader.as_bytes()),
+            Some(layout_tag),
+            Some(crate::backend::wgpu::config::effective_workgroup_size()),
+        );
+
+        let params_buffer = Arc::new(self.device_ref().create_buffer(&wgpu::BufferDescriptor {
+            label: Some("runmat-round-digits-params"),
+            size: std::mem::size_of::<crate::backend::wgpu::params::RoundDigitsParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        let bind_group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-round-digits-bind"),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params_buffer.as_ref().as_entire_binding(),
+                    },
+                ],
+            });
+
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let mut offset = 0usize;
+        let start = Instant::now();
+        while offset < len {
+            let chunk_len = (len - offset).min(chunk_capacity);
+            let params = crate::backend::wgpu::params::RoundDigitsParams {
+                len: chunk_len as u32,
+                offset: offset as u32,
+                total: len as u32,
+                digits,
+            };
+            self.queue
+                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                chunk_len as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::elementwise::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline,
+                &bind_group,
+                groups,
+            );
+            offset += chunk_len;
+        }
+
+        let out = self.register_existing_buffer(out_buffer, entry.shape, len);
+        if input_is_complex {
+            runmat_accelerate_api::set_handle_storage(
+                &out,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
+        }
+        self.telemetry
+            .record_fused_elementwise_duration(start.elapsed());
         Ok(out)
     }
 
@@ -1996,6 +2121,61 @@ mod tests {
         let inv_cosh = 1.0 / two_im.cosh();
         let denom = 1.0 + two_re.cos() * inv_cosh;
         ((two_re.sin() * inv_cosh) / denom, two_im.tanh() / denom)
+    }
+
+    #[tokio::test]
+    async fn wgpu_round_ops_match_cpu() {
+        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let shape = [6, 1];
+        let input = [-2.5, -0.2, 0.5, 1.2345, 149.9, 98765.0];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &input,
+                shape: &shape,
+            })
+            .expect("upload");
+
+        let integer = provider.unary_round(&handle).await.expect("round");
+        let decimals = provider
+            .round_digits(&handle, -2, false)
+            .await
+            .expect("round decimals");
+        let significant = provider
+            .round_digits(&handle, 3, true)
+            .await
+            .expect("round significant");
+
+        let integer_host = provider.download(&integer).await.expect("download integer");
+        let decimals_host = provider
+            .download(&decimals)
+            .await
+            .expect("download decimals");
+        let significant_host = provider
+            .download(&significant)
+            .await
+            .expect("download significant");
+
+        assert_eq!(integer_host.data, vec![-3.0, 0.0, 1.0, 1.0, 150.0, 98765.0]);
+        assert_eq!(
+            decimals_host.data,
+            vec![-0.0, -0.0, 0.0, 0.0, 100.0, 98800.0]
+        );
+        let expected = [-2.5, -0.2, 0.5, 1.23, 150.0, 98800.0];
+        for (idx, (actual, expected)) in significant_host
+            .data
+            .iter()
+            .zip(expected.iter())
+            .enumerate()
+        {
+            assert!(
+                (actual - expected).abs() < 1e-8,
+                "significant lane {idx}: expected {expected}, got {actual}"
+            );
+        }
     }
 
     #[tokio::test]

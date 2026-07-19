@@ -1305,6 +1305,15 @@ fn apply(a: f64) -> f64 {
         case 34u: { return heaviside_real(a); }
         case 35u: { return erf_real(a); }
         case 36u: { return gammaln_real(a); }
+        case 37u: {
+            if (is_nan64(a) || is_inf64(a)) {
+                return a;
+            }
+            if (a >= 0.0) {
+                return floor(a + 0.5);
+            }
+            return ceil(a - 0.5);
+        }
         default: { return a; }
     }
 }
@@ -1673,6 +1682,15 @@ fn apply(a: f32) -> f32 {
         case 34u: { return heaviside_real(a); }
         case 35u: { return erf_real(a); }
         case 36u: { return gammaln_real(a); }
+        case 37u: {
+            if (is_nan32(a) || is_inf32(a)) {
+                return a;
+            }
+            if (a >= 0.0) {
+                return floor(a + 0.5);
+            }
+            return ceil(a - 0.5);
+        }
         default: { return a; }
     }
 }
@@ -1787,3 +1805,105 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     Out.data[idx] = result;
 }
 "#;
+
+pub(crate) fn round_digits_shader(precision: NumericPrecision, significant: bool) -> String {
+    let ty = match precision {
+        NumericPrecision::F64 => "f64",
+        NumericPrecision::F32 => "f32",
+    };
+    let max_finite = match precision {
+        NumericPrecision::F64 => "1.7976931348623157e308",
+        NumericPrecision::F32 => "3.4028234663852886e38",
+    };
+    let inv_ln10 = match precision {
+        NumericPrecision::F64 => "0.4342944819032518",
+        NumericPrecision::F32 => "0.4342944819",
+    };
+    let apply_body = if significant {
+        format!(
+            r#"
+fn apply_round(a: {ty}) -> {ty} {{
+    if !is_finite_value(a) {{
+        return a;
+    }}
+    if a == {ty}(0.0) {{
+        return {ty}(0.0);
+    }}
+    let order = floor(log(abs(a)) * {ty}({inv_ln10}));
+    let scale_power = params.digits - 1 - i32(order);
+    let scale = pow({ty}(10.0), {ty}(scale_power));
+    if !is_finite_value(scale) || scale == {ty}(0.0) {{
+        return a;
+    }}
+    return round_half_away(a * scale) / scale;
+}}
+"#
+        )
+    } else {
+        format!(
+            r#"
+fn apply_round(a: {ty}) -> {ty} {{
+    if !is_finite_value(a) {{
+        return a;
+    }}
+    if params.digits == 0 {{
+        return round_half_away(a);
+    }}
+    let factor = pow({ty}(10.0), {ty}(params.digits));
+    if !is_finite_value(factor) || factor == {ty}(0.0) {{
+        return a;
+    }}
+    return round_half_away(a * factor) / factor;
+}}
+"#
+        )
+    };
+
+    format!(
+        r#"
+struct Tensor {{
+    data: array<{ty}>,
+}};
+
+struct Params {{
+    len: u32,
+    offset: u32,
+    total: u32,
+    digits: i32,
+}};
+
+@group(0) @binding(0) var<storage, read> A: Tensor;
+@group(0) @binding(1) var<storage, read_write> Out: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+fn is_finite_value(a: {ty}) -> bool {{
+    return (a == a) && (abs(a) < {ty}({max_finite}));
+}}
+
+fn round_half_away(a: {ty}) -> {ty} {{
+    if !is_finite_value(a) {{
+        return a;
+    }}
+    if a >= {ty}(0.0) {{
+        return floor(a + {ty}(0.5));
+    }}
+    return ceil(a - {ty}(0.5));
+}}
+
+{apply_body}
+
+@compute @workgroup_size(512)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let local = gid.x;
+    if local >= params.len {{
+        return;
+    }}
+    let idx = params.offset + local;
+    if idx >= params.total {{
+        return;
+    }}
+    Out.data[idx] = apply_round(A.data[idx]);
+}}
+"#
+    )
+}

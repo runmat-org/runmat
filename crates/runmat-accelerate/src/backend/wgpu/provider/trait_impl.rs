@@ -623,6 +623,24 @@ impl AccelProvider for WgpuProvider {
         )
     }
 
+    fn unary_round<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Round, a) },
+        )
+    }
+
+    fn round_digits<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        digits: i32,
+        significant: bool,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.round_digits_exec(a, digits, significant) })
+    }
+
     fn unary_fix<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(
             async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Fix, a) },

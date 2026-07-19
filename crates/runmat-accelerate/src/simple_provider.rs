@@ -4659,6 +4659,69 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn round_digits<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        digits: i32,
+        significant: bool,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            fn round_decimals(value: f64, digits: i32) -> f64 {
+                if !value.is_finite() {
+                    return value;
+                }
+                if digits == 0 {
+                    return value.round();
+                }
+                let factor = 10f64.powi(digits);
+                if !factor.is_finite() || factor == 0.0 {
+                    return value;
+                }
+                (value * factor).round() / factor
+            }
+
+            fn round_significant(value: f64, digits: i32) -> f64 {
+                if !value.is_finite() {
+                    return value;
+                }
+                if value == 0.0 {
+                    return 0.0;
+                }
+                let order = value.abs().log10().floor();
+                let scale_power = digits - 1 - order as i32;
+                let scale = 10f64.powi(scale_power);
+                if !scale.is_finite() || scale == 0.0 {
+                    return value;
+                }
+                (value * scale).round() / scale
+            }
+
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out: Vec<f64> = abuf
+                .iter()
+                .map(|&x| {
+                    if significant {
+                        round_significant(x, digits)
+                    } else {
+                        round_decimals(x, digits)
+                    }
+                })
+                .collect();
+            drop(guard);
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            let mut guard2 = registry().lock().unwrap();
+            guard2.insert(id, out);
+            Ok(GpuTensorHandle {
+                shape: a.shape.clone(),
+                device_id: 0,
+                buffer_id: id,
+            })
+        })
+    }
+
     fn unary_fix<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let guard = registry().lock().unwrap();

@@ -69,6 +69,15 @@ pub struct FusionParams {
     pub _pad2: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RoundDigitsParams {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub digits: i32,
+}
+
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Pod, Zeroable, Default)]
 pub struct PackedI32(pub [i32; 4]);

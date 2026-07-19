@@ -2005,6 +2005,14 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("unary_round not supported by provider")
     }
+    fn round_digits<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _digits: i32,
+        _significant: bool,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("round_digits not supported by provider")
+    }
     fn unary_fix<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
