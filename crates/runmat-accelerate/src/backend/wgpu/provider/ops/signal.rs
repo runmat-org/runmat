@@ -1481,23 +1481,45 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(handle)?;
         ensure!(
-            entry.storage == GpuTensorStorage::Real
-                && runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real,
-            "trapezoid: complex input tensors are not supported"
-        );
-        ensure!(
             entry.precision == self.precision,
             "trapezoid: mixed precision tensors are not supported"
         );
+        let handle_storage = runmat_accelerate_api::handle_storage(handle);
+        ensure!(
+            entry.storage == handle_storage,
+            "trapezoid: input storage metadata mismatch"
+        );
+        let lane_factor = match entry.storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
 
         let mut work_shape = if entry.shape.is_empty() {
-            vec![entry.len]
+            ensure!(
+                entry.len % lane_factor == 0,
+                "trapezoid: input raw length is not divisible by lane factor"
+            );
+            vec![entry.len / lane_factor]
         } else {
             entry.shape.clone()
         };
         while work_shape.len() <= dim {
             work_shape.push(1);
         }
+        let logical_len = work_shape
+            .iter()
+            .try_fold(1usize, |acc, &value| acc.checked_mul(value))
+            .ok_or_else(|| anyhow!("trapezoid: input too large"))?;
+        let expected_raw_len = logical_len
+            .checked_mul(lane_factor)
+            .ok_or_else(|| anyhow!("trapezoid: input length overflow"))?;
+        ensure!(
+            entry.len == expected_raw_len,
+            "trapezoid: input raw length mismatch (shape implies {} logical elements, buffer has {}, lane factor {})",
+            logical_len,
+            entry.len,
+            lane_factor
+        );
 
         let segment_len = work_shape[dim];
         let stride_before = if dim == 0 {
@@ -1528,14 +1550,20 @@ impl WgpuProvider {
             .iter()
             .try_fold(1usize, |acc, &value| acc.checked_mul(value))
             .ok_or_else(|| anyhow!("trapezoid: output too large"))?;
+        let output_raw_len = output_len
+            .checked_mul(lane_factor)
+            .ok_or_else(|| anyhow!("trapezoid: output length overflow"))?;
 
         ensure!(
-            entry.len <= u32::MAX as usize
+            logical_len <= u32::MAX as usize
+                && entry.len <= u32::MAX as usize
                 && segment_len <= u32::MAX as usize
                 && stride_before <= u32::MAX as usize
                 && segments <= u32::MAX as usize
                 && block <= u32::MAX as usize
-                && output_len <= u32::MAX as usize,
+                && output_len <= u32::MAX as usize
+                && output_raw_len <= u32::MAX as usize
+                && lane_factor <= u32::MAX as usize,
             "trapezoid: tensor too large for GPU kernel"
         );
 
@@ -1576,14 +1604,14 @@ impl WgpuProvider {
                     "trapezoid: spacing tensor must be real"
                 );
                 ensure!(
-                    spacing_entry.len >= entry.len,
+                    spacing_entry.len >= logical_len,
                     "trapezoid: spacing tensor is smaller than input"
                 );
                 (4u32, 0.0, spacing_entry.buffer)
             }
         };
 
-        let out_buffer = self.create_storage_buffer(output_len, "runmat-trapezoid-out");
+        let out_buffer = self.create_storage_buffer(output_raw_len, "runmat-trapezoid-out");
         let params_buffer = match self.precision {
             NumericPrecision::F64 => {
                 let params = TrapezoidParamsF64 {
@@ -1591,10 +1619,14 @@ impl WgpuProvider {
                     segments: segments as u32,
                     stride_before: stride_before as u32,
                     block: block as u32,
-                    total_len: entry.len as u32,
+                    total_len: logical_len as u32,
                     output_len: output_len as u32,
                     spacing_kind,
                     mode: if cumulative { 1 } else { 0 },
+                    lane_factor: lane_factor as u32,
+                    _pad_u32_0: 0,
+                    _pad_u32_1: 0,
+                    _pad_u32_2: 0,
                     spacing_scalar: scalar,
                     _pad0: 0.0,
                     _pad1: 0.0,
@@ -1611,11 +1643,12 @@ impl WgpuProvider {
                         block as u32,
                     ]),
                     meta1: PackedU32([
-                        entry.len as u32,
+                        logical_len as u32,
                         output_len as u32,
                         spacing_kind,
                         if cumulative { 1 } else { 0 },
                     ]),
+                    meta2: PackedU32([lane_factor as u32, 0, 0, 0]),
                     scalar: PackedF32([scalar as f32, 0.0, 0.0, 0.0]),
                 };
                 self.uniform_buffer(&params, "runmat-trapezoid-params")
@@ -1658,7 +1691,12 @@ impl WgpuProvider {
             "runmat-trapezoid-encoder",
             "runmat-trapezoid-pass",
         );
-        Ok(self.register_existing_buffer(out_buffer, output_shape, output_len))
+        Ok(self.register_existing_buffer_with_storage(
+            out_buffer,
+            output_shape,
+            output_raw_len,
+            entry.storage,
+        ))
     }
     pub(crate) fn cumprod_exec(
         &self,
@@ -2734,6 +2772,42 @@ mod tests {
                     "cumtrapz mismatch at {idx}: actual={actual} expected={expected}"
                 );
             }
+        });
+    }
+
+    #[test]
+    fn trapezoid_provider_preserves_complex_storage_and_integrates_lanes() {
+        with_wgpu_provider(|provider| {
+            let data = [1.0, 1.0, 2.0, 2.0, 3.0, 3.0];
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &data,
+                    shape: &[1, 3],
+                })
+                .expect("upload input");
+            runmat_accelerate_api::set_handle_storage(&input, GpuTensorStorage::ComplexInterleaved);
+
+            let trapz = provider
+                .trapz_dim(&input, 1, ProviderTrapezoidSpacing::Unit)
+                .expect("trapz");
+            let cumtrapz = provider
+                .cumtrapz_dim(&input, 1, ProviderTrapezoidSpacing::Unit)
+                .expect("cumtrapz");
+
+            let trapz_host = pollster::block_on(provider.download(&trapz)).expect("download trapz");
+            let cumtrapz_host =
+                pollster::block_on(provider.download(&cumtrapz)).expect("download cumtrapz");
+
+            provider.free(&input).ok();
+            provider.free(&trapz).ok();
+            provider.free(&cumtrapz).ok();
+
+            assert_eq!(trapz_host.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(trapz_host.shape, vec![1, 1]);
+            assert_eq!(trapz_host.data, vec![4.0, 4.0]);
+            assert_eq!(cumtrapz_host.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(cumtrapz_host.shape, vec![1, 3]);
+            assert_eq!(cumtrapz_host.data, vec![0.0, 0.0, 1.5, 1.5, 4.0, 4.0]);
         });
     }
 }

@@ -236,6 +236,10 @@ struct Params {
     output_len: u32,
     spacing_kind: u32,
     mode: u32,
+    lane_factor: u32,
+    _pad_u32_0: u32,
+    _pad_u32_1: u32,
+    _pad_u32_2: u32,
     spacing_scalar: f64,
     _pad0: f64,
     _pad1: f64,
@@ -278,30 +282,47 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if params.mode == 1u {
         let first_idx = base + before;
         if first_idx < params.total_len {
-            Output.data[first_idx] = 0.0;
-        }
-    }
-
-    var acc: f64 = 0.0;
-    var k: u32 = 0u;
-    loop {
-        if k + 1u >= params.segment_len {
-            break;
-        }
-        let idx0 = base + before + k * params.stride_before;
-        let idx1 = idx0 + params.stride_before;
-        if idx1 < params.total_len {
-            let width = interval_width(idx0, idx1, k);
-            acc = acc + 0.5 * width * (Input.data[idx0] + Input.data[idx1]);
-            if params.mode == 1u {
-                Output.data[idx1] = acc;
+            let raw_first_idx = first_idx * params.lane_factor;
+            var lane: u32 = 0u;
+            loop {
+                if lane >= params.lane_factor {
+                    break;
+                }
+                Output.data[raw_first_idx + lane] = 0.0;
+                lane = lane + 1u;
             }
         }
-        k = k + 1u;
     }
 
-    if params.mode == 0u && out_base < params.output_len {
-        Output.data[out_base] = acc;
+    var lane: u32 = 0u;
+    loop {
+        if lane >= params.lane_factor {
+            break;
+        }
+        var acc: f64 = 0.0;
+        var k: u32 = 0u;
+        loop {
+            if k + 1u >= params.segment_len {
+                break;
+            }
+            let idx0 = base + before + k * params.stride_before;
+            let idx1 = idx0 + params.stride_before;
+            if idx1 < params.total_len {
+                let width = interval_width(idx0, idx1, k);
+                let raw0 = idx0 * params.lane_factor + lane;
+                let raw1 = idx1 * params.lane_factor + lane;
+                acc = acc + 0.5 * width * (Input.data[raw0] + Input.data[raw1]);
+                if params.mode == 1u {
+                    Output.data[raw1] = acc;
+                }
+            }
+            k = k + 1u;
+        }
+
+        if params.mode == 0u && out_base < params.output_len {
+            Output.data[out_base * params.lane_factor + lane] = acc;
+        }
+        lane = lane + 1u;
     }
 }
 "#;
@@ -314,6 +335,7 @@ struct Tensor {
 struct Params {
     meta0: vec4<u32>,
     meta1: vec4<u32>,
+    meta2: vec4<u32>,
     scalar: vec4<f32>,
 };
 
@@ -330,6 +352,7 @@ fn total_len() -> u32 { return params.meta1.x; }
 fn output_len() -> u32 { return params.meta1.y; }
 fn spacing_kind() -> u32 { return params.meta1.z; }
 fn mode() -> u32 { return params.meta1.w; }
+fn lane_factor() -> u32 { return params.meta2.x; }
 
 fn interval_width(idx0: u32, idx1: u32, k: u32) -> f32 {
     if spacing_kind() == 0u {
@@ -362,30 +385,47 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if mode() == 1u {
         let first_idx = base + before;
         if first_idx < total_len() {
-            Output.data[first_idx] = 0.0;
-        }
-    }
-
-    var acc: f32 = 0.0;
-    var k: u32 = 0u;
-    loop {
-        if k + 1u >= segment_len() {
-            break;
-        }
-        let idx0 = base + before + k * stride_before();
-        let idx1 = idx0 + stride_before();
-        if idx1 < total_len() {
-            let width = interval_width(idx0, idx1, k);
-            acc = acc + 0.5 * width * (Input.data[idx0] + Input.data[idx1]);
-            if mode() == 1u {
-                Output.data[idx1] = acc;
+            let raw_first_idx = first_idx * lane_factor();
+            var lane: u32 = 0u;
+            loop {
+                if lane >= lane_factor() {
+                    break;
+                }
+                Output.data[raw_first_idx + lane] = 0.0;
+                lane = lane + 1u;
             }
         }
-        k = k + 1u;
     }
 
-    if mode() == 0u && out_base < output_len() {
-        Output.data[out_base] = acc;
+    var lane: u32 = 0u;
+    loop {
+        if lane >= lane_factor() {
+            break;
+        }
+        var acc: f32 = 0.0;
+        var k: u32 = 0u;
+        loop {
+            if k + 1u >= segment_len() {
+                break;
+            }
+            let idx0 = base + before + k * stride_before();
+            let idx1 = idx0 + stride_before();
+            if idx1 < total_len() {
+                let width = interval_width(idx0, idx1, k);
+                let raw0 = idx0 * lane_factor() + lane;
+                let raw1 = idx1 * lane_factor() + lane;
+                acc = acc + 0.5 * width * (Input.data[raw0] + Input.data[raw1]);
+                if mode() == 1u {
+                    Output.data[raw1] = acc;
+                }
+            }
+            k = k + 1u;
+        }
+
+        if mode() == 0u && out_base < output_len() {
+            Output.data[out_base * lane_factor() + lane] = acc;
+        }
+        lane = lane + 1u;
     }
 }
 "#;

@@ -2146,10 +2146,11 @@ fn simple_trapezoid(
     spacing: ProviderTrapezoidSpacing<'_>,
     cumulative: bool,
 ) -> Result<(Vec<f64>, Vec<usize>)> {
-    ensure!(
-        runmat_accelerate_api::handle_storage(input) == GpuTensorStorage::Real,
-        "trapezoid: complex input tensors are not supported"
-    );
+    let input_storage = runmat_accelerate_api::handle_storage(input);
+    let lane_factor = match input_storage {
+        GpuTensorStorage::Real => 1usize,
+        GpuTensorStorage::ComplexInterleaved => 2usize,
+    };
     let (data, spacing_data) = {
         let guard = registry().lock().unwrap();
         let data = guard
@@ -2207,13 +2208,28 @@ fn simple_trapezoid(
     };
 
     let mut shape = if input.shape.is_empty() {
-        vec![data.len()]
+        ensure!(
+            data.len() % lane_factor == 0,
+            "trapezoid: input raw length is not divisible by lane factor"
+        );
+        vec![data.len() / lane_factor]
     } else {
         input.shape.clone()
     };
     while shape.len() <= dim {
         shape.push(1);
     }
+    let logical_len = shape.iter().copied().product::<usize>();
+    let expected_raw_len = logical_len
+        .checked_mul(lane_factor)
+        .ok_or_else(|| anyhow!("trapezoid: input length overflow"))?;
+    ensure!(
+        data.len() == expected_raw_len,
+        "trapezoid: input raw length mismatch (shape implies {} logical elements, buffer has {}, lane factor {})",
+        logical_len,
+        data.len(),
+        lane_factor
+    );
     let len_dim = shape[dim];
     let stride_before = if dim == 0 {
         1usize
@@ -2231,7 +2247,7 @@ fn simple_trapezoid(
             "trapezoid: spacing vector is shorter than integration dimension"
         ),
         SimpleTrapezoidSpacing::Tensor(values) => ensure!(
-            values.len() >= data.len(),
+            values.len() >= logical_len,
             "trapezoid: spacing tensor is smaller than input"
         ),
         SimpleTrapezoidSpacing::Unit | SimpleTrapezoidSpacing::Scalar(_) => {}
@@ -2254,14 +2270,18 @@ fn simple_trapezoid(
                 let base = after * block;
                 for before in 0..stride_before {
                     let first_idx = base + before;
-                    output[first_idx] = 0.0;
-                    let mut acc = 0.0;
-                    for k in 0..len_dim.saturating_sub(1) {
-                        let idx0 = base + before + k * stride_before;
-                        let idx1 = idx0 + stride_before;
-                        let width = interval_width(idx0, idx1, k);
-                        acc += 0.5 * width * (data[idx0] + data[idx1]);
-                        output[idx1] = acc;
+                    for lane in 0..lane_factor {
+                        output[first_idx * lane_factor + lane] = 0.0;
+                        let mut acc = 0.0;
+                        for k in 0..len_dim.saturating_sub(1) {
+                            let idx0 = base + before + k * stride_before;
+                            let idx1 = idx0 + stride_before;
+                            let width = interval_width(idx0, idx1, k);
+                            let raw0 = idx0 * lane_factor + lane;
+                            let raw1 = idx1 * lane_factor + lane;
+                            acc += 0.5 * width * (data[raw0] + data[raw1]);
+                            output[raw1] = acc;
+                        }
                     }
                 }
             }
@@ -2271,20 +2291,28 @@ fn simple_trapezoid(
 
     let mut output_shape = shape;
     output_shape[dim] = 1;
-    let output_len = output_shape.iter().copied().product();
-    let mut output = vec![0.0; output_len];
+    let output_logical_len = output_shape.iter().copied().product::<usize>();
+    let output_raw_len = output_logical_len
+        .checked_mul(lane_factor)
+        .ok_or_else(|| anyhow!("trapezoid: output length overflow"))?;
+    let mut output = vec![0.0; output_raw_len];
     if len_dim > 1 {
         for after in 0..stride_after {
             let base = after * block;
             for before in 0..stride_before {
-                let mut acc = 0.0;
-                for k in 0..(len_dim - 1) {
-                    let idx0 = base + before + k * stride_before;
-                    let idx1 = idx0 + stride_before;
-                    let width = interval_width(idx0, idx1, k);
-                    acc += 0.5 * width * (data[idx0] + data[idx1]);
+                for lane in 0..lane_factor {
+                    let mut acc = 0.0;
+                    for k in 0..(len_dim - 1) {
+                        let idx0 = base + before + k * stride_before;
+                        let idx1 = idx0 + stride_before;
+                        let width = interval_width(idx0, idx1, k);
+                        let raw0 = idx0 * lane_factor + lane;
+                        let raw1 = idx1 * lane_factor + lane;
+                        acc += 0.5 * width * (data[raw0] + data[raw1]);
+                    }
+                    let out_idx = after * stride_before + before;
+                    output[out_idx * lane_factor + lane] = acc;
                 }
-                output[after * stride_before + before] = acc;
             }
         }
     }
@@ -7132,7 +7160,11 @@ impl AccelProvider for InProcessProvider {
         spacing: ProviderTrapezoidSpacing<'_>,
     ) -> Result<GpuTensorHandle> {
         let (output, shape) = simple_trapezoid(input, dim, spacing, false)?;
-        Ok(self.allocate_tensor(output, shape))
+        Ok(self.allocate_tensor_with_storage(
+            output,
+            shape,
+            runmat_accelerate_api::handle_storage(input),
+        ))
     }
 
     fn cumtrapz_dim(
@@ -7142,7 +7174,11 @@ impl AccelProvider for InProcessProvider {
         spacing: ProviderTrapezoidSpacing<'_>,
     ) -> Result<GpuTensorHandle> {
         let (output, shape) = simple_trapezoid(input, dim, spacing, true)?;
-        Ok(self.allocate_tensor(output, shape))
+        Ok(self.allocate_tensor_with_storage(
+            output,
+            shape,
+            runmat_accelerate_api::handle_storage(input),
+        ))
     }
 
     fn cummin_scan(

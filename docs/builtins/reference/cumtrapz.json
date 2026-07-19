@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Real GPU inputs route through provider `cumtrapz_dim` for unit, scalar, vector, and tensor spacing. Complex/provider-missing cases fall back to host semantics."
+    "notes": "Real, logical, and complex-interleaved GPU sample inputs route through provider `cumtrapz_dim` for unit, scalar, vector, and tensor real spacing. Provider-missing cases fall back to host semantics."
   },
   "fusion": {
     "elementwise": false,
@@ -78,7 +78,7 @@
     },
     {
       "question": "Does cumtrapz keep gpuArray residency?",
-      "answer": "For real-valued gpuArray inputs, yes. RunMat uses the acceleration provider's `cumtrapz_dim` hook for unit, scalar, vector, and tensor spacing."
+      "answer": "For real, logical, and complex-valued gpuArray sample inputs, yes. RunMat uses the acceleration provider's `cumtrapz_dim` hook with real unit, scalar, vector, or tensor spacing."
     }
   ],
   "links": [
@@ -107,9 +107,9 @@
     "label": "`crates/runmat-runtime/src/builtins/math/reduction/cumtrapz.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/cumtrapz.rs"
   },
-  "gpu_residency": "Manual `gpuArray` promotion is optional. If real sampled data already lives on the GPU, RunMat preserves cumulative outputs as gpuArrays through the provider `cumtrapz_dim` path.",
+  "gpu_residency": "Manual `gpuArray` promotion is optional. If real, logical, or complex-interleaved sampled data already lives on the GPU, RunMat preserves cumulative outputs as gpuArrays through the provider `cumtrapz_dim` path.",
   "gpu_behavior": [
-    "Real gpuArray inputs use provider-backed cumulative trapezoidal integration for unit spacing, scalar spacing, coordinate-vector spacing, and same-size coordinate-tensor spacing.",
-    "Complex inputs and provider-missing cases use the host fallback path to preserve MATLAB-compatible semantics."
+    "Real, logical, and complex-interleaved gpuArray sample inputs use provider-backed cumulative trapezoidal integration for unit spacing, scalar spacing, coordinate-vector spacing, and same-size coordinate-tensor spacing.",
+    "Spacing inputs must be real-valued. Provider-missing cases use the host fallback path to preserve MATLAB-compatible semantics."
   ]
 }

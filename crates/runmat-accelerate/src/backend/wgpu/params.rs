@@ -777,6 +777,10 @@ pub struct TrapezoidParamsF64 {
     pub output_len: u32,
     pub spacing_kind: u32,
     pub mode: u32,
+    pub lane_factor: u32,
+    pub _pad_u32_0: u32,
+    pub _pad_u32_1: u32,
+    pub _pad_u32_2: u32,
     pub spacing_scalar: f64,
     pub _pad0: f64,
     pub _pad1: f64,
@@ -788,6 +792,7 @@ pub struct TrapezoidParamsF64 {
 pub struct TrapezoidParamsF32 {
     pub meta0: PackedU32,
     pub meta1: PackedU32,
+    pub meta2: PackedU32,
     pub scalar: PackedF32,
 }
 

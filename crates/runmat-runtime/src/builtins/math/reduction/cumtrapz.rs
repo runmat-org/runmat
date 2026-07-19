@@ -171,7 +171,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Real GPU inputs route through provider `cumtrapz_dim` for unit, scalar, vector, and tensor spacing; complex/provider-missing cases fall back to host semantics.",
+    notes: "Real, logical, and complex-interleaved GPU sample inputs route through provider `cumtrapz_dim` for unit, scalar, vector, and tensor real spacing; provider-missing cases fall back to host semantics.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::cumtrapz")]
@@ -224,33 +224,23 @@ fn cumtrapz_internal_error(detail: impl AsRef<str>) -> RuntimeError {
 async fn cumtrapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let parsed = parse_arguments(first, rest)?;
     if let Value::GpuTensor(handle) = &parsed.y {
-        if runmat_accelerate_api::handle_storage(handle)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        {
-            if let Some(provider) = runmat_accelerate_api::provider() {
-                let shape = if handle.shape.is_empty() {
-                    vec![1, 1]
-                } else {
-                    handle.shape.clone()
-                };
-                let dim = parsed
-                    .dim
-                    .unwrap_or_else(|| default_dimension_from_shape(&shape));
-                let spacing =
-                    spacing_from_gpu_or_host_value(NAME, parsed.spacing.clone(), &shape, dim)
-                        .map_err(|err| {
-                            cumtrapz_error_with_detail(
-                                &CUMTRAPZ_ERROR_INVALID_ARGUMENT,
-                                err.message(),
-                            )
-                        })?;
-                if let Ok(result) = provider.cumtrapz_dim(
-                    handle,
-                    dim.saturating_sub(1),
-                    spacing.as_provider_spacing(),
-                ) {
-                    return Ok(Value::GpuTensor(result));
-                }
+        if let Some(provider) = runmat_accelerate_api::provider() {
+            let shape = if handle.shape.is_empty() {
+                vec![1, 1]
+            } else {
+                handle.shape.clone()
+            };
+            let dim = parsed
+                .dim
+                .unwrap_or_else(|| default_dimension_from_shape(&shape));
+            let spacing = spacing_from_gpu_or_host_value(NAME, parsed.spacing.clone(), &shape, dim)
+                .map_err(|err| {
+                    cumtrapz_error_with_detail(&CUMTRAPZ_ERROR_INVALID_ARGUMENT, err.message())
+                })?;
+            if let Ok(result) =
+                provider.cumtrapz_dim(handle, dim.saturating_sub(1), spacing.as_provider_spacing())
+            {
+                return Ok(Value::GpuTensor(result));
             }
         }
     }
@@ -573,6 +563,38 @@ pub(crate) mod tests {
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
             assert_eq!(gathered.data, vec![0.0, 1.5, 4.0]);
+        });
+    }
+
+    #[test]
+    fn cumtrapz_complex_gpu_input_preserves_result_residency() {
+        test_support::with_test_provider(|provider| {
+            let y =
+                ComplexTensor::new(vec![(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)], vec![1, 3]).unwrap();
+            let handle = crate::builtins::common::gpu_helpers::upload_complex_tensor(provider, &y)
+                .expect("upload complex");
+            provider.reset_telemetry();
+
+            let result = run_cumtrapz(Value::GpuTensor(handle.clone()), Vec::new())
+                .expect("cumtrapz complex gpu");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected gpu result");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let gathered = block_on(provider.download(&out)).expect("download");
+            assert_eq!(
+                gathered.storage,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.data, vec![0.0, 0.0, 1.5, 1.5, 4.0, 4.0]);
+            let _ = provider.free(&handle);
+            let _ = provider.free(&out);
         });
     }
 
