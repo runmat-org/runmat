@@ -16,8 +16,9 @@ use runmat_accelerate_api::{
     ProviderLinsolveResult, ProviderLuResult, ProviderModulationRequest, ProviderNanMode,
     ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder, ProviderPinvOptions,
     ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions, ProviderQrPivot,
-    ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind, SetdiffOptions, SetdiffResult,
-    SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind, ProviderTrapezoidSpacing,
+    SetdiffOptions, SetdiffResult, SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions,
+    UniqueResult,
 };
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -1999,6 +2000,164 @@ fn rows_cols(shape: &[usize]) -> (usize, usize) {
 
 fn is_vector_like(rows: usize, cols: usize, dims: usize) -> bool {
     rows == 1 || cols == 1 || dims <= 1
+}
+
+enum SimpleTrapezoidSpacing {
+    Unit,
+    Scalar(f64),
+    Vector(Vec<f64>),
+    Tensor(Vec<f64>),
+}
+
+fn simple_trapezoid(
+    input: &GpuTensorHandle,
+    dim: usize,
+    spacing: ProviderTrapezoidSpacing<'_>,
+    cumulative: bool,
+) -> Result<(Vec<f64>, Vec<usize>)> {
+    ensure!(
+        runmat_accelerate_api::handle_storage(input) == GpuTensorStorage::Real,
+        "trapezoid: complex input tensors are not supported"
+    );
+    let (data, spacing_data) = {
+        let guard = registry().lock().unwrap();
+        let data = guard
+            .get(&input.buffer_id)
+            .ok_or_else(|| anyhow!("trapezoid: unknown tensor handle {}", input.buffer_id))?
+            .clone();
+        let spacing_data = match spacing {
+            ProviderTrapezoidSpacing::Unit => SimpleTrapezoidSpacing::Unit,
+            ProviderTrapezoidSpacing::Scalar(value) => SimpleTrapezoidSpacing::Scalar(value),
+            ProviderTrapezoidSpacing::ScalarHandle(handle) => {
+                ensure!(
+                    runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real,
+                    "trapezoid: spacing tensor must be real"
+                );
+                let values = guard.get(&handle.buffer_id).ok_or_else(|| {
+                    anyhow!("trapezoid: unknown spacing handle {}", handle.buffer_id)
+                })?;
+                SimpleTrapezoidSpacing::Scalar(
+                    values
+                        .first()
+                        .copied()
+                        .ok_or_else(|| anyhow!("trapezoid: scalar spacing is empty"))?,
+                )
+            }
+            ProviderTrapezoidSpacing::Vector(handle) => {
+                ensure!(
+                    runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real,
+                    "trapezoid: spacing vector must be real"
+                );
+                SimpleTrapezoidSpacing::Vector(
+                    guard
+                        .get(&handle.buffer_id)
+                        .ok_or_else(|| {
+                            anyhow!("trapezoid: unknown spacing handle {}", handle.buffer_id)
+                        })?
+                        .clone(),
+                )
+            }
+            ProviderTrapezoidSpacing::Tensor(handle) => {
+                ensure!(
+                    runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real,
+                    "trapezoid: spacing tensor must be real"
+                );
+                SimpleTrapezoidSpacing::Tensor(
+                    guard
+                        .get(&handle.buffer_id)
+                        .ok_or_else(|| {
+                            anyhow!("trapezoid: unknown spacing handle {}", handle.buffer_id)
+                        })?
+                        .clone(),
+                )
+            }
+        };
+        (data, spacing_data)
+    };
+
+    let mut shape = if input.shape.is_empty() {
+        vec![data.len()]
+    } else {
+        input.shape.clone()
+    };
+    while shape.len() <= dim {
+        shape.push(1);
+    }
+    let len_dim = shape[dim];
+    let stride_before = if dim == 0 {
+        1usize
+    } else {
+        shape[..dim].iter().copied().product::<usize>().max(1)
+    };
+    let stride_after = if dim + 1 >= shape.len() {
+        1usize
+    } else {
+        shape[dim + 1..].iter().copied().product::<usize>().max(1)
+    };
+    match &spacing_data {
+        SimpleTrapezoidSpacing::Vector(values) => ensure!(
+            values.len() >= len_dim,
+            "trapezoid: spacing vector is shorter than integration dimension"
+        ),
+        SimpleTrapezoidSpacing::Tensor(values) => ensure!(
+            values.len() >= data.len(),
+            "trapezoid: spacing tensor is smaller than input"
+        ),
+        SimpleTrapezoidSpacing::Unit | SimpleTrapezoidSpacing::Scalar(_) => {}
+    }
+
+    let interval_width = |idx0: usize, idx1: usize, k: usize| -> f64 {
+        match &spacing_data {
+            SimpleTrapezoidSpacing::Unit => 1.0,
+            SimpleTrapezoidSpacing::Scalar(value) => *value,
+            SimpleTrapezoidSpacing::Vector(values) => values[k + 1] - values[k],
+            SimpleTrapezoidSpacing::Tensor(values) => values[idx1] - values[idx0],
+        }
+    };
+
+    let block = stride_before * len_dim;
+    if cumulative {
+        let mut output = vec![0.0; data.len()];
+        if len_dim > 0 {
+            for after in 0..stride_after {
+                let base = after * block;
+                for before in 0..stride_before {
+                    let first_idx = base + before;
+                    output[first_idx] = 0.0;
+                    let mut acc = 0.0;
+                    for k in 0..len_dim.saturating_sub(1) {
+                        let idx0 = base + before + k * stride_before;
+                        let idx1 = idx0 + stride_before;
+                        let width = interval_width(idx0, idx1, k);
+                        acc += 0.5 * width * (data[idx0] + data[idx1]);
+                        output[idx1] = acc;
+                    }
+                }
+            }
+        }
+        return Ok((output, shape));
+    }
+
+    let mut output_shape = shape;
+    output_shape[dim] = 1;
+    let output_len = output_shape.iter().copied().product();
+    let mut output = vec![0.0; output_len];
+    if len_dim > 1 {
+        for after in 0..stride_after {
+            let base = after * block;
+            for before in 0..stride_before {
+                let mut acc = 0.0;
+                for k in 0..(len_dim - 1) {
+                    let idx0 = base + before + k * stride_before;
+                    let idx1 = idx0 + stride_before;
+                    let width = interval_width(idx0, idx1, k);
+                    acc += 0.5 * width * (data[idx0] + data[idx1]);
+                }
+                output[after * stride_before + before] = acc;
+            }
+        }
+    }
+    Ok((output, output_shape))
 }
 
 impl AccelProvider for InProcessProvider {
@@ -6712,6 +6871,26 @@ impl AccelProvider for InProcessProvider {
         _nan_mode: ProviderNanMode,
     ) -> Result<GpuTensorHandle> {
         Err(anyhow!("cumsum_scan not supported by provider"))
+    }
+
+    fn trapz_dim(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> Result<GpuTensorHandle> {
+        let (output, shape) = simple_trapezoid(input, dim, spacing, false)?;
+        Ok(self.allocate_tensor(output, shape))
+    }
+
+    fn cumtrapz_dim(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> Result<GpuTensorHandle> {
+        let (output, shape) = simple_trapezoid(input, dim, spacing, true)?;
+        Ok(self.allocate_tensor(output, shape))
     }
 
     fn cummin_scan(

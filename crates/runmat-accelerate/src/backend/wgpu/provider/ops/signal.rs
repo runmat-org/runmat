@@ -1,4 +1,5 @@
 use super::*;
+use crate::backend::wgpu::params::{PackedF32, PackedU32};
 use crate::backend::wgpu::shaders::signal::{
     analytic_signal_mask_shader, envelope_analytic_bounds_shader,
     envelope_analytic_fir_bounds_shader, envelope_analytic_mask_shader,
@@ -7,7 +8,8 @@ use crate::backend::wgpu::shaders::signal::{
     SpectralFrameShaderMode, SpectralRangeShaderMode,
 };
 use runmat_accelerate_api::{
-    ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderHilbertRequest,
+    ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderEnvelopeResult,
+    ProviderHilbertRequest, ProviderTrapezoidSpacing,
 };
 
 #[derive(Clone, Copy)]
@@ -1404,6 +1406,213 @@ impl WgpuProvider {
         );
         Ok(self.register_existing_buffer(out_buffer, entry.shape, entry.len))
     }
+
+    pub(crate) fn trapz_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> Result<GpuTensorHandle> {
+        self.trapezoid_exec(handle, dim, spacing, false)
+    }
+
+    pub(crate) fn cumtrapz_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> Result<GpuTensorHandle> {
+        self.trapezoid_exec(handle, dim, spacing, true)
+    }
+
+    fn trapezoid_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        spacing: ProviderTrapezoidSpacing<'_>,
+        cumulative: bool,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(handle)?;
+        ensure!(
+            entry.storage == GpuTensorStorage::Real
+                && runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real,
+            "trapezoid: complex input tensors are not supported"
+        );
+        ensure!(
+            entry.precision == self.precision,
+            "trapezoid: mixed precision tensors are not supported"
+        );
+
+        let mut work_shape = if entry.shape.is_empty() {
+            vec![entry.len]
+        } else {
+            entry.shape.clone()
+        };
+        while work_shape.len() <= dim {
+            work_shape.push(1);
+        }
+
+        let segment_len = work_shape[dim];
+        let stride_before = if dim == 0 {
+            1usize
+        } else {
+            work_shape[..dim].iter().copied().product::<usize>().max(1)
+        };
+        let stride_after = if dim + 1 >= work_shape.len() {
+            1usize
+        } else {
+            work_shape[dim + 1..]
+                .iter()
+                .copied()
+                .product::<usize>()
+                .max(1)
+        };
+        let segments = stride_before
+            .checked_mul(stride_after)
+            .ok_or_else(|| anyhow!("trapezoid: segment count exceeds GPU limits"))?;
+        let block = stride_before
+            .checked_mul(segment_len)
+            .ok_or_else(|| anyhow!("trapezoid: segment stride exceeds GPU limits"))?;
+        let mut output_shape = work_shape.clone();
+        if !cumulative {
+            output_shape[dim] = 1;
+        }
+        let output_len = output_shape
+            .iter()
+            .try_fold(1usize, |acc, &value| acc.checked_mul(value))
+            .ok_or_else(|| anyhow!("trapezoid: output too large"))?;
+
+        ensure!(
+            entry.len <= u32::MAX as usize
+                && segment_len <= u32::MAX as usize
+                && stride_before <= u32::MAX as usize
+                && segments <= u32::MAX as usize
+                && block <= u32::MAX as usize
+                && output_len <= u32::MAX as usize,
+            "trapezoid: tensor too large for GPU kernel"
+        );
+
+        let (spacing_kind, scalar, spacing_buffer) = match spacing {
+            ProviderTrapezoidSpacing::Unit => (0u32, 1.0, entry.buffer.clone()),
+            ProviderTrapezoidSpacing::Scalar(value) => (1u32, value, entry.buffer.clone()),
+            ProviderTrapezoidSpacing::ScalarHandle(spacing_handle) => {
+                let spacing_entry = self.get_entry(spacing_handle)?;
+                ensure!(
+                    spacing_entry.storage == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_storage(spacing_handle)
+                            == GpuTensorStorage::Real,
+                    "trapezoid: spacing tensor must be real"
+                );
+                ensure!(spacing_entry.len >= 1, "trapezoid: scalar spacing is empty");
+                (2u32, 0.0, spacing_entry.buffer)
+            }
+            ProviderTrapezoidSpacing::Vector(spacing_handle) => {
+                let spacing_entry = self.get_entry(spacing_handle)?;
+                ensure!(
+                    spacing_entry.storage == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_storage(spacing_handle)
+                            == GpuTensorStorage::Real,
+                    "trapezoid: spacing vector must be real"
+                );
+                ensure!(
+                    spacing_entry.len >= segment_len,
+                    "trapezoid: spacing vector is shorter than integration dimension"
+                );
+                (3u32, 0.0, spacing_entry.buffer)
+            }
+            ProviderTrapezoidSpacing::Tensor(spacing_handle) => {
+                let spacing_entry = self.get_entry(spacing_handle)?;
+                ensure!(
+                    spacing_entry.storage == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_storage(spacing_handle)
+                            == GpuTensorStorage::Real,
+                    "trapezoid: spacing tensor must be real"
+                );
+                ensure!(
+                    spacing_entry.len >= entry.len,
+                    "trapezoid: spacing tensor is smaller than input"
+                );
+                (4u32, 0.0, spacing_entry.buffer)
+            }
+        };
+
+        let out_buffer = self.create_storage_buffer(output_len, "runmat-trapezoid-out");
+        let params_buffer = match self.precision {
+            NumericPrecision::F64 => {
+                let params = TrapezoidParamsF64 {
+                    segment_len: segment_len as u32,
+                    segments: segments as u32,
+                    stride_before: stride_before as u32,
+                    block: block as u32,
+                    total_len: entry.len as u32,
+                    output_len: output_len as u32,
+                    spacing_kind,
+                    mode: if cumulative { 1 } else { 0 },
+                    spacing_scalar: scalar,
+                    _pad0: 0.0,
+                    _pad1: 0.0,
+                    _pad2: 0.0,
+                };
+                self.uniform_buffer(&params, "runmat-trapezoid-params")
+            }
+            NumericPrecision::F32 => {
+                let params = TrapezoidParamsF32 {
+                    meta0: PackedU32([
+                        segment_len as u32,
+                        segments as u32,
+                        stride_before as u32,
+                        block as u32,
+                    ]),
+                    meta1: PackedU32([
+                        entry.len as u32,
+                        output_len as u32,
+                        spacing_kind,
+                        if cumulative { 1 } else { 0 },
+                    ]),
+                    scalar: PackedF32([scalar as f32, 0.0, 0.0, 0.0]),
+                };
+                self.uniform_buffer(&params, "runmat-trapezoid-params")
+            }
+        };
+        let bind_group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-trapezoid-bind"),
+                layout: &self.pipelines.trapezoid.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: spacing_buffer.as_ref().as_entire_binding(),
+                    },
+                ],
+            });
+        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+            segments as u32,
+            crate::backend::wgpu::config::WORKGROUP_SIZE,
+        );
+        crate::backend::wgpu::dispatch::scan::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &self.pipelines.trapezoid.pipeline,
+            &bind_group,
+            groups,
+            "runmat-trapezoid-encoder",
+            "runmat-trapezoid-pass",
+        );
+        Ok(self.register_existing_buffer(out_buffer, output_shape, output_len))
+    }
     pub(crate) fn cumprod_exec(
         &self,
         handle: &GpuTensorHandle,
@@ -1951,7 +2160,7 @@ mod tests {
     use num_complex::Complex;
     use runmat_accelerate_api::{
         AccelProvider, GpuTensorStorage, HostTensorView, ProviderEnvelopeMethod,
-        ProviderEnvelopeRequest, ProviderHilbertRequest,
+        ProviderEnvelopeRequest, ProviderHilbertRequest, ProviderTrapezoidSpacing,
     };
     use runmat_builtins::{ComplexTensor, Tensor};
     use runmat_runtime::builtins::math::reduction::{
@@ -2364,6 +2573,67 @@ mod tests {
                 assert!(
                     (*actual - expected).abs() < 1.0e-10,
                     "gradient mismatch at {idx}: actual={actual} expected={expected}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn trapezoid_provider_trapz_vector_spacing_matches_host() {
+        with_wgpu_provider(|provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 1.0, 2.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload input");
+            let spacing = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 1.0, 3.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload spacing");
+            let output = provider
+                .trapz_dim(&input, 1, ProviderTrapezoidSpacing::Vector(&spacing))
+                .expect("trapz");
+            let gathered = pollster::block_on(provider.download(&output)).expect("download");
+            provider.free(&input).ok();
+            provider.free(&spacing).ok();
+            provider.free(&output).ok();
+            assert_eq!(gathered.shape, vec![1, 1]);
+            assert!((gathered.data[0] - 3.5).abs() < 1.0e-5);
+        });
+    }
+
+    #[test]
+    fn trapezoid_provider_cumtrapz_tensor_spacing_matches_host() {
+        with_wgpu_provider(|provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0],
+                    shape: &[2, 3],
+                })
+                .expect("upload input");
+            let spacing = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 0.0, 1.0, 1.0, 3.0, 3.0],
+                    shape: &[2, 3],
+                })
+                .expect("upload spacing");
+            let output = provider
+                .cumtrapz_dim(&input, 1, ProviderTrapezoidSpacing::Tensor(&spacing))
+                .expect("cumtrapz");
+            let gathered = pollster::block_on(provider.download(&output)).expect("download");
+            provider.free(&input).ok();
+            provider.free(&spacing).ok();
+            provider.free(&output).ok();
+            assert_eq!(gathered.shape, vec![2, 3]);
+            assert_eq!(gathered.data.len(), 6);
+            let expected = [0.0, 0.0, 1.5, 4.5, 6.5, 15.5];
+            for (idx, (actual, expected)) in gathered.data.iter().zip(expected).enumerate() {
+                assert!(
+                    (*actual - expected).abs() < 1.0e-5,
+                    "cumtrapz mismatch at {idx}: actual={actual} expected={expected}"
                 );
             }
         });

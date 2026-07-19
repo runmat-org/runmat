@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "GPU inputs currently gather to the host for trapezoidal integration and re-upload real-valued outputs so downstream code can remain device-resident."
+    "notes": "Real GPU inputs route through provider `trapz_dim` for unit, scalar, vector, and tensor spacing. Complex/provider-missing cases fall back to host semantics."
   },
   "fusion": {
     "elementwise": false,
@@ -78,7 +78,7 @@
     },
     {
       "question": "Does trapz keep gpuArray residency?",
-      "answer": "For real-valued results, yes. RunMat currently gathers GPU inputs to the host, computes the trapezoidal integral, and re-uploads the result so downstream GPU code can stay resident."
+      "answer": "For real-valued gpuArray inputs, yes. RunMat uses the acceleration provider's `trapz_dim` hook for unit, scalar, vector, and tensor spacing."
     }
   ],
   "links": [
@@ -111,8 +111,9 @@
     "label": "`crates/runmat-runtime/src/builtins/math/reduction/trapz.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/trapz.rs"
   },
-  "gpu_residency": "Manual `gpuArray` promotion is optional. If sampled data already lives on the GPU, RunMat preserves real-valued outputs as gpuArrays by re-uploading the trapezoidal result after the host fallback path.",
+  "gpu_residency": "Manual `gpuArray` promotion is optional. If real sampled data already lives on the GPU, RunMat preserves the output as a gpuArray through the provider `trapz_dim` path.",
   "gpu_behavior": [
-    "RunMat does not yet expose a native provider hook for `trapz`. When the input is a gpuArray, the runtime gathers the data to host memory, performs the trapezoidal integration with MATLAB-compatible dimension and spacing rules, and re-uploads real-valued outputs so downstream GPU work stays resident."
+    "Real gpuArray inputs use provider-backed trapezoidal integration for unit spacing, scalar spacing, coordinate-vector spacing, and same-size coordinate-tensor spacing.",
+    "Complex inputs and provider-missing cases use the host fallback path to preserve MATLAB-compatible semantics."
   ]
 }

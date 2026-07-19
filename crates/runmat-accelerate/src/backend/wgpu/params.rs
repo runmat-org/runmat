@@ -732,6 +732,31 @@ pub struct CumsumParams {
     pub _pad1: u32,
 }
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct TrapezoidParamsF64 {
+    pub segment_len: u32,
+    pub segments: u32,
+    pub stride_before: u32,
+    pub block: u32,
+    pub total_len: u32,
+    pub output_len: u32,
+    pub spacing_kind: u32,
+    pub mode: u32,
+    pub spacing_scalar: f64,
+    pub _pad0: f64,
+    pub _pad1: f64,
+    pub _pad2: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct TrapezoidParamsF32 {
+    pub meta0: PackedU32,
+    pub meta1: PackedU32,
+    pub scalar: PackedF32,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct CumprodParams {

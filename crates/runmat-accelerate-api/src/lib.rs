@@ -928,6 +928,16 @@ pub enum ProviderScanDirection {
     Reverse,
 }
 
+/// Spacing input for provider-backed trapezoidal integration.
+#[derive(Debug, Clone, Copy)]
+pub enum ProviderTrapezoidSpacing<'a> {
+    Unit,
+    Scalar(f64),
+    ScalarHandle(&'a GpuTensorHandle),
+    Vector(&'a GpuTensorHandle),
+    Tensor(&'a GpuTensorHandle),
+}
+
 /// Sort direction used by acceleration providers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SortOrder {
@@ -2682,6 +2692,22 @@ pub trait AccelProvider: Send + Sync {
         _nan_mode: ProviderNanMode,
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("cumsum_scan not supported by provider"))
+    }
+    fn trapz_dim(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("trapz_dim not supported by provider"))
+    }
+    fn cumtrapz_dim(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("cumtrapz_dim not supported by provider"))
     }
     fn cumprod_scan(
         &self,

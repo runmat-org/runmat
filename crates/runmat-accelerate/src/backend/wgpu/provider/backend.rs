@@ -112,7 +112,7 @@ use crate::backend::wgpu::params::{
     BandwidthParams, Conv1dParams, CummaxParams, CumminParams, CumprodParams, CumsumParams,
     DiffParams, FilterParams, GradientParamsF32, GradientParamsF64, LinearGatherParams,
     LinearScatterParams, QrPowerIterParams, SymmetryParamsF32, SymmetryParamsF64, SyrkParams,
-    SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
+    TrapezoidParamsF32, TrapezoidParamsF64, SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
 };
 use crate::backend::wgpu::pipelines::WgpuPipelines;
 use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};

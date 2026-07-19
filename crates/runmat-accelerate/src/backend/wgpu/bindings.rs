@@ -337,6 +337,20 @@ pub fn build_bgl_for_layout_tag(device: &wgpu::Device, tag: &str) -> Option<wgpu
                 }),
             );
         }
+        "runmat-trapezoid-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+                storage_read_entry(3),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-trapezoid-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
         "runmat-cumprod-layout" => {
             let entries = [
                 storage_read_entry(0),

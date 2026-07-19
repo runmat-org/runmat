@@ -5,6 +5,7 @@ use runmat_accelerate_api::{
     ProviderCovarianceToCorrelationResult, ProviderCrossentropyRequest, ProviderCrossentropyResult,
     ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderHilbertRequest,
     ProviderModulationRequest, ProviderNdgridRequest, ProviderNdgridResult,
+    ProviderTrapezoidSpacing,
 };
 
 impl AccelProvider for WgpuProvider {
@@ -910,6 +911,24 @@ impl AccelProvider for WgpuProvider {
         nan_mode: ProviderNanMode,
     ) -> Result<GpuTensorHandle> {
         self.cumsum_exec(input, dim, direction, nan_mode)
+    }
+
+    fn trapz_dim(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> Result<GpuTensorHandle> {
+        self.trapz_exec(input, dim, spacing)
+    }
+
+    fn cumtrapz_dim(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> Result<GpuTensorHandle> {
+        self.cumtrapz_exec(input, dim, spacing)
     }
 
     fn cumprod_scan(

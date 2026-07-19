@@ -71,6 +71,8 @@ const GRADIENT_COORDINATES_SHADER_F32: &str =
     crate::backend::wgpu::shaders::gradient::GRADIENT_COORDINATES_SHADER_F32;
 const CUMSUM_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMSUM_SHADER_F64;
 const CUMSUM_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMSUM_SHADER_F32;
+const TRAPEZOID_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::TRAPEZOID_SHADER_F64;
+const TRAPEZOID_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::TRAPEZOID_SHADER_F32;
 const REPMAT_SHADER_F64: &str = crate::backend::wgpu::shaders::repmat::REPMAT_SHADER_F64;
 const REPMAT_SHADER_F32: &str = crate::backend::wgpu::shaders::repmat::REPMAT_SHADER_F32;
 const KRON_SHADER_F64: &str = crate::backend::wgpu::shaders::kron::KRON_SHADER_F64;
@@ -237,6 +239,7 @@ pub struct WgpuPipelines {
     pub conv1d: PipelineBundle,
     pub filter: PipelineBundle,
     pub cumsum: PipelineBundle,
+    pub trapezoid: PipelineBundle,
     pub cumprod: PipelineBundle,
     pub cummin: PipelineBundle,
     pub cummax: PipelineBundle,
@@ -523,6 +526,23 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => CUMSUM_SHADER_F64,
                 NumericPrecision::F32 => CUMSUM_SHADER_F32,
+            },
+        );
+
+        let trapezoid = create_pipeline(
+            device,
+            "runmat-trapezoid-layout",
+            "runmat-trapezoid-shader",
+            "runmat-trapezoid-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+                storage_read_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => TRAPEZOID_SHADER_F64,
+                NumericPrecision::F32 => TRAPEZOID_SHADER_F32,
             },
         );
 
@@ -1532,6 +1552,7 @@ impl WgpuPipelines {
             conv1d,
             filter,
             cumsum,
+            trapezoid,
             cumprod,
             cummin,
             cummax,
