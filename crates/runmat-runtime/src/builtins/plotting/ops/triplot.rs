@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Tensor, Value,
+    ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -352,16 +352,21 @@ fn peel_parent_value(
 }
 
 fn parse_triangulation_struct(args: &[Value]) -> BuiltinResult<Option<TriangulationArgs>> {
-    let Some(Value::Struct(st)) = args.first() else {
+    let Some(first) = args.first() else {
         return Ok(None);
     };
-    let tri = lookup_field_case_insensitive(st, "ConnectivityList")
-        .or_else(|| lookup_field_case_insensitive(st, "triangulation"))
-        .or_else(|| lookup_field_case_insensitive(st, "tri"))
+    if !matches!(first, Value::Struct(_) | Value::Object(_)) {
+        return Ok(None);
+    }
+    let tri = lookup_triangulation_value(first, "ConnectivityList")
+        .or_else(|| lookup_triangulation_value(first, "triangulation"))
+        .or_else(|| lookup_triangulation_value(first, "tri"))
+        .or_else(|| lookup_triangulation_value(first, "Triangulation"))
         .cloned()
         .ok_or_else(|| triplot_invalid("triangulation input must contain ConnectivityList"))?;
-    let points = lookup_field_case_insensitive(st, "Points")
-        .or_else(|| lookup_field_case_insensitive(st, "vertices"))
+    let points = lookup_triangulation_value(first, "Points")
+        .or_else(|| lookup_triangulation_value(first, "vertices"))
+        .or_else(|| lookup_triangulation_value(first, "X"))
         .cloned()
         .ok_or_else(|| triplot_invalid("triangulation input must contain Points"))?;
     let points = Tensor::try_from(&points)
@@ -381,8 +386,27 @@ fn parse_triangulation_struct(args: &[Value]) -> BuiltinResult<Option<Triangulat
     )))
 }
 
+fn lookup_triangulation_value<'a>(value: &'a Value, name: &str) -> Option<&'a Value> {
+    match value {
+        Value::Struct(st) => lookup_field_case_insensitive(st, name),
+        Value::Object(object) => lookup_object_property_case_insensitive(object, name),
+        _ => None,
+    }
+}
+
 fn lookup_field_case_insensitive<'a>(st: &'a StructValue, name: &str) -> Option<&'a Value> {
     st.fields
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value)
+}
+
+fn lookup_object_property_case_insensitive<'a>(
+    object: &'a ObjectInstance,
+    name: &str,
+) -> Option<&'a Value> {
+    object
+        .properties
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case(name))
         .map(|(_, value)| value)
@@ -666,8 +690,51 @@ mod tests {
         let PlotElement::Line(line) = fig.plots().next().unwrap() else {
             panic!("expected line plot");
         };
-        assert_eq!(&line.x_data[0..4], &[0.0, 1.0, 0.0, 0.0]);
-        assert_eq!(&line.y_data[0..4], &[0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(line.x_data.len(), 5);
+        assert_eq!(line.y_data.len(), 5);
+        assert_eq!(line.x_data[0], line.x_data[3]);
+        assert_eq!(line.y_data[0], line.y_data[3]);
+        assert!(line.x_data[4].is_nan());
+        assert!(line.y_data[4].is_nan());
+        for (x, y) in line.x_data.iter().zip(&line.y_data).take(3) {
+            let point = (*x, *y);
+            assert!(
+                point == (0.0, 0.0) || point == (1.0, 0.0) || point == (0.0, 1.0),
+                "unexpected triangle vertex ({x}, {y})"
+            );
+        }
+    }
+
+    #[test]
+    fn triplot_accepts_delaunaytri_object() {
+        let _guard = setup();
+        let dt = block_on(
+            crate::builtins::geometry::triangulation::delaunay_tri_builtin(vec![tensor(
+                &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                3,
+                2,
+            )]),
+        )
+        .unwrap();
+        let handle = block_on(triplot_builtin(vec![dt])).unwrap();
+        assert!(handle.is_finite());
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Line(line) = fig.plots().next().unwrap() else {
+            panic!("expected line plot");
+        };
+        assert_eq!(line.x_data.len(), 5);
+        assert_eq!(line.y_data.len(), 5);
+        assert_eq!(line.x_data[0], line.x_data[3]);
+        assert_eq!(line.y_data[0], line.y_data[3]);
+        assert!(line.x_data[4].is_nan());
+        assert!(line.y_data[4].is_nan());
+        for (x, y) in line.x_data.iter().zip(&line.y_data).take(3) {
+            let point = (*x, *y);
+            assert!(
+                point == (0.0, 0.0) || point == (1.0, 0.0) || point == (0.0, 1.0),
+                "unexpected triangle vertex ({x}, {y})"
+            );
+        }
     }
 
     #[test]
