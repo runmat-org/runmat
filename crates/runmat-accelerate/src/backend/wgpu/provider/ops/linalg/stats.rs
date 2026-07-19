@@ -23,11 +23,6 @@ impl WgpuProvider {
                 options.rows
             ));
         }
-        if options.has_weight_vector || weights.is_some() {
-            return Err(anyhow!(
-                "covariance: weight vectors are not supported by WGPU provider"
-            ));
-        }
 
         let combined = if let Some(rhs) = second {
             let left_entry = self.get_entry(matrix)?;
@@ -71,7 +66,7 @@ impl WgpuProvider {
 
         let result = {
             let source = combined.as_ref().unwrap_or(matrix);
-            self.covariance_exec(source, options).await
+            self.covariance_exec(source, weights, options).await
         };
 
         if let Some(handle) = combined {
@@ -547,9 +542,191 @@ impl WgpuProvider {
 
         Ok(())
     }
+    fn covariance_weight_column_view(
+        &self,
+        weights: &GpuTensorHandle,
+        rows: usize,
+    ) -> Result<(GpuTensorHandle, bool)> {
+        let entry = self.get_entry(weights)?;
+        ensure!(
+            entry.storage != GpuTensorStorage::ComplexInterleaved,
+            "covariance: complex weight vectors are not supported"
+        );
+        ensure!(
+            entry.len == rows,
+            "covariance: weight vector length must match input rows"
+        );
+        let (weight_rows, weight_cols) = match entry.shape.len() {
+            0 => (1usize, 1usize),
+            1 => (entry.shape[0], 1usize),
+            2 => (entry.shape[0], entry.shape[1]),
+            _ => {
+                return Err(anyhow!(
+                    "covariance: weight vector must be one-dimensional (got shape {:?})",
+                    entry.shape
+                ))
+            }
+        };
+        ensure!(
+            weight_rows == 1 || weight_cols == 1,
+            "covariance: weight vector must be one-dimensional"
+        );
+        ensure!(
+            weight_rows == rows || weight_cols == rows,
+            "covariance: weight vector length must match input rows"
+        );
+        if entry.shape.as_slice() == [rows, 1] {
+            return Ok((weights.clone(), false));
+        }
+        let handle = self.register_existing_buffer_with_storage(
+            entry.buffer.clone(),
+            vec![rows, 1],
+            entry.len,
+            entry.storage.clone(),
+        );
+        Ok((handle, true))
+    }
+
+    async fn validate_covariance_weights(&self, weights: &GpuTensorHandle) -> Result<f64> {
+        let finite_mask = self.logical_isfinite_exec(weights)?;
+        let all_finite = match self.reduce_all_exec(&finite_mask, false) {
+            Ok(handle) => handle,
+            Err(err) => {
+                let _ = self.free_exec(&finite_mask);
+                return Err(err);
+            }
+        };
+        let all_finite_value = self.read_scalar_exec(&all_finite, 0);
+        let _ = self.free_exec(&finite_mask);
+        let _ = self.free_exec(&all_finite);
+        ensure!(
+            all_finite_value? != 0.0,
+            "covariance: weights must be non-negative finite values"
+        );
+
+        let min_weight =
+            self.reduce_global_exec(weights, crate::backend::wgpu::types::GlobalReduceOp::Min)?;
+        let min_value = self.read_scalar_exec(&min_weight, 0);
+        let _ = self.free_exec(&min_weight);
+        ensure!(
+            min_value? >= 0.0,
+            "covariance: weights must be non-negative finite values"
+        );
+
+        let sum_weight =
+            self.reduce_global_exec(weights, crate::backend::wgpu::types::GlobalReduceOp::Sum)?;
+        let sum_value = self.read_scalar_exec(&sum_weight, 0);
+        let _ = self.free_exec(&sum_weight);
+        sum_value
+    }
+
+    async fn weighted_covariance_exec(
+        &self,
+        matrix: &GpuTensorHandle,
+        matrix_entry: &BufferEntry,
+        weights: &GpuTensorHandle,
+        rows: usize,
+        cols: usize,
+    ) -> Result<GpuTensorHandle> {
+        let (weights_column, weights_alias) = self.covariance_weight_column_view(weights, rows)?;
+        let sum_w = match self.validate_covariance_weights(&weights_column).await {
+            Ok(value) => value,
+            Err(err) => {
+                if weights_alias {
+                    let _ = self.free_exec(&weights_column);
+                }
+                return Err(err);
+            }
+        };
+        let denom = sum_w - 1.0;
+        if sum_w <= 0.0 || denom <= 0.0 {
+            if weights_alias {
+                let _ = self.free_exec(&weights_column);
+            }
+            return self.fill_exec(&[cols, cols], f64::NAN);
+        }
+
+        let weights_entry = self.get_entry(&weights_column)?;
+        let mut weights_used = weights_column.clone();
+        let mut casted_weights = false;
+        if weights_entry.precision != matrix_entry.precision {
+            weights_used = match self
+                .cast_tensor_precision(&weights_column, matrix_entry.precision)
+                .await
+            {
+                Ok(handle) => handle,
+                Err(err) => {
+                    if weights_alias {
+                        let _ = self.free_exec(&weights_column);
+                    }
+                    return Err(err);
+                }
+            };
+            casted_weights = true;
+        }
+
+        let weighted = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Mul,
+            matrix,
+            &weights_used,
+        )?;
+        let weighted_sum = match self.reduce_dim_sum_mean_exec(
+            &weighted,
+            0,
+            crate::backend::wgpu::types::DimReduceOp::Sum,
+        ) {
+            Ok(handle) => handle,
+            Err(err) => {
+                let _ = self.free_exec(&weighted);
+                if casted_weights {
+                    let _ = self.free_exec(&weights_used);
+                }
+                if weights_alias {
+                    let _ = self.free_exec(&weights_column);
+                }
+                return Err(err);
+            }
+        };
+        let weighted_means = self.scalar_mul(&weighted_sum, 1.0 / sum_w)?;
+        let ones = self.fill_exec(&[rows, 1], 1.0)?;
+        let means_full = self.matmul_exec(&ones, &weighted_means)?;
+        let centered = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Sub,
+            matrix,
+            &means_full,
+        )?;
+        let weighted_centered = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Mul,
+            &centered,
+            &weights_used,
+        )?;
+        let centered_t = self.transpose_exec(&centered)?;
+        let covariance = self.matmul_exec(&centered_t, &weighted_centered)?;
+        let result = self.scalar_mul(&covariance, 1.0 / denom);
+
+        let _ = self.free_exec(&weighted);
+        let _ = self.free_exec(&weighted_sum);
+        let _ = self.free_exec(&weighted_means);
+        let _ = self.free_exec(&ones);
+        let _ = self.free_exec(&means_full);
+        let _ = self.free_exec(&centered);
+        let _ = self.free_exec(&weighted_centered);
+        let _ = self.free_exec(&centered_t);
+        let _ = self.free_exec(&covariance);
+        if casted_weights {
+            let _ = self.free_exec(&weights_used);
+        }
+        if weights_alias {
+            let _ = self.free_exec(&weights_column);
+        }
+
+        result
+    }
+
     pub(crate) async fn covariance_exec(
         &self,
         matrix: &GpuTensorHandle,
+        weights: Option<&GpuTensorHandle>,
         options: &CovarianceOptions,
     ) -> Result<GpuTensorHandle> {
         if options.rows != CovRows::All {
@@ -558,10 +735,8 @@ impl WgpuProvider {
                 options.rows
             ));
         }
-        if options.has_weight_vector {
-            return Err(anyhow!(
-                "covariance: weight vectors are not supported by WGPU provider"
-            ));
+        if options.has_weight_vector && weights.is_none() {
+            return Err(anyhow!("covariance: weight vector handle is required"));
         }
 
         let entry = self.get_entry(matrix)?;
@@ -585,6 +760,12 @@ impl WgpuProvider {
 
         if rows == 0 {
             return self.fill_exec(&[cols, cols], f64::NAN);
+        }
+
+        if let Some(weights) = weights {
+            return self
+                .weighted_covariance_exec(matrix, &entry, weights, rows, cols)
+                .await;
         }
 
         let denom = match options.normalization {

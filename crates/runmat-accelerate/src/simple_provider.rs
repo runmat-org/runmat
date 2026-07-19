@@ -583,6 +583,13 @@ fn tensor_to_weight_vector(tensor: &Tensor) -> Result<Vec<f64>> {
             cols
         ));
     }
+    ensure!(
+        tensor
+            .data
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0),
+        "covariance: weights must be non-negative finite values"
+    );
     Ok(tensor.data.clone())
 }
 
