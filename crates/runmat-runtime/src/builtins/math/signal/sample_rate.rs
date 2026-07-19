@@ -357,7 +357,7 @@ impl SampleInput {
     async fn from_value(value: Value, builtin: &'static str) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
                     .await
                     .map_err(|flow| {
                         let detail = flow.message().to_owned();
@@ -368,11 +368,32 @@ impl SampleInput {
                             map_control_flow_with_builtin(flow, builtin),
                         )
                     })?;
-                Ok(Self::Real {
-                    data: tensor.data,
-                    shape: tensor.shape,
-                    dtype: tensor.dtype,
-                })
+                match gathered {
+                    Value::Tensor(tensor) => Ok(Self::Real {
+                        data: tensor.data,
+                        shape: tensor.shape,
+                        dtype: tensor.dtype,
+                    }),
+                    Value::LogicalArray(logical) => {
+                        let tensor = tensor::logical_to_tensor(&logical).map_err(|err| {
+                            sample_error_with_detail(builtin, &SAMPLE_ERROR_INVALID_INPUT, err)
+                        })?;
+                        Ok(Self::Real {
+                            data: tensor.data,
+                            shape: tensor.shape,
+                            dtype: NumericDType::F64,
+                        })
+                    }
+                    Value::ComplexTensor(tensor) => Ok(Self::Complex {
+                        data: tensor.data,
+                        shape: tensor.shape,
+                    }),
+                    other => Err(sample_error_with_detail(
+                        builtin,
+                        &SAMPLE_ERROR_INVALID_INPUT,
+                        format!("gathered GPU value produced {other:?}"),
+                    )),
+                }
             }
             Value::Tensor(tensor) => Ok(Self::Real {
                 data: tensor.data,
@@ -591,15 +612,10 @@ async fn resample_gpu(
     q: usize,
     options: &ResampleOptions,
 ) -> BuiltinResult<Option<ResampleEval>> {
-    if runmat_accelerate_api::handle_storage(handle)
-        != runmat_accelerate_api::GpuTensorStorage::Real
-    {
-        return Ok(None);
-    }
-
     let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
         return Ok(None);
     };
+    let storage = runmat_accelerate_api::handle_storage(handle);
     let handle_len = checked_product(&handle.shape)
         .ok_or_else(|| sample_error(RESAMPLE_NAME, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
     let mut shape = canonical_shape(handle.shape.clone(), handle_len);
@@ -617,7 +633,7 @@ async fn resample_gpu(
     output_shape[dim] = output_len;
 
     if input_len == 0 || output_len == 0 {
-        return match provider.zeros(&output_shape) {
+        return match provider.zeros_with_storage(&output_shape, storage) {
             Ok(output) => Ok(Some(ResampleEval {
                 y: wrap_resampled_gpu(handle, output),
                 filter: options.filter.clone(),
@@ -660,7 +676,7 @@ async fn resample_gpu(
         return Ok(None);
     };
 
-    let padded = match provider.zeros(&padded_shape) {
+    let padded = match provider.zeros_with_storage(&padded_shape, storage) {
         Ok(handle) => handle,
         Err(_) => return Ok(None),
     };
@@ -1118,7 +1134,7 @@ fn wrap_resampled_gpu(
     }
     runmat_accelerate_api::set_handle_storage(
         &output,
-        runmat_accelerate_api::GpuTensorStorage::Real,
+        runmat_accelerate_api::handle_storage(source),
     );
     runmat_accelerate_api::clear_handle_logical(&output);
     gpu_helpers::resident_gpu_value(output)
@@ -1904,6 +1920,38 @@ mod tests {
             assert_eq!(gathered.shape, vec![1, 6]);
             assert_eq!(gathered.data, vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]);
             let _ = provider.free(&handle);
+        });
+    }
+
+    #[test]
+    fn resample_complex_gpu_stays_resident_through_filter_pipeline() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &input).expect("upload");
+            provider.reset_telemetry();
+
+            let out = call_resample(vec![
+                Value::GpuTensor(handle.clone()),
+                Value::Num(2.0),
+                Value::Num(1.0),
+                tensor(vec![0.0, 1.0, 0.0], vec![1, 3]),
+            ]);
+            let Value::GpuTensor(out_handle) = out else {
+                panic!("expected resident gpu tensor");
+            };
+            assert_eq!(out_handle.shape, vec![1, 4]);
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out_handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let host = block_on(provider.download(&out_handle)).expect("download output");
+            assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(host.shape, vec![1, 4]);
+            assert_eq!(host.data, vec![1.0, 2.0, 0.0, 0.0, 3.0, 4.0, 0.0, 0.0]);
+            let _ = provider.free(&handle);
+            let _ = provider.free(&out_handle);
         });
     }
 

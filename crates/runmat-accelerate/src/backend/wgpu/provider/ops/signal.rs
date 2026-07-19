@@ -556,6 +556,10 @@ impl WgpuProvider {
         let entry_x = self.get_entry(x)?;
 
         ensure!(
+            entry_b.storage == GpuTensorStorage::Real && entry_a.storage == GpuTensorStorage::Real,
+            "iir_filter: complex filter coefficients are not supported"
+        );
+        ensure!(
             entry_b.precision == self.precision
                 && entry_a.precision == self.precision
                 && entry_x.precision == self.precision,
@@ -615,6 +619,22 @@ impl WgpuProvider {
         );
         let dim_idx = dim;
         let dim_len = shape_ext[dim_idx];
+        let x_lane_factor = match entry_x.storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
+        let signal_logical_len = product_checked(&shape_ext)
+            .ok_or_else(|| anyhow!("iir_filter: tensor exceeds GPU limits"))?;
+        let signal_raw_len = signal_logical_len
+            .checked_mul(x_lane_factor)
+            .ok_or_else(|| anyhow!("iir_filter: signal length overflow"))?;
+        ensure!(
+            entry_x.len == signal_raw_len,
+            "iir_filter: signal raw length mismatch (shape implies {} logical elements, buffer has {}, lane factor {})",
+            signal_logical_len,
+            entry_x.len,
+            x_lane_factor
+        );
 
         let leading = if dim_idx == 0 {
             1usize
@@ -657,6 +677,10 @@ impl WgpuProvider {
                 "iir_filter: initial conditions use incompatible precision"
             );
             ensure!(
+                zi_entry.storage == entry_x.storage,
+                "iir_filter: initial conditions storage must match the signal"
+            );
+            ensure!(
                 shapes_compatible(&state_shape, &zi_entry.shape),
                 "iir_filter: initial conditions are not compatible with the requested dimension"
             );
@@ -678,18 +702,25 @@ impl WgpuProvider {
                     zi_entry.len
                 );
             } else {
+                let expected_zi_len = state_total
+                    .checked_mul(x_lane_factor)
+                    .ok_or_else(|| anyhow!("iir_filter: initial state length overflow"))?;
                 ensure!(
-                    zi_entry.len == state_total,
-                    "iir_filter: initial state vector length mismatch (expected {}, found {})",
-                    state_total,
+                    zi_entry.len == expected_zi_len,
+                    "iir_filter: initial state vector raw length mismatch (expected {}, found {})",
+                    expected_zi_len,
                     zi_entry.len
                 );
             }
         }
 
         ensure!(
-            entry_x.len <= u32::MAX as usize,
+            signal_logical_len <= u32::MAX as usize,
             "iir_filter: signal length exceeds GPU limits"
+        );
+        ensure!(
+            entry_x.len <= u32::MAX as usize,
+            "iir_filter: signal raw buffer length exceeds GPU limits"
         );
         ensure!(
             leading <= u32::MAX as usize
@@ -715,11 +746,19 @@ impl WgpuProvider {
         } else {
             state_len
                 .checked_mul(channel_count)
+                .and_then(|value| value.checked_mul(x_lane_factor))
                 .ok_or_else(|| anyhow!("iir_filter: state buffer length overflow"))?
         };
+        let state_total_raw = state_total
+            .checked_mul(x_lane_factor)
+            .ok_or_else(|| anyhow!("iir_filter: final state length overflow"))?;
         ensure!(
             state_buffer_len <= u32::MAX as usize,
             "iir_filter: state buffer length exceeds GPU limits"
+        );
+        ensure!(
+            state_total_raw <= u32::MAX as usize,
+            "iir_filter: filter state size exceeds GPU limits"
         );
 
         let mut cleanup_handles: Vec<GpuTensorHandle> = Vec::new();
@@ -747,14 +786,14 @@ impl WgpuProvider {
             let states_buffer =
                 self.create_storage_buffer(state_buffer_len, "runmat-iir-filter-state");
             let final_state_buffer =
-                self.create_storage_buffer(state_total, "runmat-iir-filter-final");
+                self.create_storage_buffer(state_total_raw, "runmat-iir-filter-final");
 
             let (zi_buffer, zi_present_flag) = if let Some(ref zi_handle) = zi {
                 let zi_entry = self.get_entry(zi_handle)?;
                 (zi_entry.buffer, 1u32)
             } else {
                 (
-                    self.create_storage_buffer(state_total, "runmat-iir-filter-zi"),
+                    self.create_storage_buffer(state_total_raw, "runmat-iir-filter-zi"),
                     0u32,
                 )
             };
@@ -778,13 +817,13 @@ impl WgpuProvider {
                 trailing: trailing as u32,
                 order: order as u32,
                 state_len: state_len as u32,
-                signal_len: entry_x.len as u32,
+                signal_len: signal_logical_len as u32,
                 channel_count: channel_count as u32,
                 zi_present: zi_present_flag,
                 dim_idx: dim_idx as u32,
                 rank: shape_ext.len() as u32,
                 state_rank: state_shape.len() as u32,
-                _pad: 0,
+                lane_factor: x_lane_factor as u32,
                 signal_shape: signal_shape_arr,
                 state_shape: state_shape_arr,
             };
@@ -844,10 +883,18 @@ impl WgpuProvider {
                 workgroups,
             );
 
-            let output_handle =
-                self.register_existing_buffer(out_buffer, entry_x.shape.clone(), entry_x.len);
-            let final_state_handle =
-                self.register_existing_buffer(final_state_buffer, state_shape.clone(), state_total);
+            let output_handle = self.register_existing_buffer_with_storage(
+                out_buffer,
+                entry_x.shape.clone(),
+                entry_x.len,
+                entry_x.storage,
+            );
+            let final_state_handle = self.register_existing_buffer_with_storage(
+                final_state_buffer,
+                state_shape.clone(),
+                state_total_raw,
+                entry_x.storage,
+            );
 
             Ok(ProviderIirFilterResult {
                 output: output_handle,
@@ -2160,7 +2207,8 @@ mod tests {
     use num_complex::Complex;
     use runmat_accelerate_api::{
         AccelProvider, GpuTensorStorage, HostTensorView, ProviderEnvelopeMethod,
-        ProviderEnvelopeRequest, ProviderHilbertRequest, ProviderTrapezoidSpacing,
+        ProviderEnvelopeRequest, ProviderHilbertRequest, ProviderIirFilterOptions,
+        ProviderTrapezoidSpacing,
     };
     use runmat_builtins::{ComplexTensor, Tensor};
     use runmat_runtime::builtins::math::reduction::{
@@ -2575,6 +2623,56 @@ mod tests {
                     "gradient mismatch at {idx}: actual={actual} expected={expected}"
                 );
             }
+        });
+    }
+
+    #[test]
+    fn iir_filter_provider_preserves_complex_storage_and_filters_lanes() {
+        with_wgpu_provider(|provider| {
+            let b = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 1.0],
+                    shape: &[1, 2],
+                })
+                .expect("upload numerator");
+            let a = provider
+                .upload(&HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .expect("upload denominator");
+            let data = [1.0, 10.0, 2.0, 20.0, 3.0, 30.0];
+            let x = provider
+                .upload(&HostTensorView {
+                    data: &data,
+                    shape: &[1, 3],
+                })
+                .expect("upload signal");
+            runmat_accelerate_api::set_handle_storage(&x, GpuTensorStorage::ComplexInterleaved);
+
+            let result = pollster::block_on(provider.iir_filter(
+                &b,
+                &a,
+                &x,
+                ProviderIirFilterOptions { dim: 1, zi: None },
+            ))
+            .expect("iir filter");
+            let output = pollster::block_on(provider.download(&result.output)).expect("download");
+            let final_state =
+                pollster::block_on(provider.download(result.final_state.as_ref().unwrap()))
+                    .expect("download state");
+            provider.free(&b).ok();
+            provider.free(&a).ok();
+            provider.free(&x).ok();
+            provider.free(&result.output).ok();
+            provider.free(result.final_state.as_ref().unwrap()).ok();
+
+            assert_eq!(output.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(output.shape, vec![1, 3]);
+            assert_eq!(output.data, vec![1.0, 10.0, 3.0, 30.0, 5.0, 50.0]);
+            assert_eq!(final_state.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(final_state.shape, vec![1, 1]);
+            assert_eq!(final_state.data, vec![3.0, 30.0]);
         });
     }
 

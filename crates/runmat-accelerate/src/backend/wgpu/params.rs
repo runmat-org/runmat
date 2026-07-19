@@ -434,7 +434,7 @@ pub struct FilterParams {
     pub dim_idx: u32,
     pub rank: u32,
     pub state_rank: u32,
-    pub _pad: u32,
+    pub lane_factor: u32,
     pub signal_shape: [AlignedU32; FILTER_MAX_RANK],
     pub state_shape: [AlignedU32; FILTER_MAX_RANK],
 }

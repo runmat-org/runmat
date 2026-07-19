@@ -1237,6 +1237,7 @@ fn states_from_column_major(
     state_len: usize,
     dim_idx: usize,
     shape_ext: &[usize],
+    lane_factor: usize,
 ) -> Vec<f64> {
     if state_len == 0 {
         return Vec::new();
@@ -1259,7 +1260,7 @@ fn states_from_column_major(
     };
     let channel_count = leading * trailing;
     let shape = filter_state_shape(shape_ext.to_vec(), dim_idx, state_len);
-    let mut states = vec![0.0; state_len * channel_count];
+    let mut states = vec![0.0; state_len * channel_count * lane_factor];
     for channel in 0..channel_count {
         let before_idx = if dims_before.is_empty() {
             0
@@ -1288,7 +1289,10 @@ fn states_from_column_major(
                 offset += coord * stride;
                 stride *= size;
             }
-            states[channel * state_len + s] = data[offset];
+            let state_base = (channel * state_len + s) * lane_factor;
+            let input_base = offset * lane_factor;
+            states[state_base..state_base + lane_factor]
+                .copy_from_slice(&data[input_base..input_base + lane_factor]);
         }
     }
     states
@@ -1299,6 +1303,7 @@ fn states_to_column_major(
     state_len: usize,
     dim_idx: usize,
     shape_ext: &[usize],
+    lane_factor: usize,
 ) -> Vec<f64> {
     if state_len == 0 {
         return Vec::new();
@@ -1350,7 +1355,10 @@ fn states_to_column_major(
                 offset += coord * stride;
                 stride *= size;
             }
-            out[offset] = states[channel * state_len + s];
+            let output_base = offset * lane_factor;
+            let state_base = (channel * state_len + s) * lane_factor;
+            out[output_base..output_base + lane_factor]
+                .copy_from_slice(&states[state_base..state_base + lane_factor]);
         }
     }
     out
@@ -5844,6 +5852,11 @@ impl AccelProvider for InProcessProvider {
             let nb = product(&b.shape);
             let na = product(&a.shape);
             ensure!(
+                runmat_accelerate_api::handle_storage(b) == GpuTensorStorage::Real
+                    && runmat_accelerate_api::handle_storage(a) == GpuTensorStorage::Real,
+                "iir_filter: complex filter coefficients are not supported"
+            );
+            ensure!(
                 nb > 0,
                 "iir_filter: numerator coefficients must not be empty"
             );
@@ -5853,6 +5866,14 @@ impl AccelProvider for InProcessProvider {
             );
 
             let signal_elems = product(&x.shape);
+            let x_storage = runmat_accelerate_api::handle_storage(x);
+            let lane_factor = match x_storage {
+                GpuTensorStorage::Real => 1usize,
+                GpuTensorStorage::ComplexInterleaved => 2usize,
+            };
+            let signal_lanes = signal_elems
+                .checked_mul(lane_factor)
+                .ok_or_else(|| anyhow!("iir_filter: signal length overflow"))?;
             let zi_shape = zi.as_ref().map(|handle| handle.shape.clone());
 
             let (b_data, a_data, x_data, zi_data) = {
@@ -5880,12 +5901,17 @@ impl AccelProvider for InProcessProvider {
                     a_buf.len()
                 );
                 ensure!(
-                    x_buf.len() == signal_elems,
-                    "iir_filter: signal length mismatch (shape implies {}, buffer has {})",
+                    x_buf.len() == signal_lanes,
+                    "iir_filter: signal raw length mismatch (shape implies {} logical elements, buffer has {}, lane factor {})",
                     signal_elems,
-                    x_buf.len()
+                    x_buf.len(),
+                    lane_factor
                 );
                 let zi_buf = if let Some(ref zi_handle) = zi {
+                    ensure!(
+                        runmat_accelerate_api::handle_storage(zi_handle) == x_storage,
+                        "iir_filter: initial conditions storage must match the signal"
+                    );
                     Some(guard.get(&zi_handle.buffer_id).cloned().ok_or_else(|| {
                         anyhow!(
                             "iir_filter: unknown initial state buffer {}",
@@ -5926,6 +5952,9 @@ impl AccelProvider for InProcessProvider {
             let state_len = order.saturating_sub(1);
             let state_shape = filter_state_shape(shape_ext.clone(), dim_idx, state_len);
             let expected_states = state_len.saturating_mul(channel_count);
+            let expected_state_lanes = expected_states
+                .checked_mul(lane_factor)
+                .ok_or_else(|| anyhow!("iir_filter: state length overflow"))?;
 
             if let Some(ref shape) = zi_shape {
                 ensure!(
@@ -5949,14 +5978,14 @@ impl AccelProvider for InProcessProvider {
                 Vec::new()
             } else if let Some(ref zi_buf) = zi_data {
                 ensure!(
-                    zi_buf.len() == expected_states,
-                    "iir_filter: initial state vector length mismatch (expected {}, found {})",
-                    expected_states,
+                    zi_buf.len() == expected_state_lanes,
+                    "iir_filter: initial state vector raw length mismatch (expected {}, found {})",
+                    expected_state_lanes,
                     zi_buf.len()
                 );
-                states_from_column_major(zi_buf, state_len, dim_idx, &shape_ext)
+                states_from_column_major(zi_buf, state_len, dim_idx, &shape_ext, lane_factor)
             } else {
-                vec![0.0; expected_states]
+                vec![0.0; expected_state_lanes]
             };
 
             let mut b_norm = vec![0.0f64; order];
@@ -5998,27 +6027,31 @@ impl AccelProvider for InProcessProvider {
                         }
                         let state_base = channel_idx
                             .checked_mul(state_len)
+                            .and_then(|v| v.checked_mul(lane_factor))
                             .ok_or_else(|| anyhow!("iir_filter: state index overflow"))?;
                         for step in 0..dim_len {
                             let idx = base
                                 .checked_add(l)
                                 .and_then(|v| v.checked_add(step.saturating_mul(leading)))
                                 .ok_or_else(|| anyhow!("iir_filter: signal index overflow"))?;
-                            if idx >= x_data.len() {
+                            if idx >= signal_elems {
                                 break;
                             }
-                            let x_n = x_data[idx];
-                            let y =
-                                b_norm[0] * x_n + states.get(state_base).copied().unwrap_or(0.0);
-                            output[idx] = y;
-                            for i in 1..order {
-                                let next_state = if i < state_len {
-                                    states[state_base + i]
-                                } else {
-                                    0.0
-                                };
-                                let new_state = b_norm[i] * x_n + next_state - a_norm[i] * y;
-                                states[state_base + i - 1] = new_state;
+                            let raw_idx = idx
+                                .checked_mul(lane_factor)
+                                .ok_or_else(|| anyhow!("iir_filter: signal index overflow"))?;
+                            for lane in 0..lane_factor {
+                                let x_n = x_data[raw_idx + lane];
+                                let y = b_norm[0] * x_n
+                                    + states.get(state_base + lane).copied().unwrap_or(0.0);
+                                output[raw_idx + lane] = y;
+                                for i in 1..order {
+                                    let state_i = state_base + i * lane_factor + lane;
+                                    let next_state =
+                                        if i < state_len { states[state_i] } else { 0.0 };
+                                    let new_state = b_norm[i] * x_n + next_state - a_norm[i] * y;
+                                    states[state_base + (i - 1) * lane_factor + lane] = new_state;
+                                }
                             }
                         }
                     }
@@ -6028,11 +6061,13 @@ impl AccelProvider for InProcessProvider {
             let final_state_data = if state_len == 0 {
                 Vec::new()
             } else {
-                states_to_column_major(&states, state_len, dim_idx, &shape_ext)
+                states_to_column_major(&states, state_len, dim_idx, &shape_ext, lane_factor)
             };
 
-            let output_handle = self.allocate_tensor(output, x.shape.clone());
-            let final_state_handle = self.allocate_tensor(final_state_data, state_shape);
+            let output_handle =
+                self.allocate_tensor_with_storage(output, x.shape.clone(), x_storage);
+            let final_state_handle =
+                self.allocate_tensor_with_storage(final_state_data, state_shape, x_storage);
 
             Ok(ProviderIirFilterResult {
                 output: output_handle,
@@ -8514,6 +8549,36 @@ mod tests {
             &target,
             &[(2.0, 20.0), (0.0, 0.0), (4.0, 40.0), (0.0, 0.0)],
             &[1, 4],
+        );
+    }
+
+    #[test]
+    fn iir_filter_preserves_complex_storage_and_filters_lanes() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(9_000_175, Ordering::Relaxed);
+        let b = real_handle(&provider, &[1.0, 1.0], &[1, 2]);
+        let a = real_handle(&provider, &[1.0], &[1, 1]);
+        let x = complex_handle(&provider, &[(1.0, 10.0), (2.0, 20.0), (3.0, 30.0)], &[1, 3]);
+
+        let result = block_on(provider.iir_filter(
+            &b,
+            &a,
+            &x,
+            ProviderIirFilterOptions { dim: 1, zi: None },
+        ))
+        .expect("iir filter");
+
+        assert_complex_close(
+            &provider,
+            &result.output,
+            &[(1.0, 10.0), (3.0, 30.0), (5.0, 50.0)],
+            &[1, 3],
+        );
+        assert_complex_close(
+            &provider,
+            &result.final_state.unwrap(),
+            &[(3.0, 30.0)],
+            &[1, 1],
         );
     }
 
