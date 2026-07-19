@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "RunMat gathers gpuArray inputs and evaluates the lower-triangular predicate on the host."
+    "notes": "Uses the provider `bandwidth` hook for real/logical gpuArray inputs and reads back only the small bandwidth result; complex/provider-missing paths fall back to the host."
   },
   "fusion": {
     "elementwise": false,
@@ -28,7 +28,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::math::linalg::structure::diagonal_triangular::tests",
-    "integration": "builtins::math::linalg::structure::diagonal_triangular::tests::gpu_input_is_gathered"
+    "integration": "builtins::math::linalg::structure::diagonal_triangular::tests::gpu_inputs_use_provider_bandwidth_without_gathering"
   },
   "description": "`istril(A)` returns true when every element above the main diagonal of matrix `A` is zero.",
   "behaviors": [
@@ -106,8 +106,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/linalg/structure/diagonal_triangular.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/structure/diagonal_triangular.rs"
   },
-  "gpu_residency": "RunMat gathers gpuArray inputs to host memory for this scalar predicate and returns a host logical scalar.",
+  "gpu_residency": "The result is always a host logical scalar. For real/logical gpuArray inputs, RunMat keeps the matrix on the provider and uses the `bandwidth` hook to read back only lower/upper bandwidth metadata. Complex-interleaved GPU inputs and providers without `bandwidth` support fall back to the host path.",
   "gpu_behavior": [
-    "`istril` is registered as a structure-analysis fusion sink. GPU-resident inputs are gathered transparently before the host predicate runs, so explicit `gather` calls are optional."
+    "`istril` is registered as a structure-analysis fusion sink. GPU-resident real/logical inputs use provider bandwidth (`upper == 0`) instead of gathering the full matrix when the active provider supports it."
   ]
 }

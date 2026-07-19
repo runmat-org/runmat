@@ -1,6 +1,7 @@
 //! MATLAB-compatible `isdiag`, `istril`, and `istriu` matrix-structure predicates.
 
-use runmat_accelerate_api::GpuTensorHandle;
+use log::debug;
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderBandwidth};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -11,7 +12,7 @@ use runmat_macros::runtime_builtin;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -128,14 +129,14 @@ pub const ISDIAG_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("structure_analysis"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
+    provider_hooks: &[ProviderHook::Custom("bandwidth")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::GatherImmediately,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "RunMat gathers gpuArray inputs and evaluates the diagonal predicate on the host.",
+    notes: "Real and logical gpuArray inputs use the provider bandwidth hook and read back only the small [lower, upper] result. Complex-interleaved inputs and providers without bandwidth support fall back to the host path.",
 };
 
 #[runmat_macros::register_gpu_spec(
@@ -146,7 +147,7 @@ pub const ISTRIL_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("structure_analysis"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
+    provider_hooks: &[ProviderHook::Custom("bandwidth")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::GatherImmediately,
     nan_mode: ReductionNaN::Include,
@@ -154,7 +155,7 @@ pub const ISTRIL_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "RunMat gathers gpuArray inputs and evaluates the lower-triangular predicate on the host.",
+        "Real and logical gpuArray inputs use the provider bandwidth hook and read back only the small [lower, upper] result. Complex-interleaved inputs and providers without bandwidth support fall back to the host path.",
 };
 
 #[runmat_macros::register_gpu_spec(
@@ -165,7 +166,7 @@ pub const ISTRIU_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("structure_analysis"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
+    provider_hooks: &[ProviderHook::Custom("bandwidth")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::GatherImmediately,
     nan_mode: ReductionNaN::Include,
@@ -173,7 +174,7 @@ pub const ISTRIU_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "RunMat gathers gpuArray inputs and evaluates the upper-triangular predicate on the host.",
+        "Real and logical gpuArray inputs use the provider bandwidth hook and read back only the small [lower, upper] result. Complex-interleaved inputs and providers without bandwidth support fall back to the host path.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -303,8 +304,44 @@ async fn structure_predicate_builtin(
     predicate: StructurePredicate,
     ctx: BuiltinContext,
 ) -> BuiltinResult<Value> {
+    if let Value::GpuTensor(handle) = value {
+        return Ok(Value::Bool(
+            gpu_structure_predicate(handle, predicate, ctx).await?,
+        ));
+    }
     let matrix = MatrixInput::from_value(value, ctx).await?;
     Ok(Value::Bool(matrix.satisfies(predicate)))
+}
+
+async fn gpu_structure_predicate(
+    handle: GpuTensorHandle,
+    predicate: StructurePredicate,
+    ctx: BuiltinContext,
+) -> BuiltinResult<bool> {
+    if runmat_accelerate_api::handle_storage(&handle) != GpuTensorStorage::ComplexInterleaved {
+        let Some((_rows, _cols)) = matrix_dims_or_false(&handle.shape) else {
+            return Ok(false);
+        };
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
+            .or_else(runmat_accelerate_api::provider)
+        {
+            match provider.bandwidth(&handle) {
+                Ok(bandwidth) => return Ok(bandwidth_satisfies(bandwidth, predicate)),
+                Err(err) => debug!("{}: provider bandwidth fallback: {err}", ctx.name),
+            }
+        }
+    }
+
+    let matrix = matrix_from_gpu(handle, ctx).await?;
+    Ok(matrix.satisfies(predicate))
+}
+
+fn bandwidth_satisfies(bandwidth: ProviderBandwidth, predicate: StructurePredicate) -> bool {
+    match predicate {
+        StructurePredicate::Diagonal => bandwidth.lower == 0 && bandwidth.upper == 0,
+        StructurePredicate::LowerTriangular => bandwidth.upper == 0,
+        StructurePredicate::UpperTriangular => bandwidth.lower == 0,
+    }
 }
 
 enum MatrixInput {
@@ -558,6 +595,9 @@ fn runtime_error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_accelerate_api::{
+        AccelDownloadFuture, AccelProvider, HostTensorOwned, HostTensorView,
+    };
     use runmat_builtins::{IntValue, ResolveContext, Type};
 
     use crate::builtins::common::test_support;
@@ -776,8 +816,168 @@ mod tests {
         assert!(!expect_bool(call_istriu(Value::Tensor(tensor)).unwrap()));
     }
 
+    #[derive(Clone, Copy)]
+    struct FixedBandwidthProvider {
+        lower: u32,
+        upper: u32,
+        device_id: u32,
+    }
+
+    impl AccelProvider for FixedBandwidthProvider {
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Ok(GpuTensorHandle {
+                shape: host.shape.to_vec(),
+                device_id: self.device_id,
+                buffer_id: 1,
+            })
+        }
+
+        fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async move { Err(anyhow::anyhow!("download should not be called")) })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "fixed-bandwidth-test-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            self.device_id
+        }
+
+        fn bandwidth(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<ProviderBandwidth> {
+            Ok(ProviderBandwidth {
+                lower: self.lower,
+                upper: self.upper,
+            })
+        }
+    }
+
+    static DIAGONAL_PROVIDER: FixedBandwidthProvider = FixedBandwidthProvider {
+        lower: 0,
+        upper: 0,
+        device_id: 92_001,
+    };
+    static LOWER_PROVIDER: FixedBandwidthProvider = FixedBandwidthProvider {
+        lower: 2,
+        upper: 0,
+        device_id: 92_002,
+    };
+    static UPPER_PROVIDER: FixedBandwidthProvider = FixedBandwidthProvider {
+        lower: 0,
+        upper: 2,
+        device_id: 92_003,
+    };
+
+    fn fixed_gpu_handle(provider: &FixedBandwidthProvider) -> Value {
+        Value::GpuTensor(GpuTensorHandle {
+            shape: vec![3, 3],
+            device_id: provider.device_id(),
+            buffer_id: 1,
+        })
+    }
+
+    #[derive(Clone, Copy)]
+    struct FallbackDownloadProvider;
+
+    impl AccelProvider for FallbackDownloadProvider {
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Ok(GpuTensorHandle {
+                shape: host.shape.to_vec(),
+                device_id: self.device_id(),
+                buffer_id: 1,
+            })
+        }
+
+        fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async move {
+                Ok(HostTensorOwned {
+                    data: vec![1.0, 3.0, 0.0, 2.0],
+                    shape: h.shape.clone(),
+                    storage: GpuTensorStorage::Real,
+                })
+            })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "fallback-download-test-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            92_004
+        }
+
+        fn bandwidth(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<ProviderBandwidth> {
+            Err(anyhow::anyhow!("bandwidth intentionally unavailable"))
+        }
+    }
+
+    static FALLBACK_PROVIDER: FallbackDownloadProvider = FallbackDownloadProvider;
+
     #[test]
-    fn gpu_input_is_gathered() {
+    fn gpu_inputs_use_provider_bandwidth_without_gathering() {
+        let _guard = test_support::accel_test_lock();
+        let _thread_provider =
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&DIAGONAL_PROVIDER));
+        assert!(expect_bool(
+            call_isdiag(fixed_gpu_handle(&DIAGONAL_PROVIDER)).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istril(fixed_gpu_handle(&DIAGONAL_PROVIDER)).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istriu(fixed_gpu_handle(&DIAGONAL_PROVIDER)).unwrap()
+        ));
+
+        let _thread_provider =
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&LOWER_PROVIDER));
+        assert!(!expect_bool(
+            call_isdiag(fixed_gpu_handle(&LOWER_PROVIDER)).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istril(fixed_gpu_handle(&LOWER_PROVIDER)).unwrap()
+        ));
+        assert!(!expect_bool(
+            call_istriu(fixed_gpu_handle(&LOWER_PROVIDER)).unwrap()
+        ));
+
+        let _thread_provider =
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&UPPER_PROVIDER));
+        assert!(!expect_bool(
+            call_isdiag(fixed_gpu_handle(&UPPER_PROVIDER)).unwrap()
+        ));
+        assert!(!expect_bool(
+            call_istril(fixed_gpu_handle(&UPPER_PROVIDER)).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istriu(fixed_gpu_handle(&UPPER_PROVIDER)).unwrap()
+        ));
+    }
+
+    #[test]
+    fn gpu_inputs_fall_back_to_download_when_bandwidth_is_unavailable() {
+        let _guard = test_support::accel_test_lock();
+        let _thread_provider =
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&FALLBACK_PROVIDER));
+        let handle = Value::GpuTensor(GpuTensorHandle {
+            shape: vec![2, 2],
+            device_id: FALLBACK_PROVIDER.device_id(),
+            buffer_id: 1,
+        });
+        assert!(!expect_bool(call_isdiag(handle.clone()).unwrap()));
+        assert!(expect_bool(call_istril(handle.clone()).unwrap()));
+        assert!(!expect_bool(call_istriu(handle).unwrap()));
+    }
+
+    #[test]
+    fn gpu_input_with_inprocess_provider_works() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
             let handle = provider
@@ -788,6 +988,39 @@ mod tests {
                 .unwrap();
             assert!(expect_bool(call_isdiag(Value::GpuTensor(handle)).unwrap()));
         });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn wgpu_inputs_use_bandwidth_predicates() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let lower = Tensor::new(
+            vec![1.0, 4.0, 0.0, 0.0, 2.0, 5.0, 0.0, 0.0, 3.0],
+            vec![3, 3],
+        )
+        .unwrap();
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &lower.data,
+                shape: &lower.shape,
+            })
+            .expect("upload lower");
+        assert!(!expect_bool(
+            call_isdiag(Value::GpuTensor(handle.clone())).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istril(Value::GpuTensor(handle.clone())).unwrap()
+        ));
+        assert!(!expect_bool(call_istriu(Value::GpuTensor(handle)).unwrap()));
     }
 
     #[test]
