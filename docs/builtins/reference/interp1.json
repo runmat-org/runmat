@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "GPU inputs are gathered to the CPU reference implementation in this release. Linear and nearest interpolation are good future provider-kernel candidates."
+    "notes": "Linear and nearest interpolation keep real resident Y/query data on the active provider when sample points are implicit or host-validated. Spline/pchip forms, complex data, provider-missing cases, and resident X breakpoint validation fall back to the host path."
   },
   "fusion": {
     "elementwise": false,
@@ -31,7 +31,7 @@
     "`interp1(y, xq)` uses implicit sample points `1:numel(y)`.",
     "`interp1(x, y, xq, method)` supports `linear`, `nearest`, `spline`, and `pchip`.",
     "Out-of-range query points return `NaN` unless an extrapolation value or `'extrap'` is supplied.",
-    "Dense real numeric arrays are supported. GPU inputs gather to the host reference path."
+    "Dense real numeric arrays are supported. Real gpuArray Y/query inputs stay resident for linear and nearest interpolation when X is implicit or host-validated."
   ],
   "examples": [
     {
@@ -43,6 +43,11 @@
       "description": "Spline interpolation",
       "input": "x = [1 2 3];\ny = [1 4 9];\nyq = interp1(x, y, [1.5 2.5], 'spline')",
       "output": "yq = [2.25 6.25]"
+    },
+    {
+      "description": "Resident GPU linear interpolation",
+      "input": "Y = gpuArray([10 20 40]);\nVq = interp1(Y, gpuArray([1.5 2.5]))",
+      "output": "Vq = gpuArray([15 30])"
     }
   ],
   "syntax": {
@@ -75,5 +80,6 @@
   "source": {
     "label": "Open an issue",
     "url": "https://github.com/runmat-org/runmat/issues/new/choose"
-  }
+  },
+  "gpu_residency": "`interp1` uploads implicit or host-validated sample points, evaluates linear/nearest queries with provider `interp1`, and returns a resident gpuArray output. Spline, pchip, complex, and resident-X validation paths use the host implementation until dedicated validation/interpolation kernels cover those cases."
 }

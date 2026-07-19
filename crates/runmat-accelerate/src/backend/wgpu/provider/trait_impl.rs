@@ -4,7 +4,7 @@ use runmat_accelerate_api::{
     ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult,
     ProviderCovarianceToCorrelationResult, ProviderCrossentropyRequest, ProviderCrossentropyResult,
     ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderHilbertRequest,
-    ProviderModulationRequest, ProviderNdgridRequest, ProviderNdgridResult,
+    ProviderInterp1Request, ProviderModulationRequest, ProviderNdgridRequest, ProviderNdgridResult,
     ProviderTrapezoidSpacing,
 };
 
@@ -1206,6 +1206,13 @@ impl AccelProvider for WgpuProvider {
         order: ProviderNormOrder,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.norm_exec(tensor, order).await })
+    }
+
+    fn interp1<'a>(
+        &'a self,
+        request: &'a ProviderInterp1Request<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.interp1_exec(request).await })
     }
 
     fn rank<'a>(

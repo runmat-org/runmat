@@ -171,6 +171,8 @@ const TRIU_SHADER_F64: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F
 const TRIU_SHADER_F32: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F32;
 const IMFILTER_SHADER_F64: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F64;
 const IMFILTER_SHADER_F32: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F32;
+const INTERP1_SHADER_F64: &str = crate::backend::wgpu::shaders::interp1::INTERP1_SHADER_F64;
+const INTERP1_SHADER_F32: &str = crate::backend::wgpu::shaders::interp1::INTERP1_SHADER_F32;
 #[cfg(not(target_os = "windows"))]
 const IMAGE_NORMALIZE_SHADER_F64: &str =
     crate::backend::wgpu::shaders::image_normalize::IMAGE_NORMALIZE_SHADER_F64;
@@ -293,6 +295,7 @@ pub struct WgpuPipelines {
     pub polyval: PipelineBundle,
     pub polyder: PipelineBundle,
     pub polyint: PipelineBundle,
+    pub interp1: PipelineBundle,
     pub diag_from_vector: PipelineBundle,
     pub diag_extract: PipelineBundle,
     pub gather_linear: PipelineBundle,
@@ -1419,6 +1422,24 @@ impl WgpuPipelines {
             },
         );
 
+        let interp1 = create_pipeline(
+            device,
+            "runmat-interp1-layout",
+            "runmat-interp1-shader",
+            "runmat-interp1-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_write_entry(3),
+                uniform_entry(4),
+            ],
+            match precision {
+                NumericPrecision::F64 => INTERP1_SHADER_F64,
+                NumericPrecision::F32 => INTERP1_SHADER_F32,
+            },
+        );
+
         let gather_linear = create_pipeline(
             device,
             "runmat-gather-linear-layout",
@@ -1606,6 +1627,7 @@ impl WgpuPipelines {
             polyval,
             polyder,
             polyint,
+            interp1,
             diag_from_vector,
             diag_extract,
             gather_linear,

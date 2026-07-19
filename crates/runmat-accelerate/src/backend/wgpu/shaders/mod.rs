@@ -17,6 +17,7 @@ pub mod image_normalize_stub;
 pub mod imfilter;
 pub mod ind2sub;
 pub mod index_select;
+pub mod interp1;
 pub mod kron;
 pub mod logical;
 pub mod matmul;

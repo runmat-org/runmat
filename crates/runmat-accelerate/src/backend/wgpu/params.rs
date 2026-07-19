@@ -25,6 +25,38 @@ pub struct LinearScatterParams {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+pub struct Interp1ParamsF64 {
+    pub sample_len: u32,
+    pub query_len: u32,
+    pub series_count: u32,
+    pub output_len: u32,
+    pub method: u32,
+    pub extrapolation: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub extrapolation_value: f64,
+    pub _pad2: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct Interp1ParamsF32 {
+    pub sample_len: u32,
+    pub query_len: u32,
+    pub series_count: u32,
+    pub output_len: u32,
+    pub method: u32,
+    pub extrapolation: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub extrapolation_value: f32,
+    pub _pad2: f32,
+    pub _pad3: f32,
+    pub _pad4: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 pub struct ScalarParamsF64 {
     pub len: u32,
     pub op: u32,

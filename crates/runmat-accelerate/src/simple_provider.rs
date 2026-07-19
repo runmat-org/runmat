@@ -12,7 +12,8 @@ use runmat_accelerate_api::{
     ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
     ProviderCovarianceToCorrelationResult, ProviderCrossentropyMode, ProviderCrossentropyRequest,
     ProviderCrossentropyResult, ProviderEigResult, ProviderFindResult, ProviderHermitianKind,
-    ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions, ProviderLinsolveOptions,
+    ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInterp1Extrapolation,
+    ProviderInterp1Method, ProviderInterp1Request, ProviderInvOptions, ProviderLinsolveOptions,
     ProviderLinsolveResult, ProviderLuResult, ProviderModulationRequest, ProviderNanMode,
     ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder, ProviderPinvOptions,
     ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions, ProviderQrPivot,
@@ -1112,6 +1113,84 @@ fn provider_crossentropy_terms(
 
 fn product(shape: &[usize]) -> usize {
     shape.iter().copied().product()
+}
+
+fn interp1_value(
+    x: &[f64],
+    y: &[f64],
+    xq: f64,
+    method: ProviderInterp1Method,
+    extrapolation: ProviderInterp1Extrapolation,
+    fill_value: f64,
+) -> f64 {
+    if !xq.is_finite() {
+        return f64::NAN;
+    }
+    match method {
+        ProviderInterp1Method::Linear => {
+            let Some(piece) = interp1_interval_index(
+                x,
+                xq,
+                matches!(extrapolation, ProviderInterp1Extrapolation::Extrapolate),
+            ) else {
+                return interp1_out_of_range(extrapolation, fill_value);
+            };
+            let h = x[piece + 1] - x[piece];
+            let t = (xq - x[piece]) / h;
+            y[piece] + t * (y[piece + 1] - y[piece])
+        }
+        ProviderInterp1Method::Nearest => {
+            if xq < x[0] {
+                return match extrapolation {
+                    ProviderInterp1Extrapolation::Extrapolate => y[0],
+                    _ => interp1_out_of_range(extrapolation, fill_value),
+                };
+            }
+            if xq > x[x.len() - 1] {
+                return match extrapolation {
+                    ProviderInterp1Extrapolation::Extrapolate => y[y.len() - 1],
+                    _ => interp1_out_of_range(extrapolation, fill_value),
+                };
+            }
+            match x.binary_search_by(|probe| probe.partial_cmp(&xq).unwrap()) {
+                Ok(index) => y[index],
+                Err(index) => {
+                    let left = index.saturating_sub(1);
+                    let right = index.min(x.len() - 1);
+                    if (xq - x[left]).abs() <= (x[right] - xq).abs() {
+                        y[left]
+                    } else {
+                        y[right]
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn interp1_interval_index(x: &[f64], xq: f64, allow_extrapolation: bool) -> Option<usize> {
+    if xq < x[0] {
+        return allow_extrapolation.then_some(0);
+    }
+    let last = x.len() - 1;
+    if xq > x[last] {
+        return allow_extrapolation.then_some(last - 1);
+    }
+    if xq == x[last] {
+        return Some(last - 1);
+    }
+    match x.binary_search_by(|probe| probe.partial_cmp(&xq).unwrap()) {
+        Ok(index) => Some(index.min(last - 1)),
+        Err(index) if index > 0 && index < x.len() => Some(index - 1),
+        _ => None,
+    }
+}
+
+fn interp1_out_of_range(extrapolation: ProviderInterp1Extrapolation, fill_value: f64) -> f64 {
+    match extrapolation {
+        ProviderInterp1Extrapolation::Value => fill_value,
+        ProviderInterp1Extrapolation::Nan | ProviderInterp1Extrapolation::Extrapolate => f64::NAN,
+    }
 }
 
 fn decode_indices(mut index: usize, dims: &[usize]) -> Vec<usize> {
@@ -7626,6 +7705,77 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn interp1<'a>(
+        &'a self,
+        request: &'a ProviderInterp1Request<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                request.sample_len >= 2,
+                "interp1: sample_len must be at least 2"
+            );
+            ensure!(
+                request.series_count >= 1,
+                "interp1: series_count must be positive"
+            );
+            let output_len = request
+                .query_len
+                .checked_mul(request.series_count)
+                .ok_or_else(|| anyhow!("interp1: output length overflow"))?;
+            ensure!(
+                product(request.output_shape) == output_len,
+                "interp1: output shape does not match query/series count"
+            );
+            let (x, y, xq) =
+                {
+                    let guard = registry().lock().unwrap();
+                    let x = guard.get(&request.x.buffer_id).cloned().ok_or_else(|| {
+                        anyhow!("interp1: unknown X buffer {}", request.x.buffer_id)
+                    })?;
+                    let y = guard.get(&request.y.buffer_id).cloned().ok_or_else(|| {
+                        anyhow!("interp1: unknown Y buffer {}", request.y.buffer_id)
+                    })?;
+                    let xq = guard.get(&request.xq.buffer_id).cloned().ok_or_else(|| {
+                        anyhow!("interp1: unknown Xq buffer {}", request.xq.buffer_id)
+                    })?;
+                    (x, y, xq)
+                };
+            ensure!(
+                x.len() == request.sample_len,
+                "interp1: X length does not match sample_len"
+            );
+            ensure!(
+                y.len()
+                    == request
+                        .series_count
+                        .checked_mul(request.sample_len)
+                        .ok_or_else(|| anyhow!("interp1: Y length overflow"))?,
+                "interp1: Y length does not match sample/series count"
+            );
+            ensure!(
+                xq.len() == request.query_len,
+                "interp1: Xq length does not match query_len"
+            );
+
+            let mut out = Vec::with_capacity(output_len);
+            for series in 0..request.series_count {
+                let start = series * request.sample_len;
+                let samples = &y[start..start + request.sample_len];
+                for &query in &xq {
+                    out.push(interp1_value(
+                        &x,
+                        samples,
+                        query,
+                        request.method,
+                        request.extrapolation,
+                        request.extrapolation_value,
+                    ));
+                }
+            }
+            Ok(self.allocate_tensor(out, request.output_shape.to_vec()))
+        })
+    }
+
     fn rank<'a>(
         &'a self,
         matrix: &'a GpuTensorHandle,
@@ -7994,6 +8144,36 @@ mod tests {
             &result.outputs[1],
             &[10.0, 10.0, 20.0, 20.0, 30.0, 30.0],
             &[2, 3],
+        );
+    }
+
+    #[test]
+    fn interp1_evaluates_resident_linear_series() {
+        let provider = InProcessProvider::new();
+        let x = real_handle(&provider, &[1.0, 2.0, 3.0], &[1, 3]);
+        let y = real_handle(&provider, &[10.0, 20.0, 40.0, 100.0, 200.0, 400.0], &[3, 2]);
+        let xq = real_handle(&provider, &[1.2, 2.5], &[1, 2]);
+        let output_shape = [1, 2, 2];
+
+        let result = block_on(provider.interp1(&ProviderInterp1Request {
+            x: &x,
+            y: &y,
+            xq: &xq,
+            sample_len: 3,
+            series_count: 2,
+            query_len: 2,
+            output_shape: &output_shape,
+            method: ProviderInterp1Method::Linear,
+            extrapolation: ProviderInterp1Extrapolation::Nan,
+            extrapolation_value: f64::NAN,
+        }))
+        .expect("interp1");
+
+        assert_real_close(
+            &provider,
+            &result,
+            &[12.0, 30.0, 120.0, 300.0],
+            &output_shape,
         );
     }
 

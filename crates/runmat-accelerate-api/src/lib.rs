@@ -737,6 +737,33 @@ pub enum ProviderNormOrder {
     P(f64),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderInterp1Method {
+    Linear,
+    Nearest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderInterp1Extrapolation {
+    Nan,
+    Extrapolate,
+    Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderInterp1Request<'a> {
+    pub x: &'a GpuTensorHandle,
+    pub y: &'a GpuTensorHandle,
+    pub xq: &'a GpuTensorHandle,
+    pub sample_len: usize,
+    pub series_count: usize,
+    pub query_len: usize,
+    pub output_shape: &'a [usize],
+    pub method: ProviderInterp1Method,
+    pub extrapolation: ProviderInterp1Extrapolation,
+    pub extrapolation_value: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderEigResult {
     pub eigenvalues: GpuTensorHandle,
@@ -2296,6 +2323,12 @@ pub trait AccelProvider: Send + Sync {
         _order: ProviderNormOrder,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { Err(anyhow::anyhow!("norm not supported by provider")) })
+    }
+    fn interp1<'a>(
+        &'a self,
+        _request: &'a ProviderInterp1Request<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("interp1 not supported by provider")
     }
     fn rank<'a>(
         &'a self,
