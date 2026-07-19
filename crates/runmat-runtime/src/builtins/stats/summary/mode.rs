@@ -143,13 +143,6 @@ const MODE_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescrip
     message: "mode: dimension must be >= 1",
 };
 
-const MODE_ERROR_GPU_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MODE.GPU_UNSUPPORTED",
-    identifier: Some("RunMat:mode:GpuUnsupported"),
-    when: "Input is GPU-resident and mode requires host data.",
-    message: "mode: GPU tensors must be gathered to the host before mode can be computed",
-};
-
 const MODE_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.MODE.COMPLEX_UNSUPPORTED",
     identifier: Some("RunMat:mode:ComplexUnsupported"),
@@ -164,10 +157,9 @@ const MODE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "mode: internal operation failed",
 };
 
-const MODE_ERRORS: [BuiltinErrorDescriptor; 5] = [
+const MODE_ERRORS: [BuiltinErrorDescriptor; 4] = [
     MODE_ERROR_INVALID_ARGUMENT,
     MODE_ERROR_INVALID_DIMENSION,
-    MODE_ERROR_GPU_UNSUPPORTED,
     MODE_ERROR_COMPLEX_UNSUPPORTED,
     MODE_ERROR_INTERNAL,
 ];
@@ -213,6 +205,7 @@ fn mode_type_resolver(args: &[Type], ctx: &ResolveContext) -> Type {
 )]
 async fn mode_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let parsed = parse_arguments(&rest).await?;
+    let value = crate::gather_if_needed_async(&value).await?;
     let output_class = OutputClass::from_value(&value);
     let eval = mode_evaluate(value, parsed, output_class)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
@@ -432,7 +425,6 @@ fn mode_evaluate(
 
 fn materialize_tensor(value: Value) -> BuiltinResult<Tensor> {
     match value {
-        Value::GpuTensor(_) => Err(mode_error(&MODE_ERROR_GPU_UNSUPPORTED)),
         Value::ComplexTensor(_) | Value::Complex(_, _) => {
             Err(mode_error(&MODE_ERROR_COMPLEX_UNSUPPORTED))
         }
@@ -1105,7 +1097,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn mode_rejects_gpu_input_without_gather() {
+    fn mode_gathers_gpu_input_for_host_order_statistics() {
         use crate::builtins::common::test_support;
 
         test_support::with_test_provider(|provider| {
@@ -1115,8 +1107,22 @@ pub(crate) mod tests {
                 shape: &source.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let err = mode_call(Value::GpuTensor(handle), Vec::new()).unwrap_err();
-            assert_eq!(err.identifier(), MODE_ERROR_GPU_UNSUPPORTED.identifier);
+            let outputs = mode_outputs(Value::GpuTensor(handle), Vec::new(), 2).expect("mode");
+            assert_eq!(outputs[0], Value::Num(2.0));
+            assert_eq!(outputs[1], Value::Num(2.0));
+
+            let logical_source = Tensor::new(vec![0.0, 1.0, 1.0], vec![3, 1]).unwrap();
+            let logical_handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &logical_source.data,
+                    shape: &logical_source.shape,
+                })
+                .expect("upload logical");
+            runmat_accelerate_api::set_handle_logical(&logical_handle, true);
+            let logical_outputs =
+                mode_outputs(Value::GpuTensor(logical_handle), Vec::new(), 2).expect("mode");
+            assert_eq!(logical_outputs[0], Value::Bool(true));
+            assert_eq!(logical_outputs[1], Value::Num(2.0));
         });
     }
 
