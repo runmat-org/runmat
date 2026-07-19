@@ -103,6 +103,10 @@ const QR_POWER_ITER_CHOL_SHADER: &str =
     crate::backend::wgpu::shaders::qr_power_iter::QR_POWER_ITER_CHOL_SHADER;
 const CONV1D_SHADER_F64: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F64;
 const CONV1D_SHADER_F32: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F32;
+const MOVING_WINDOW_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::moving_window::MOVING_WINDOW_SHADER_F64;
+const MOVING_WINDOW_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::moving_window::MOVING_WINDOW_SHADER_F32;
 const REDUCE_GLOBAL_SHADER_F64: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_GLOBAL_SHADER_F64;
 const REDUCE_GLOBAL_SHADER_F32: &str =
@@ -240,6 +244,7 @@ pub struct WgpuPipelines {
     pub gradient_coordinates: PipelineBundle,
     pub conv1d: PipelineBundle,
     pub filter: PipelineBundle,
+    pub moving_window: PipelineBundle,
     pub cumsum: PipelineBundle,
     pub trapezoid: PipelineBundle,
     pub cumprod: PipelineBundle,
@@ -464,6 +469,22 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => crate::backend::wgpu::shaders::filter::FILTER_SHADER_F64,
                 NumericPrecision::F32 => crate::backend::wgpu::shaders::filter::FILTER_SHADER_F32,
+            },
+        );
+
+        let moving_window = create_pipeline(
+            device,
+            "runmat-moving-window-layout",
+            "runmat-moving-window-shader",
+            "runmat-moving-window-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => MOVING_WINDOW_SHADER_F64,
+                NumericPrecision::F32 => MOVING_WINDOW_SHADER_F32,
             },
         );
 
@@ -1572,6 +1593,7 @@ impl WgpuPipelines {
             gradient_coordinates,
             conv1d,
             filter,
+            moving_window,
             cumsum,
             trapezoid,
             cumprod,

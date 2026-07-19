@@ -23,6 +23,7 @@ pub mod logical;
 pub mod matmul;
 pub mod matmul_smallk;
 pub mod matmul_tall_skinny;
+pub mod moving_window;
 pub mod nan;
 pub mod permute;
 pub mod polyder;

@@ -1,18 +1,35 @@
 {
   "title": "movmedian",
   "category": "math/reduction",
-  "keywords": ["movmedian", "moving", "window", "median", "omitnan"],
+  "keywords": [
+    "movmedian",
+    "moving",
+    "window",
+    "median",
+    "omitnan"
+  ],
   "summary": "Compute moving medians in MATLAB and RunMat.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f32", "f64"],
+    "precisions": [
+      "f32",
+      "f64"
+    ],
     "broadcasting": "matlab",
-    "notes": "GPU inputs currently use a resident fallback: gather once to host for the moving-window pass and re-upload the result when an acceleration provider is active."
+    "notes": "GPU inputs currently use a resident fallback: gather once to host for the moving-window median pass and re-upload the result when an acceleration provider is active. Median/order-statistics residency needs a dedicated provider hook."
   },
-  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
   "requires_feature": null,
-  "tested": {"unit": "builtins::math::reduction::moving::tests", "integration": null},
+  "tested": {
+    "unit": "builtins::math::reduction::moving::tests",
+    "integration": null
+  },
   "description": "`movmedian(A,k)` returns the median value in each sliding window.",
   "behaviors": [
     "`k` may be a positive scalar window length or a two-element `[kb kf]` backward/forward window.",
@@ -24,8 +41,24 @@
     "This implementation covers numeric, logical, complex, and gpuArray inputs; table/timetable `DataVariables` forms are tracked separately."
   ],
   "examples": [
-    {"description": "Moving median with an even window", "input": "M = movmedian([1 10 3 8], 2)", "output": "M = [1 5.5 6.5 5.5]"}
+    {
+      "description": "Moving median with an even window",
+      "input": "M = movmedian([1 10 3 8], 2)",
+      "output": "M = [1 5.5 6.5 5.5]"
+    }
   ],
-  "links": [{"label": "median", "url": "./median"}, {"label": "movmean", "url": "./movmean"}],
-  "source": {"label": "`crates/runmat-runtime/src/builtins/math/reduction/moving.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/moving.rs"}
+  "links": [
+    {
+      "label": "median",
+      "url": "./median"
+    },
+    {
+      "label": "movmean",
+      "url": "./movmean"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/moving.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/moving.rs"
+  }
 }

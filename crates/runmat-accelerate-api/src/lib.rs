@@ -948,6 +948,41 @@ pub enum ProviderNanMode {
     Omit,
 }
 
+/// Moving-window reduction operation executed by acceleration providers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderMovingWindowOp {
+    Sum,
+    Mean,
+    Prod,
+    Min,
+    Max,
+    Std,
+    Var,
+}
+
+/// Endpoint handling for provider-backed moving-window reductions.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ProviderMovingWindowEndpoints {
+    Shrink,
+    Discard,
+    Fill(f64),
+}
+
+/// Request for provider-backed count-window moving reductions.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderMovingWindowRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    pub output_shape: &'a [usize],
+    /// Zero-based dimension along which the moving window is applied.
+    pub dim: usize,
+    pub before: usize,
+    pub after: usize,
+    pub op: ProviderMovingWindowOp,
+    pub endpoints: ProviderMovingWindowEndpoints,
+    pub nan_mode: ProviderNanMode,
+    pub normalization: ProviderStdNormalization,
+}
+
 /// Direction used when computing prefix sums on the device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderScanDirection {
@@ -2742,6 +2777,12 @@ pub trait AccelProvider: Send + Sync {
         _dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("reduce_median_dim not supported by provider")
+    }
+    fn moving_window<'a>(
+        &'a self,
+        _request: &'a ProviderMovingWindowRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("moving_window not supported by provider")
     }
     fn reduce_min<'a>(
         &'a self,

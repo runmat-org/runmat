@@ -1,18 +1,36 @@
 {
   "title": "movstd",
   "category": "math/reduction",
-  "keywords": ["movstd", "moving", "window", "standard deviation", "std", "omitnan"],
+  "keywords": [
+    "movstd",
+    "moving",
+    "window",
+    "standard deviation",
+    "std",
+    "omitnan"
+  ],
   "summary": "Compute moving standard deviations in MATLAB and RunMat.",
   "gpu_support": {
     "elementwise": false,
-    "reduction": false,
-    "precisions": ["f32", "f64"],
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
     "broadcasting": "matlab",
-    "notes": "GPU inputs currently use a resident fallback: gather once to host for the moving-window pass and re-upload the result when an acceleration provider is active."
+    "notes": "Real dense gpuArray inputs use provider-resident count-window reductions for scalar or [kb kf] windows, explicit dimensions, omit/include NaN modes, shrink/discard/fill endpoints, and sample/population normalization for movstd/movvar. SamplePoints and unsupported provider backends fall back to gather-once host evaluation and re-upload when an acceleration provider is active; complex GPU moving-window support remains tracked outside this resident real-dense fast path."
   },
-  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
   "requires_feature": null,
-  "tested": {"unit": "builtins::math::reduction::moving::tests", "integration": null},
+  "tested": {
+    "unit": "builtins::math::reduction::moving::tests",
+    "integration": null
+  },
   "description": "`movstd(A,k)` computes standard deviations over a sliding window of length `k` along the first non-singleton dimension.",
   "behaviors": [
     "`k` may be a positive scalar window length or a two-element `[kb kf]` backward/forward window.",
@@ -25,8 +43,28 @@
     "This implementation covers numeric, logical, complex, and gpuArray inputs; table/timetable `DataVariables` forms are tracked separately."
   ],
   "examples": [
-    {"description": "Moving standard deviation across columns", "input": "A = [4 8 6];\nM = movstd(A,3)", "output": "M = [2.8284 2.0000 1.4142]"}
+    {
+      "description": "Moving standard deviation across columns",
+      "input": "A = [4 8 6];\nM = movstd(A,3)",
+      "output": "M = [2.8284 2.0000 1.4142]"
+    }
   ],
-  "links": [{"label": "std", "url": "./std"}, {"label": "movvar", "url": "./movvar"}, {"label": "movmean", "url": "./movmean"}],
-  "source": {"label": "`crates/runmat-runtime/src/builtins/math/reduction/moving.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/moving.rs"}
+  "links": [
+    {
+      "label": "std",
+      "url": "./std"
+    },
+    {
+      "label": "movvar",
+      "url": "./movvar"
+    },
+    {
+      "label": "movmean",
+      "url": "./movmean"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/moving.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/moving.rs"
+  }
 }

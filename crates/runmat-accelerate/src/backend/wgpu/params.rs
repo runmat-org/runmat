@@ -94,6 +94,25 @@ pub struct Conv1dParams {
     pub start_offset: u32,
 }
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct MovingWindowParamsF64 {
+    pub meta0: PackedU32,
+    pub meta1: PackedU32,
+    pub meta2: PackedU32,
+    pub fill_value: f64,
+    pub _pad1: f64,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct MovingWindowParamsF32 {
+    pub meta0: PackedU32,
+    pub meta1: PackedU32,
+    pub meta2: PackedU32,
+    pub meta3: PackedF32,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct FusionParams {

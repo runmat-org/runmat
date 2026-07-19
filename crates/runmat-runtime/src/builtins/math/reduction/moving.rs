@@ -2,7 +2,10 @@
 
 use std::cmp::Ordering;
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{
+    GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderMovingWindowEndpoints,
+    ProviderMovingWindowOp, ProviderMovingWindowRequest, ProviderNanMode, ProviderStdNormalization,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -581,6 +584,19 @@ impl MovingOp {
     fn uses_variance_normalization(self) -> bool {
         matches!(self, MovingOp::Std | MovingOp::Var)
     }
+
+    fn provider_op(self) -> Option<ProviderMovingWindowOp> {
+        match self {
+            MovingOp::Sum => Some(ProviderMovingWindowOp::Sum),
+            MovingOp::Mean => Some(ProviderMovingWindowOp::Mean),
+            MovingOp::Prod => Some(ProviderMovingWindowOp::Prod),
+            MovingOp::Min => Some(ProviderMovingWindowOp::Min),
+            MovingOp::Max => Some(ProviderMovingWindowOp::Max),
+            MovingOp::Std => Some(ProviderMovingWindowOp::Std),
+            MovingOp::Var => Some(ProviderMovingWindowOp::Var),
+            MovingOp::Median => None,
+        }
+    }
 }
 
 async fn moving_builtin(
@@ -623,6 +639,9 @@ async fn moving_gpu(
     handle: GpuTensorHandle,
     parsed: &ParsedMoving,
 ) -> BuiltinResult<Value> {
+    if let Some(output) = moving_gpu_provider(name, op, &handle, parsed).await? {
+        return Ok(Value::GpuTensor(output));
+    }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let result = moving_real(name, op, tensor, parsed)?;
     let Some(provider) = runmat_accelerate_api::provider() else {
@@ -636,6 +655,83 @@ async fn moving_gpu(
         .upload(&view)
         .map_err(|err| internal(name, format!("{name}: failed to upload GPU result: {err}")))?;
     Ok(Value::GpuTensor(uploaded))
+}
+
+async fn moving_gpu_provider(
+    name: &'static str,
+    op: MovingOp,
+    handle: &GpuTensorHandle,
+    parsed: &ParsedMoving,
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let Some(provider_op) = op.provider_op() else {
+        return Ok(None);
+    };
+    if parsed.sample_points.is_some() {
+        return Ok(None);
+    }
+    let Some((before, after)) = parsed.window.count_radius() else {
+        return Ok(None);
+    };
+    if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved {
+        return Ok(None);
+    }
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
+        return Ok(None);
+    };
+
+    let dim = parsed
+        .dim
+        .unwrap_or_else(|| default_dimension(&handle.shape));
+    if dim == 0 {
+        return Err(invalid_argument(
+            name,
+            format!("{name}: dimension must be >= 1"),
+        ));
+    }
+    let input_shape = shape_with_trailing_singletons(&handle.shape, dim);
+    let output_shape = output_shape(name, &input_shape, dim, parsed)?;
+    validate_sample_points_len(name, input_shape[dim - 1], parsed)?;
+    let request = ProviderMovingWindowRequest {
+        input: handle,
+        output_shape: &output_shape,
+        dim: dim - 1,
+        before,
+        after,
+        op: provider_op,
+        endpoints: provider_endpoints(op, parsed.endpoints),
+        nan_mode: provider_nan_mode(parsed.nan_mode),
+        normalization: provider_normalization(parsed.normalization),
+    };
+    match provider.moving_window(&request).await {
+        Ok(output) => {
+            runmat_accelerate_api::set_handle_logical(&output, false);
+            Ok(Some(output))
+        }
+        Err(_) => Ok(None),
+    }
+}
+
+fn provider_endpoints(op: MovingOp, endpoints: Endpoints) -> ProviderMovingWindowEndpoints {
+    match endpoints {
+        Endpoints::Shrink => ProviderMovingWindowEndpoints::Shrink,
+        Endpoints::Discard => ProviderMovingWindowEndpoints::Discard,
+        Endpoints::FillDefault => ProviderMovingWindowEndpoints::Fill(op.default_fill()),
+        Endpoints::Fill(value) => ProviderMovingWindowEndpoints::Fill(value),
+    }
+}
+
+fn provider_nan_mode(mode: NanMode) -> ProviderNanMode {
+    match mode {
+        NanMode::Include => ProviderNanMode::Include,
+        NanMode::Omit => ProviderNanMode::Omit,
+    }
+}
+
+fn provider_normalization(normalization: VarianceNormalization) -> ProviderStdNormalization {
+    match normalization {
+        VarianceNormalization::Sample => ProviderStdNormalization::Sample,
+        VarianceNormalization::Population => ProviderStdNormalization::Population,
+    }
 }
 
 fn moving_real(
@@ -1937,6 +2033,69 @@ mod tests {
             Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn gpu_count_window_reductions_return_resident_results() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, f64::NAN, 4.0],
+                    shape: &[1, 4],
+                })
+                .expect("upload");
+            let result = call(
+                "movsum",
+                MovingOp::Sum,
+                vec![
+                    Value::GpuTensor(input.clone()),
+                    Value::Num(3.0),
+                    Value::from("omitnan"),
+                ],
+            )
+            .expect("movsum gpu");
+            let Value::GpuTensor(sum_handle) = result else {
+                panic!("expected resident gpu result");
+            };
+            assert!(runmat_accelerate_api::provider_for_handle(&sum_handle).is_some());
+            let sum =
+                crate::builtins::common::test_support::gather(Value::GpuTensor(sum_handle.clone()))
+                    .expect("gather sum");
+            assert_eq!(sum.shape, vec![1, 4]);
+            assert_eq!(sum.data, vec![3.0, 3.0, 6.0, 4.0]);
+
+            let var_input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0],
+                    shape: &[1, 2],
+                })
+                .expect("upload var");
+            let result = call(
+                "movvar",
+                MovingOp::Var,
+                vec![
+                    Value::GpuTensor(var_input.clone()),
+                    Value::Num(3.0),
+                    Value::from("Endpoints"),
+                    Value::Num(0.0),
+                ],
+            )
+            .expect("movvar gpu");
+            let Value::GpuTensor(var_handle) = result else {
+                panic!("expected resident gpu var result");
+            };
+            assert!(runmat_accelerate_api::provider_for_handle(&var_handle).is_some());
+            let var =
+                crate::builtins::common::test_support::gather(Value::GpuTensor(var_handle.clone()))
+                    .expect("gather var");
+            assert_eq!(var.shape, vec![1, 2]);
+            assert_eq!(var.data, vec![1.0, 1.0]);
+
+            provider.free(&input).ok();
+            provider.free(&sum_handle).ok();
+            provider.free(&var_input).ok();
+            provider.free(&var_handle).ok();
+        });
     }
 
     #[test]

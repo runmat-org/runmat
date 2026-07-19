@@ -1,18 +1,35 @@
 {
   "title": "movmax",
   "category": "math/reduction",
-  "keywords": ["movmax", "moving", "window", "maximum", "omitnan"],
+  "keywords": [
+    "movmax",
+    "moving",
+    "window",
+    "maximum",
+    "omitnan"
+  ],
   "summary": "Compute moving maximum values in MATLAB and RunMat.",
   "gpu_support": {
     "elementwise": false,
-    "reduction": false,
-    "precisions": ["f32", "f64"],
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
     "broadcasting": "matlab",
-    "notes": "GPU inputs currently use a resident fallback: gather once to host for the moving-window pass and re-upload the result when an acceleration provider is active."
+    "notes": "Real dense gpuArray inputs use provider-resident count-window reductions for scalar or [kb kf] windows, explicit dimensions, omit/include NaN modes, shrink/discard/fill endpoints, and sample/population normalization for movstd/movvar. SamplePoints and unsupported provider backends fall back to gather-once host evaluation and re-upload when an acceleration provider is active; complex GPU moving-window support remains tracked outside this resident real-dense fast path."
   },
-  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
   "requires_feature": null,
-  "tested": {"unit": "builtins::math::reduction::moving::tests", "integration": null},
+  "tested": {
+    "unit": "builtins::math::reduction::moving::tests",
+    "integration": null
+  },
   "description": "`movmax(A,k)` returns the maximum value in each sliding window.",
   "behaviors": [
     "`k` may be a positive scalar window length or a two-element `[kb kf]` backward/forward window.",
@@ -25,8 +42,24 @@
     "This implementation covers numeric, logical, complex, and gpuArray inputs; table/timetable `DataVariables` forms are tracked separately."
   ],
   "examples": [
-    {"description": "Discard incomplete endpoint windows", "input": "M = movmax([1 9 3 4], 3, 'Endpoints', 'discard')", "output": "M = [9 9]"}
+    {
+      "description": "Discard incomplete endpoint windows",
+      "input": "M = movmax([1 9 3 4], 3, 'Endpoints', 'discard')",
+      "output": "M = [9 9]"
+    }
   ],
-  "links": [{"label": "max", "url": "./max"}, {"label": "movmin", "url": "./movmin"}],
-  "source": {"label": "`crates/runmat-runtime/src/builtins/math/reduction/moving.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/moving.rs"}
+  "links": [
+    {
+      "label": "max",
+      "url": "./max"
+    },
+    {
+      "label": "movmin",
+      "url": "./movmin"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/moving.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/moving.rs"
+  }
 }

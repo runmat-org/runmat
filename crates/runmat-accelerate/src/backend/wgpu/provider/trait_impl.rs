@@ -4,8 +4,8 @@ use runmat_accelerate_api::{
     ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult,
     ProviderCovarianceToCorrelationResult, ProviderCrossentropyRequest, ProviderCrossentropyResult,
     ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderHilbertRequest,
-    ProviderInterp1Request, ProviderModulationRequest, ProviderNdgridRequest, ProviderNdgridResult,
-    ProviderTrapezoidSpacing,
+    ProviderInterp1Request, ProviderModulationRequest, ProviderMovingWindowRequest,
+    ProviderNdgridRequest, ProviderNdgridResult, ProviderTrapezoidSpacing,
 };
 
 impl AccelProvider for WgpuProvider {
@@ -875,6 +875,12 @@ impl AccelProvider for WgpuProvider {
         options: ProviderIirFilterOptions,
     ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
         Box::pin(async move { self.iir_filter_exec(b, a, x, options).await })
+    }
+    fn moving_window<'a>(
+        &'a self,
+        request: &'a ProviderMovingWindowRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.moving_window_exec(request) })
     }
     fn uniform_spectral_estimate<'a>(
         &'a self,

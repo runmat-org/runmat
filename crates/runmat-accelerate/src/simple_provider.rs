@@ -14,12 +14,13 @@ use runmat_accelerate_api::{
     ProviderCrossentropyResult, ProviderEigResult, ProviderFindResult, ProviderHermitianKind,
     ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInterp1Extrapolation,
     ProviderInterp1Method, ProviderInterp1Request, ProviderInvOptions, ProviderLinsolveOptions,
-    ProviderLinsolveResult, ProviderLuResult, ProviderModulationRequest, ProviderNanMode,
-    ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder, ProviderPinvOptions,
-    ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions, ProviderQrPivot,
-    ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind, ProviderTrapezoidSpacing,
-    SetdiffOptions, SetdiffResult, SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions,
-    UniqueResult,
+    ProviderLinsolveResult, ProviderLuResult, ProviderModulationRequest,
+    ProviderMovingWindowEndpoints, ProviderMovingWindowOp, ProviderMovingWindowRequest,
+    ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder,
+    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions,
+    ProviderQrPivot, ProviderQrResult, ProviderScanDirection, ProviderStdNormalization,
+    ProviderSymmetryKind, ProviderTrapezoidSpacing, SetdiffOptions, SetdiffResult, SortComparison,
+    SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -1113,6 +1114,215 @@ fn provider_crossentropy_terms(
 
 fn product(shape: &[usize]) -> usize {
     shape.iter().copied().product()
+}
+
+#[derive(Clone, Copy)]
+struct MovingAccum {
+    count: usize,
+    sum: f64,
+    prod: f64,
+    min: f64,
+    max: f64,
+    mean: f64,
+    m2: f64,
+    has_value: bool,
+}
+
+impl MovingAccum {
+    fn new() -> Self {
+        Self {
+            count: 0,
+            sum: 0.0,
+            prod: 1.0,
+            min: 0.0,
+            max: 0.0,
+            mean: 0.0,
+            m2: 0.0,
+            has_value: false,
+        }
+    }
+
+    fn push(&mut self, value: f64) {
+        self.count += 1;
+        self.sum += value;
+        self.prod *= value;
+        if self.has_value {
+            self.min = self.min.min(value);
+            self.max = self.max.max(value);
+        } else {
+            self.min = value;
+            self.max = value;
+            self.has_value = true;
+        }
+        let delta = value - self.mean;
+        self.mean += delta / self.count as f64;
+        let delta2 = value - self.mean;
+        self.m2 += delta * delta2;
+    }
+
+    fn push_repeated(&mut self, value: f64, repeat: usize) {
+        if repeat == 0 {
+            return;
+        }
+        self.sum += value * repeat as f64;
+        self.prod *= value.powf(repeat as f64);
+        if self.has_value {
+            self.min = self.min.min(value);
+            self.max = self.max.max(value);
+        } else {
+            self.min = value;
+            self.max = value;
+            self.has_value = true;
+        }
+        if self.count == 0 {
+            self.count = repeat;
+            self.mean = value;
+            self.m2 = 0.0;
+            return;
+        }
+        let old_count = self.count;
+        let new_count = old_count + repeat;
+        let delta = value - self.mean;
+        self.mean += delta * repeat as f64 / new_count as f64;
+        self.m2 += delta * delta * old_count as f64 * repeat as f64 / new_count as f64;
+        self.count = new_count;
+    }
+
+    fn finish(self, op: ProviderMovingWindowOp, normalization: ProviderStdNormalization) -> f64 {
+        if self.count == 0 {
+            return match op {
+                ProviderMovingWindowOp::Sum => 0.0,
+                ProviderMovingWindowOp::Prod => 1.0,
+                ProviderMovingWindowOp::Mean
+                | ProviderMovingWindowOp::Min
+                | ProviderMovingWindowOp::Max
+                | ProviderMovingWindowOp::Std
+                | ProviderMovingWindowOp::Var => f64::NAN,
+            };
+        }
+        match op {
+            ProviderMovingWindowOp::Sum => self.sum,
+            ProviderMovingWindowOp::Mean => self.sum / self.count as f64,
+            ProviderMovingWindowOp::Prod => self.prod,
+            ProviderMovingWindowOp::Min => self.min,
+            ProviderMovingWindowOp::Max => self.max,
+            ProviderMovingWindowOp::Std | ProviderMovingWindowOp::Var => {
+                let denom = match normalization {
+                    ProviderStdNormalization::Sample if self.count > 1 => self.count - 1,
+                    ProviderStdNormalization::Sample => self.count,
+                    ProviderStdNormalization::Population => self.count,
+                };
+                let variance = self.m2 / denom as f64;
+                if matches!(op, ProviderMovingWindowOp::Std) {
+                    variance.sqrt()
+                } else {
+                    variance
+                }
+            }
+        }
+    }
+}
+
+fn simple_moving_window(
+    request: &ProviderMovingWindowRequest<'_>,
+) -> Result<(Vec<f64>, Vec<usize>)> {
+    ensure!(
+        runmat_accelerate_api::handle_storage(request.input) == GpuTensorStorage::Real,
+        "moving_window: complex tensors are not supported"
+    );
+    let input_data = {
+        let guard = registry().lock().unwrap();
+        guard
+            .get(&request.input.buffer_id)
+            .ok_or_else(|| anyhow!("buffer not found: {}", request.input.buffer_id))?
+            .clone()
+    };
+    let mut input_shape = request.input.shape.clone();
+    if request.dim >= input_shape.len() {
+        input_shape.resize(request.dim + 1, 1);
+    }
+    ensure!(
+        request.dim < input_shape.len() && request.dim < request.output_shape.len(),
+        "moving_window: dimension exceeds tensor rank"
+    );
+    ensure!(
+        input_data.len() == product(&input_shape),
+        "moving_window: input buffer length does not match shape"
+    );
+    let output_len = product(request.output_shape);
+    let axis_len = input_shape[request.dim];
+    let out_axis_len = request.output_shape[request.dim];
+    let stride_before = product(&input_shape[..request.dim]);
+    let stride_after = product(&input_shape[request.dim + 1..]);
+    let mut output = vec![0.0; output_len];
+
+    for after in 0..stride_after {
+        for out_pos in 0..out_axis_len {
+            let center = if matches!(request.endpoints, ProviderMovingWindowEndpoints::Discard) {
+                out_pos + request.before
+            } else {
+                out_pos
+            };
+            let start = center as isize - request.before as isize;
+            let end = center as isize + request.after as isize;
+            let in_start = start.max(0) as usize;
+            let in_end = if axis_len == 0 {
+                0
+            } else {
+                (end.min(axis_len as isize - 1) + 1) as usize
+            };
+            let fill_count = match request.endpoints {
+                ProviderMovingWindowEndpoints::Fill(_) => {
+                    let left = if start < 0 { (-start) as usize } else { 0 };
+                    let right = if end >= axis_len as isize {
+                        (end - axis_len as isize + 1) as usize
+                    } else {
+                        0
+                    };
+                    left + right
+                }
+                ProviderMovingWindowEndpoints::Shrink | ProviderMovingWindowEndpoints::Discard => 0,
+            };
+            for before in 0..stride_before {
+                let out_idx =
+                    before + out_pos * stride_before + after * stride_before * out_axis_len;
+                let mut acc = MovingAccum::new();
+                let mut saw_nan = false;
+                for pos in in_start..in_end {
+                    let idx = before + pos * stride_before + after * stride_before * axis_len;
+                    let value = input_data[idx];
+                    if value.is_nan() {
+                        if request.nan_mode == ProviderNanMode::Include {
+                            saw_nan = true;
+                            break;
+                        }
+                        continue;
+                    }
+                    acc.push(value);
+                }
+                if !saw_nan {
+                    if let ProviderMovingWindowEndpoints::Fill(fill) = request.endpoints {
+                        if fill_count > 0 {
+                            if fill.is_nan() {
+                                if request.nan_mode == ProviderNanMode::Include {
+                                    saw_nan = true;
+                                }
+                            } else {
+                                acc.push_repeated(fill, fill_count);
+                            }
+                        }
+                    }
+                }
+                output[out_idx] = if saw_nan {
+                    f64::NAN
+                } else {
+                    acc.finish(request.op, request.normalization)
+                };
+            }
+        }
+    }
+
+    Ok((output, request.output_shape.to_vec()))
 }
 
 fn interp1_value(
@@ -6982,6 +7192,16 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn moving_window<'a>(
+        &'a self,
+        request: &'a ProviderMovingWindowRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let (output, shape) = simple_moving_window(request)?;
+            Ok(self.allocate_tensor(output, shape))
+        })
+    }
+
     fn reduce_min<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
@@ -8244,6 +8464,40 @@ mod tests {
                 "lane {idx}: got {actual}, expected {expected}"
             );
         }
+    }
+
+    #[test]
+    fn moving_window_provider_reduces_count_windows_without_download_fallback() {
+        let provider = InProcessProvider::new();
+        let input = real_handle(&provider, &[1.0, 2.0, f64::NAN, 4.0], &[1, 4]);
+        let sum = block_on(provider.moving_window(&ProviderMovingWindowRequest {
+            input: &input,
+            output_shape: &[1, 4],
+            dim: 1,
+            before: 1,
+            after: 1,
+            op: ProviderMovingWindowOp::Sum,
+            endpoints: ProviderMovingWindowEndpoints::Shrink,
+            nan_mode: ProviderNanMode::Omit,
+            normalization: ProviderStdNormalization::Sample,
+        }))
+        .expect("movsum provider");
+        assert_real_close(&provider, &sum, &[3.0, 3.0, 6.0, 4.0], &[1, 4]);
+
+        let var_input = real_handle(&provider, &[1.0, 2.0], &[1, 2]);
+        let var = block_on(provider.moving_window(&ProviderMovingWindowRequest {
+            input: &var_input,
+            output_shape: &[1, 2],
+            dim: 1,
+            before: 1,
+            after: 1,
+            op: ProviderMovingWindowOp::Var,
+            endpoints: ProviderMovingWindowEndpoints::Fill(0.0),
+            nan_mode: ProviderNanMode::Include,
+            normalization: ProviderStdNormalization::Sample,
+        }))
+        .expect("movvar provider");
+        assert_real_close(&provider, &var, &[1.0, 1.0], &[1, 2]);
     }
 
     #[test]
