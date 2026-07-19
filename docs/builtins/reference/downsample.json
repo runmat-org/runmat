@@ -16,7 +16,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "GPU inputs are accepted through the active provider gather path. The current implementation performs sample-rate conversion on the host and returns a host tensor."
+    "notes": "Real and logical GPU inputs use the active provider's linear-gather path to keep the downsampled output resident. Complex GPU tensors fall back to host materialization until complex interleaved gather semantics are widened."
   },
   "fusion": {
     "elementwise": false,
@@ -66,7 +66,7 @@
     },
     {
       "question": "Can I pass GPU tensors?",
-      "answer": "Yes. GPU inputs are gathered through the active provider, converted on the host, and returned as host tensors."
+      "answer": "Yes. Real and logical GPU inputs stay resident through the provider `gather_linear` hook. Complex GPU tensors fall back to host materialization."
     }
   ],
   "links": [
