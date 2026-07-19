@@ -1,0 +1,37 @@
+{
+  "title": "bayesopt",
+  "category": "stats/ml",
+  "keywords": ["bayesopt", "Bayesian optimization", "optimizableVariable"],
+  "summary": "Run deterministic Bayesian optimization over optimizableVariable metadata.",
+  "description": "`bayesopt(fun, vars, Name, Value)` evaluates a scalar objective over `optimizableVariable` metadata and returns a `BayesianOptimization` compatibility object.",
+  "behaviors": [
+    "The objective is called as `fun(X)`, where `X` is a one-row table with one column per optimizable variable.",
+    "Supports real, integer, and categorical `optimizableVariable` objects, including `Transform='log'` for valid numeric ranges and `Optimize=false` fixed variables.",
+    "Uses deterministic low-discrepancy seed points followed by a Gaussian-process surrogate with expected-improvement-style acquisition for reproducible in-memory optimization loops.",
+    "Finite integer/categorical search spaces terminate cleanly when all unique candidate points have been exhausted before `MaxObjectiveEvaluations`.",
+    "Name-value support includes `MaxObjectiveEvaluations`, `NumSeedPoints`, `AcquisitionFunctionName`, `ExplorationRatio`, `IsObjectiveDeterministic`, `Verbose`, `UseParallel=false`, empty `PlotFcn`/`OutputFcn`, and `XConstraintFcn` logical feasibility filters.",
+    "The objective may return a scalar objective value or a struct with `Objective` and optional `ConstraintViolations` fields. Constraint violations less than or equal to zero are feasible.",
+    "The result object exposes `XTrace`, `ObjectiveTrace`, `ObjectiveMinimumTrace`, `ObjectiveEvaluationTimeTrace`, `FeasibilityTrace`, `OptimizationTrace`, `XAtMinObjective`, `MinObjective`, `BestPoint`, `BestObjective`, `VariableDescriptions`, `Options`, `Output`, `ExitFlag`, and surrogate metadata.",
+    "Warm starts, conditional variables, plotting/output callbacks, parallel evaluation, GPU-resident optimization, datastore-backed objectives, and multi-output result forms remain outside this slice and raise explicit compatibility errors."
+  ],
+  "examples": [
+    {
+      "description": "Minimize a scalar objective over two real variables",
+      "input": "x = optimizableVariable('x',[-1 1]);\ny = optimizableVariable('y',[-1 1]);\nresults = bayesopt(@objective, {x y}, 'MaxObjectiveEvaluations', 24, 'NumSeedPoints', 6)",
+      "output": "results is a BayesianOptimization compatibility object with trace tables and the best observed point."
+    },
+    {
+      "description": "Filter candidates with an XConstraintFcn",
+      "input": "x = optimizableVariable('x',[-1 1]);\nresults = bayesopt(@objective, x, 'XConstraintFcn', @isFeasible)",
+      "output": "Only rows for which isFeasible(X) returns true are evaluated by the objective."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "results = bayesopt(fun, vars, Name, Value)",
+      "output": "BayesianOptimization compatibility object."
+    }
+  },
+  "gpu_residency": "`bayesopt` is a host control-flow solver. It gathers variable metadata and option inputs before evaluation, rejects `UseParallel=true`, and does not run objective scheduling or surrogate updates on a GPU provider."
+}
