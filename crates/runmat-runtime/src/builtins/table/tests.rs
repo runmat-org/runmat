@@ -203,6 +203,47 @@ fn object(value: Value) -> ObjectInstance {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn write_sample_parquet(path: &Path) {
+    use arrow_array::{
+        BooleanArray, Float64Array, Int32Array, RecordBatch, StringArray as ArrowStringArray,
+    };
+    use arrow_schema::{DataType, Field, Schema};
+    use parquet::arrow::ArrowWriter;
+    use parquet::file::properties::WriterProperties;
+    use std::sync::Arc;
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("Name", DataType::Utf8, true),
+        Field::new("Score", DataType::Float64, true),
+        Field::new("Passed", DataType::Boolean, true),
+        Field::new("Group", DataType::Int32, true),
+    ]));
+    let properties = WriterProperties::builder()
+        .set_max_row_group_row_count(Some(2))
+        .build();
+    let mut bytes = Vec::new();
+    let mut writer = ArrowWriter::try_new(&mut bytes, schema.clone(), Some(properties))
+        .expect("create parquet writer");
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(ArrowStringArray::from(vec![
+                Some("Ada"),
+                Some("Grace"),
+                Some("Linus"),
+            ])),
+            Arc::new(Float64Array::from(vec![Some(10.0), Some(12.5), None])),
+            Arc::new(BooleanArray::from(vec![Some(true), Some(false), None])),
+            Arc::new(Int32Array::from(vec![Some(1), Some(1), Some(2)])),
+        ],
+    )
+    .expect("create parquet batch");
+    writer.write(&batch).expect("write parquet batch");
+    writer.close().expect("close parquet writer");
+    fs::write(path, bytes).expect("write parquet sample");
+}
+
 #[test]
 fn readtable_imports_headered_numeric_and_text_columns() {
     let path = unique_path("readtable_basic");
@@ -225,6 +266,145 @@ fn readtable_imports_headered_numeric_and_text_columns() {
         }
         other => panic!("expected string array, got {other:?}"),
     }
+    let _ = fs::remove_file(&path);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn parquetread_imports_common_column_types() {
+    let path = unique_path("parquetread_basic").with_extension("parquet");
+    write_sample_parquet(&path);
+
+    let table = object(
+        block_on(parquetread_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            Vec::new(),
+        ))
+        .expect("parquetread"),
+    );
+    assert_eq!(
+        table_variable_names_from_object(&table).unwrap(),
+        vec![
+            "Name".to_string(),
+            "Score".to_string(),
+            "Passed".to_string(),
+            "Group".to_string()
+        ]
+    );
+    match table_member_get(&table, &Value::from("Name")).unwrap() {
+        Value::StringArray(array) => {
+            assert_eq!(array.shape, vec![3, 1]);
+            assert_eq!(
+                array.data,
+                vec!["Ada".to_string(), "Grace".to_string(), "Linus".to_string()]
+            );
+        }
+        other => panic!("expected string column, got {other:?}"),
+    }
+    match table_member_get(&table, &Value::from("Score")).unwrap() {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![3, 1]);
+            assert_eq!(tensor.data[0], 10.0);
+            assert_eq!(tensor.data[1], 12.5);
+            assert!(tensor.data[2].is_nan());
+        }
+        other => panic!("expected tensor column, got {other:?}"),
+    }
+    match table_member_get(&table, &Value::from("Passed")).unwrap() {
+        Value::LogicalArray(array) => assert_eq!(array.data, vec![1, 0, 0]),
+        other => panic!("expected logical column, got {other:?}"),
+    }
+
+    let _ = fs::remove_file(&path);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn parquetread_supports_selected_variables_and_row_groups() {
+    let path = unique_path("parquetread_projection").with_extension("parquet");
+    write_sample_parquet(&path);
+
+    let selected = StringArray::new(vec!["Group".to_string(), "Score".to_string()], vec![1, 2])
+        .expect("selected variables");
+    let table = object(
+        block_on(parquetread_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            vec![
+                Value::from("SelectedVariableNames"),
+                Value::StringArray(selected),
+                Value::from("RowGroups"),
+                Value::Num(2.0),
+            ],
+        ))
+        .expect("parquetread selected"),
+    );
+    assert_eq!(
+        table_variable_names_from_object(&table).unwrap(),
+        vec!["Group".to_string(), "Score".to_string()]
+    );
+    match table_member_get(&table, &Value::from("Group")).unwrap() {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![1, 1]);
+            assert_eq!(tensor.data, vec![2.0]);
+        }
+        other => panic!("expected tensor column, got {other:?}"),
+    }
+
+    let _ = fs::remove_file(&path);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn parquetinfo_reports_schema_and_row_groups() {
+    let path = unique_path("parquetinfo_basic").with_extension("parquet");
+    write_sample_parquet(&path);
+
+    let info = match block_on(parquetinfo_builtin(Value::from(
+        path.to_string_lossy().to_string(),
+    )))
+    .expect("parquetinfo")
+    {
+        Value::Struct(info) => info,
+        other => panic!("expected struct, got {other:?}"),
+    };
+    assert_eq!(info.fields.get("NumRows"), Some(&Value::Num(3.0)));
+    assert_eq!(info.fields.get("NumVariables"), Some(&Value::Num(4.0)));
+    match info.fields.get("VariableNames").unwrap() {
+        Value::StringArray(array) => assert_eq!(
+            array.data,
+            vec![
+                "Name".to_string(),
+                "Score".to_string(),
+                "Passed".to_string(),
+                "Group".to_string()
+            ]
+        ),
+        other => panic!("expected variable names, got {other:?}"),
+    }
+    match info.fields.get("RowGroups").unwrap() {
+        Value::Struct(row_groups) => {
+            assert!(row_groups.fields.contains_key("RowGroup1"));
+            assert!(row_groups.fields.contains_key("RowGroup2"));
+        }
+        other => panic!("expected row group struct, got {other:?}"),
+    }
+
+    let _ = fs::remove_file(&path);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn parquetread_rejects_rowfilter_until_predicates_are_available() {
+    let path = unique_path("parquetread_rowfilter").with_extension("parquet");
+    write_sample_parquet(&path);
+
+    let err = block_on(parquetread_builtin(
+        Value::from(path.to_string_lossy().to_string()),
+        vec![Value::from("RowFilter"), Value::Bool(true)],
+    ))
+    .expect_err("expected rowfilter failure");
+    assert!(err.to_string().contains("RowFilter is not supported"));
+
     let _ = fs::remove_file(&path);
 }
 

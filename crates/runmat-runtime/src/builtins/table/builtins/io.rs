@@ -23,6 +23,45 @@ pub(crate) async fn readtable_builtin(path: Value, rest: Vec<Value>) -> BuiltinR
 }
 
 #[runtime_builtin(
+    name = "parquetread",
+    category = "io/tabular",
+    summary = "Read Parquet columnar data into a table.",
+    keywords = "parquetread,parquet,table,SelectedVariableNames,RowGroups,OutputType",
+    accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::struct_type),
+    descriptor(crate::builtins::table::PARQUETREAD_DESCRIPTOR),
+    builtin_path = "crate::builtins::table::builtins"
+)]
+pub(crate) async fn parquetread_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_table_class_registered();
+    let path_value = gather_if_needed_async(&path)
+        .await
+        .map_err(map_control_flow)?;
+    let args = gather_values(&rest).await?;
+    let options = ParquetReadOptions::parse(&args)?;
+    let resolved = resolve_path(&path_value)?;
+    read_parquet_table(&resolved, &options).await
+}
+
+#[runtime_builtin(
+    name = "parquetinfo",
+    category = "io/tabular",
+    summary = "Inspect Parquet file schema and row-group metadata.",
+    keywords = "parquetinfo,parquet,schema,row groups,metadata",
+    accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::struct_type),
+    descriptor(crate::builtins::table::PARQUETINFO_DESCRIPTOR),
+    builtin_path = "crate::builtins::table::builtins"
+)]
+pub(crate) async fn parquetinfo_builtin(path: Value) -> BuiltinResult<Value> {
+    let path_value = gather_if_needed_async(&path)
+        .await
+        .map_err(map_control_flow)?;
+    let resolved = resolve_path(&path_value)?;
+    parquet_file_info(&resolved).await
+}
+
+#[runtime_builtin(
     name = "spreadsheetImportOptions",
     category = "io/tabular",
     summary = "Create spreadsheet import options for readtable.",

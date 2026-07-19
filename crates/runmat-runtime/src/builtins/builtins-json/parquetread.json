@@ -1,0 +1,59 @@
+{
+  "title": "parquetread",
+  "category": "io/tabular",
+  "keywords": ["parquetread", "parquet", "table", "SelectedVariableNames", "RowGroups", "OutputType"],
+  "summary": "Read Parquet columnar data into a table.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Parquet decoding is host file I/O and schema conversion. GPU-resident inputs are gathered before the filename/options are inspected."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 5,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::table::tests::{parquetread_imports_common_column_types,parquetread_supports_selected_variables_and_row_groups,parquetread_rejects_rowfilter_until_predicates_are_available}",
+    "integration": null
+  },
+  "description": "`parquetread(filename)` decodes a Parquet file with Arrow-backed Parquet support and returns a RunMat table. Common numeric, logical, string, date, and timestamp columns are mapped to table variables.",
+  "behaviors": [
+    "`SelectedVariableNames` limits the imported variables, preserves the requested output order, and rejects unknown or duplicate names.",
+    "`RowGroups` accepts one-based row-group indices and decodes only those groups.",
+    "`OutputType` accepts `\"table\"`; `\"timetable\"` is rejected until timetable row-time synthesis for Parquet is implemented.",
+    "`RowFilter` is rejected until rowfilter predicate execution is available.",
+    "Unsupported nested or complex Parquet logical types raise deterministic import errors instead of producing partial columns."
+  ],
+  "examples": [
+    {
+      "description": "Read a Parquet file",
+      "input": "T = parquetread(\"measurements.parquet\")",
+      "output": "T = table"
+    },
+    {
+      "description": "Read selected columns and row groups",
+      "input": "T = parquetread(\"measurements.parquet\", \"SelectedVariableNames\", [\"time\", \"value\"], \"RowGroups\", 2)",
+      "output": "T = table"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does parquetread run on the GPU?",
+      "answer": "No. Parquet is a compressed columnar file format, so decoding and table construction happen on the host."
+    }
+  ],
+  "links": [
+    {"label": "parquetinfo", "url": "./parquetinfo"},
+    {"label": "readtable", "url": "./readtable"},
+    {"label": "parquetDatastore", "url": "./parquetDatastore"}
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/table/import/parquet.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/import/parquet.rs"
+  }
+}

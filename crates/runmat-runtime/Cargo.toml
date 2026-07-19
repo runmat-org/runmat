@@ -72,6 +72,10 @@ accelerate-src = { version = "0.3", optional = true }
 openblas-src = { version = "0.10", features = ["system", "cblas"], optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+arrow-array = "59.0.0"
+arrow-schema = "59.0.0"
+bytes = "1.12.0"
+parquet = { version = "59.0.0", features = ["arrow"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "charset", "gzip", "json", "rustls-tls"] }
 tokio = { version = "1.36", features = ["rt"] }
 
