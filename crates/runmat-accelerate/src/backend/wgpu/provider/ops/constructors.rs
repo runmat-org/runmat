@@ -896,18 +896,37 @@ impl WgpuProvider {
         );
 
         let len = entry.len;
-        if len == 0 {
-            return Err(anyhow!("diag: empty vector fallback"));
-        }
-        let (size, total) = diag_matrix_size_checked(len, offset)?;
+        let (size, _) = diag_matrix_size_checked(len, offset)?;
+        self.diag_from_vector_sized_exec(vector, offset, size, size)
+    }
+
+    pub(crate) fn diag_from_vector_sized_exec(
+        &self,
+        vector: &GpuTensorHandle,
+        offset: isize,
+        out_rows: usize,
+        out_cols: usize,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(vector)?;
+        diag_ensure_shape(&entry.shape)?;
+        let (rows, cols) = diag_rows_cols(&entry.shape);
+        ensure!(
+            diag_is_vector_like(rows, cols, entry.shape.len()),
+            "diag: input must be a vector"
+        );
+
+        let len = entry.len;
         ensure!(
             len <= u32::MAX as usize,
             "diag: vector is too large for GPU dispatch"
         );
         ensure!(
-            size <= u32::MAX as usize,
+            out_rows <= u32::MAX as usize && out_cols <= u32::MAX as usize,
             "diag: result dimension exceeds GPU dispatch limits"
         );
+        let total = out_rows
+            .checked_mul(out_cols)
+            .ok_or_else(|| anyhow!("diag: result size exceeds GPU dispatch limits"))?;
         ensure!(
             total <= u32::MAX as usize,
             "diag: result size exceeds GPU dispatch limits"
@@ -916,6 +935,9 @@ impl WgpuProvider {
             .map_err(|_| anyhow!("diag: offset magnitude exceeds GPU limits"))?;
 
         let out_buffer = self.create_storage_buffer(total, "runmat-diag-vec-out");
+        if len == 0 || total == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, vec![out_rows, out_cols], total));
+        }
         {
             let mut enc =
                 self.device_ref()
@@ -933,9 +955,13 @@ impl WgpuProvider {
 
         let params = crate::backend::wgpu::params::DiagFromVectorParams {
             len: len as u32,
-            size: size as u32,
+            rows: out_rows as u32,
+            cols: out_cols as u32,
+            _pad0: 0,
             offset: offset_i32,
-            _pad: 0,
+            _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,
         };
         let params_buffer = self.uniform_buffer(&params, "runmat-diag-vec-params");
         let bind_group = self
@@ -971,7 +997,7 @@ impl WgpuProvider {
             "runmat-diag-vec-pass",
         );
 
-        Ok(self.register_existing_buffer(out_buffer, vec![size, size], total))
+        Ok(self.register_existing_buffer(out_buffer, vec![out_rows, out_cols], total))
     }
     pub(crate) fn diag_extract_exec(
         &self,
@@ -987,7 +1013,8 @@ impl WgpuProvider {
         );
         let diag_len = diag_length(rows, cols, offset);
         if diag_len == 0 {
-            return Err(anyhow!("diag: empty diagonal fallback"));
+            let out_buffer = self.create_storage_buffer(0, "runmat-diag-extract-empty");
+            return Ok(self.register_existing_buffer(out_buffer, vec![0, 1], 0));
         }
         ensure!(
             diag_len <= u32::MAX as usize,
@@ -1098,6 +1125,49 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 }}
 "#
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_accelerate_api::{AccelProvider, HostTensorView};
+
+    #[tokio::test]
+    async fn wgpu_diag_vector_sized_and_extract_match_column_major_cpu() {
+        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let vector = [3.0, 5.0, 7.0];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &vector,
+                shape: &[3, 1],
+            })
+            .expect("upload vector");
+        let placed = provider
+            .diag_from_vector_sized(&handle, -1, 5, 3)
+            .expect("diag from vector");
+        let placed_host = provider.download(&placed).await.expect("download placed");
+        assert_eq!(placed_host.shape, vec![5, 3]);
+        assert_eq!(
+            placed_host.data,
+            vec![0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0, 0.0]
+        );
+
+        let extracted = provider.diag_extract(&placed, -1).expect("diag extract");
+        let extracted_host = provider
+            .download(&extracted)
+            .await
+            .expect("download extracted");
+        assert_eq!(extracted_host.shape, vec![3, 1]);
+        assert_eq!(extracted_host.data, vector.to_vec());
+
+        let empty = provider.diag_extract(&placed, 10).expect("empty extract");
+        let empty_host = provider.download(&empty).await.expect("download empty");
+        assert_eq!(empty_host.shape, vec![0, 1]);
+        assert!(empty_host.data.is_empty());
+    }
 }
 
 fn column_major_strides_checked(shape: &[usize]) -> Result<Vec<usize>> {

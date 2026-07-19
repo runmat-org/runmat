@@ -849,9 +849,13 @@ pub struct FspecialParamsF32 {
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct DiagFromVectorParams {
     pub len: u32,
-    pub size: u32,
+    pub rows: u32,
+    pub cols: u32,
+    pub _pad0: u32,
     pub offset: i32,
-    pub _pad: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+    pub _pad3: u32,
 }
 
 #[repr(C)]

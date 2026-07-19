@@ -2786,6 +2786,31 @@ impl AccelProvider for InProcessProvider {
             "diag: input must be a vector"
         );
 
+        let len = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&vector.buffer_id)
+                .map(|data| data.len())
+                .ok_or_else(|| anyhow!("diag: unknown buffer {}", vector.buffer_id))?
+        };
+        let (size, _) = diag_matrix_size(len, offset)?;
+        self.diag_from_vector_sized(vector, offset, size, size)
+    }
+
+    fn diag_from_vector_sized(
+        &self,
+        vector: &GpuTensorHandle,
+        offset: isize,
+        out_rows: usize,
+        out_cols: usize,
+    ) -> Result<GpuTensorHandle> {
+        ensure_diag_shape("diag", &vector.shape)?;
+        let (rows, cols) = rows_cols(&vector.shape);
+        ensure!(
+            is_vector_like(rows, cols, vector.shape.len()),
+            "diag: input must be a vector"
+        );
+
         let data = {
             let guard = registry().lock().unwrap();
             guard
@@ -2793,19 +2818,20 @@ impl AccelProvider for InProcessProvider {
                 .cloned()
                 .ok_or_else(|| anyhow!("diag: unknown buffer {}", vector.buffer_id))?
         };
-        let len = data.len();
-        let (size, total) = diag_matrix_size(len, offset)?;
+        let total = out_rows
+            .checked_mul(out_cols)
+            .ok_or_else(|| anyhow!("diag: result size exceeds limits"))?;
         let mut out = vec![0.0; total];
         for (idx, &value) in data.iter().enumerate() {
             let (row, col) = diagonal_target_index(idx, offset);
-            if row < size && col < size {
-                out[row + col * size] = value;
+            if row < out_rows && col < out_cols {
+                out[row + col * out_rows] = value;
             }
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         registry().lock().unwrap().insert(id, out);
         Ok(GpuTensorHandle {
-            shape: vec![size, size],
+            shape: vec![out_rows, out_cols],
             device_id: 0,
             buffer_id: id,
         })

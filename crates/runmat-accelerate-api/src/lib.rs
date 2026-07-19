@@ -1449,6 +1449,21 @@ pub trait AccelProvider: Send + Sync {
         ))
     }
 
+    /// Construct a diagonal matrix with an explicit shape from a vector-like tensor.
+    /// `offset` matches MATLAB semantics; values that do not fit inside the requested
+    /// rectangle are ignored.
+    fn diag_from_vector_sized(
+        &self,
+        _vector: &GpuTensorHandle,
+        _offset: isize,
+        _rows: usize,
+        _cols: usize,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "diag_from_vector_sized not supported by provider"
+        ))
+    }
+
     /// Extract a diagonal from a matrix-like tensor. The result is always a column vector.
     fn diag_extract(
         &self,

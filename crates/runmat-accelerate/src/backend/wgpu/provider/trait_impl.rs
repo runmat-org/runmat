@@ -243,6 +243,16 @@ impl AccelProvider for WgpuProvider {
         self.diag_from_vector_exec(vector, offset)
     }
 
+    fn diag_from_vector_sized(
+        &self,
+        vector: &GpuTensorHandle,
+        offset: isize,
+        rows: usize,
+        cols: usize,
+    ) -> Result<GpuTensorHandle> {
+        self.diag_from_vector_sized_exec(vector, offset, rows, cols)
+    }
+
     fn diag_extract(&self, matrix: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
         self.diag_extract_exec(matrix, offset)
     }

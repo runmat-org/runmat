@@ -28,7 +28,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::array::shape::diag::tests",
-    "integration": "builtins::array::shape::diag::tests::diag_gpu_roundtrip"
+    "integration": "builtins::array::shape::diag::tests::diag_wgpu_rectangular_and_extract_paths_stay_resident"
   },
   "description": "`diag` either constructs a diagonal matrix from a vector or extracts a diagonal from a matrix. Offset handling and supported input classes follow MATLAB semantics.",
   "behaviors": [
@@ -115,7 +115,7 @@
     },
     {
       "question": "Do GPU results stay on the device?",
-      "answer": "Yes—providers with diag hooks operate entirely on the GPU. Providers without hooks perform a single host gather and upload, so downstream fused expressions still see a GPU handle. When you request `'like'` with a GPU prototype, the result is uploaded back to the device even if a host fallback was required."
+      "answer": "Yes. Real and logical gpuArray inputs use provider hooks for vector placement, explicit rectangular sizes, `'vector'` mode, and matrix diagonal extraction. Complex, character, and conversion-heavy template forms use the host fallback."
     },
     {
       "question": "Is the offset argument required to be an integer?",
@@ -224,8 +224,8 @@
     "label": "`crates/runmat-runtime/src/builtins/array/shape/diag.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/diag.rs"
   },
-  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the auto-offload planner keeps residency on the GPU when expressions make use of GPU providers. Even when the provider lacks `diag_from_vector` / `diag_extract`, the builtin gathers once on the host, performs the diagonal operation, and re-uploads the result so later GPU-friendly ops can continue without intervention.\n\nTo preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` to move data to the GPU. That mirrors MATLAB's behaviour while still allowing RunMat's planner to decide whether the GPU offers an advantage for the surrounding computation.\n\nSince MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.",
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the auto-offload planner keeps residency on the GPU when expressions make use of GPU providers. For `diag`, real and logical GPU inputs stay resident when the active provider exposes the required diagonal hooks. If those hooks are missing, or if the requested class semantics require host conversion, the builtin gathers once and returns the host result unless a GPU `'like'` prototype explicitly requests device residency.\n\nTo preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` to move data to the GPU. That mirrors MATLAB's behaviour while still allowing RunMat's planner to decide whether the GPU offers an advantage for the surrounding computation.\n\nSince MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.",
   "gpu_behavior": [
-    "When the input lives on the GPU, RunMat calls the acceleration provider's `diag_from_vector` or `diag_extract` hook (see the GPU spec). Providers that do not expose these hooks fall back to a host round-trip: the input is gathered once, the diagonal computation runs on the CPU, and the result is uploaded back to the device. Size overrides or the `'vector'` option also trigger the host path because they are not yet exposed through provider hooks. `'like'` requests are honoured regardless of the path: GPU prototypes stay on the device, while logical or complex prototypes adjust the element type accordingly."
+    "When a real or logical input lives on the GPU, RunMat calls the acceleration provider's `diag_from_vector`, `diag_from_vector_sized`, `diag_extract`, or metadata-only `reshape` hook as appropriate. That covers native vector-to-matrix placement, explicit rectangular size overrides, `'vector'` mode, matrix diagonal extraction, and empty out-of-bounds diagonals without gathering. Providers that do not expose these hooks fall back to a host result. Complex, character, and conversion-heavy template forms also use the host path so MATLAB-compatible class conversion semantics remain intact."
   ]
 }
