@@ -509,13 +509,26 @@ async fn resample_builtin(x: Value, p: Value, q: Value, rest: Vec<Value>) -> Bui
         _ => {}
     }
 
-    let input = SampleInput::from_value(x, RESAMPLE_NAME).await?;
     let mut p = parse_factor(&p, RESAMPLE_NAME).await?;
     let mut q = parse_factor(&q, RESAMPLE_NAME).await?;
     let divisor = gcd(p, q);
     p /= divisor;
     q /= divisor;
     let options = parse_resample_options(rest, p, q).await?;
+    if let Value::GpuTensor(handle) = &x {
+        if let Some(eval) = resample_gpu(handle, p, q, &options).await? {
+            return match requested_outputs {
+                Some(1) => Ok(Value::OutputList(vec![eval.y])),
+                Some(2) => Ok(Value::OutputList(vec![
+                    eval.y,
+                    Value::Tensor(filter_tensor(eval.filter)?),
+                ])),
+                None => Ok(eval.y),
+                _ => unreachable!("output count was validated before evaluation"),
+            };
+        }
+    }
+    let input = SampleInput::from_value(x, RESAMPLE_NAME).await?;
     let eval = apply_resample(input, p, q, &options)?;
     match requested_outputs {
         Some(1) => Ok(Value::OutputList(vec![eval.y])),
@@ -572,6 +585,154 @@ struct ResampleEval {
     filter: Vec<f64>,
 }
 
+async fn resample_gpu(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    p: usize,
+    q: usize,
+    options: &ResampleOptions,
+) -> BuiltinResult<Option<ResampleEval>> {
+    if runmat_accelerate_api::handle_storage(handle)
+        != runmat_accelerate_api::GpuTensorStorage::Real
+    {
+        return Ok(None);
+    }
+
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
+        return Ok(None);
+    };
+    let handle_len = checked_product(&handle.shape)
+        .ok_or_else(|| sample_error(RESAMPLE_NAME, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
+    let mut shape = canonical_shape(handle.shape.clone(), handle_len);
+    let dim = options
+        .dim
+        .unwrap_or_else(|| first_non_singleton_dim(&shape));
+    if dim >= shape.len() {
+        shape.resize(dim + 1, 1);
+    }
+
+    let input_len = shape[dim];
+    let output_len = resample_output_len(input_len, p, q)
+        .ok_or_else(|| sample_error(RESAMPLE_NAME, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
+    let mut output_shape = shape.clone();
+    output_shape[dim] = output_len;
+
+    if input_len == 0 || output_len == 0 {
+        return match provider.zeros(&output_shape) {
+            Ok(output) => Ok(Some(ResampleEval {
+                y: wrap_resampled_gpu(handle, output),
+                filter: options.filter.clone(),
+            })),
+            Err(_) => Ok(None),
+        };
+    }
+
+    let delay = options.filter.len() / 2;
+    let gather_span_len = output_len
+        .checked_sub(1)
+        .and_then(|last| last.checked_mul(q))
+        .and_then(|last| last.checked_add(delay))
+        .and_then(|last| last.checked_add(1))
+        .ok_or_else(|| sample_error(RESAMPLE_NAME, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
+    let scatter_span_len = input_len
+        .checked_sub(1)
+        .and_then(|last| last.checked_mul(p))
+        .and_then(|last| last.checked_add(1))
+        .ok_or_else(|| sample_error(RESAMPLE_NAME, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
+    let padded_len = gather_span_len.max(scatter_span_len);
+    let mut padded_shape = shape.clone();
+    padded_shape[dim] = padded_len;
+
+    let Some(scatter_indices) =
+        upsample_linear_indices(&shape, dim, input_len, padded_len, p, 0, RESAMPLE_NAME)?
+    else {
+        return Ok(None);
+    };
+    let Some(gather_indices) = downsample_linear_indices(
+        &padded_shape,
+        dim,
+        padded_len,
+        output_len,
+        q,
+        delay,
+        RESAMPLE_NAME,
+    )?
+    else {
+        return Ok(None);
+    };
+
+    let padded = match provider.zeros(&padded_shape) {
+        Ok(handle) => handle,
+        Err(_) => return Ok(None),
+    };
+    if provider
+        .scatter_linear(&padded, &scatter_indices, handle)
+        .is_err()
+    {
+        let _ = provider.free(&padded);
+        return Ok(None);
+    }
+
+    let filter_shape = [options.filter.len(), 1usize];
+    let b_handle = match provider.upload(&runmat_accelerate_api::HostTensorView {
+        data: &options.filter,
+        shape: &filter_shape,
+    }) {
+        Ok(handle) => handle,
+        Err(_) => {
+            let _ = provider.free(&padded);
+            return Ok(None);
+        }
+    };
+    let a_coeff = [1.0f64];
+    let a_shape = [1usize, 1usize];
+    let a_handle = match provider.upload(&runmat_accelerate_api::HostTensorView {
+        data: &a_coeff,
+        shape: &a_shape,
+    }) {
+        Ok(handle) => handle,
+        Err(_) => {
+            let _ = provider.free(&b_handle);
+            let _ = provider.free(&padded);
+            return Ok(None);
+        }
+    };
+
+    let filter_result = match provider
+        .iir_filter(
+            &b_handle,
+            &a_handle,
+            &padded,
+            runmat_accelerate_api::ProviderIirFilterOptions { dim, zi: None },
+        )
+        .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            let _ = provider.free(&a_handle);
+            let _ = provider.free(&b_handle);
+            let _ = provider.free(&padded);
+            return Ok(None);
+        }
+    };
+
+    let output = provider.gather_linear(&filter_result.output, &gather_indices, &output_shape);
+    if let Some(final_state) = &filter_result.final_state {
+        let _ = provider.free(final_state);
+    }
+    let _ = provider.free(&filter_result.output);
+    let _ = provider.free(&a_handle);
+    let _ = provider.free(&b_handle);
+    let _ = provider.free(&padded);
+
+    match output {
+        Ok(output) => Ok(Some(ResampleEval {
+            y: wrap_resampled_gpu(handle, output),
+            filter: options.filter.clone(),
+        })),
+        Err(_) => Ok(None),
+    }
+}
+
 async fn parse_resample_options(
     rest: Vec<Value>,
     p: usize,
@@ -624,7 +785,7 @@ async fn parse_resample_filter_spec(args: &[Value], p: usize, q: usize) -> Built
             if let Some(n) = scalar_integer_option(&args[0]).await? {
                 design_resample_filter(p, q, n, DEFAULT_RESAMPLE_BETA)
             } else {
-                parse_filter_vector(args[0].clone())
+                parse_filter_vector(args[0].clone()).await
             }
         }
         2 => {
@@ -686,7 +847,21 @@ async fn scalar_f64_option(value: &Value) -> BuiltinResult<f64> {
     Ok(raw)
 }
 
-fn parse_filter_vector(value: Value) -> BuiltinResult<Vec<f64>> {
+async fn parse_filter_vector(value: Value) -> BuiltinResult<Vec<f64>> {
+    let value = match value {
+        Value::GpuTensor(handle) => Value::Tensor(
+            gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|err| {
+                    sample_error_with_detail(
+                        RESAMPLE_NAME,
+                        &SAMPLE_ERROR_GATHER_FAILED,
+                        err.message(),
+                    )
+                })?,
+        ),
+        other => other,
+    };
     let tensor = tensor::value_into_tensor_for(RESAMPLE_NAME, value).map_err(|err| {
         sample_error_with_detail(RESAMPLE_NAME, &SAMPLE_ERROR_INVALID_OPTION, err)
     })?;
@@ -943,6 +1118,21 @@ fn wrap_sample_rate_gpu(
         );
         gpu_helpers::resident_gpu_value(output)
     }
+}
+
+fn wrap_resampled_gpu(
+    source: &runmat_accelerate_api::GpuTensorHandle,
+    output: runmat_accelerate_api::GpuTensorHandle,
+) -> Value {
+    if let Some(precision) = runmat_accelerate_api::handle_precision(source) {
+        runmat_accelerate_api::set_handle_precision(&output, precision);
+    }
+    runmat_accelerate_api::set_handle_storage(
+        &output,
+        runmat_accelerate_api::GpuTensorStorage::Real,
+    );
+    runmat_accelerate_api::clear_handle_logical(&output);
+    gpu_helpers::resident_gpu_value(output)
 }
 
 fn upsample_linear_indices(
@@ -1629,6 +1819,102 @@ mod tests {
         };
         assert_eq!(downsampled.shape, vec![1, 3]);
         assert_eq!(downsampled.data, vec![1.0, 3.0, 5.0]);
+    }
+
+    #[test]
+    fn resample_gpu_composes_scatter_filter_and_gather_resident_output() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &input.data,
+                    shape: &input.shape,
+                })
+                .expect("upload input");
+            provider.reset_telemetry();
+
+            let out = call_resample(vec![
+                Value::GpuTensor(handle.clone()),
+                Value::Num(2.0),
+                Value::Num(1.0),
+                tensor(vec![0.0, 1.0, 0.0], vec![1, 3]),
+            ]);
+            let Value::GpuTensor(out_handle) = out else {
+                panic!("expected resident gpu tensor");
+            };
+            assert_eq!(out_handle.shape, vec![1, 6]);
+
+            let gathered =
+                test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
+            assert_eq!(gathered.shape, vec![1, 6]);
+            assert_eq!(gathered.data, vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]);
+            let _ = provider.free(&handle);
+        });
+    }
+
+    #[test]
+    fn resample_gpu_two_outputs_return_resident_signal_and_host_filter() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![1, 5]).unwrap();
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &input.data,
+                    shape: &input.shape,
+                })
+                .expect("upload input");
+
+            let _guard = crate::output_count::push_output_count(Some(2));
+            let out = block_on(resample_builtin(
+                Value::GpuTensor(handle.clone()),
+                Value::Num(1.0),
+                Value::Num(2.0),
+                vec![tensor(vec![0.0, 1.0, 0.0], vec![1, 3])],
+            ))
+            .expect("gpu resample");
+            let Value::OutputList(outputs) = out else {
+                panic!("expected output list");
+            };
+            assert_eq!(outputs.len(), 2);
+            let Value::GpuTensor(signal_handle) = &outputs[0] else {
+                panic!("expected resident signal output");
+            };
+            assert_eq!(signal_handle.shape, vec![1, 3]);
+            let gathered = test_support::gather(outputs[0].clone()).expect("gather signal output");
+            assert_eq!(gathered.data, vec![1.0, 3.0, 5.0]);
+            let Value::Tensor(filter) = &outputs[1] else {
+                panic!("expected host filter tensor");
+            };
+            assert_eq!(filter.data, vec![0.0, 1.0, 0.0]);
+            let _ = provider.free(&handle);
+        });
+    }
+
+    #[test]
+    fn resample_gpu_short_filter_high_decimation_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new((1..=10).map(f64::from).collect(), vec![1, 10]).unwrap();
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &input.data,
+                    shape: &input.shape,
+                })
+                .expect("upload input");
+
+            let out = call_resample(vec![
+                Value::GpuTensor(handle.clone()),
+                Value::Num(1.0),
+                Value::Num(10.0),
+                tensor(vec![0.0, 1.0, 0.0], vec![1, 3]),
+            ]);
+            let Value::GpuTensor(out_handle) = out else {
+                panic!("expected resident gpu tensor");
+            };
+            assert_eq!(out_handle.shape, vec![1, 1]);
+            let gathered =
+                test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
+            assert_eq!(gathered.data, vec![1.0]);
+            let _ = provider.free(&handle);
+        });
     }
 
     #[test]
