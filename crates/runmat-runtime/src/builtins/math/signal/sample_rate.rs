@@ -543,10 +543,17 @@ async fn sample_rate_builtin(
         Some(value) => parse_phase(value, factor, builtin).await?,
         None => 0,
     };
-    if op == SampleOp::Down {
-        if let Value::GpuTensor(handle) = &x {
-            if let Some(output) = downsample_gpu(handle, factor, phase, builtin)? {
-                return Ok(output);
+    if let Value::GpuTensor(handle) = &x {
+        match op {
+            SampleOp::Up => {
+                if let Some(output) = upsample_gpu(handle, factor, phase, builtin)? {
+                    return Ok(output);
+                }
+            }
+            SampleOp::Down => {
+                if let Some(output) = downsample_gpu(handle, factor, phase, builtin)? {
+                    return Ok(output);
+                }
             }
         }
     }
@@ -832,6 +839,53 @@ fn apply_sample_rate(
     }
 }
 
+fn upsample_gpu(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    factor: usize,
+    phase: usize,
+    builtin: &'static str,
+) -> BuiltinResult<Option<Value>> {
+    let handle_len = checked_product(&handle.shape)
+        .ok_or_else(|| sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
+    let shape = canonical_shape(handle.shape.clone(), handle_len);
+    let dim = first_non_singleton_dim(&shape);
+    let input_len = shape[dim];
+    let output_len = output_len(input_len, factor, phase, SampleOp::Up)
+        .ok_or_else(|| sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
+    let mut output_shape = shape.clone();
+    output_shape[dim] = output_len;
+
+    if factor == 1 && phase == 0 {
+        return Ok(Some(wrap_sample_rate_gpu(handle, handle.clone())));
+    }
+
+    if runmat_accelerate_api::handle_storage(handle)
+        != runmat_accelerate_api::GpuTensorStorage::Real
+    {
+        return Ok(None);
+    }
+
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
+        return Ok(None);
+    };
+    let Some(indices) =
+        upsample_linear_indices(&shape, dim, input_len, output_len, factor, phase, builtin)?
+    else {
+        return Ok(None);
+    };
+    let output = match provider.zeros(&output_shape) {
+        Ok(output) => output,
+        Err(_) => return Ok(None),
+    };
+    match provider.scatter_linear(&output, &indices, handle) {
+        Ok(()) => Ok(Some(wrap_sample_rate_gpu(handle, output))),
+        Err(_) => {
+            let _ = provider.free(&output);
+            Ok(None)
+        }
+    }
+}
+
 fn downsample_gpu(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     factor: usize,
@@ -849,7 +903,7 @@ fn downsample_gpu(
     output_shape[dim] = output_len;
 
     if factor == 1 && phase == 0 {
-        return Ok(Some(wrap_downsampled_gpu(handle, handle.clone())));
+        return Ok(Some(wrap_sample_rate_gpu(handle, handle.clone())));
     }
 
     if runmat_accelerate_api::handle_storage(handle)
@@ -868,12 +922,12 @@ fn downsample_gpu(
     };
 
     match provider.gather_linear(handle, &indices, &output_shape) {
-        Ok(output) => Ok(Some(wrap_downsampled_gpu(handle, output))),
+        Ok(output) => Ok(Some(wrap_sample_rate_gpu(handle, output))),
         Err(_) => Ok(None),
     }
 }
 
-fn wrap_downsampled_gpu(
+fn wrap_sample_rate_gpu(
     source: &runmat_accelerate_api::GpuTensorHandle,
     output: runmat_accelerate_api::GpuTensorHandle,
 ) -> Value {
@@ -889,6 +943,59 @@ fn wrap_downsampled_gpu(
         );
         gpu_helpers::resident_gpu_value(output)
     }
+}
+
+fn upsample_linear_indices(
+    shape: &[usize],
+    dim: usize,
+    input_len: usize,
+    output_len: usize,
+    factor: usize,
+    phase: usize,
+    builtin: &'static str,
+) -> BuiltinResult<Option<Vec<u32>>> {
+    let input_count = checked_element_count(shape)
+        .ok_or_else(|| sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
+    if input_count > u32::MAX as usize {
+        return Ok(None);
+    }
+
+    let leading = checked_product(&shape[..dim])
+        .ok_or_else(|| sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
+    let trailing = checked_product(&shape[dim + 1..])
+        .ok_or_else(|| sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
+    let mut indices = Vec::new();
+    indices
+        .try_reserve_exact(input_count)
+        .map_err(|_| sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
+
+    for trail in 0..trailing {
+        for input_pos in 0..input_len {
+            let output_pos = input_pos
+                .checked_mul(factor)
+                .and_then(|offset| offset.checked_add(phase))
+                .ok_or_else(|| sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
+            let trail_offset = output_len
+                .checked_mul(trail)
+                .and_then(|offset| offset.checked_add(output_pos))
+                .ok_or_else(|| sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
+            for before in 0..leading {
+                let Some(dst) = before.checked_add(
+                    leading
+                        .checked_mul(trail_offset)
+                        .ok_or_else(|| sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW))?,
+                ) else {
+                    return Err(sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW));
+                };
+                let Ok(dst) = u32::try_from(dst) else {
+                    return Ok(None);
+                };
+                indices.push(dst);
+            }
+        }
+    }
+
+    Ok(Some(indices))
 }
 
 fn downsample_linear_indices(
@@ -1305,6 +1412,37 @@ mod tests {
             tensor.data,
             vec![0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0]
         );
+    }
+
+    #[test]
+    fn upsample_gpu_uses_provider_scatter_and_preserves_residency() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &input.data,
+                    shape: &input.shape,
+                })
+                .expect("upload input");
+            provider.reset_telemetry();
+
+            let out = call_upsample(vec![
+                Value::GpuTensor(handle.clone()),
+                Value::Num(2.0),
+                Value::Num(1.0),
+            ]);
+            let Value::GpuTensor(out_handle) = out else {
+                panic!("expected resident gpu tensor");
+            };
+            assert_eq!(out_handle.shape, vec![4, 2]);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let gathered =
+                test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
+            assert_eq!(gathered.shape, vec![4, 2]);
+            assert_eq!(gathered.data, vec![0.0, 1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0]);
+            let _ = provider.free(&handle);
+        });
     }
 
     #[test]
