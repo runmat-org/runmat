@@ -1,0 +1,15 @@
+{
+  "title": "h5writeatt",
+  "category": "io/hdf5",
+  "keywords": ["h5writeatt", "hdf5", "attribute", "dataset", "group", "file", "io"],
+  "summary": "Write an HDF5 attribute on a file, group, or dataset.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Attribute writes are host file I/O and are not acceleration operations."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::io::hdf5::tests::h5writeatt_h5info_and_h5disp_report_metadata", "integration": null},
+  "description": "`h5writeatt(filename, location, attribute, data)` creates or replaces an attribute at the file root, a group, or a dataset.",
+  "behaviors": ["Numeric, logical, string, and char attributes are supported.", "Unsupported MATLAB value classes raise deterministic unsupported-type errors."],
+  "examples": [{"description": "Write units metadata", "input": "h5writeatt('out.h5', '/A', 'units', 'm/s');"}],
+  "links": [{"label": "h5info", "url": "./h5info"}, {"label": "h5disp", "url": "./h5disp"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/io/hdf5.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5.rs"}
+}

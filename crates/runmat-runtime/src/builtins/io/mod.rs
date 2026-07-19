@@ -7,6 +7,7 @@ pub mod disp;
 pub mod display;
 pub mod filetext;
 pub mod format;
+pub mod hdf5;
 pub mod http;
 pub mod importdata;
 pub mod input;
