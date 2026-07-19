@@ -405,6 +405,9 @@ fn canonical_property_name(name: &str) -> String {
         "gateactivationfunction" => "GateActivationFunction",
         "normalization" => "Normalization",
         "splitcomplexinputs" => "SplitComplexInputs",
+        "weights" => "Weights",
+        "bias" => "Bias",
+        "classes" => "Classes",
         "epsilon" => "Epsilon",
         "alphalearnratefactor" => "AlphaLearnRateFactor",
         "betalearnratefactor" => "BetaLearnRateFactor",
@@ -476,6 +479,7 @@ pub(super) fn layer_names(layers: &[Value], function: &'static str) -> BuiltinRe
 pub(crate) mod graph;
 pub(crate) mod layers;
 pub(crate) mod losses;
+pub(crate) mod model;
 pub(crate) mod sequences;
 pub(crate) mod training;
 

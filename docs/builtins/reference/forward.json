@@ -1,0 +1,32 @@
+{
+  "title": "forward",
+  "category": "deep_learning",
+  "keywords": ["forward", "dlnetwork", "deep learning", "predict"],
+  "summary": "Run a supported dlnetwork forward pass.",
+  "description": "`forward(net,X)` evaluates a RunMat `dlnetwork` compatibility object over numeric predictor data.",
+  "behaviors": [
+    "Supports sequential feed-forward networks made from `featureInputLayer`, `fullyConnectedLayer`, `reluLayer`, `eluLayer`, `softmaxLayer`, `classificationLayer`, and `regressionLayer`.",
+    "Numeric matrix inputs are interpreted as observations in rows and predictors in columns.",
+    "`dlarray` inputs are unwrapped for execution, and the output is wrapped back into a `dlarray` preserving the input format metadata.",
+    "Name-value execution options, recurrent state outputs, branching DAG execution, automatic differentiation, and training-time behavior are not implemented in this slice and raise explicit compatibility errors."
+  ],
+  "examples": [
+    {
+      "description": "Evaluate a feed-forward dlnetwork",
+      "input": "layers = {featureInputLayer(2,'Name','in'); fullyConnectedLayer(2,'Name','fc'); softmaxLayer('Name','prob')};\nnet = dlnetwork(layers);\ny = forward(net, [1 2; 3 4])",
+      "output": "y is a numeric matrix with one row per observation."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "Y = forward(net, X)",
+      "output": "Network scores or activations."
+    }
+  },
+  "gpu_residency": "`forward` currently gathers provider-resident `gpuArray` inputs to host before evaluating the supported layer chain. Native Deep Learning provider kernels remain future acceleration work.",
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/deep_learning/model.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/model.rs"
+  }
+}

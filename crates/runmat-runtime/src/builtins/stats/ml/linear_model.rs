@@ -477,6 +477,11 @@ pub(crate) async fn predict_builtin(
         .await
         .map_err(|err| predict_invalid(err.message))?;
     let output = match model {
+        Value::Object(object)
+            if crate::builtins::deep_learning::model::is_deep_learning_network_object(&object) =>
+        {
+            crate::builtins::deep_learning::model::predict_deep_learning_object(object, xnew, rest)?
+        }
         Value::Object(object) if object.class_name == CLASSIFICATION_TREE_CLASS => {
             predict_classification_tree_object(object, xnew, rest)?
         }

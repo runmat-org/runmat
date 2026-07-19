@@ -1,6 +1,7 @@
 use super::graph::*;
 use super::layers::*;
 use super::losses::*;
+use super::model::*;
 use super::sequences::*;
 use super::training::*;
 use futures::executor::block_on;
@@ -141,6 +142,154 @@ fn analyze_network_counts_layers() {
         panic!("expected analysis object");
     };
     assert_eq!(object.properties.get("NumLayers"), Some(&Value::Num(1.0)));
+}
+
+fn feature_network_layers() -> Value {
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        vec![
+            Value::String("Name".into()),
+            Value::String("features".into()),
+        ],
+    ))
+    .unwrap();
+    let fc = block_on(fully_connected_layer_builtin(
+        Value::Num(2.0),
+        vec![
+            Value::String("Name".into()),
+            Value::String("fc".into()),
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![1.0, -1.0, 0.0, 1.0], vec![2, 2]).unwrap()),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    let softmax = block_on(softmax_layer_builtin(vec![
+        Value::String("Name".into()),
+        Value::String("prob".into()),
+    ]))
+    .unwrap();
+    Value::Cell(CellArray::new(vec![input, fc, softmax], 3, 1).unwrap())
+}
+
+#[test]
+fn dlnetwork_materializes_metadata_and_learnables() {
+    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let Value::Object(object) = net else {
+        panic!("expected dlnetwork object");
+    };
+    assert_eq!(object.class_name, "dlnetwork");
+    assert_eq!(
+        object.properties.get("Initialized"),
+        Some(&Value::Bool(true))
+    );
+    let Value::StringArray(names) = object.properties.get("LayerNames").unwrap() else {
+        panic!("expected layer names");
+    };
+    assert_eq!(names.data, vec!["features", "fc", "prob"]);
+    let Value::Struct(learnables) = object.properties.get("Learnables").unwrap() else {
+        panic!("expected learnables struct");
+    };
+    let Value::Cell(values) = learnables.fields.get("Value").unwrap() else {
+        panic!("expected learnable values");
+    };
+    assert_eq!(values.data.len(), 2);
+}
+
+#[test]
+fn dlnetwork_initialize_false_preserves_uninitialized_learnables() {
+    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let fc = block_on(fully_connected_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let layers = Value::Cell(CellArray::new(vec![input, fc], 2, 1).unwrap());
+    let net = block_on(dlnetwork_builtin(vec![
+        layers,
+        Value::String("Initialize".into()),
+        Value::Bool(false),
+    ]))
+    .unwrap();
+    let Value::Object(object) = &net else {
+        panic!("expected dlnetwork object");
+    };
+    assert_eq!(
+        object.properties.get("Initialized"),
+        Some(&Value::Bool(false))
+    );
+    let Value::Struct(learnables) = object.properties.get("Learnables").unwrap() else {
+        panic!("expected learnables struct");
+    };
+    let Value::Cell(values) = learnables.fields.get("Value").unwrap() else {
+        panic!("expected learnable values");
+    };
+    assert!(values.data.is_empty());
+
+    let err = block_on(forward_builtin(
+        net,
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        vec![],
+    ))
+    .unwrap_err();
+    assert!(err.message.contains("layer is missing Weights"));
+}
+
+#[test]
+fn forward_and_predict_execute_supported_feedforward_networks() {
+    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let input = Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap());
+    let out = block_on(forward_builtin(net.clone(), input.clone(), vec![])).unwrap();
+    let Value::Tensor(tensor) = out else {
+        panic!("expected tensor output");
+    };
+    assert_eq!(tensor.shape, vec![2, 2]);
+    assert!((tensor.data[0] - 0.5).abs() < 1.0e-12);
+    assert!((tensor.data[1] - 0.8807970779778823).abs() < 1.0e-12);
+    assert!((tensor.data[2] - 0.5).abs() < 1.0e-12);
+    assert!((tensor.data[3] - 0.11920292202211755).abs() < 1.0e-12);
+
+    let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+        net,
+        input,
+        vec![],
+    ))
+    .unwrap();
+    let Value::Tensor(predicted) = predicted else {
+        panic!("expected predict tensor");
+    };
+    assert_eq!(predicted.shape, vec![2, 2]);
+    assert!((predicted.data[1] - 0.8807970779778823).abs() < 1.0e-12);
+}
+
+#[test]
+fn forward_preserves_dlarray_wrapper() {
+    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let data = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+    let dl = block_on(dlarray_builtin(data, vec![Value::String("CB".into())])).unwrap();
+    let out = block_on(forward_builtin(net, dl, vec![])).unwrap();
+    let Value::Object(object) = out else {
+        panic!("expected dlarray output");
+    };
+    assert_eq!(object.class_name, "dlarray");
+    assert_eq!(
+        object.properties.get("Format"),
+        Some(&Value::String("CB".into()))
+    );
+    assert!(matches!(
+        object.properties.get("Data"),
+        Some(Value::Tensor(_))
+    ));
+}
+
+#[test]
+fn dlnetwork_rejects_layers_without_forward_support() {
+    let input = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let lstm = block_on(lstm_layer_builtin(Value::Num(4.0), vec![])).unwrap();
+    let err = block_on(dlnetwork_builtin(vec![Value::Cell(
+        CellArray::new(vec![input, lstm], 2, 1).unwrap(),
+    )]))
+    .unwrap_err();
+    assert!(err
+        .message
+        .contains("is not supported for RunMat forward execution"));
 }
 
 #[test]
