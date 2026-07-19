@@ -582,7 +582,7 @@ impl WgpuProvider {
             entry.buffer.clone(),
             vec![rows, 1],
             entry.len,
-            entry.storage.clone(),
+            entry.storage,
         );
         Ok((handle, true))
     }

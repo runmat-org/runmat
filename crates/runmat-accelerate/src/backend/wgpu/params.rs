@@ -13,14 +13,16 @@ pub struct LenOpParams {
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct LinearGatherParams {
     pub count: u32,
-    pub _pad: [u32; 3],
+    pub lane_factor: u32,
+    pub _pad: [u32; 2],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct LinearScatterParams {
     pub count: u32,
-    pub _pad: [u32; 3],
+    pub lane_factor: u32,
+    pub _pad: [u32; 2],
 }
 
 #[repr(C)]

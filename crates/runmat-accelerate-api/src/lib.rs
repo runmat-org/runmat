@@ -229,7 +229,7 @@ pub fn handle_is_transposed(handle: &GpuTensorHandle) -> bool {
     handle_transpose_info(handle).is_some()
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GpuTensorStorage {
     Real,
     ComplexInterleaved,
@@ -1309,8 +1309,12 @@ pub trait AccelProvider: Send + Sync {
         None
     }
 
-    /// Gather elements from `source` at the provided zero-based linear `indices`, materialising
-    /// a dense tensor with the specified `output_shape`.
+    /// Gather logical elements from `source` at the provided zero-based linear `indices`,
+    /// materialising a dense tensor with the specified `output_shape`.
+    ///
+    /// Indices address MATLAB logical elements, not raw provider storage lanes. Providers that
+    /// store complex values as interleaved lanes must copy both lanes for each selected element
+    /// and preserve the source storage kind on the output handle.
     fn gather_linear(
         &self,
         _source: &GpuTensorHandle,
@@ -1320,9 +1324,12 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!("gather_linear not supported by provider"))
     }
 
-    /// Scatter the contents of `values` into `target` at the provided zero-based linear `indices`.
+    /// Scatter logical elements from `values` into `target` at the provided zero-based linear
+    /// `indices`.
     ///
-    /// The provider must ensure `values.len() == indices.len()` and update `target` in place.
+    /// Indices address MATLAB logical elements, not raw provider storage lanes. Providers must
+    /// ensure `values` has one logical element per index, copy all lanes for the handle storage
+    /// kind, and update `target` in place without changing its shape or storage.
     fn scatter_linear(
         &self,
         _target: &GpuTensorHandle,
@@ -1355,6 +1362,25 @@ pub trait AccelProvider: Send + Sync {
     /// Allocate a zero-initialised tensor with the provided shape on the device.
     fn zeros(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("zeros not supported by provider"))
+    }
+
+    /// Allocate a zero-initialised tensor with the provided shape and storage layout.
+    ///
+    /// `shape` is the logical MATLAB shape. Providers must allocate enough raw lanes for the
+    /// requested storage kind, e.g. two interleaved numeric lanes per logical element for complex
+    /// tensors.
+    fn zeros_with_storage(
+        &self,
+        shape: &[usize],
+        storage: GpuTensorStorage,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        if storage == GpuTensorStorage::Real {
+            self.zeros(shape)
+        } else {
+            Err(anyhow::anyhow!(
+                "zeros_with_storage not supported by provider for {storage:?}"
+            ))
+        }
     }
 
     /// Allocate a one-initialised tensor with the provided shape on the device.

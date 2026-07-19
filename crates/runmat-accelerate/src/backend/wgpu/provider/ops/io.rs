@@ -133,7 +133,7 @@ impl WgpuProvider {
         {
             GpuTensorStorage::ComplexInterleaved
         } else {
-            entry.storage.clone()
+            entry.storage
         };
         if entry.len == 0 {
             return Ok(HostTensorOwned {

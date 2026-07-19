@@ -1034,12 +1034,6 @@ fn upsample_gpu(
         return Ok(Some(wrap_sample_rate_gpu(handle, handle.clone())));
     }
 
-    if runmat_accelerate_api::handle_storage(handle)
-        != runmat_accelerate_api::GpuTensorStorage::Real
-    {
-        return Ok(None);
-    }
-
     let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
         return Ok(None);
     };
@@ -1048,7 +1042,8 @@ fn upsample_gpu(
     else {
         return Ok(None);
     };
-    let output = match provider.zeros(&output_shape) {
+    let storage = runmat_accelerate_api::handle_storage(handle);
+    let output = match provider.zeros_with_storage(&output_shape, storage) {
         Ok(output) => output,
         Err(_) => return Ok(None),
     };
@@ -1079,12 +1074,6 @@ fn downsample_gpu(
 
     if factor == 1 && phase == 0 {
         return Ok(Some(wrap_sample_rate_gpu(handle, handle.clone())));
-    }
-
-    if runmat_accelerate_api::handle_storage(handle)
-        != runmat_accelerate_api::GpuTensorStorage::Real
-    {
-        return Ok(None);
     }
 
     let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
@@ -1540,7 +1529,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -1690,6 +1679,72 @@ mod tests {
             assert_eq!(gathered.shape, vec![1, 2]);
             assert_eq!(gathered.data, vec![2.0, 4.0]);
             let _ = provider.free(&handle);
+        });
+    }
+
+    #[test]
+    fn upsample_complex_gpu_stays_resident_and_preserves_interleaved_storage() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &input).expect("upload");
+            provider.reset_telemetry();
+
+            let out = call_upsample(vec![
+                Value::GpuTensor(handle.clone()),
+                Value::Num(2.0),
+                Value::Num(1.0),
+            ]);
+            let Value::GpuTensor(out_handle) = out else {
+                panic!("expected resident gpu tensor");
+            };
+            assert_eq!(out_handle.shape, vec![1, 4]);
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out_handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let host = block_on(provider.download(&out_handle)).expect("download output");
+            assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(host.shape, vec![1, 4]);
+            assert_eq!(host.data, vec![0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 3.0, 4.0]);
+            let _ = provider.free(&handle);
+            let _ = provider.free(&out_handle);
+        });
+    }
+
+    #[test]
+    fn downsample_complex_gpu_stays_resident_and_gathers_logical_elements() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(
+                vec![(1.0, -1.0), (2.0, -2.0), (3.0, -3.0), (4.0, -4.0)],
+                vec![1, 4],
+            )
+            .unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &input).expect("upload");
+            provider.reset_telemetry();
+
+            let out = call_downsample(vec![
+                Value::GpuTensor(handle.clone()),
+                Value::Num(2.0),
+                Value::Num(1.0),
+            ]);
+            let Value::GpuTensor(out_handle) = out else {
+                panic!("expected resident gpu tensor");
+            };
+            assert_eq!(out_handle.shape, vec![1, 2]);
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out_handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let host = block_on(provider.download(&out_handle)).expect("download output");
+            assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(host.shape, vec![1, 2]);
+            assert_eq!(host.data, vec![2.0, -2.0, 4.0, -4.0]);
+            let _ = provider.free(&handle);
+            let _ = provider.free(&out_handle);
         });
     }
 

@@ -2298,6 +2298,11 @@ impl AccelProvider for InProcessProvider {
         indices: &[u32],
         output_shape: &[usize],
     ) -> Result<GpuTensorHandle> {
+        let storage = runmat_accelerate_api::handle_storage(source);
+        let lane_factor = match storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
         let data = {
             let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
             guard
@@ -2305,20 +2310,33 @@ impl AccelProvider for InProcessProvider {
                 .cloned()
                 .ok_or_else(|| anyhow!("gather_linear: unknown buffer {}", source.buffer_id))?
         };
-        let mut out = Vec::with_capacity(indices.len());
+        ensure!(
+            data.len() % lane_factor == 0,
+            "gather_linear: buffer {} length {} is not aligned to storage lane factor {}",
+            source.buffer_id,
+            data.len(),
+            lane_factor
+        );
+        let logical_len = data.len() / lane_factor;
+        let mut out = Vec::with_capacity(indices.len() * lane_factor);
         for (pos, &idx) in indices.iter().enumerate() {
             let lin = idx as usize;
             ensure!(
-                lin < data.len(),
-                "gather_linear: index {} (position {}) out of bounds for buffer {} (len={})",
+                lin < logical_len,
+                "gather_linear: index {} (position {}) out of bounds for buffer {} (logical_len={})",
                 lin,
                 pos,
                 source.buffer_id,
-                data.len()
+                logical_len
             );
-            out.push(data[lin]);
+            let start = lin * lane_factor;
+            out.extend_from_slice(&data[start..start + lane_factor]);
         }
-        Ok(self.allocate_tensor(out, output_shape.to_vec()))
+        let output = self.allocate_tensor_with_storage(out, output_shape.to_vec(), storage);
+        if runmat_accelerate_api::handle_is_logical(source) {
+            runmat_accelerate_api::set_handle_logical(&output, true);
+        }
+        Ok(output)
     }
 
     fn scatter_linear(
@@ -2327,6 +2345,18 @@ impl AccelProvider for InProcessProvider {
         indices: &[u32],
         values: &GpuTensorHandle,
     ) -> Result<()> {
+        let target_storage = runmat_accelerate_api::handle_storage(target);
+        let values_storage = runmat_accelerate_api::handle_storage(values);
+        ensure!(
+            target_storage == values_storage,
+            "scatter_linear: storage mismatch target={:?} values={:?}",
+            target_storage,
+            values_storage
+        );
+        let lane_factor = match target_storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
         let values_data = {
             let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
             guard.get(&values.buffer_id).cloned().ok_or_else(|| {
@@ -2334,25 +2364,36 @@ impl AccelProvider for InProcessProvider {
             })?
         };
         ensure!(
-            values_data.len() == indices.len(),
-            "scatter_linear: values length {} does not match indices length {}",
+            values_data.len() == indices.len() * lane_factor,
+            "scatter_linear: values raw length {} does not match index count {} for lane factor {}",
             values_data.len(),
-            indices.len()
+            indices.len(),
+            lane_factor
         );
         let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         let target_buf = guard
             .get_mut(&target.buffer_id)
             .ok_or_else(|| anyhow!("scatter_linear: unknown target buffer {}", target.buffer_id))?;
+        ensure!(
+            target_buf.len() % lane_factor == 0,
+            "scatter_linear: target length {} is not aligned to storage lane factor {}",
+            target_buf.len(),
+            lane_factor
+        );
+        let target_logical_len = target_buf.len() / lane_factor;
         for (pos, &idx) in indices.iter().enumerate() {
             let lin = idx as usize;
             ensure!(
-                lin < target_buf.len(),
-                "scatter_linear: index {} (position {}) out of bounds for target len {}",
+                lin < target_logical_len,
+                "scatter_linear: index {} (position {}) out of bounds for target logical len {}",
                 lin,
                 pos,
-                target_buf.len()
+                target_logical_len
             );
-            target_buf[lin] = values_data[pos];
+            let target_start = lin * lane_factor;
+            let values_start = pos * lane_factor;
+            target_buf[target_start..target_start + lane_factor]
+                .copy_from_slice(&values_data[values_start..values_start + lane_factor]);
         }
         Ok(())
     }
@@ -3067,14 +3108,23 @@ impl AccelProvider for InProcessProvider {
 
     fn zeros(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let len: usize = shape.iter().copied().product();
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut guard = registry().lock().unwrap();
-        guard.insert(id, vec![0.0; len]);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: 0,
-            buffer_id: id,
-        })
+        Ok(self.allocate_tensor(vec![0.0; len], shape.to_vec()))
+    }
+
+    fn zeros_with_storage(
+        &self,
+        shape: &[usize],
+        storage: GpuTensorStorage,
+    ) -> Result<GpuTensorHandle> {
+        let logical_len: usize = shape.iter().copied().product();
+        let lane_factor = match storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
+        let raw_len = logical_len
+            .checked_mul(lane_factor)
+            .ok_or_else(|| anyhow!("zeros_with_storage: tensor size overflow"))?;
+        Ok(self.allocate_tensor_with_storage(vec![0.0; raw_len], shape.to_vec(), storage))
     }
 
     fn zeros_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -8435,6 +8485,35 @@ mod tests {
             &div,
             &[(2.0 / 17.0, 9.0 / 17.0), (-4.5 / 13.0, 10.0 / 13.0)],
             &shape,
+        );
+    }
+
+    #[test]
+    fn linear_gather_and_scatter_copy_complex_logical_elements() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(9_000_150, Ordering::Relaxed);
+        let source = complex_handle(
+            &provider,
+            &[(1.0, 10.0), (2.0, 20.0), (3.0, 30.0), (4.0, 40.0)],
+            &[1, 4],
+        );
+
+        let gathered = provider
+            .gather_linear(&source, &[1, 3], &[1, 2])
+            .expect("gather complex");
+        assert_complex_close(&provider, &gathered, &[(2.0, 20.0), (4.0, 40.0)], &[1, 2]);
+
+        let target = provider
+            .zeros_with_storage(&[1, 4], GpuTensorStorage::ComplexInterleaved)
+            .expect("complex zeros");
+        provider
+            .scatter_linear(&target, &[0, 2], &gathered)
+            .expect("scatter complex");
+        assert_complex_close(
+            &provider,
+            &target,
+            &[(2.0, 20.0), (0.0, 0.0), (4.0, 40.0), (0.0, 0.0)],
+            &[1, 4],
         );
     }
 

@@ -48,6 +48,14 @@ impl AccelProvider for WgpuProvider {
         self.zeros_exec(shape)
     }
 
+    fn zeros_with_storage(
+        &self,
+        shape: &[usize],
+        storage: GpuTensorStorage,
+    ) -> Result<GpuTensorHandle> {
+        self.zeros_with_storage_exec(shape, storage)
+    }
+
     fn zeros_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.zeros_exec(&prototype.shape)
     }

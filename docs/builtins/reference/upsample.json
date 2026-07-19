@@ -16,7 +16,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Real and logical GPU inputs use the active provider's zeros and linear-scatter hooks to keep the upsampled output resident. Complex GPU tensors fall back to host materialization until complex interleaved scatter semantics are widened."
+    "notes": "Real, logical, and complex-interleaved GPU inputs use the active provider's storage-aware zeros and linear-scatter hooks to keep the upsampled output resident."
   },
   "fusion": {
     "elementwise": false,
@@ -66,7 +66,7 @@
     },
     {
       "question": "Can I pass GPU tensors?",
-      "answer": "Yes. Real and logical GPU inputs stay resident through provider `zeros` and `scatter_linear` hooks. Complex GPU tensors fall back to host materialization."
+      "answer": "Yes. Real, logical, and complex-interleaved GPU inputs stay resident through provider `zeros_with_storage` and `scatter_linear` hooks."
     }
   ],
   "links": [

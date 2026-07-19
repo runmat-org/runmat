@@ -627,9 +627,21 @@ impl WgpuProvider {
         let entry = self.get_entry(source)?;
         let expected = product_checked(output_shape)
             .ok_or_else(|| anyhow!("gather_linear: output shape product overflow"))?;
+        let lane_factor = match entry.storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
+        ensure!(
+            entry.len % lane_factor == 0,
+            "gather_linear: source raw length {} is not aligned to storage lane factor {}",
+            entry.len,
+            lane_factor
+        );
+        let source_logical_len = entry.len / lane_factor;
         let _span = info_span!(
             "gpu.gather_linear",
             source_len = entry.len,
+            source_logical_len,
             index_count = indices.len(),
             output_size = expected
         )
@@ -642,11 +654,30 @@ impl WgpuProvider {
         );
         if expected == 0 {
             let out = self.create_storage_buffer(0, "runmat-gather-linear-empty");
-            return Ok(self.register_existing_buffer(out, output_shape.to_vec(), 0));
+            let handle = self.register_existing_buffer_with_storage(
+                out,
+                output_shape.to_vec(),
+                0,
+                entry.storage,
+            );
+            if runmat_accelerate_api::handle_is_logical(source) {
+                runmat_accelerate_api::set_handle_logical(&handle, true);
+            }
+            return Ok(handle);
         }
         ensure!(
             indices.len() <= u32::MAX as usize,
             "gather_linear: index count exceeds GPU limits"
+        );
+        ensure!(
+            expected.checked_mul(lane_factor).is_some(),
+            "gather_linear: output raw length overflow"
+        );
+        ensure!(
+            indices
+                .iter()
+                .all(|&idx| (idx as usize) < source_logical_len),
+            "gather_linear: index out of bounds for source tensor"
         );
         let indices_len_bytes = std::mem::size_of_val(indices) as u64;
         let indices_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -667,11 +698,13 @@ impl WgpuProvider {
             indices.len()
         );
 
+        let raw_output_len = expected * lane_factor;
         let out_buffer =
-            self.create_storage_buffer_checked(expected, "runmat-gather-linear-out")?;
+            self.create_storage_buffer_checked(raw_output_len, "runmat-gather-linear-out")?;
         let params = LinearGatherParams {
             count: indices.len() as u32,
-            _pad: [0; 3],
+            lane_factor: lane_factor as u32,
+            _pad: [0; 2],
         };
         let params_buffer = self.uniform_buffer(&params, "runmat-gather-linear-params");
         let bind_group = self
@@ -718,7 +751,16 @@ impl WgpuProvider {
             indices.len()
         );
 
-        Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), expected))
+        let handle = self.register_existing_buffer_with_storage(
+            out_buffer,
+            output_shape.to_vec(),
+            raw_output_len,
+            entry.storage,
+        );
+        if runmat_accelerate_api::handle_is_logical(source) {
+            runmat_accelerate_api::set_handle_logical(&handle, true);
+        }
+        Ok(handle)
     }
 
     pub(crate) fn scatter_linear_exec(
@@ -736,21 +778,42 @@ impl WgpuProvider {
         );
         let target_entry = self.get_entry(target)?;
         let values_entry = self.get_entry(values)?;
+        ensure!(
+            target_entry.storage == values_entry.storage,
+            "scatter_linear: storage mismatch target={:?} values={:?}",
+            target_entry.storage,
+            values_entry.storage
+        );
+        let lane_factor = match target_entry.storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
+        ensure!(
+            target_entry.len % lane_factor == 0,
+            "scatter_linear: target raw length {} is not aligned to storage lane factor {}",
+            target_entry.len,
+            lane_factor
+        );
+        let target_logical_len = target_entry.len / lane_factor;
         let _span = info_span!(
             "gpu.scatter_linear",
             target_len = target_entry.len,
+            target_logical_len,
             index_count = indices.len(),
             values_len = values_entry.len
         )
         .entered();
         ensure!(
-            values_entry.len == indices.len(),
-            "scatter_linear: values length {} does not match indices length {}",
+            values_entry.len == indices.len() * lane_factor,
+            "scatter_linear: values raw length {} does not match index count {} for lane factor {}",
             values_entry.len,
-            indices.len()
+            indices.len(),
+            lane_factor
         );
         ensure!(
-            indices.iter().all(|&idx| (idx as usize) < target_entry.len),
+            indices
+                .iter()
+                .all(|&idx| (idx as usize) < target_logical_len),
             "scatter_linear: index out of bounds for target tensor"
         );
         let indices_len_bytes = std::mem::size_of_val(indices) as u64;
@@ -772,7 +835,8 @@ impl WgpuProvider {
         );
         let params = LinearScatterParams {
             count: indices.len() as u32,
-            _pad: [0; 3],
+            lane_factor: lane_factor as u32,
+            _pad: [0; 2],
         };
         let params_buffer = self.uniform_buffer(&params, "runmat-scatter-linear-params");
         let bind_group = self
@@ -988,5 +1052,50 @@ impl WgpuProvider {
             cols: cols_handle,
             values: Some(values_handle),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use futures::executor::block_on;
+
+    #[test]
+    fn wgpu_linear_gather_and_scatter_copy_complex_logical_elements() {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let data = [1.0, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0];
+        let source = provider
+            .upload_exec(&HostTensorView {
+                data: &data,
+                shape: &[1, 4],
+            })
+            .expect("upload");
+        runmat_accelerate_api::set_handle_storage(&source, GpuTensorStorage::ComplexInterleaved);
+
+        let gathered = provider
+            .gather_linear_exec(&source, &[1, 3], &[1, 2])
+            .expect("gather");
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&gathered),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        let host = block_on(provider.download_exec(&gathered)).expect("download gathered");
+        assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
+        assert_eq!(host.shape, vec![1, 2]);
+        assert_eq!(host.data, vec![2.0, 20.0, 4.0, 40.0]);
+
+        let target = provider
+            .zeros_with_storage_exec(&[1, 4], GpuTensorStorage::ComplexInterleaved)
+            .expect("zeros");
+        provider
+            .scatter_linear_exec(&target, &[0, 2], &gathered)
+            .expect("scatter");
+        let host = block_on(provider.download_exec(&target)).expect("download target");
+        assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
+        assert_eq!(host.shape, vec![1, 4]);
+        assert_eq!(host.data, vec![2.0, 20.0, 0.0, 0.0, 4.0, 40.0, 0.0, 0.0]);
     }
 }

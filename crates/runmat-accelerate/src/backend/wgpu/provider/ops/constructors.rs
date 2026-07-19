@@ -200,16 +200,31 @@ impl WgpuProvider {
     }
 
     pub(crate) fn zeros_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
+        self.zeros_with_storage_exec(shape, GpuTensorStorage::Real)
+    }
+
+    pub(crate) fn zeros_with_storage_exec(
+        &self,
+        shape: &[usize],
+        storage: GpuTensorStorage,
+    ) -> Result<GpuTensorHandle> {
         let len: usize = shape.iter().copied().product();
-        let buffer = self.create_storage_buffer_checked(len, "zeros")?;
+        let lane_factor = match storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
+        let raw_len = len
+            .checked_mul(lane_factor)
+            .ok_or_else(|| anyhow!("zeros_with_storage: tensor size exceeds GPU limits"))?;
+        let buffer = self.create_storage_buffer_checked(raw_len, "zeros")?;
         // Explicitly zero-initialize the storage buffer; pooled buffers may contain old data
-        let size_bytes = (len.max(1) as u64) * (self.element_size as u64);
+        let size_bytes = (raw_len.max(1) as u64) * (self.element_size as u64);
         if size_bytes > 0 {
             // Write zeros across the entire buffer
             let zero_bytes = vec![0u8; size_bytes as usize];
             self.queue.write_buffer(buffer.as_ref(), 0, &zero_bytes);
         }
-        Ok(self.register_existing_buffer(buffer, shape.to_vec(), len))
+        Ok(self.register_existing_buffer_with_storage(buffer, shape.to_vec(), raw_len, storage))
     }
 
     pub(crate) fn meshgrid_exec(
