@@ -19,7 +19,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`quiver` uses a GPU-backed geometry path and can keep vector-field inputs resident on device when the shared plotting device is available."
+    "notes": "`quiver` uses a GPU-backed geometry path and can keep vector-field inputs resident on device when the shared plotting device is available. Default X/Y grids are represented as compact axis buffers while U/V remain resident; explicit host X/Y coordinates are uploaded as axis buffers for the packer."
   },
   "fusion": {
     "elementwise": false,
@@ -38,7 +38,7 @@
     "`quiver(X, Y, U, V)` accepts explicit coordinate vectors or meshgrid-style axes, depending on the input layout.",
     "The returned value is a quiver-handle object that can be queried and updated through `get` and `set`.",
     "Auto-scale factor, head size, line width, color, and display-name workflows are all part of the plotting property path.",
-    "Dedicated GPU geometry generation keeps vector-field rendering on device when plotting-compatible buffers are available."
+    "Dedicated GPU geometry generation keeps vector-field rendering on device when plotting-compatible U/V buffers are available, including `quiver(U,V)` with an implicit coordinate grid."
   ],
   "options": [
     "`'AutoScaleFactor'` / `'Scale'` controls arrow scaling.",
@@ -121,9 +121,10 @@
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/quiver.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/quiver.rs"
   },
-  "gpu_residency": "`quiver` preserves GPU residency on the direct path by building arrow geometry from exported GPU buffers. If the direct geometry path is unavailable for the active input combination, RunMat falls back while preserving the same quiver semantics and handle behavior.",
+  "gpu_residency": "`quiver` preserves GPU residency on the direct path by building arrow geometry from exported GPU U/V buffers. Explicit GPU X/Y coordinates also stay resident when their precision matches U/V. Implicit default X/Y grids are uploaded as compact meshgrid-vector axis buffers, and explicit host X/Y coordinates are uploaded as axis buffers, so resident U/V inputs do not have to be gathered. If the direct geometry path is unavailable for the active input combination, RunMat falls back while preserving the same quiver semantics and handle behavior.",
   "gpu_behavior": [
     "The direct quiver path emits renderer-ready arrow geometry from GPU buffers on the happy path.",
-    "Axes-local state, handle/property workflows, and replay/export behavior stay aligned across GPU and fallback rendering paths."
+    "Axes-local state and handle/property workflows stay aligned across GPU and fallback rendering paths.",
+    "Replay/export paths read back GPU source buffers when serializable plot data is required."
   ]
 }

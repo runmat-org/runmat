@@ -377,8 +377,7 @@ impl Line3Plot {
         view_angles_deg: Option<(f32, f32)>,
         gpu: Option<&GpuPackContext<'_>>,
     ) -> RenderData {
-        let can_gpu_pack = self.line_width_px() <= 1.0;
-        if can_gpu_pack && self.gpu_line_inputs.is_some() && self.gpu_vertices.is_none() {
+        if self.gpu_line_inputs.is_some() && self.gpu_vertices.is_none() {
             if let (Some(gpu), Some(vp)) = (gpu, viewport_px) {
                 if let Err(err) = self.pack_gpu_vertices_if_needed(gpu, vp) {
                     warn!("plot3 gpu pack failed: {err}");
@@ -476,6 +475,37 @@ impl Line3Plot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pollster::FutureExt;
+    use std::sync::Arc;
+    use wgpu::util::DeviceExt;
+
+    fn maybe_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+        if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
+            || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
+        {
+            return None;
+        }
+        let instance = wgpu::Instance::default();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .block_on()?;
+        let (device, queue) = adapter
+            .request_device(
+                &crate::wgpu_compat::device_descriptor(
+                    Some("runmat-plot-line3-test-device"),
+                    wgpu::Features::empty(),
+                    adapter.limits(),
+                ),
+                None,
+            )
+            .block_on()
+            .ok()?;
+        Some((Arc::new(device), Arc::new(queue)))
+    }
 
     #[test]
     fn line3_creation_and_bounds() {
@@ -509,5 +539,55 @@ mod tests {
         assert_eq!(render.pipeline_type, PipelineType::Scatter3);
         assert_eq!(render.vertices.len(), 1);
         assert!(render.vertices[0].normal[2] >= 6.0);
+    }
+
+    #[test]
+    fn line3_gpu_source_packs_default_width_as_thick_geometry() {
+        let Some((device, queue)) = maybe_device() else {
+            return;
+        };
+        let x_buffer = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("line3-test-x"),
+                contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        let y_buffer = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("line3-test-y"),
+                contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        let z_buffer = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("line3-test-z"),
+                contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        let mut plot = Line3Plot::from_gpu_xyz(
+            Line3GpuInputs {
+                x_buffer,
+                y_buffer,
+                z_buffer,
+                len: 2,
+                scalar: crate::gpu::ScalarType::F32,
+            },
+            Vec4::ONE,
+            1.0,
+            crate::plots::line::LineStyle::Solid,
+            BoundingBox::new(Vec3::ZERO, Vec3::ONE),
+        );
+        let gpu = GpuPackContext {
+            device: &device,
+            queue: &queue,
+        };
+        let render = plot.render_data_with_viewport_gpu(Some((800, 600)), None, Some(&gpu));
+        assert_eq!(render.pipeline_type, PipelineType::Triangles);
+        assert_eq!(render.vertices.len(), 0);
+        assert!(render.gpu_vertices.is_some());
+        assert_eq!(render.draw_calls[0].vertex_count, 6);
     }
 }

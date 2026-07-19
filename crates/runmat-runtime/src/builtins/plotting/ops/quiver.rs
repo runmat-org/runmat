@@ -4,6 +4,7 @@ use runmat_builtins::{
     Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_plot::gpu::axis::{AxisData, OwnedAxisData};
 use runmat_plot::plots::QuiverPlot;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -21,7 +22,14 @@ use super::style::{parse_line_style_args, value_as_f64, LineStyleParseOptions};
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "quiver";
-type QuiverArgs = (Option<usize>, Value, Value, Value, Value, Vec<Value>);
+type QuiverArgs = (
+    Option<usize>,
+    QuiverCoordinateInput,
+    QuiverCoordinateInput,
+    Value,
+    Value,
+    Vec<Value>,
+);
 type QuiverComponents = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>);
 
 const QUIVER_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -443,10 +451,8 @@ pub async fn quiver_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (target_axes, x, y, u, v, rest) =
         parse_quiver_args(args).map_err(map_quiver_invalid_argument)?;
     let parsed = parse_quiver_style_args(&rest).map_err(map_quiver_invalid_argument)?;
-    let mut x_in =
-        Some(NumericInput::from_value(x, BUILTIN_NAME).map_err(map_quiver_invalid_argument)?);
-    let mut y_in =
-        Some(NumericInput::from_value(y, BUILTIN_NAME).map_err(map_quiver_invalid_argument)?);
+    let mut x_in = Some(x);
+    let mut y_in = Some(y);
     let mut u_in =
         Some(NumericInput::from_value(u, BUILTIN_NAME).map_err(map_quiver_invalid_argument)?);
     let mut v_in =
@@ -462,15 +468,13 @@ pub async fn quiver_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let axes = target_axes.unwrap_or(axes);
-        if let (Some(x_gpu), Some(y_gpu), Some(u_gpu), Some(v_gpu)) = (
-            x_in.as_ref().and_then(NumericInput::gpu_handle),
-            y_in.as_ref().and_then(NumericInput::gpu_handle),
+        if let (Some(u_gpu), Some(v_gpu)) = (
             u_in.as_ref().and_then(NumericInput::gpu_handle),
             v_in.as_ref().and_then(NumericInput::gpu_handle),
         ) {
             if let Ok(plot) = build_quiver_gpu_plot(
-                x_gpu,
-                y_gpu,
+                x_in.as_ref().expect("x available"),
+                y_in.as_ref().expect("y available"),
                 u_gpu,
                 v_gpu,
                 &parsed,
@@ -534,18 +538,14 @@ pub async fn quiver_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 }
 
 fn build_quiver_gpu_plot(
-    x: &runmat_accelerate_api::GpuTensorHandle,
-    y: &runmat_accelerate_api::GpuTensorHandle,
+    x: &QuiverCoordinateInput,
+    y: &QuiverCoordinateInput,
     u: &runmat_accelerate_api::GpuTensorHandle,
     v: &runmat_accelerate_api::GpuTensorHandle,
     parsed: &ParsedQuiverStyle,
     label: &str,
 ) -> crate::BuiltinResult<QuiverPlot> {
     let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "quiver: unable to export GPU X data"))?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "quiver: unable to export GPU Y data"))?;
     let u_ref = runmat_accelerate_api::export_wgpu_buffer(u)
         .ok_or_else(|| plotting_error(BUILTIN_NAME, "quiver: unable to export GPU U data"))?;
     let v_ref = runmat_accelerate_api::export_wgpu_buffer(v)
@@ -556,15 +556,11 @@ fn build_quiver_gpu_plot(
             "quiver: U and V GPU inputs must match",
         ));
     }
-    if x_ref.precision != u_ref.precision || y_ref.precision != u_ref.precision {
-        return Err(plotting_error(
-            BUILTIN_NAME,
-            "quiver: GPU X, Y, U, and V inputs must have matching precision",
-        ));
-    }
     let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
         u_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
     );
+    let x_axis = quiver_axis_source(x, u_ref.precision, "X")?;
+    let y_axis = quiver_axis_source(y, u_ref.precision, "Y")?;
     let rows = u_ref.shape.first().copied().unwrap_or(u_ref.len).max(1);
     let cols = u_ref.shape.get(1).copied().unwrap_or(1).max(1);
     let count = u_ref.len;
@@ -574,9 +570,11 @@ fn build_quiver_gpu_plot(
             "quiver: GPU U/V inputs must be non-empty",
         ));
     }
-    let xy_mode = if x_ref.len == count && y_ref.len == count {
+    let x_len = x_axis.len();
+    let y_len = y_axis.len();
+    let xy_mode = if x_len == count && y_len == count {
         0u32
-    } else if x_ref.len == cols && y_ref.len == rows {
+    } else if x_len == cols && y_len == rows {
         1u32
     } else {
         return Err(plotting_error(
@@ -598,12 +596,8 @@ fn build_quiver_gpu_plot(
     let cols_u32 = u32::try_from(cols).map_err(|_| {
         plotting_error(BUILTIN_NAME, "quiver: column count exceeds supported range")
     })?;
-    let (min_x, max_x) = super::gpu_helpers::axis_bounds(u, BUILTIN_NAME)
-        .map(|_| ())
-        .err()
-        .map(|_| (0.0, 0.0))
-        .unwrap_or_else(|| super::gpu_helpers::axis_bounds(x, BUILTIN_NAME).unwrap_or((0.0, 0.0)));
-    let (min_y, max_y) = super::gpu_helpers::axis_bounds(y, BUILTIN_NAME).unwrap_or((0.0, 0.0));
+    let (min_x, max_x) = x_axis.bounds(BUILTIN_NAME).unwrap_or((0.0, 0.0));
+    let (min_y, max_y) = y_axis.bounds(BUILTIN_NAME).unwrap_or((0.0, 0.0));
     let (min_u, max_u) = super::gpu_helpers::axis_bounds(u, BUILTIN_NAME).unwrap_or((0.0, 0.0));
     let (min_v, max_v) = super::gpu_helpers::axis_bounds(v, BUILTIN_NAME).unwrap_or((0.0, 0.0));
     let bounds = runmat_plot::core::BoundingBox::new(
@@ -619,8 +613,8 @@ fn build_quiver_gpu_plot(
         ),
     );
     let inputs = runmat_plot::gpu::quiver::QuiverGpuInputs {
-        x_data: runmat_plot::gpu::axis::AxisData::Buffer(x_ref.buffer.clone()),
-        y_data: runmat_plot::gpu::axis::AxisData::Buffer(y_ref.buffer.clone()),
+        x_data: x_axis.axis_data(),
+        y_data: y_axis.axis_data(),
         u_buffer: u_ref.buffer.clone(),
         v_buffer: v_ref.buffer.clone(),
         count: count_u32,
@@ -630,8 +624,8 @@ fn build_quiver_gpu_plot(
         scalar,
     };
     let gpu_source = runmat_plot::plots::QuiverGpuSource {
-        x_data: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.x_data),
-        y_data: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.y_data),
+        x_data: OwnedAxisData::from_axis(&inputs.x_data),
+        y_data: OwnedAxisData::from_axis(&inputs.y_data),
         u_buffer: inputs.u_buffer.clone(),
         v_buffer: inputs.v_buffer.clone(),
         count,
@@ -672,6 +666,157 @@ fn build_quiver_gpu_plot(
     plot.u = Vec::new();
     plot.v = Vec::new();
     Ok(plot)
+}
+
+enum QuiverAxisSource {
+    HostF32(Vec<f32>),
+    HostF64(Vec<f64>),
+    Gpu {
+        handle: runmat_accelerate_api::GpuTensorHandle,
+        data: OwnedAxisData,
+        len: usize,
+    },
+}
+
+enum QuiverCoordinateInput {
+    Explicit(NumericInput),
+    ImplicitX { rows: usize, cols: usize },
+    ImplicitY { rows: usize, cols: usize },
+}
+
+impl QuiverCoordinateInput {
+    fn into_tensor(self, builtin: &'static str) -> crate::BuiltinResult<Tensor> {
+        match self {
+            Self::Explicit(input) => input.into_tensor(builtin),
+            Self::ImplicitX { rows, cols } => implicit_quiver_grid_tensor(rows, cols, true),
+            Self::ImplicitY { rows, cols } => implicit_quiver_grid_tensor(rows, cols, false),
+        }
+    }
+}
+
+impl QuiverAxisSource {
+    fn len(&self) -> usize {
+        match self {
+            Self::HostF32(values) => values.len(),
+            Self::HostF64(values) => values.len(),
+            Self::Gpu { len, .. } => *len,
+        }
+    }
+
+    fn axis_data(&self) -> AxisData<'_> {
+        match self {
+            Self::HostF32(values) => AxisData::F32(values),
+            Self::HostF64(values) => AxisData::F64(values),
+            Self::Gpu {
+                data: OwnedAxisData::Buffer(buffer),
+                ..
+            } => AxisData::Buffer(buffer.clone()),
+            Self::Gpu { .. } => unreachable!("GPU quiver axes are stored as GPU buffers"),
+        }
+    }
+
+    fn bounds(&self, name: &'static str) -> crate::BuiltinResult<(f32, f32)> {
+        match self {
+            Self::HostF32(values) => Ok(host_bounds(values.iter().map(|value| f64::from(*value)))),
+            Self::HostF64(values) => Ok(host_bounds(values.iter().copied())),
+            Self::Gpu { handle, .. } => super::gpu_helpers::axis_bounds(handle, name),
+        }
+    }
+}
+
+fn quiver_axis_source(
+    input: &QuiverCoordinateInput,
+    precision: runmat_accelerate_api::ProviderPrecision,
+    label: &'static str,
+) -> crate::BuiltinResult<QuiverAxisSource> {
+    match input {
+        QuiverCoordinateInput::Explicit(NumericInput::Host(tensor)) => match precision {
+            runmat_accelerate_api::ProviderPrecision::F32 => Ok(QuiverAxisSource::HostF32(
+                tensor.data.iter().map(|value| *value as f32).collect(),
+            )),
+            runmat_accelerate_api::ProviderPrecision::F64 => {
+                Ok(QuiverAxisSource::HostF64(tensor.data.clone()))
+            }
+        },
+        QuiverCoordinateInput::Explicit(NumericInput::Gpu(handle)) => {
+            let exported = runmat_accelerate_api::export_wgpu_buffer(handle).ok_or_else(|| {
+                plotting_error(
+                    BUILTIN_NAME,
+                    format!("quiver: unable to export GPU {label} data"),
+                )
+            })?;
+            if exported.precision != precision {
+                return Err(plotting_error(
+                    BUILTIN_NAME,
+                    "quiver: GPU X, Y, U, and V inputs must have matching precision",
+                ));
+            }
+            Ok(QuiverAxisSource::Gpu {
+                handle: handle.clone(),
+                data: OwnedAxisData::Buffer(exported.buffer.clone()),
+                len: exported.len,
+            })
+        }
+        QuiverCoordinateInput::ImplicitX { cols, .. } => Ok(implicit_quiver_axis(*cols, precision)),
+        QuiverCoordinateInput::ImplicitY { rows, .. } => Ok(implicit_quiver_axis(*rows, precision)),
+    }
+}
+
+fn implicit_quiver_axis(
+    len: usize,
+    precision: runmat_accelerate_api::ProviderPrecision,
+) -> QuiverAxisSource {
+    match precision {
+        runmat_accelerate_api::ProviderPrecision::F32 => {
+            QuiverAxisSource::HostF32((1..=len).map(|value| value as f32).collect())
+        }
+        runmat_accelerate_api::ProviderPrecision::F64 => {
+            QuiverAxisSource::HostF64((1..=len).map(|value| value as f64).collect())
+        }
+    }
+}
+
+fn implicit_quiver_grid_tensor(
+    rows: usize,
+    cols: usize,
+    x_axis: bool,
+) -> crate::BuiltinResult<Tensor> {
+    let len = rows
+        .checked_mul(cols)
+        .ok_or_else(|| plotting_error(BUILTIN_NAME, "quiver: implicit grid is too large"))?;
+    let mut data = Vec::with_capacity(len);
+    for col in 0..cols {
+        for row in 0..rows {
+            data.push(if x_axis {
+                (col + 1) as f64
+            } else {
+                (row + 1) as f64
+            });
+        }
+    }
+    Ok(Tensor {
+        data,
+        shape: vec![len],
+        rows: len,
+        cols: 1,
+        dtype: runmat_builtins::NumericDType::F64,
+    })
+}
+
+fn host_bounds(values: impl Iterator<Item = f64>) -> (f32, f32) {
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    for value in values {
+        if value.is_finite() {
+            min = min.min(value);
+            max = max.max(value);
+        }
+    }
+    if min.is_finite() && max.is_finite() {
+        (min as f32, max as f32)
+    } else {
+        (0.0, 0.0)
+    }
 }
 
 struct ParsedQuiverStyle {
@@ -748,19 +893,30 @@ fn parse_quiver_args(args: Vec<Value>) -> crate::BuiltinResult<QuiverArgs> {
     let fourth = it.next();
     match (third, fourth) {
         (None, _) => {
-            let (x, y) = default_quiver_grid_from_values(&first, &second, BUILTIN_NAME)?;
+            let (rows, cols) = default_quiver_grid_shape(&first, &second, BUILTIN_NAME)?;
             Ok((
                 target_axes,
-                Value::Tensor(x),
-                Value::Tensor(y),
+                QuiverCoordinateInput::ImplicitX { rows, cols },
+                QuiverCoordinateInput::ImplicitY { rows, cols },
                 first,
                 second,
                 Vec::new(),
             ))
         }
-        (Some(third), Some(fourth)) => {
-            Ok((target_axes, first, second, third, fourth, it.collect()))
-        }
+        (Some(third), Some(fourth)) => Ok((
+            target_axes,
+            QuiverCoordinateInput::Explicit(
+                NumericInput::from_value(first, BUILTIN_NAME)
+                    .map_err(map_quiver_invalid_argument)?,
+            ),
+            QuiverCoordinateInput::Explicit(
+                NumericInput::from_value(second, BUILTIN_NAME)
+                    .map_err(map_quiver_invalid_argument)?,
+            ),
+            third,
+            fourth,
+            it.collect(),
+        )),
         _ => Err(plotting_error(
             BUILTIN_NAME,
             "quiver: expected U,V or X,Y,U,V inputs",
@@ -768,11 +924,11 @@ fn parse_quiver_args(args: Vec<Value>) -> crate::BuiltinResult<QuiverArgs> {
     }
 }
 
-fn default_quiver_grid_from_values(
+fn default_quiver_grid_shape(
     u: &Value,
     v: &Value,
     builtin: &'static str,
-) -> crate::BuiltinResult<(Tensor, Tensor)> {
+) -> crate::BuiltinResult<(usize, usize)> {
     let (u_rows, u_cols, u_len) = tensor_shape_from_value(u, builtin)?;
     let (v_rows, v_cols, v_len) = tensor_shape_from_value(v, builtin)?;
     if u_rows != v_rows || u_cols != v_cols || u_len != v_len {
@@ -783,30 +939,7 @@ fn default_quiver_grid_from_values(
     }
     let rows = u_rows.max(1);
     let cols = u_cols.max(1);
-    let mut x = Vec::with_capacity(rows * cols);
-    let mut y = Vec::with_capacity(rows * cols);
-    for col in 0..cols {
-        for row in 0..rows {
-            x.push((col + 1) as f64);
-            y.push((row + 1) as f64);
-        }
-    }
-    Ok((
-        Tensor {
-            data: x,
-            shape: vec![rows * cols],
-            rows: rows * cols,
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        },
-        Tensor {
-            data: y,
-            shape: vec![rows * cols],
-            rows: rows * cols,
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        },
-    ))
+    Ok((rows, cols))
 }
 
 fn tensor_shape_from_value(
@@ -904,6 +1037,62 @@ mod tests {
             cols: 1,
             dtype: runmat_builtins::NumericDType::F64,
         }
+    }
+
+    #[test]
+    fn quiver_axis_source_keeps_host_axes_on_gpu_pack_path() {
+        let host =
+            QuiverCoordinateInput::Explicit(NumericInput::Host(vec_tensor(&[1.0, 2.5, f64::NAN])));
+        let f32_axis =
+            quiver_axis_source(&host, runmat_accelerate_api::ProviderPrecision::F32, "X").unwrap();
+        assert_eq!(f32_axis.len(), 3);
+        match f32_axis.axis_data() {
+            AxisData::F32(values) => {
+                assert_eq!(&values[..2], &[1.0, 2.5]);
+                assert!(values[2].is_nan());
+            }
+            _ => panic!("expected f32 axis data for f32 shader"),
+        }
+        assert_eq!(f32_axis.bounds(BUILTIN_NAME).unwrap(), (1.0, 2.5));
+
+        let f64_axis =
+            quiver_axis_source(&host, runmat_accelerate_api::ProviderPrecision::F64, "Y").unwrap();
+        assert_eq!(f64_axis.len(), 3);
+        match f64_axis.axis_data() {
+            AxisData::F64(values) => {
+                assert_eq!(&values[..2], &[1.0, 2.5]);
+                assert!(values[2].is_nan());
+            }
+            _ => panic!("expected f64 axis data for f64 shader"),
+        }
+        assert_eq!(f64_axis.bounds(BUILTIN_NAME).unwrap(), (1.0, 2.5));
+    }
+
+    #[test]
+    fn quiver_axis_source_keeps_implicit_grid_compact() {
+        let x_axis = QuiverCoordinateInput::ImplicitX { rows: 3, cols: 2 };
+        let y_axis = QuiverCoordinateInput::ImplicitY { rows: 3, cols: 2 };
+        let x_source =
+            quiver_axis_source(&x_axis, runmat_accelerate_api::ProviderPrecision::F64, "X")
+                .unwrap();
+        let y_source =
+            quiver_axis_source(&y_axis, runmat_accelerate_api::ProviderPrecision::F64, "Y")
+                .unwrap();
+        assert_eq!(x_source.len(), 2);
+        assert_eq!(y_source.len(), 3);
+        match x_source.axis_data() {
+            AxisData::F64(values) => assert_eq!(values, &[1.0, 2.0]),
+            _ => panic!("expected compact f64 x axis"),
+        }
+        match y_source.axis_data() {
+            AxisData::F64(values) => assert_eq!(values, &[1.0, 2.0, 3.0]),
+            _ => panic!("expected compact f64 y axis"),
+        }
+
+        let x_full = x_axis.into_tensor(BUILTIN_NAME).unwrap();
+        let y_full = y_axis.into_tensor(BUILTIN_NAME).unwrap();
+        assert_eq!(x_full.data, vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0]);
+        assert_eq!(y_full.data, vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
     }
 
     #[test]
