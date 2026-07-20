@@ -60,8 +60,10 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 const PROVIDER_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
+const PROVIDER_ID_BLOCK_SIZE: u64 = 1_000_000_000;
 
 static REGISTRY: OnceCell<Mutex<HashMap<u64, Vec<f64>>>> = OnceCell::new();
+static NEXT_PROVIDER_ID_BASE: AtomicU64 = AtomicU64::new(PROVIDER_ID_BLOCK_SIZE);
 
 fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
@@ -666,13 +668,22 @@ fn next_normal_pair(state: &mut u64) -> (f64, f64) {
 
 pub struct InProcessProvider {
     next_id: AtomicU64,
+    id_limit: u64,
     telemetry: AccelTelemetry,
 }
 
 impl InProcessProvider {
     pub fn new() -> Self {
+        let id_base = NEXT_PROVIDER_ID_BASE
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(PROVIDER_ID_BLOCK_SIZE)
+            })
+            .expect("in-process provider id range exhausted");
         Self {
-            next_id: AtomicU64::new(1),
+            next_id: AtomicU64::new(id_base),
+            id_limit: id_base
+                .checked_add(PROVIDER_ID_BLOCK_SIZE)
+                .expect("in-process provider id range exhausted"),
             telemetry: AccelTelemetry::new(),
         }
     }
@@ -687,7 +698,16 @@ impl InProcessProvider {
         shape: Vec<usize>,
         storage: GpuTensorStorage,
     ) -> GpuTensorHandle {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let id = self
+            .next_id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                if current < self.id_limit {
+                    current.checked_add(1)
+                } else {
+                    None
+                }
+            })
+            .expect("in-process provider id range exhausted");
         registry()
             .lock()
             .unwrap_or_else(|e| e.into_inner())

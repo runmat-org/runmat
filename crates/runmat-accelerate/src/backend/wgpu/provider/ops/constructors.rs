@@ -1144,13 +1144,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 
 #[cfg(test)]
 mod tests {
-    use runmat_accelerate_api::{AccelProvider, HostTensorView};
+    use runmat_accelerate_api::{
+        AccelProvider, HostTensorView, ProviderNdgridAxis, ProviderNdgridRequest,
+    };
+
+    fn register_wgpu_provider_for_test(
+    ) -> Option<&'static crate::backend::wgpu::provider::WgpuProvider> {
+        match crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) {
+            Ok(provider) => Some(provider),
+            Err(err) if err.to_string() == "wgpu: no compatible adapter found" => None,
+            Err(err) => panic!("register wgpu provider failed: {err:?}"),
+        }
+    }
 
     #[tokio::test]
     async fn wgpu_diag_vector_sized_and_extract_match_column_major_cpu() {
-        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
-            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        ) else {
+        let Some(provider) = register_wgpu_provider_for_test() else {
             return;
         };
         let vector = [3.0, 5.0, 7.0];
@@ -1182,6 +1193,49 @@ mod tests {
         let empty_host = provider.download(&empty).await.expect("download empty");
         assert_eq!(empty_host.shape, vec![0, 1]);
         assert!(empty_host.data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn wgpu_ndgrid_resident_axes_match_column_major_cpu() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let x = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[2, 1],
+            })
+            .expect("upload x");
+        let y = provider
+            .upload(&HostTensorView {
+                data: &[10.0, 20.0, 30.0],
+                shape: &[3, 1],
+            })
+            .expect("upload y");
+        let axes = [
+            ProviderNdgridAxis { handle: &x },
+            ProviderNdgridAxis { handle: &y },
+        ];
+        let result = provider
+            .ndgrid(&ProviderNdgridRequest {
+                axes: &axes,
+                output_shape: &[2, 3],
+                output_count: 2,
+            })
+            .expect("ndgrid");
+        assert_eq!(result.outputs.len(), 2);
+        let gx = provider
+            .download(&result.outputs[0])
+            .await
+            .expect("download gx");
+        let gy = provider
+            .download(&result.outputs[1])
+            .await
+            .expect("download gy");
+        assert_eq!(gx.shape, vec![2, 3]);
+        assert_eq!(gy.shape, vec![2, 3]);
+        assert_eq!(gx.data, vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0]);
+        assert_eq!(gy.data, vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]);
     }
 }
 

@@ -2107,6 +2107,137 @@ mod tests {
         }
     }
 
+    fn assert_close(actual: &[f64], expected: &[f64], tol: f64) {
+        assert_eq!(actual.len(), expected.len());
+        for (idx, (&actual, &expected)) in actual.iter().zip(expected.iter()).enumerate() {
+            if expected.is_nan() {
+                assert!(actual.is_nan(), "lane {idx}: expected NaN, got {actual}");
+            } else {
+                assert!(
+                    (actual - expected).abs() <= tol,
+                    "lane {idx}: expected {expected}, got {actual}"
+                );
+            }
+        }
+    }
+
+    fn register_wgpu_provider_for_test(
+    ) -> Option<&'static crate::backend::wgpu::provider::WgpuProvider> {
+        match crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) {
+            Ok(provider) => Some(provider),
+            Err(err) if err.to_string() == "wgpu: no compatible adapter found" => None,
+            Err(err) => panic!("register wgpu provider failed: {err:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_provider_parity_samples_real_unary_and_broadcast_binary_paths() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-8,
+            runmat_accelerate_api::ProviderPrecision::F32 => 2e-4,
+        };
+
+        let unary_input = provider
+            .upload(&HostTensorView {
+                data: &[0.25, 0.5, 1.0, 1.5],
+                shape: &[4, 1],
+            })
+            .expect("upload unary");
+        let erf = provider.unary_erf(&unary_input).await.expect("erf");
+        let gammaln = provider.unary_gammaln(&unary_input).await.expect("gammaln");
+        let realsqrt = provider
+            .unary_sqrt(&unary_input)
+            .await
+            .expect("realsqrt provider sqrt");
+        let erf_host = provider.download(&erf).await.expect("download erf");
+        let gammaln_host = provider.download(&gammaln).await.expect("download gammaln");
+        let realsqrt_host = provider
+            .download(&realsqrt)
+            .await
+            .expect("download realsqrt");
+        for host in [&erf_host, &gammaln_host, &realsqrt_host] {
+            assert_eq!(host.shape, vec![4, 1]);
+            assert_eq!(host.storage, GpuTensorStorage::Real);
+        }
+        assert_close(
+            &erf_host.data,
+            &[
+                libm::erf(0.25),
+                libm::erf(0.5),
+                libm::erf(1.0),
+                libm::erf(1.5),
+            ],
+            tol,
+        );
+        assert_close(
+            &gammaln_host.data,
+            &[
+                libm::lgamma(0.25),
+                libm::lgamma(0.5),
+                libm::lgamma(1.0),
+                libm::lgamma(1.5),
+            ],
+            tol,
+        );
+        assert_close(
+            &realsqrt_host.data,
+            &[0.5, 0.5_f64.sqrt(), 1.0, 1.5_f64.sqrt()],
+            tol,
+        );
+
+        let lhs = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                shape: &[2, 3],
+            })
+            .expect("upload lhs");
+        let rhs = provider
+            .upload(&HostTensorView {
+                data: &[10.0, 20.0, 30.0],
+                shape: &[1, 3],
+            })
+            .expect("upload rhs");
+        let add = provider.elem_add(&lhs, &rhs).await.expect("add");
+        let sub = provider.elem_sub(&lhs, &rhs).await.expect("sub");
+        let mul = provider.elem_mul(&lhs, &rhs).await.expect("mul");
+        let div = provider.elem_div(&lhs, &rhs).await.expect("div");
+        let pow = provider.elem_pow(&lhs, &rhs).await.expect("pow");
+        let add_host = provider.download(&add).await.expect("download add");
+        let sub_host = provider.download(&sub).await.expect("download sub");
+        let mul_host = provider.download(&mul).await.expect("download mul");
+        let div_host = provider.download(&div).await.expect("download div");
+        let pow_host = provider.download(&pow).await.expect("download pow");
+        for host in [&add_host, &sub_host, &mul_host, &div_host, &pow_host] {
+            assert_eq!(host.shape, vec![2, 3]);
+            assert_eq!(host.storage, GpuTensorStorage::Real);
+        }
+        assert_close(&add_host.data, &[11.0, 12.0, 23.0, 24.0, 35.0, 36.0], tol);
+        assert_close(
+            &sub_host.data,
+            &[-9.0, -8.0, -17.0, -16.0, -25.0, -24.0],
+            tol,
+        );
+        assert_close(&mul_host.data, &[10.0, 20.0, 60.0, 80.0, 150.0, 180.0], tol);
+        assert_close(&div_host.data, &[0.1, 0.2, 0.15, 0.2, 5.0 / 30.0, 0.2], tol);
+        assert_close(
+            &pow_host.data,
+            &[
+                1.0_f64.powf(10.0),
+                2.0_f64.powf(10.0),
+                3.0_f64.powf(20.0),
+                4.0_f64.powf(20.0),
+                5.0_f64.powf(30.0),
+                6.0_f64.powf(30.0),
+            ],
+            tol * 1.0e6,
+        );
+    }
+
     fn sin_complex_host(re: f64, im: f64) -> (f64, f64) {
         (re.sin() * im.cosh(), re.cos() * im.sinh())
     }
@@ -2225,11 +2356,9 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_complex_binary_ops_match_cpu() {
-        crate::backend::wgpu::provider::register_wgpu_provider(
-            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        )
-        .expect("register wgpu provider");
-        let provider = runmat_accelerate_api::provider().expect("provider");
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
         let shape = [2, 2];
         let a = complex_pair(
             provider,
@@ -2441,11 +2570,9 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_complex_real_mix_and_scalar_ops_stay_complex() {
-        crate::backend::wgpu::provider::register_wgpu_provider(
-            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        )
-        .expect("register wgpu provider");
-        let provider = runmat_accelerate_api::provider().expect("provider");
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
         let shape = [3, 1];
         let complex = complex_pair(provider, &[1.0, -2.0, 4.0], &[0.5, 3.0, -1.5], &shape).await;
         let real = provider
