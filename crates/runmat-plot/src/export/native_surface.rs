@@ -616,6 +616,8 @@ impl NativeSurfaceRenderContext {
                     show_grid: false,
                     // Toolbar actions are surfaced by host UI, not native overlay.
                     show_toolbar: false,
+                    // CAD controls are surfaced by host UI, not native overlay.
+                    show_cad_overlay: false,
                     font_scale: 1.25,
                     show_axes: true,
                     show_title: self.renderer.geometry_overlay().is_none(),

@@ -861,6 +861,9 @@ impl WebRenderer {
                         show_grid: false,
                         // Toolbar is handled by the host UI in the wasm IDE.
                         show_toolbar: false,
+                        // CAD controls are also handled by host UI so no egui
+                        // controls overlap the hosted surface.
+                        show_cad_overlay: false,
                         // Make overlay text more readable in the IDE.
                         font_scale: 1.25,
                         show_axes: true,

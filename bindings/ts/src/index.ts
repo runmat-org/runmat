@@ -1037,14 +1037,14 @@ export type GeometrySceneViewPreset =
 
 export interface GeometrySceneRegionHighlightState {
   regionId: string;
-  color: [number, number, number, number];
+  color?: [number, number, number, number] | null;
   role?: string | null;
   label?: string | null;
 }
 
 export interface GeometrySceneRegionAnnotationState {
   regionId: string;
-  color: [number, number, number, number];
+  color?: [number, number, number, number] | null;
   role?: string | null;
   label?: string | null;
   direction?: [number, number, number] | null;
@@ -1053,6 +1053,7 @@ export interface GeometrySceneRegionAnnotationState {
 
 export interface GeometryScenePresentationState {
   selectedRegionId?: string | null;
+  selectedRegionIds?: string[] | null;
   hoveredRegionId?: string | null;
   regionHighlights?: GeometrySceneRegionHighlightState[];
   regionAnnotations?: GeometrySceneRegionAnnotationState[];

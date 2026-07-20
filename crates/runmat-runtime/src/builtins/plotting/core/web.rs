@@ -303,6 +303,13 @@ pub(crate) mod wasm {
                     "Plotting surface is not bound to a geometry scene.",
                 ));
             };
+            log::info!(
+                "geometry_scene.presentation_runtime surface_id={} selected_region_id={} selected_region_count={} display_mode={:?}",
+                surface_id,
+                presentation.selected_region_id.as_deref().unwrap_or("none"),
+                presentation.selected_region_ids.len(),
+                presentation.display_mode,
+            );
             entry.geometry_presentation = presentation.clone();
             entry
                 .renderer

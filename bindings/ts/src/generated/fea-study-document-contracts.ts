@@ -410,6 +410,9 @@ export interface FeaStudySummary {
   geometryUnits: string | null;
   modelProfile: string | null;
   modelDefaults: string | null;
+  meshProfile: string | null;
+  meshTargetSize: string | null;
+  meshMaxElements: string | null;
   runKind: string | null;
   runBackend: string | null;
 }

@@ -12,6 +12,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeSet;
 
 const SECTION_DISTANCE_EPSILON: f32 = 1.0e-6;
+const GEOMETRY_SELECTED_REGION_COLOR: [f32; 4] = [0.98, 0.45, 0.12, 1.0];
+const GEOMETRY_HOVER_REGION_COLOR: [f32; 4] = [0.43, 0.78, 1.0, 1.0];
+const GEOMETRY_MATERIAL_REGION_COLOR: [f32; 4] = [0.38, 0.58, 0.96, 0.92];
+const GEOMETRY_BOUNDARY_REGION_COLOR: [f32; 4] = [0.22, 0.82, 0.52, 0.96];
+const GEOMETRY_DRIVING_REGION_COLOR: [f32; 4] = [0.98, 0.38, 0.28, 0.96];
 
 #[derive(Debug, Clone)]
 pub struct GeometryScene {
@@ -156,7 +161,9 @@ impl GeometryScene {
                 let Some(anchor) = chunk.region_anchor(&annotation.region_id) else {
                     continue;
                 };
-                let color = annotation.color;
+                let color = annotation
+                    .color
+                    .unwrap_or_else(|| geometry_region_role_color(annotation.role.as_deref()));
                 let mut marker = vertex(
                     anchor.to_array(),
                     color,
@@ -254,6 +261,8 @@ impl GeometryScene {
 #[serde(rename_all = "camelCase")]
 pub struct GeometryScenePresentation {
     pub selected_region_id: Option<String>,
+    #[serde(default)]
+    pub selected_region_ids: Vec<String>,
     pub hovered_region_id: Option<String>,
     #[serde(default)]
     pub region_highlights: Vec<GeometrySceneRegionHighlight>,
@@ -281,6 +290,7 @@ impl Default for GeometryScenePresentation {
     fn default() -> Self {
         Self {
             selected_region_id: None,
+            selected_region_ids: Vec::new(),
             hovered_region_id: None,
             region_highlights: Vec::new(),
             region_annotations: Vec::new(),
@@ -295,6 +305,14 @@ impl Default for GeometryScenePresentation {
 }
 
 impl GeometryScenePresentation {
+    pub(crate) fn rewrites_geometry_vertices(&self) -> bool {
+        self.hovered_region_id.is_some()
+            || self.selected_region_id.is_some()
+            || !self.selected_region_ids.is_empty()
+            || !self.region_highlights.is_empty()
+            || self.active_section().is_some()
+    }
+
     pub(crate) fn resolves_owner_visibility(&self) -> bool {
         self.hidden_owner_node_ids.is_some() || self.isolated_owner_node_ids.is_some()
     }
@@ -395,7 +413,8 @@ pub enum GeometrySceneViewPreset {
 #[serde(rename_all = "camelCase")]
 pub struct GeometrySceneRegionHighlight {
     pub region_id: String,
-    pub color: [f32; 4],
+    #[serde(default)]
+    pub color: Option<[f32; 4]>,
     #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]
@@ -406,7 +425,8 @@ pub struct GeometrySceneRegionHighlight {
 #[serde(rename_all = "camelCase")]
 pub struct GeometrySceneRegionAnnotation {
     pub region_id: String,
-    pub color: [f32; 4],
+    #[serde(default)]
+    pub color: Option<[f32; 4]>,
     #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]
@@ -783,6 +803,11 @@ impl GeometrySceneChunk {
         presentation: &GeometryScenePresentation,
     ) -> RenderData {
         let mut render_data = self.render_data.clone();
+        if presentation.rewrites_geometry_vertices() {
+            // Presentation overlays rewrite CPU-side vertices/indices. A stale
+            // GPU vertex source would otherwise bypass the rewritten data.
+            render_data.gpu_vertices = None;
+        }
         let is_edge_chunk = self.is_edge_chunk();
         match presentation.display_mode {
             GeometrySceneDisplayMode::Wireframe if !is_edge_chunk => {
@@ -819,13 +844,44 @@ impl GeometrySceneChunk {
         }
 
         for highlight in &presentation.region_highlights {
-            self.apply_region_color(&mut render_data, &highlight.region_id, highlight.color);
+            self.apply_region_color(
+                &mut render_data,
+                &highlight.region_id,
+                highlight
+                    .color
+                    .unwrap_or_else(|| geometry_region_role_color(highlight.role.as_deref())),
+            );
         }
         if let Some(region_id) = presentation.hovered_region_id.as_deref() {
-            self.apply_region_color(&mut render_data, region_id, [0.43, 0.78, 1.0, 1.0]);
+            self.apply_region_color(&mut render_data, region_id, GEOMETRY_HOVER_REGION_COLOR);
+        }
+        for region_id in &presentation.selected_region_ids {
+            let colored = self.apply_region_color(
+                &mut render_data,
+                region_id,
+                GEOMETRY_SELECTED_REGION_COLOR,
+            );
+            log::info!(
+                target: "runmat_plot",
+                "geometry_scene.selection_color chunk_id={} region_id={} colored_triangles={}",
+                self.chunk_id,
+                region_id,
+                colored
+            );
         }
         if let Some(region_id) = presentation.selected_region_id.as_deref() {
-            self.apply_region_color(&mut render_data, region_id, [0.98, 0.78, 0.22, 1.0]);
+            let colored = self.apply_region_color(
+                &mut render_data,
+                region_id,
+                GEOMETRY_SELECTED_REGION_COLOR,
+            );
+            log::info!(
+                target: "runmat_plot",
+                "geometry_scene.selection_color chunk_id={} region_id={} colored_triangles={}",
+                self.chunk_id,
+                region_id,
+                colored
+            );
         }
         if let Some(section) = presentation.active_section() {
             render_data = self.render_data_with_section(render_data, section);
@@ -937,19 +993,32 @@ impl GeometrySceneChunk {
         }
     }
 
-    fn apply_region_color(&self, render_data: &mut RenderData, region_id: &str, color: [f32; 4]) {
+    fn apply_region_color(
+        &self,
+        render_data: &mut RenderData,
+        region_id: &str,
+        color: [f32; 4],
+    ) -> usize {
         if self.render_data.pipeline_type != PipelineType::Triangles {
-            return;
+            return 0;
         }
         let Some(region) = self.regions.iter().find(|item| item.region_id == region_id) else {
-            return;
+            log::info!(
+                target: "runmat_plot",
+                "geometry_scene.selection_color_missing chunk_id={} region_id={} available_regions={}",
+                self.chunk_id,
+                region_id,
+                self.regions.len()
+            );
+            return 0;
         };
-        let Some(indices) = self.indices.as_ref() else {
-            return;
+        let (Some(indices), Some(render_indices)) =
+            (self.indices.as_ref(), render_data.indices.as_mut())
+        else {
+            return self.apply_direct_region_color(render_data, region, color);
         };
-        let Some(render_indices) = render_data.indices.as_mut() else {
-            return;
-        };
+
+        let mut colored = 0usize;
         for range in &region.triangle_ranges {
             let start = range.start as usize;
             let end = start.saturating_add(range.count as usize);
@@ -981,9 +1050,38 @@ impl GeometrySceneChunk {
                 }
                 if isolated {
                     render_indices[base..base + 3].copy_from_slice(&isolated_indices);
+                    colored += 1;
                 }
             }
         }
+        colored
+    }
+
+    fn apply_direct_region_color(
+        &self,
+        render_data: &mut RenderData,
+        region: &GeometrySceneRegion,
+        color: [f32; 4],
+    ) -> usize {
+        if render_data.indices.is_some() {
+            return 0;
+        }
+        let mut colored = 0usize;
+        for range in &region.triangle_ranges {
+            let start = range.start as usize;
+            let end = start.saturating_add(range.count as usize);
+            for triangle_index in start..end {
+                let base = triangle_index.saturating_mul(3);
+                let Some(triangle) = render_data.vertices.get_mut(base..base + 3) else {
+                    continue;
+                };
+                for vertex in triangle {
+                    vertex.color = color;
+                }
+                colored += 1;
+            }
+        }
+        colored
     }
 }
 
@@ -1000,6 +1098,16 @@ fn section_plane(plane: &GeometrySceneSectionPlane) -> Option<(Vec3, Vec3)> {
         return None;
     }
     Some((normal, origin))
+}
+
+fn geometry_region_role_color(role: Option<&str>) -> [f32; 4] {
+    match role.unwrap_or_default() {
+        "material" => GEOMETRY_MATERIAL_REGION_COLOR,
+        "boundary" => GEOMETRY_BOUNDARY_REGION_COLOR,
+        "driving" => GEOMETRY_DRIVING_REGION_COLOR,
+        "selection" => GEOMETRY_SELECTED_REGION_COLOR,
+        _ => GEOMETRY_HOVER_REGION_COLOR,
+    }
 }
 
 fn clip_triangle_render_data(mut render_data: RenderData, plane: (Vec3, Vec3)) -> RenderData {
@@ -1537,6 +1645,113 @@ mod tests {
     }
 
     #[test]
+    fn presentation_selection_colors_indexed_triangle_region() {
+        let material = cad_default_material();
+        let chunk = GeometrySceneChunk::indexed_triangles(
+            "face_chunk",
+            vec![
+                vertex([-1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+                vertex([1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+                vertex([0.0, 1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+                vertex([2.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+            ],
+            vec![0, 1, 2, 1, 3, 2],
+            material,
+        )
+        .with_regions(vec![GeometrySceneRegion::new(
+            "face_b",
+            Some("Face B".to_string()),
+            Some("cad-face".to_string()),
+            vec![GeometrySceneTriangleRange::new(1, 1)],
+        )]);
+
+        let render_data = chunk.render_data_with_presentation(&GeometryScenePresentation {
+            selected_region_ids: vec!["face_b".to_string()],
+            ..Default::default()
+        });
+
+        assert_eq!(render_data.vertices.len(), 7);
+        assert_eq!(
+            render_data.indices.as_deref(),
+            Some(&[0, 1, 2, 4, 5, 6][..])
+        );
+        assert_eq!(
+            render_data.vertices[4].color,
+            GEOMETRY_SELECTED_REGION_COLOR
+        );
+        assert_eq!(
+            render_data.vertices[5].color,
+            GEOMETRY_SELECTED_REGION_COLOR
+        );
+        assert_eq!(
+            render_data.vertices[6].color,
+            GEOMETRY_SELECTED_REGION_COLOR
+        );
+    }
+
+    #[test]
+    fn presentation_selection_colors_direct_triangle_region() {
+        let material = cad_default_material();
+        let base_color = [0.5, 0.5, 0.5, 1.0];
+        let vertices = vec![
+            vertex([-1.0, -1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
+            vertex([1.0, -1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
+            vertex([0.0, 1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
+            vertex([1.0, -1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
+            vertex([2.0, -1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
+            vertex([0.0, 1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
+        ];
+        let chunk = GeometrySceneChunk::from_render_data(
+            "face_chunk",
+            RenderData {
+                pipeline_type: PipelineType::Triangles,
+                vertices,
+                indices: None,
+                gpu_vertices: None,
+                bounds: None,
+                material,
+                draw_calls: vec![DrawCall {
+                    vertex_offset: 0,
+                    vertex_count: 6,
+                    index_offset: None,
+                    index_count: None,
+                    instance_count: 1,
+                }],
+                image: None,
+            },
+        )
+        .with_regions(vec![GeometrySceneRegion::new(
+            "face_b",
+            Some("Face B".to_string()),
+            Some("cad-face".to_string()),
+            vec![GeometrySceneTriangleRange::new(1, 1)],
+        )]);
+
+        let render_data = chunk.render_data_with_presentation(&GeometryScenePresentation {
+            selected_region_id: Some("face_b".to_string()),
+            ..Default::default()
+        });
+
+        assert!(render_data.indices.is_none());
+        assert_eq!(render_data.vertices.len(), 6);
+        assert_eq!(render_data.vertices[0].color, base_color);
+        assert_eq!(render_data.vertices[1].color, base_color);
+        assert_eq!(render_data.vertices[2].color, base_color);
+        assert_eq!(
+            render_data.vertices[3].color,
+            GEOMETRY_SELECTED_REGION_COLOR
+        );
+        assert_eq!(
+            render_data.vertices[4].color,
+            GEOMETRY_SELECTED_REGION_COLOR
+        );
+        assert_eq!(
+            render_data.vertices[5].color,
+            GEOMETRY_SELECTED_REGION_COLOR
+        );
+    }
+
+    #[test]
     fn presentation_resolves_hidden_and_isolated_owner_visibility() {
         let current_hidden = BTreeSet::from(["panel_b".to_string()]);
         let all_owner_ids = ["panel_a", "panel_b", "panel_c"];
@@ -1688,7 +1903,7 @@ mod tests {
         let nodes = scene.nodes_with_presentation(&GeometryScenePresentation {
             region_annotations: vec![GeometrySceneRegionAnnotation {
                 region_id: "loaded_face".to_string(),
-                color: [0.9, 0.1, 0.1, 1.0],
+                color: Some([0.9, 0.1, 0.1, 1.0]),
                 role: Some("load".to_string()),
                 label: Some("load".to_string()),
                 direction: Some([0.0, 0.0, 1.0]),

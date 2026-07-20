@@ -60,6 +60,12 @@ pub struct OverlayConfig {
     /// Whether to show the top toolbar (legend/grid/reset/save).
     pub show_toolbar: bool,
 
+    /// Whether to render the CAD/geometry overlay UI inside the plot surface.
+    ///
+    /// Hosted web/Tauri surfaces reserve React UI outside the native surface
+    /// instead, because native-layer surfaces cannot be occluded by DOM.
+    pub show_cad_overlay: bool,
+
     /// Scale factor applied to overlay font sizes (1.0 = default).
     pub font_scale: f32,
 
@@ -108,6 +114,7 @@ impl Default for OverlayConfig {
         Self {
             show_sidebar: true,
             show_toolbar: true,
+            show_cad_overlay: true,
             font_scale: 1.0,
             show_grid: true,
             show_axes: true,
@@ -1474,17 +1481,19 @@ impl PlotOverlay {
                 .rect_stroke(bar_rect, 0.0, Stroke::new(1.0, border));
         }
 
-        if let Some(overlay) = plot_renderer.geometry_overlay() {
-            let actions = self.cad_overlay.render(CadOverlayRenderInput {
-                ctx: ui.ctx(),
-                plot_rect: centered_plot_rect,
-                overlay,
-                grid_enabled: plot_renderer.overlay_show_grid(),
-                xray_enabled: plot_renderer.geometry_xray_enabled(),
-                owner_visible: &|owner_id| plot_renderer.geometry_owner_visible(owner_id),
-                font_scale: config.font_scale,
-            });
-            self.cad_actions.merge(actions);
+        if config.show_cad_overlay {
+            if let Some(overlay) = plot_renderer.geometry_overlay() {
+                let actions = self.cad_overlay.render(CadOverlayRenderInput {
+                    ctx: ui.ctx(),
+                    plot_rect: centered_plot_rect,
+                    overlay,
+                    grid_enabled: plot_renderer.overlay_show_grid(),
+                    xray_enabled: plot_renderer.geometry_xray_enabled(),
+                    owner_visible: &|owner_id| plot_renderer.geometry_owner_visible(owner_id),
+                    font_scale: config.font_scale,
+                });
+                self.cad_actions.merge(actions);
+            }
         }
 
         self.axes_plot_rects = rendered_axes_rects;

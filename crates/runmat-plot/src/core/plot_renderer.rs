@@ -659,20 +659,7 @@ impl PlotRenderer {
         self.axes_applied_view_revisions.clear();
         self.axes_applied_view_revisions.push(None);
 
-        for (index, chunk) in geometry_scene.chunks.iter().enumerate() {
-            let node_id = geometry_scene.chunk_node_id(index, &chunk.chunk_id);
-            if !chunk.owner_node_ids.is_empty() {
-                self.geometry_node_owner_ids
-                    .insert(node_id, chunk.owner_node_ids.clone());
-            }
-        }
-        self.apply_geometry_presentation_visibility();
-
-        for node in geometry_scene.nodes_with_presentation(&self.geometry_presentation) {
-            self.scene.add_node(node);
-        }
-        self.apply_geometry_xray_to_nodes();
-        self.apply_geometry_visibility_filter();
+        self.rebuild_geometry_scene_nodes(&geometry_scene);
 
         if preserved_camera.is_none() {
             let mut camera = Camera::new();
@@ -3418,6 +3405,14 @@ impl PlotRenderer {
         if let Some(view_preset) = requested_view_preset {
             self.set_camera_view_preset(geometry_scene_view_preset_to_camera(view_preset));
         }
+        log::info!(
+            target: "runmat_plot",
+            "geometry_scene.presentation_renderer selected_region_id={} selected_region_count={} has_scene={} unchanged={}",
+            presentation.selected_region_id.as_deref().unwrap_or("none"),
+            presentation.selected_region_ids.len(),
+            self.last_geometry_scene.is_some(),
+            self.geometry_presentation == presentation,
+        );
         if self.geometry_presentation == presentation {
             return;
         }
@@ -3453,19 +3448,36 @@ impl PlotRenderer {
         self.needs_update = true;
     }
     fn refresh_geometry_scene_render_data(&mut self, geometry_scene: &GeometryScene) {
+        log::info!(
+            target: "runmat_plot",
+            "geometry_scene.refresh_render_data chunks={} selected_region_id={} selected_region_count={}",
+            geometry_scene.chunks.len(),
+            self.geometry_presentation
+                .selected_region_id
+                .as_deref()
+                .unwrap_or("none"),
+            self.geometry_presentation.selected_region_ids.len(),
+        );
+        self.rebuild_geometry_scene_nodes(geometry_scene);
+    }
+
+    fn rebuild_geometry_scene_nodes(&mut self, geometry_scene: &GeometryScene) {
+        self.scene.clear();
+        self.scene_buffer_cache.borrow_mut().clear();
+        self.geometry_node_owner_ids.clear();
         for (index, chunk) in geometry_scene.chunks.iter().enumerate() {
             let node_id = geometry_scene.chunk_node_id(index, &chunk.chunk_id);
-            if let Some(node) = self.scene.get_node_mut(node_id) {
-                node.render_data =
-                    Some(chunk.render_data_with_presentation(&self.geometry_presentation));
-                node.bounds = chunk.bounds;
-                node.visible = chunk.visible;
+            if !chunk.owner_node_ids.is_empty() {
+                self.geometry_node_owner_ids
+                    .insert(node_id, chunk.owner_node_ids.clone());
             }
         }
-        self.apply_geometry_xray_to_nodes();
         self.apply_geometry_presentation_visibility();
+        for node in geometry_scene.nodes_with_presentation(&self.geometry_presentation) {
+            self.scene.add_node_preserving_id(node);
+        }
+        self.apply_geometry_xray_to_nodes();
         self.apply_geometry_visibility_filter();
-        self.scene_buffer_cache.borrow_mut().clear();
         self.needs_update = true;
     }
     fn preserve_geometry_scene_state_when_unspecified(

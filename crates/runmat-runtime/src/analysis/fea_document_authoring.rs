@@ -115,6 +115,12 @@ pub struct FeaStudySummary {
     pub model_profile: Option<String>,
     #[serde(rename = "modelDefaults")]
     pub model_defaults: Option<String>,
+    #[serde(rename = "meshProfile")]
+    pub mesh_profile: Option<String>,
+    #[serde(rename = "meshTargetSize")]
+    pub mesh_target_size: Option<String>,
+    #[serde(rename = "meshMaxElements")]
+    pub mesh_max_elements: Option<String>,
     #[serde(rename = "runKind")]
     pub run_kind: Option<String>,
     #[serde(rename = "runBackend")]
@@ -658,6 +664,9 @@ fn summarize_fea_study(document: &YamlValue) -> FeaStudySummary {
         geometry_units: read_yaml_string(document, &["geometry", "units"]),
         model_profile,
         model_defaults: read_yaml_string(document, &["model", "defaults"]),
+        mesh_profile: read_yaml_string(document, &["mesh", "profile"]),
+        mesh_target_size: read_yaml_string(document, &["mesh", "target_size"]),
+        mesh_max_elements: read_yaml_string(document, &["mesh", "max_elements"]),
         run_kind,
         run_backend: read_yaml_string(document, &["run", "backend"]),
     }
