@@ -9,6 +9,7 @@ pub(crate) mod cumsum;
 pub(crate) mod cumtrapz;
 pub(crate) mod diff;
 pub(crate) mod gradient;
+pub(crate) mod integer_native;
 pub(crate) mod integration_common;
 pub(crate) mod max;
 pub(crate) mod mean;

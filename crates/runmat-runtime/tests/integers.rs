@@ -138,6 +138,49 @@ fn integer_relation_size_errors_keep_builtin_identifier() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn sum_native_preserves_exact_integer_storage_while_default_is_double() {
+    let input = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1, 5, 7]), vec![2, 2])
+            .expect("input"),
+    );
+    assert_eq!(
+        runmat_runtime::call_builtin("sum", &[input.clone(), Value::from("native")])
+            .expect("native sum"),
+        Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 12]), vec![1, 2])
+                .expect("native output"),
+        )
+    );
+    assert_eq!(
+        runmat_runtime::call_builtin(
+            "sum",
+            &[input.clone(), Value::Num(2.0), Value::from("native")],
+        )
+        .expect("native row sum"),
+        Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 8]), vec![2, 1])
+                .expect("native row output"),
+        )
+    );
+    assert_eq!(
+        runmat_runtime::call_builtin(
+            "sum",
+            &[Value::Int(IntValue::U64(u64::MAX)), Value::from("native")],
+        )
+        .expect("native scalar sum"),
+        Value::Int(IntValue::U64(u64::MAX))
+    );
+    match runmat_runtime::call_builtin("sum", &[input]).expect("default sum") {
+        Value::Tensor(tensor) => {
+            assert!(tensor.integer_storage().is_none());
+            assert_eq!(tensor.shape, vec![1, 2]);
+        }
+        other => panic!("expected double tensor, got {other:?}"),
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn integer_class_and_string() {
     let i = Value::Int(IntValue::U16(42));
     let cls = runmat_runtime::call_builtin("class", [i.clone()].as_slice()).unwrap();
