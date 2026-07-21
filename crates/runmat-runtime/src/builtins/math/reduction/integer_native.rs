@@ -14,6 +14,18 @@ pub(crate) enum ExtremaComparison {
     Absolute,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CumulativeOperation {
+    Sum,
+    Product,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CumulativeDirection {
+    Forward,
+    Reverse,
+}
+
 pub(crate) struct IntegerExtrema {
     pub(crate) values: Value,
     pub(crate) indices: Value,
@@ -197,6 +209,115 @@ pub(crate) fn extrema(
 
 pub(crate) fn empty_like(storage: &IntegerStorage, shape: Vec<usize>) -> Result<Value, String> {
     integer_storage_into_value(empty_storage_like(storage), shape)
+}
+
+/// Performs a MATLAB cumulative reduction in the input integer class. Integer
+/// `cumsum` and `cumprod` preserve their class, unlike scalar reductions whose
+/// default output is double.
+pub(crate) fn cumulative(
+    storage: &IntegerStorage,
+    shape: &[usize],
+    dim: usize,
+    direction: CumulativeDirection,
+    operation: CumulativeOperation,
+) -> Result<Value, String> {
+    if dim == 0 {
+        return Err("cumulative integer reduction dimension must be >= 1".to_string());
+    }
+    let shape = normalized_shape(shape);
+    if storage.is_empty() || dim > shape.len() {
+        return integer_storage_into_value(storage.clone(), shape);
+    }
+
+    let dim_index = dim - 1;
+    let segment_len = shape[dim_index];
+    if segment_len == 0 {
+        return integer_storage_into_value(storage.clone(), shape);
+    }
+    let stride_before = element_count(&shape[..dim_index]);
+    let stride_after = element_count(&shape[dim..]);
+    let block = stride_before.saturating_mul(segment_len);
+
+    macro_rules! scan {
+        ($values:expr, $variant:ident, $identity:expr, $method:ident) => {{
+            let mut output = vec![$identity; $values.len()];
+            for after in 0..stride_after {
+                let base = after * block;
+                for before in 0..stride_before {
+                    let mut accumulator = $identity;
+                    match direction {
+                        CumulativeDirection::Forward => {
+                            for offset in 0..segment_len {
+                                let index = base + before + offset * stride_before;
+                                accumulator = accumulator.$method($values[index]);
+                                output[index] = accumulator;
+                            }
+                        }
+                        CumulativeDirection::Reverse => {
+                            for offset in (0..segment_len).rev() {
+                                let index = base + before + offset * stride_before;
+                                accumulator = accumulator.$method($values[index]);
+                                output[index] = accumulator;
+                            }
+                        }
+                    }
+                }
+            }
+            IntegerStorage::$variant(output)
+        }};
+    }
+
+    let output = match (storage, operation) {
+        (IntegerStorage::I8(values), CumulativeOperation::Sum) => {
+            scan!(values, I8, 0i8, saturating_add)
+        }
+        (IntegerStorage::I16(values), CumulativeOperation::Sum) => {
+            scan!(values, I16, 0i16, saturating_add)
+        }
+        (IntegerStorage::I32(values), CumulativeOperation::Sum) => {
+            scan!(values, I32, 0i32, saturating_add)
+        }
+        (IntegerStorage::I64(values), CumulativeOperation::Sum) => {
+            scan!(values, I64, 0i64, saturating_add)
+        }
+        (IntegerStorage::U8(values), CumulativeOperation::Sum) => {
+            scan!(values, U8, 0u8, saturating_add)
+        }
+        (IntegerStorage::U16(values), CumulativeOperation::Sum) => {
+            scan!(values, U16, 0u16, saturating_add)
+        }
+        (IntegerStorage::U32(values), CumulativeOperation::Sum) => {
+            scan!(values, U32, 0u32, saturating_add)
+        }
+        (IntegerStorage::U64(values), CumulativeOperation::Sum) => {
+            scan!(values, U64, 0u64, saturating_add)
+        }
+        (IntegerStorage::I8(values), CumulativeOperation::Product) => {
+            scan!(values, I8, 1i8, saturating_mul)
+        }
+        (IntegerStorage::I16(values), CumulativeOperation::Product) => {
+            scan!(values, I16, 1i16, saturating_mul)
+        }
+        (IntegerStorage::I32(values), CumulativeOperation::Product) => {
+            scan!(values, I32, 1i32, saturating_mul)
+        }
+        (IntegerStorage::I64(values), CumulativeOperation::Product) => {
+            scan!(values, I64, 1i64, saturating_mul)
+        }
+        (IntegerStorage::U8(values), CumulativeOperation::Product) => {
+            scan!(values, U8, 1u8, saturating_mul)
+        }
+        (IntegerStorage::U16(values), CumulativeOperation::Product) => {
+            scan!(values, U16, 1u16, saturating_mul)
+        }
+        (IntegerStorage::U32(values), CumulativeOperation::Product) => {
+            scan!(values, U32, 1u32, saturating_mul)
+        }
+        (IntegerStorage::U64(values), CumulativeOperation::Product) => {
+            scan!(values, U64, 1u64, saturating_mul)
+        }
+    };
+    integer_storage_into_value(output, shape)
 }
 
 pub(crate) fn storage_from_scalar(value: &IntValue) -> IntegerStorage {
@@ -487,5 +608,55 @@ mod tests {
         .expect("max by absolute value");
         assert_eq!(result.values, Value::Int(IntValue::I64(i64::MIN)));
         assert_eq!(result.indices, Value::Num(1.0));
+    }
+
+    #[test]
+    fn cumulative_scans_preserve_class_direction_and_saturation() {
+        let sum = cumulative(
+            &IntegerStorage::U8(vec![250, 10, 2, 3]),
+            &[2, 2],
+            1,
+            CumulativeDirection::Forward,
+            CumulativeOperation::Sum,
+        )
+        .expect("cumsum");
+        assert_eq!(
+            sum,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U8(vec![250, 255, 2, 5]), vec![2, 2])
+                    .expect("sum")
+            )
+        );
+
+        let product = cumulative(
+            &IntegerStorage::I8(vec![2, 100, 3, 2]),
+            &[2, 2],
+            1,
+            CumulativeDirection::Reverse,
+            CumulativeOperation::Product,
+        )
+        .expect("cumprod");
+        assert_eq!(
+            product,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I8(vec![127, 100, 6, 2]), vec![2, 2])
+                    .expect("product")
+            )
+        );
+
+        assert_eq!(
+            cumulative(
+                &IntegerStorage::U64(vec![u64::MAX, 1]),
+                &[1, 2],
+                3,
+                CumulativeDirection::Forward,
+                CumulativeOperation::Sum,
+            )
+            .expect("out-of-range dimension"),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1]), vec![1, 2])
+                    .expect("unchanged input")
+            )
+        );
     }
 }
