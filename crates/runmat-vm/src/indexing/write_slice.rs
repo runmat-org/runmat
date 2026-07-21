@@ -1,6 +1,7 @@
+use crate::indexing::integer_assignment::{self, IntegerAssignmentValue};
 use crate::indexing::plan::IndexPlan;
 use crate::interpreter::errors::mex;
-use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntegerStorage, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
 
 fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
@@ -49,6 +50,35 @@ fn sorted_unique_positions_desc(
     positions.dedup();
     positions.reverse();
     Ok(positions)
+}
+
+fn scalar_integer_value(value: &Value) -> Result<IntegerAssignmentValue, RuntimeError> {
+    match value {
+        Value::Int(value) => Ok(IntegerAssignmentValue::Exact(value.clone())),
+        Value::Num(value) => Ok(IntegerAssignmentValue::Float(*value)),
+        Value::Bool(value) => Ok(IntegerAssignmentValue::Float(if *value {
+            1.0
+        } else {
+            0.0
+        })),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.integer_storage() {
+            Some(storage) => Ok(IntegerAssignmentValue::Exact(
+                integer_assignment::values(storage)[0].clone(),
+            )),
+            None => Ok(IntegerAssignmentValue::Float(tensor.data[0])),
+        },
+        Value::LogicalArray(array) if array.data.len() == 1 => {
+            Ok(IntegerAssignmentValue::Float(if array.data[0] == 0 {
+                0.0
+            } else {
+                1.0
+            }))
+        }
+        _ => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            "rhs must be numeric or logical",
+        )),
+    }
 }
 
 pub enum ComplexRhsView {
@@ -381,6 +411,107 @@ pub async fn materialize_rhs_real_for_plan(
     }
 }
 
+async fn materialize_integer_rhs_for_plan(
+    rhs: &Value,
+    plan: &IndexPlan,
+) -> Result<Vec<IntegerAssignmentValue>, RuntimeError> {
+    match rhs {
+        Value::Int(value) => Ok(vec![
+            IntegerAssignmentValue::Exact(value.clone());
+            plan.indices.len()
+        ]),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            let values = integer_assignment::values(
+                tensor
+                    .integer_storage()
+                    .expect("integer RHS must retain exact storage"),
+            );
+            if plan.dims == 1 {
+                if values.len() == plan.indices.len() {
+                    return Ok(values
+                        .into_iter()
+                        .map(IntegerAssignmentValue::Exact)
+                        .collect());
+                }
+                if values.len() == 1 {
+                    return Ok(vec![
+                        IntegerAssignmentValue::Exact(values[0].clone());
+                        plan.indices.len()
+                    ]);
+                }
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+            }
+
+            let dims = plan.selection_lengths.len();
+            let mut shape = tensor.shape.clone();
+            if shape.len() < dims {
+                shape.resize(dims, 1);
+            }
+            if shape.len() > dims {
+                if shape.iter().skip(dims).any(|&dimension| dimension != 1) {
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+                }
+                shape.truncate(dims);
+            }
+            for (&rhs_len, &selection_len) in shape.iter().zip(&plan.selection_lengths) {
+                if rhs_len != 1 && rhs_len != selection_len {
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+                }
+            }
+            let expected = shape
+                .iter()
+                .copied()
+                .fold(1usize, |acc, length| acc.saturating_mul(length.max(1)));
+            if values.len() != expected {
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+            }
+            let mut strides = vec![1usize; dims];
+            for dimension in 1..dims {
+                strides[dimension] = strides[dimension - 1] * shape[dimension - 1].max(1);
+            }
+            let mut output = Vec::with_capacity(plan.indices.len());
+            let mut coordinates = vec![0usize; dims];
+            for _ in 0..plan.indices.len() {
+                let mut rhs_index = 0usize;
+                for dimension in 0..dims {
+                    let coordinate = if shape[dimension] == 1 {
+                        0
+                    } else {
+                        coordinates[dimension]
+                    };
+                    rhs_index += coordinate * strides[dimension];
+                }
+                output.push(IntegerAssignmentValue::Exact(values[rhs_index].clone()));
+                for dimension in 0..dims {
+                    coordinates[dimension] += 1;
+                    if coordinates[dimension] < plan.selection_lengths[dimension].max(1) {
+                        break;
+                    }
+                    coordinates[dimension] = 0;
+                }
+            }
+            Ok(output)
+        }
+        Value::OutputList(values) => {
+            if values.len() == plan.indices.len() {
+                return values.iter().map(scalar_integer_value).collect();
+            }
+            if values.len() == 1 {
+                return Ok(vec![scalar_integer_value(&values[0])?; plan.indices.len()]);
+            }
+            Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
+        }
+        _ => materialize_rhs_real_for_plan(rhs, plan)
+            .await
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(IntegerAssignmentValue::Float)
+                    .collect()
+            }),
+    }
+}
+
 pub fn scatter_real_with_plan(
     t: &mut Tensor,
     plan: &IndexPlan,
@@ -414,6 +545,22 @@ pub async fn assign_tensor_with_plan(
         scatter_complex_with_plan(&mut ct, plan, &rhs_view)?;
         return Ok(Value::ComplexTensor(ct));
     }
+    if t.integer_storage().is_some() {
+        let rhs_values = materialize_integer_rhs_for_plan(rhs, plan).await?;
+        let storage = t
+            .integer_data
+            .as_mut()
+            .expect("integer tensor must retain exact storage");
+        integer_assignment::scatter(storage, plan, &rhs_values)?;
+        return Tensor::new_integer(
+            t.integer_data
+                .take()
+                .expect("integer tensor must retain exact storage"),
+            t.shape,
+        )
+        .map(Value::Tensor)
+        .map_err(|error| map_slice_shape_error("slice assign", error));
+    }
     let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
     scatter_real_with_plan(&mut t, plan, &rhs_values)?;
     Ok(Value::Tensor(t))
@@ -440,6 +587,31 @@ pub fn delete_tensor_with_plan(
         ));
     }
     let positions = sorted_unique_positions_desc(plan, t.data.len())?;
+    if let Some(storage) = t.integer_data.take() {
+        macro_rules! delete_positions {
+            ($values:expr, $variant:ident) => {{
+                let mut values = $values;
+                for &position in &positions {
+                    values.remove(position);
+                }
+                IntegerStorage::$variant(values)
+            }};
+        }
+        let storage = match storage {
+            IntegerStorage::I8(values) => delete_positions!(values, I8),
+            IntegerStorage::I16(values) => delete_positions!(values, I16),
+            IntegerStorage::I32(values) => delete_positions!(values, I32),
+            IntegerStorage::I64(values) => delete_positions!(values, I64),
+            IntegerStorage::U8(values) => delete_positions!(values, U8),
+            IntegerStorage::U16(values) => delete_positions!(values, U16),
+            IntegerStorage::U32(values) => delete_positions!(values, U32),
+            IntegerStorage::U64(values) => delete_positions!(values, U64),
+        };
+        let shape = deleted_vector_shape(t.rows, t.cols, storage.len());
+        return Tensor::new_integer(storage, shape)
+            .map(Value::Tensor)
+            .map_err(|error| map_slice_shape_error("slice deletion", error));
+    }
     for pos in positions {
         t.data.remove(pos);
     }
@@ -833,8 +1005,86 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_complex_rhs_view, build_string_rhs_view, map_acceleration_error};
-    use runmat_builtins::{CellArray, ComplexTensor, StringArray, Tensor, Value};
+    use super::{
+        assign_tensor_with_plan, build_complex_rhs_view, build_string_rhs_view,
+        delete_tensor_with_plan, map_acceleration_error,
+    };
+    use crate::indexing::plan::IndexPlan;
+    use futures::executor::block_on;
+    use runmat_builtins::{CellArray, ComplexTensor, IntegerStorage, StringArray, Tensor, Value};
+
+    #[test]
+    fn integer_plan_assignment_preserves_exact_uint64_rhs() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 3]), vec![1, 3]).expect("tensor");
+        let rhs = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 9]), vec![1, 2]).expect("rhs"),
+        );
+        let plan = IndexPlan::new(vec![0, 1], vec![1, 2], vec![2], 1, vec![1, 3]);
+        let result = block_on(assign_tensor_with_plan(tensor, &plan, &rhs)).expect("assign");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 9, 3]))
+        );
+    }
+
+    #[test]
+    fn integer_plan_assignment_broadcasts_exact_tensor_rhs() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I8(vec![0; 4]), vec![2, 2]).expect("tensor");
+        let rhs = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I8(vec![5, 6]), vec![1, 2]).expect("rhs"),
+        );
+        let plan = IndexPlan::new(vec![0, 1, 2, 3], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+        let result = block_on(assign_tensor_with_plan(tensor, &plan, &rhs)).expect("assign");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I8(vec![5, 5, 6, 6]))
+        );
+    }
+
+    #[test]
+    fn integer_plan_assignment_converts_float_rhs_with_saturation() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I8(vec![0, 0]), vec![1, 2]).expect("tensor");
+        let plan = IndexPlan::new(vec![0, 1], vec![1, 2], vec![2], 1, vec![1, 2]);
+        let result =
+            block_on(assign_tensor_with_plan(tensor, &plan, &Value::Num(300.5))).expect("assign");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I8(vec![i8::MAX, i8::MAX]))
+        );
+    }
+
+    #[test]
+    fn integer_plan_deletion_preserves_exact_storage() {
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![1, i64::MAX, 3]), vec![1, 3])
+            .expect("tensor");
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty"));
+        let plan = IndexPlan::new(vec![1], vec![1, 1], vec![1], 1, vec![1, 3]);
+        let result = delete_tensor_with_plan(tensor, &plan, &empty).expect("delete");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I64(vec![1, 3]))
+        );
+        assert_eq!(output.shape, vec![1, 2]);
+    }
 
     #[test]
     fn complex_rhs_view_shape_mismatch_reports_identifier() {
