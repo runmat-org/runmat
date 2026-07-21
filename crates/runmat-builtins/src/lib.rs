@@ -262,6 +262,10 @@ impl IntegerStorage {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn class_name(&self) -> &'static str {
         match self {
             Self::I8(_) => "int8",

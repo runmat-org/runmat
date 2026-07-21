@@ -16,6 +16,8 @@ pub(crate) mod heaviside;
 pub(crate) mod hypot;
 pub(crate) mod imag;
 pub(crate) mod int32;
+pub(crate) mod integer_cast;
+pub(crate) mod integer_cast_builtins;
 pub(crate) mod ldivide;
 pub(crate) mod log;
 pub(crate) mod log10;
