@@ -17,6 +17,32 @@ pub(crate) enum IntegerTarget {
 }
 
 impl IntegerTarget {
+    pub(crate) fn from_int_value(value: &IntValue) -> Self {
+        match value {
+            IntValue::I8(_) => Self::I8,
+            IntValue::I16(_) => Self::I16,
+            IntValue::I32(_) => Self::I32,
+            IntValue::I64(_) => Self::I64,
+            IntValue::U8(_) => Self::U8,
+            IntValue::U16(_) => Self::U16,
+            IntValue::U32(_) => Self::U32,
+            IntValue::U64(_) => Self::U64,
+        }
+    }
+
+    pub(crate) fn from_storage(storage: &IntegerStorage) -> Self {
+        match storage {
+            IntegerStorage::I8(_) => Self::I8,
+            IntegerStorage::I16(_) => Self::I16,
+            IntegerStorage::I32(_) => Self::I32,
+            IntegerStorage::I64(_) => Self::I64,
+            IntegerStorage::U8(_) => Self::U8,
+            IntegerStorage::U16(_) => Self::U16,
+            IntegerStorage::U32(_) => Self::U32,
+            IntegerStorage::U64(_) => Self::U64,
+        }
+    }
+
     pub(crate) fn cast_scalar(self, value: f64) -> IntValue {
         match self {
             Self::I8 => IntValue::I8(cast_signed(value, i8::MIN as f64, i8::MAX as f64) as i8),
@@ -62,7 +88,7 @@ impl IntegerTarget {
         Tensor::new_integer(self.storage(values), tensor.shape)
     }
 
-    fn storage(self, values: Vec<IntValue>) -> IntegerStorage {
+    pub(crate) fn storage(self, values: Vec<IntValue>) -> IntegerStorage {
         match self {
             Self::I8 => IntegerStorage::I8(
                 values
@@ -249,7 +275,7 @@ fn unsigned_value(value: &IntValue) -> u64 {
     }
 }
 
-fn integer_values(storage: IntegerStorage) -> Vec<IntValue> {
+pub(crate) fn integer_values(storage: IntegerStorage) -> Vec<IntValue> {
     match storage {
         IntegerStorage::I8(values) => values.into_iter().map(IntValue::I8).collect(),
         IntegerStorage::I16(values) => values.into_iter().map(IntValue::I16).collect(),
