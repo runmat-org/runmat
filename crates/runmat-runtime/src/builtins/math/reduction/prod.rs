@@ -361,6 +361,11 @@ async fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         return Err(prod_descriptor_error(&PROD_ERROR_COMPLEX_UNSUPPORTED));
     }
     let parsed = parse_arguments(&rest).await?;
+    if matches!(parsed.output, OutputTemplate::Native) {
+        if let Some(result) = prod_native_integer(&value, &parsed)? {
+            return Ok(result);
+        }
+    }
     let raw_result = match value {
         Value::GpuTensor(handle) => prod_gpu(handle, &parsed).await?,
         Value::Tensor(_)
@@ -379,6 +384,30 @@ async fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         }
     };
     apply_output_template(raw_result, &parsed.output, &input_meta).await
+}
+
+fn prod_native_integer(value: &Value, parsed: &ParsedArguments) -> BuiltinResult<Option<Value>> {
+    let (storage, shape) = match value {
+        Value::Int(value) => (
+            crate::builtins::math::reduction::integer_native::storage_from_scalar(value),
+            vec![1, 1],
+        ),
+        Value::Tensor(tensor) => {
+            let Some(storage) = tensor.integer_storage() else {
+                return Ok(None);
+            };
+            (storage.clone(), tensor.shape.clone())
+        }
+        _ => return Ok(None),
+    };
+    let resolved = resolve_dims(&shape, &parsed.selection)?;
+    crate::builtins::math::reduction::integer_native::product(
+        &storage,
+        &shape,
+        &resolved.dims_in_bounds,
+    )
+    .map(Some)
+    .map_err(prod_internal_error)
 }
 
 #[derive(Clone, PartialEq, Eq)]

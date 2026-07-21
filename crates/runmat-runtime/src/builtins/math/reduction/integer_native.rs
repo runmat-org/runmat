@@ -59,6 +59,62 @@ pub(crate) fn sum(
     integer_storage_into_value(output, output_shape)
 }
 
+/// Reduces an integer tensor by saturated native multiplication along
+/// zero-based dimensions for MATLAB's explicit `"native"` output mode.
+pub(crate) fn product(
+    storage: &IntegerStorage,
+    shape: &[usize],
+    reduced_dims: &[usize],
+) -> Result<Value, String> {
+    if reduced_dims.is_empty() {
+        return integer_storage_into_value(storage.clone(), shape.to_vec());
+    }
+
+    let shape = normalized_shape(shape);
+    let mut output_shape = shape.clone();
+    for &dim in reduced_dims {
+        if dim < output_shape.len() {
+            output_shape[dim] = 1;
+        }
+    }
+    let output_len = element_count(&output_shape);
+    let mut coords = vec![0usize; shape.len()];
+    let mut output_coords = vec![0usize; shape.len()];
+    let mut reduced = vec![false; shape.len()];
+    for &dim in reduced_dims {
+        if dim < reduced.len() {
+            reduced[dim] = true;
+        }
+    }
+
+    macro_rules! reduce {
+        ($values:expr, $variant:ident) => {{
+            let mut output = vec![1; output_len];
+            for (linear, &value) in $values.iter().enumerate() {
+                linear_to_multi(linear, &shape, &mut coords);
+                for (dim, &coord) in coords.iter().enumerate() {
+                    output_coords[dim] = if reduced[dim] { 0 } else { coord };
+                }
+                let output_index = multi_to_linear(&output_coords, &output_shape);
+                output[output_index] = output[output_index].saturating_mul(value);
+            }
+            IntegerStorage::$variant(output)
+        }};
+    }
+
+    let output = match storage {
+        IntegerStorage::I8(values) => reduce!(values, I8),
+        IntegerStorage::I16(values) => reduce!(values, I16),
+        IntegerStorage::I32(values) => reduce!(values, I32),
+        IntegerStorage::I64(values) => reduce!(values, I64),
+        IntegerStorage::U8(values) => reduce!(values, U8),
+        IntegerStorage::U16(values) => reduce!(values, U16),
+        IntegerStorage::U32(values) => reduce!(values, U32),
+        IntegerStorage::U64(values) => reduce!(values, U64),
+    };
+    integer_storage_into_value(output, output_shape)
+}
+
 pub(crate) fn storage_from_scalar(value: &IntValue) -> IntegerStorage {
     match value {
         IntValue::I8(value) => IntegerStorage::I8(vec![*value]),
@@ -154,6 +210,19 @@ mod tests {
         assert_eq!(
             sum(&storage, &[2, 2], &[]).expect("out of bounds"),
             Value::Tensor(Tensor::new_integer(storage, vec![2, 2]).expect("unchanged tensor"))
+        );
+    }
+
+    #[test]
+    fn product_preserves_native_type_identity_and_saturates() {
+        let result = product(&IntegerStorage::U8(vec![2, 200, 3, 2]), &[2, 2], &[0])
+            .expect("native product");
+        assert_eq!(
+            result,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U8(vec![255, 6]), vec![1, 2])
+                    .expect("expected tensor")
+            )
         );
     }
 }

@@ -181,6 +181,34 @@ fn sum_native_preserves_exact_integer_storage_while_default_is_double() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn prod_native_preserves_integer_storage_while_default_is_double() {
+    let input = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U8(vec![2, 200, 3, 2]), vec![2, 2]).expect("input"),
+    );
+    assert_eq!(
+        runmat_runtime::call_builtin("prod", &[input.clone(), Value::from("native")])
+            .expect("native product"),
+        Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U8(vec![255, 6]), vec![1, 2])
+                .expect("native output"),
+        )
+    );
+    assert_eq!(
+        runmat_runtime::call_builtin(
+            "prod",
+            &[Value::Int(IntValue::I64(i64::MIN)), Value::from("native")],
+        )
+        .expect("native scalar product"),
+        Value::Int(IntValue::I64(i64::MIN))
+    );
+    match runmat_runtime::call_builtin("prod", &[input]).expect("default product") {
+        Value::Tensor(tensor) => assert!(tensor.integer_storage().is_none()),
+        other => panic!("expected double tensor, got {other:?}"),
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn integer_class_and_string() {
     let i = Value::Int(IntValue::U16(42));
     let cls = runmat_runtime::call_builtin("class", [i.clone()].as_slice()).unwrap();
