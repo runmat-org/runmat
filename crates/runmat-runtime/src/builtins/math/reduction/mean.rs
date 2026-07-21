@@ -493,6 +493,11 @@ pub(crate) async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::Built
 
     let input_meta = InputMeta::from_value(&value);
     let parsed = parse_arguments(&rest).await?;
+    if matches!(parsed.output, OutputTemplate::Native) {
+        if let Some(result) = mean_native_integer(&value, &parsed)? {
+            return Ok(result);
+        }
+    }
     let raw = match value {
         Value::GpuTensor(handle) => mean_gpu(handle, &parsed).await?,
         Value::Complex(re, im) => mean_host_complex_scalar(re, im, &parsed)?,
@@ -500,6 +505,39 @@ pub(crate) async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::Built
         other => mean_host(other, &parsed)?,
     };
     apply_output_template(raw, &parsed.output, &input_meta).await
+}
+
+fn mean_native_integer(value: &Value, parsed: &ParsedArguments) -> BuiltinResult<Option<Value>> {
+    let (storage, shape) = match value {
+        Value::Int(value) => (
+            crate::builtins::math::reduction::integer_native::storage_from_scalar(value),
+            vec![1, 1],
+        ),
+        Value::Tensor(tensor) => {
+            let Some(storage) = tensor.integer_storage() else {
+                return Ok(None);
+            };
+            (storage.clone(), tensor.shape.clone())
+        }
+        _ => return Ok(None),
+    };
+    let dims = resolve_native_dims(&shape, &parsed.axes)?;
+    crate::builtins::math::reduction::integer_native::mean(&storage, &shape, &dims)
+        .map(Some)
+        .map_err(mean_internal_error)
+}
+
+fn resolve_native_dims(shape: &[usize], axes: &MeanAxes) -> BuiltinResult<Vec<usize>> {
+    let mut dims = match axes {
+        MeanAxes::Default => vec![default_dimension_from_shape(shape).saturating_sub(1)],
+        MeanAxes::Dim(dim) => vec![dim.saturating_sub(1)],
+        MeanAxes::Vec(dims) => dims.iter().map(|dim| dim.saturating_sub(1)).collect(),
+        MeanAxes::All => (0..shape.len()).collect(),
+    };
+    dims.retain(|&dim| dim < shape.len());
+    dims.sort_unstable();
+    dims.dedup();
+    Ok(dims)
 }
 
 fn normalise_mean_call_args(value: Value, rest: Vec<Value>) -> (Value, Vec<Value>) {
@@ -1744,6 +1782,92 @@ pub(crate) mod tests {
         let value = Value::Int(IntValue::I16(42));
         let result = mean_builtin(value, vec![Value::from("native")]).expect("mean");
         assert_eq!(result, Value::Int(IntValue::I16(42)));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn mean_native_uint64_uses_exact_storage_and_rounds_halves_up() {
+        let input = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, u64::MAX, 0, 0]),
+            vec![2, 2],
+        )
+        .expect("integer tensor");
+        let result = mean_builtin(
+            Value::Tensor(input),
+            vec![Value::from("all"), Value::from("native")],
+        )
+        .expect("native mean");
+        assert_eq!(result, Value::Int(IntValue::U64(1_u64 << 63)));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn mean_native_integer_default_dimension_preserves_typed_tensor() {
+        let input = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![1, 2, 4, 5]),
+            vec![2, 2],
+        )
+        .expect("integer tensor");
+        let result =
+            mean_builtin(Value::Tensor(input), vec![Value::from("native")]).expect("native mean");
+        let Value::Tensor(output) = result else {
+            panic!("expected typed tensor result");
+        };
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::U16(vec![2, 5]))
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn mean_native_integer_empty_reduction_returns_typed_zeros() {
+        let input = Tensor::new_integer(runmat_builtins::IntegerStorage::I8(vec![]), vec![0, 3])
+            .expect("integer tensor");
+        let result =
+            mean_builtin(Value::Tensor(input), vec![Value::from("native")]).expect("native mean");
+        let Value::Tensor(output) = result else {
+            panic!("expected typed tensor result");
+        };
+        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::I8(vec![0, 0, 0]))
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn mean_native_int64_rounds_negative_halves_away_from_zero() {
+        let input = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![-2, -1, 0, 1]),
+            vec![2, 2],
+        )
+        .expect("integer tensor");
+        let result = mean_builtin(
+            Value::Tensor(input),
+            vec![Value::from("all"), Value::from("native")],
+        )
+        .expect("native mean");
+        assert_eq!(result, Value::Int(IntValue::I64(-1)));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn mean_native_vecdim_reduces_once_before_rounding() {
+        let input = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I8(vec![0, 0, 0, 5]),
+            vec![2, 2],
+        )
+        .expect("integer tensor");
+        let dimensions = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("dimensions");
+        let result = mean_builtin(
+            Value::Tensor(input),
+            vec![Value::Tensor(dimensions), Value::from("native")],
+        )
+        .expect("native mean");
+        assert_eq!(result, Value::Int(IntValue::I8(1)));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

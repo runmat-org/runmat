@@ -150,6 +150,123 @@ pub(crate) fn product(
     integer_storage_into_value(output, output_shape)
 }
 
+/// Reduces an integer tensor by an exact mean in the source integer class.
+///
+/// MATLAB's `mean(A, "native")` performs the operation in the input class.
+/// Accumulating in the native class would overflow before the division, so the
+/// calculation uses a widened exact accumulator and converts only the final,
+/// rounded mean back to the source class. Half values round away from zero.
+pub(crate) fn mean(
+    storage: &IntegerStorage,
+    shape: &[usize],
+    reduced_dims: &[usize],
+) -> Result<Value, String> {
+    if reduced_dims.is_empty() {
+        return integer_storage_into_value(storage.clone(), shape.to_vec());
+    }
+
+    let shape = normalized_shape(shape);
+    let mut output_shape = shape.clone();
+    for &dim in reduced_dims {
+        if dim < output_shape.len() {
+            output_shape[dim] = 1;
+        }
+    }
+    let output_len = element_count(&output_shape);
+    let mut coords = vec![0usize; shape.len()];
+    let mut output_coords = vec![0usize; shape.len()];
+    let mut reduced = vec![false; shape.len()];
+    for &dim in reduced_dims {
+        if dim < reduced.len() {
+            reduced[dim] = true;
+        }
+    }
+
+    macro_rules! reduce_signed {
+        ($values:expr, $variant:ident, $ty:ty) => {{
+            let mut sums = vec![0i128; output_len];
+            let mut counts = vec![0usize; output_len];
+            for (linear, &value) in $values.iter().enumerate() {
+                linear_to_multi(linear, &shape, &mut coords);
+                for (dim, &coord) in coords.iter().enumerate() {
+                    output_coords[dim] = if reduced[dim] { 0 } else { coord };
+                }
+                let output_index = multi_to_linear(&output_coords, &output_shape);
+                sums[output_index] += value as i128;
+                counts[output_index] += 1;
+            }
+            IntegerStorage::$variant(
+                sums.into_iter()
+                    .zip(counts)
+                    .map(|(sum, count)| rounded_signed_mean(sum, count) as $ty)
+                    .collect(),
+            )
+        }};
+    }
+
+    macro_rules! reduce_unsigned {
+        ($values:expr, $variant:ident, $ty:ty) => {{
+            let mut sums = vec![0u128; output_len];
+            let mut counts = vec![0usize; output_len];
+            for (linear, &value) in $values.iter().enumerate() {
+                linear_to_multi(linear, &shape, &mut coords);
+                for (dim, &coord) in coords.iter().enumerate() {
+                    output_coords[dim] = if reduced[dim] { 0 } else { coord };
+                }
+                let output_index = multi_to_linear(&output_coords, &output_shape);
+                sums[output_index] += value as u128;
+                counts[output_index] += 1;
+            }
+            IntegerStorage::$variant(
+                sums.into_iter()
+                    .zip(counts)
+                    .map(|(sum, count)| rounded_unsigned_mean(sum, count) as $ty)
+                    .collect(),
+            )
+        }};
+    }
+
+    let output = match storage {
+        IntegerStorage::I8(values) => reduce_signed!(values, I8, i8),
+        IntegerStorage::I16(values) => reduce_signed!(values, I16, i16),
+        IntegerStorage::I32(values) => reduce_signed!(values, I32, i32),
+        IntegerStorage::I64(values) => reduce_signed!(values, I64, i64),
+        IntegerStorage::U8(values) => reduce_unsigned!(values, U8, u8),
+        IntegerStorage::U16(values) => reduce_unsigned!(values, U16, u16),
+        IntegerStorage::U32(values) => reduce_unsigned!(values, U32, u32),
+        IntegerStorage::U64(values) => reduce_unsigned!(values, U64, u64),
+    };
+    integer_storage_into_value(output, output_shape)
+}
+
+fn rounded_signed_mean(sum: i128, count: usize) -> i128 {
+    if count == 0 {
+        return 0;
+    }
+    let divisor = count as i128;
+    let quotient = sum / divisor;
+    let remainder = sum % divisor;
+    if remainder.unsigned_abs() * 2 >= count as u128 {
+        quotient + remainder.signum()
+    } else {
+        quotient
+    }
+}
+
+fn rounded_unsigned_mean(sum: u128, count: usize) -> u128 {
+    if count == 0 {
+        return 0;
+    }
+    let divisor = count as u128;
+    let quotient = sum / divisor;
+    let remainder = sum % divisor;
+    if remainder * 2 >= divisor {
+        quotient + 1
+    } else {
+        quotient
+    }
+}
+
 /// Reduces native integer storage without reading its lossy floating-point
 /// compatibility view. The caller owns MATLAB argument parsing and supplies
 /// the already-resolved dimension plan so `min` and `max` retain identical
