@@ -151,7 +151,13 @@ impl IntValue {
         }
     }
     pub fn to_f64(&self) -> f64 {
-        self.to_i64() as f64
+        match self {
+            // `uint64` has a wider positive range than `int64`. Converting it
+            // through `to_i64` incorrectly clamps every value above i64::MAX
+            // before normal IEEE-754 rounding can occur.
+            IntValue::U64(value) => *value as f64,
+            _ => self.to_i64() as f64,
+        }
     }
     pub fn is_zero(&self) -> bool {
         self.to_i64() == 0
@@ -167,6 +173,18 @@ impl IntValue {
             IntValue::U32(_) => "uint32",
             IntValue::U64(_) => "uint64",
         }
+    }
+}
+
+#[cfg(test)]
+mod int_value_tests {
+    use super::IntValue;
+
+    #[test]
+    fn uint64_to_f64_does_not_clamp_through_int64() {
+        let value = IntValue::U64(u64::MAX);
+        assert_eq!(value.to_f64(), u64::MAX as f64);
+        assert!(value.to_f64() > i64::MAX as f64);
     }
 }
 
