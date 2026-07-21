@@ -10,6 +10,7 @@ pub(crate) enum IntegerBinaryOp {
     Add,
     Subtract,
     Multiply,
+    Divide,
 }
 
 /// Applies a MATLAB integer binary operation when either operand is integer
@@ -151,16 +152,21 @@ fn apply_float(lhs: f64, rhs: f64, operation: IntegerBinaryOp) -> f64 {
         IntegerBinaryOp::Add => lhs + rhs,
         IntegerBinaryOp::Subtract => lhs - rhs,
         IntegerBinaryOp::Multiply => lhs * rhs,
+        IntegerBinaryOp::Divide => lhs / rhs,
     }
 }
 
 fn apply_exact(lhs: IntValue, rhs: IntValue, operation: IntegerBinaryOp) -> IntValue {
+    if matches!(operation, IntegerBinaryOp::Divide) {
+        return exact_integer_divide(lhs, rhs);
+    }
     macro_rules! apply {
         ($lhs:expr, $rhs:expr, $variant:ident) => {
             IntValue::$variant(match operation {
                 IntegerBinaryOp::Add => $lhs.saturating_add($rhs),
                 IntegerBinaryOp::Subtract => $lhs.saturating_sub($rhs),
                 IntegerBinaryOp::Multiply => $lhs.saturating_mul($rhs),
+                IntegerBinaryOp::Divide => unreachable!("division returns before this dispatch"),
             })
         };
     }
@@ -175,6 +181,71 @@ fn apply_exact(lhs: IntValue, rhs: IntValue, operation: IntegerBinaryOp) -> IntV
         (IntValue::U64(lhs), IntValue::U64(rhs)) => apply!(lhs, rhs, U64),
         _ => unreachable!("integer class compatibility was checked before applying"),
     }
+}
+
+fn exact_integer_divide(lhs: IntValue, rhs: IntValue) -> IntValue {
+    macro_rules! signed {
+        ($lhs:expr, $rhs:expr, $variant:ident, $min:expr, $max:expr) => {
+            IntValue::$variant(rounded_signed_divide(
+                $lhs as i128,
+                $rhs as i128,
+                $min as i128,
+                $max as i128,
+            ) as _)
+        };
+    }
+    macro_rules! unsigned {
+        ($lhs:expr, $rhs:expr, $variant:ident, $max:expr) => {
+            IntValue::$variant(
+                rounded_unsigned_divide($lhs as u128, $rhs as u128, $max as u128) as _,
+            )
+        };
+    }
+    match (lhs, rhs) {
+        (IntValue::I8(lhs), IntValue::I8(rhs)) => signed!(lhs, rhs, I8, i8::MIN, i8::MAX),
+        (IntValue::I16(lhs), IntValue::I16(rhs)) => signed!(lhs, rhs, I16, i16::MIN, i16::MAX),
+        (IntValue::I32(lhs), IntValue::I32(rhs)) => signed!(lhs, rhs, I32, i32::MIN, i32::MAX),
+        (IntValue::I64(lhs), IntValue::I64(rhs)) => signed!(lhs, rhs, I64, i64::MIN, i64::MAX),
+        (IntValue::U8(lhs), IntValue::U8(rhs)) => unsigned!(lhs, rhs, U8, u8::MAX),
+        (IntValue::U16(lhs), IntValue::U16(rhs)) => unsigned!(lhs, rhs, U16, u16::MAX),
+        (IntValue::U32(lhs), IntValue::U32(rhs)) => unsigned!(lhs, rhs, U32, u32::MAX),
+        (IntValue::U64(lhs), IntValue::U64(rhs)) => unsigned!(lhs, rhs, U64, u64::MAX),
+        _ => unreachable!("integer class compatibility was checked before applying"),
+    }
+}
+
+fn rounded_signed_divide(lhs: i128, rhs: i128, min: i128, max: i128) -> i128 {
+    if rhs == 0 {
+        return if lhs < 0 {
+            min
+        } else if lhs > 0 {
+            max
+        } else {
+            0
+        };
+    }
+    let quotient = lhs / rhs;
+    let remainder = lhs % rhs;
+    let rounded = if remainder.unsigned_abs() * 2 >= rhs.unsigned_abs() {
+        quotient + (lhs.signum() * rhs.signum())
+    } else {
+        quotient
+    };
+    rounded.clamp(min, max)
+}
+
+fn rounded_unsigned_divide(lhs: u128, rhs: u128, max: u128) -> u128 {
+    if rhs == 0 {
+        return if lhs == 0 { 0 } else { max };
+    }
+    let quotient = lhs / rhs;
+    let remainder = lhs % rhs;
+    (if remainder * 2 >= rhs {
+        quotient + 1
+    } else {
+        quotient
+    })
+    .min(max)
 }
 
 fn storage_value(storage: &IntegerStorage, index: usize) -> IntValue {
@@ -282,5 +353,40 @@ mod tests {
         )
         .expect_err("nonscalar double must reject");
         assert!(nonscalar.contains("scalar double"));
+    }
+
+    #[test]
+    fn exact_integer_division_rounds_saturates_and_preserves_uint64() {
+        let result = try_integer_binary(
+            &integer(IntegerStorage::U64(vec![u64::MAX, 3, 0]), vec![1, 3]),
+            &integer(IntegerStorage::U64(vec![2, 2, 0]), vec![1, 3]),
+            IntegerBinaryOp::Divide,
+            "rdivide",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(
+            result,
+            integer(IntegerStorage::U64(vec![1_u64 << 63, 2, 0]), vec![1, 3])
+        );
+    }
+
+    #[test]
+    fn exact_signed_integer_division_rounds_negative_ties_and_zero_divisors() {
+        let result = try_integer_binary(
+            &integer(IntegerStorage::I8(vec![-3, 3, -4, 4, 0]), vec![1, 5]),
+            &integer(IntegerStorage::I8(vec![2, 2, 0, 0, 0]), vec![1, 5]),
+            IntegerBinaryOp::Divide,
+            "rdivide",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(
+            result,
+            integer(
+                IntegerStorage::I8(vec![-2, 2, i8::MIN, i8::MAX, 0]),
+                vec![1, 5]
+            )
+        );
     }
 }
