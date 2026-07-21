@@ -1,11 +1,10 @@
 //! MATLAB-compatible `int32` builtin with GPU-aware semantics for RunMat.
 
-use log::trace;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, Tensor, Value,
+    CharArray, IntValue, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -88,12 +87,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::Matlab,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
+    residency: ResidencyPolicy::GatherImmediately,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "No provider-native int32 hook yet; gpuArray inputs gather to host for saturating conversion and are then re-uploaded when possible.",
+    notes: "No provider-native int32 storage hook exists yet; gpuArray inputs gather and return an exact host int32 tensor rather than silently re-uploading an f64 compatibility view.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::int32")]
@@ -154,12 +153,18 @@ async fn int32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::Num(n) => Ok(Value::Int(IntValue::I32(cast_scalar_to_int32(n)))),
         Value::Int(i) => Ok(Value::Int(IntValue::I32(cast_scalar_to_int32(i.to_f64())))),
         Value::Bool(flag) => Ok(Value::Int(IntValue::I32(if flag { 1 } else { 0 }))),
-        Value::Tensor(tensor) => Ok(int32_value_from_tensor(int32_tensor_to_host(tensor))),
+        Value::Tensor(tensor) => Ok(int32_value_from_tensor(
+            int32_tensor_to_host(tensor)
+                .map_err(|e| int32_error_with_detail(&INT32_ERROR_INTERNAL, e))?,
+        )),
         Value::SparseTensor(_) => Err(conversion_error("sparse")),
         Value::LogicalArray(array) => {
             let tensor = tensor::logical_to_tensor(&array)
                 .map_err(|e| int32_error_with_detail(&INT32_ERROR_INTERNAL, e))?;
-            Ok(int32_value_from_tensor(int32_tensor_to_host(tensor)))
+            Ok(int32_value_from_tensor(
+                int32_tensor_to_host(tensor)
+                    .map_err(|e| int32_error_with_detail(&INT32_ERROR_INTERNAL, e))?,
+            ))
         }
         Value::CharArray(chars) => int32_from_char_array(chars),
         Value::GpuTensor(handle) => int32_from_gpu(handle).await,
@@ -186,12 +191,12 @@ async fn int32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn int32_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
-    let data: Vec<f64> = chars
+    let data: Vec<i32> = chars
         .data
         .iter()
-        .map(|&ch| cast_scalar_to_int32(ch as u32 as f64) as f64)
+        .map(|&ch| cast_scalar_to_int32(ch as u32 as f64))
         .collect();
-    let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
+    let tensor = Tensor::new_integer(IntegerStorage::I32(data), vec![chars.rows, chars.cols])
         .map_err(|e| int32_error_with_detail(&INT32_ERROR_INTERNAL, e))?;
     Ok(int32_value_from_tensor(tensor))
 }
@@ -201,28 +206,15 @@ async fn int32_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         gpu_helpers::gather_tensor_async(&handle)
             .await
             .map_err(|e| int32_error_with_detail(&INT32_ERROR_INTERNAL, e))?,
-    );
-
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        let _ = provider.free(&handle);
-        let view = HostTensorView {
-            data: &converted.data,
-            shape: &converted.shape,
-        };
-        match provider.upload(&view) {
-            Ok(new_handle) => return Ok(Value::GpuTensor(new_handle)),
-            Err(err) => trace!("int32: provider upload failed after gather ({err})"),
-        }
-    }
+    )
+    .map_err(|e| int32_error_with_detail(&INT32_ERROR_INTERNAL, e))?;
 
     Ok(int32_value_from_tensor(converted))
 }
 
-fn int32_tensor_to_host(mut tensor: Tensor) -> Tensor {
-    for value in &mut tensor.data {
-        *value = cast_scalar_to_int32(*value) as f64;
-    }
-    tensor
+fn int32_tensor_to_host(tensor: Tensor) -> Result<Tensor, String> {
+    let data = tensor.data.into_iter().map(cast_scalar_to_int32).collect();
+    Tensor::new_integer(IntegerStorage::I32(data), tensor.shape)
 }
 
 fn int32_value_from_tensor(tensor: Tensor) -> Value {
@@ -338,6 +330,10 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
                 assert_eq!(out.data, vec![-2.0, 2.0, 3.0, i32::MAX as f64]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::I32(vec![-2, 2, 3, i32::MAX]))
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -352,6 +348,10 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 assert_eq!(t.data, vec![65.0, 122.0]);
+                assert_eq!(
+                    t.integer_storage(),
+                    Some(&IntegerStorage::I32(vec![65, 122]))
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -386,12 +386,15 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let result = int32_builtin(Value::GpuTensor(handle), Vec::new()).expect("int32");
             match result {
-                Value::GpuTensor(handle) => {
-                    let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.shape, vec![3, 1]);
-                    assert_eq!(gathered.data, vec![-3.0, 4.0, 6.0]);
+                Value::Tensor(tensor) => {
+                    assert_eq!(tensor.shape, vec![3, 1]);
+                    assert_eq!(tensor.data, vec![-3.0, 4.0, 6.0]);
+                    assert_eq!(
+                        tensor.integer_storage(),
+                        Some(&IntegerStorage::I32(vec![-3, 4, 6]))
+                    );
                 }
-                other => panic!("expected gpu tensor, got {other:?}"),
+                other => panic!("expected exact host tensor, got {other:?}"),
             }
         });
     }

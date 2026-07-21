@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, NumericDType, Tensor, Value,
+    CharArray, IntValue, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -126,12 +126,16 @@ async fn uint32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             int_to_lossless_f64(&i),
         )))),
         Value::Bool(flag) => Ok(Value::Int(IntValue::U32(if flag { 1 } else { 0 }))),
-        Value::Tensor(tensor) => Ok(value_from_tensor(tensor_to_host(tensor))),
+        Value::Tensor(tensor) => Ok(value_from_tensor(
+            tensor_to_host(tensor).map_err(|e| error_with_detail(&ERROR_INTERNAL, e))?,
+        )),
         Value::SparseTensor(_) => Err(conversion_error("sparse")),
         Value::LogicalArray(array) => {
             let tensor = tensor::logical_to_tensor(&array)
                 .map_err(|e| error_with_detail(&ERROR_INTERNAL, e))?;
-            Ok(value_from_tensor(tensor_to_host(tensor)))
+            Ok(value_from_tensor(
+                tensor_to_host(tensor).map_err(|e| error_with_detail(&ERROR_INTERNAL, e))?,
+            ))
         }
         Value::CharArray(chars) => from_char_array(chars),
         Value::GpuTensor(handle) => from_gpu(handle).await,
@@ -158,12 +162,12 @@ async fn uint32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
 }
 
 fn from_char_array(chars: CharArray) -> BuiltinResult<Value> {
-    let data = chars
+    let data: Vec<u32> = chars
         .data
         .iter()
-        .map(|&ch| cast_scalar_to_uint32(ch as u32 as f64) as f64)
+        .map(|&ch| cast_scalar_to_uint32(ch as u32 as f64))
         .collect();
-    let tensor = Tensor::new_with_dtype(data, vec![chars.rows, chars.cols], NumericDType::U32)
+    let tensor = Tensor::new_integer(IntegerStorage::U32(data), vec![chars.rows, chars.cols])
         .map_err(|e| error_with_detail(&ERROR_INTERNAL, e))?;
     Ok(value_from_tensor(tensor))
 }
@@ -173,16 +177,14 @@ async fn from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         gpu_helpers::gather_tensor_async(&handle)
             .await
             .map_err(|e| error_with_detail(&ERROR_INTERNAL, e))?,
-    );
+    )
+    .map_err(|e| error_with_detail(&ERROR_INTERNAL, e))?;
     Ok(value_from_tensor(converted))
 }
 
-fn tensor_to_host(mut tensor: Tensor) -> Tensor {
-    for value in &mut tensor.data {
-        *value = cast_scalar_to_uint32(*value) as f64;
-    }
-    tensor.dtype = NumericDType::U32;
-    tensor
+fn tensor_to_host(tensor: Tensor) -> Result<Tensor, String> {
+    let data = tensor.data.into_iter().map(cast_scalar_to_uint32).collect();
+    Tensor::new_integer(IntegerStorage::U32(data), tensor.shape)
 }
 
 fn value_from_tensor(tensor: Tensor) -> Value {
@@ -271,8 +273,11 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.dtype, NumericDType::U32);
                 assert_eq!(out.data, vec![0.0, 2.0, 3.0, u32::MAX as f64]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::U32(vec![0, 2, 3, u32::MAX]))
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
