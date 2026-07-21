@@ -2,6 +2,23 @@
 
 use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExtremaDirection {
+    Min,
+    Max,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExtremaComparison {
+    Natural,
+    Absolute,
+}
+
+pub(crate) struct IntegerExtrema {
+    pub(crate) values: Value,
+    pub(crate) indices: Value,
+}
+
 /// Reduces an integer tensor by saturated native addition along zero-based
 /// dimensions. Callers select this only for MATLAB's explicit `"native"`
 /// output mode; default reductions intentionally retain their double output.
@@ -32,8 +49,8 @@ pub(crate) fn sum(
     }
 
     macro_rules! reduce {
-        ($values:expr, $variant:ident) => {{
-            let mut output = vec![0; output_len];
+        ($values:expr, $variant:ident, $zero:expr) => {{
+            let mut output = vec![$zero; output_len];
             for (linear, &value) in $values.iter().enumerate() {
                 linear_to_multi(linear, &shape, &mut coords);
                 for (dim, &coord) in coords.iter().enumerate() {
@@ -47,14 +64,14 @@ pub(crate) fn sum(
     }
 
     let output = match storage {
-        IntegerStorage::I8(values) => reduce!(values, I8),
-        IntegerStorage::I16(values) => reduce!(values, I16),
-        IntegerStorage::I32(values) => reduce!(values, I32),
-        IntegerStorage::I64(values) => reduce!(values, I64),
-        IntegerStorage::U8(values) => reduce!(values, U8),
-        IntegerStorage::U16(values) => reduce!(values, U16),
-        IntegerStorage::U32(values) => reduce!(values, U32),
-        IntegerStorage::U64(values) => reduce!(values, U64),
+        IntegerStorage::I8(values) => reduce!(values, I8, 0i8),
+        IntegerStorage::I16(values) => reduce!(values, I16, 0i16),
+        IntegerStorage::I32(values) => reduce!(values, I32, 0i32),
+        IntegerStorage::I64(values) => reduce!(values, I64, 0i64),
+        IntegerStorage::U8(values) => reduce!(values, U8, 0u8),
+        IntegerStorage::U16(values) => reduce!(values, U16, 0u16),
+        IntegerStorage::U32(values) => reduce!(values, U32, 0u32),
+        IntegerStorage::U64(values) => reduce!(values, U64, 0u64),
     };
     integer_storage_into_value(output, output_shape)
 }
@@ -88,8 +105,8 @@ pub(crate) fn product(
     }
 
     macro_rules! reduce {
-        ($values:expr, $variant:ident) => {{
-            let mut output = vec![1; output_len];
+        ($values:expr, $variant:ident, $one:expr) => {{
+            let mut output = vec![$one; output_len];
             for (linear, &value) in $values.iter().enumerate() {
                 linear_to_multi(linear, &shape, &mut coords);
                 for (dim, &coord) in coords.iter().enumerate() {
@@ -103,16 +120,83 @@ pub(crate) fn product(
     }
 
     let output = match storage {
-        IntegerStorage::I8(values) => reduce!(values, I8),
-        IntegerStorage::I16(values) => reduce!(values, I16),
-        IntegerStorage::I32(values) => reduce!(values, I32),
-        IntegerStorage::I64(values) => reduce!(values, I64),
-        IntegerStorage::U8(values) => reduce!(values, U8),
-        IntegerStorage::U16(values) => reduce!(values, U16),
-        IntegerStorage::U32(values) => reduce!(values, U32),
-        IntegerStorage::U64(values) => reduce!(values, U64),
+        IntegerStorage::I8(values) => reduce!(values, I8, 1i8),
+        IntegerStorage::I16(values) => reduce!(values, I16, 1i16),
+        IntegerStorage::I32(values) => reduce!(values, I32, 1i32),
+        IntegerStorage::I64(values) => reduce!(values, I64, 1i64),
+        IntegerStorage::U8(values) => reduce!(values, U8, 1u8),
+        IntegerStorage::U16(values) => reduce!(values, U16, 1u16),
+        IntegerStorage::U32(values) => reduce!(values, U32, 1u32),
+        IntegerStorage::U64(values) => reduce!(values, U64, 1u64),
     };
     integer_storage_into_value(output, output_shape)
+}
+
+/// Reduces native integer storage without reading its lossy floating-point
+/// compatibility view. The caller owns MATLAB argument parsing and supplies
+/// the already-resolved dimension plan so `min` and `max` retain identical
+/// shape and index semantics.
+pub(crate) fn extrema(
+    storage: &IntegerStorage,
+    shape: &[usize],
+    output_shape: Vec<usize>,
+    reduced_dims: &[usize],
+    dims_mask: &[bool],
+    reduce_strides: &[usize],
+    reduce_all: bool,
+    linear_index: bool,
+    direction: ExtremaDirection,
+    comparison: ExtremaComparison,
+) -> Result<IntegerExtrema, String> {
+    let output_len = element_count(&output_shape);
+    if storage.is_empty() || output_len == 0 {
+        return Err("integer extrema requires a non-empty reduction input".to_string());
+    }
+
+    let shape = normalized_shape(shape);
+    let output_strides = strides(&output_shape);
+    let mut best = vec![0usize; output_len];
+    let mut has_value = vec![false; output_len];
+    let mut coords = vec![0usize; shape.len()];
+
+    for linear in 0..storage.len() {
+        let output_index = output_index(&coords, &output_strides, dims_mask);
+        let candidate = storage_value(storage, linear);
+        if !has_value[output_index]
+            || should_replace(
+                &storage_value(storage, best[output_index]),
+                &candidate,
+                direction,
+                comparison,
+            )
+        {
+            best[output_index] = linear;
+            has_value[output_index] = true;
+        }
+        increment_coords(&mut coords, &shape);
+    }
+
+    let values = selected_storage(storage, &best);
+    let mut indices = Vec::with_capacity(output_len);
+    for &full_index in &best {
+        let index = if linear_index || reduce_all {
+            full_index
+        } else if reduced_dims.is_empty() {
+            0
+        } else {
+            reduction_index(full_index, &shape, reduced_dims, reduce_strides)
+        };
+        indices.push((index + 1) as f64);
+    }
+
+    Ok(IntegerExtrema {
+        values: integer_storage_into_value(values, output_shape.clone())?,
+        indices: numeric_tensor_into_value(indices, output_shape)?,
+    })
+}
+
+pub(crate) fn empty_like(storage: &IntegerStorage, shape: Vec<usize>) -> Result<Value, String> {
+    integer_storage_into_value(empty_storage_like(storage), shape)
 }
 
 pub(crate) fn storage_from_scalar(value: &IntValue) -> IntegerStorage {
@@ -133,6 +217,84 @@ fn integer_storage_into_value(storage: IntegerStorage, shape: Vec<usize>) -> Res
         return Ok(Value::Int(storage_value(&storage, 0)));
     }
     Ok(Value::Tensor(Tensor::new_integer(storage, shape)?))
+}
+
+fn numeric_tensor_into_value(data: Vec<f64>, shape: Vec<usize>) -> Result<Value, String> {
+    if data.len() == 1 {
+        return Ok(Value::Num(data[0]));
+    }
+    Ok(Value::Tensor(Tensor::new(data, shape)?))
+}
+
+fn empty_storage_like(storage: &IntegerStorage) -> IntegerStorage {
+    match storage {
+        IntegerStorage::I8(_) => IntegerStorage::I8(Vec::new()),
+        IntegerStorage::I16(_) => IntegerStorage::I16(Vec::new()),
+        IntegerStorage::I32(_) => IntegerStorage::I32(Vec::new()),
+        IntegerStorage::I64(_) => IntegerStorage::I64(Vec::new()),
+        IntegerStorage::U8(_) => IntegerStorage::U8(Vec::new()),
+        IntegerStorage::U16(_) => IntegerStorage::U16(Vec::new()),
+        IntegerStorage::U32(_) => IntegerStorage::U32(Vec::new()),
+        IntegerStorage::U64(_) => IntegerStorage::U64(Vec::new()),
+    }
+}
+
+fn selected_storage(storage: &IntegerStorage, indices: &[usize]) -> IntegerStorage {
+    macro_rules! select {
+        ($values:expr, $variant:ident) => {
+            IntegerStorage::$variant(indices.iter().map(|&index| $values[index]).collect())
+        };
+    }
+    match storage {
+        IntegerStorage::I8(values) => select!(values, I8),
+        IntegerStorage::I16(values) => select!(values, I16),
+        IntegerStorage::I32(values) => select!(values, I32),
+        IntegerStorage::I64(values) => select!(values, I64),
+        IntegerStorage::U8(values) => select!(values, U8),
+        IntegerStorage::U16(values) => select!(values, U16),
+        IntegerStorage::U32(values) => select!(values, U32),
+        IntegerStorage::U64(values) => select!(values, U64),
+    }
+}
+
+fn should_replace(
+    current: &IntValue,
+    candidate: &IntValue,
+    direction: ExtremaDirection,
+    comparison: ExtremaComparison,
+) -> bool {
+    let ordering = match comparison {
+        ExtremaComparison::Natural => numeric_value(candidate).cmp(&numeric_value(current)),
+        ExtremaComparison::Absolute => absolute_value(candidate)
+            .cmp(&absolute_value(current))
+            .then_with(|| numeric_value(candidate).cmp(&numeric_value(current))),
+    };
+    match direction {
+        ExtremaDirection::Min => ordering.is_lt(),
+        ExtremaDirection::Max => ordering.is_gt(),
+    }
+}
+
+fn numeric_value(value: &IntValue) -> i128 {
+    match value {
+        IntValue::I8(value) => *value as i128,
+        IntValue::I16(value) => *value as i128,
+        IntValue::I32(value) => *value as i128,
+        IntValue::I64(value) => *value as i128,
+        IntValue::U8(value) => *value as i128,
+        IntValue::U16(value) => *value as i128,
+        IntValue::U32(value) => *value as i128,
+        IntValue::U64(value) => *value as i128,
+    }
+}
+
+fn absolute_value(value: &IntValue) -> u128 {
+    let numeric = numeric_value(value);
+    if numeric < 0 {
+        (-numeric) as u128
+    } else {
+        numeric as u128
+    }
 }
 
 fn storage_value(storage: &IntegerStorage, index: usize) -> IntValue {
@@ -180,6 +342,58 @@ fn multi_to_linear(coords: &[usize], shape: &[usize]) -> usize {
     index
 }
 
+fn strides(shape: &[usize]) -> Vec<usize> {
+    let mut result = Vec::with_capacity(shape.len());
+    let mut stride = 1usize;
+    for &dimension in shape {
+        result.push(stride);
+        stride = stride.saturating_mul(dimension.max(1));
+    }
+    result
+}
+
+fn output_index(coords: &[usize], output_strides: &[usize], dims_mask: &[bool]) -> usize {
+    output_strides
+        .iter()
+        .enumerate()
+        .map(|(dimension, &stride)| {
+            if dims_mask.get(dimension).copied().unwrap_or(false) {
+                0
+            } else {
+                coords[dimension] * stride
+            }
+        })
+        .sum()
+}
+
+fn reduction_index(
+    full_index: usize,
+    shape: &[usize],
+    reduced_dims: &[usize],
+    reduce_strides: &[usize],
+) -> usize {
+    let mut coords = vec![0usize; shape.len()];
+    linear_to_multi(full_index, shape, &mut coords);
+    reduced_dims
+        .iter()
+        .zip(reduce_strides)
+        .map(|(&dimension, &stride)| coords[dimension] * stride)
+        .sum()
+}
+
+fn increment_coords(coords: &mut [usize], shape: &[usize]) {
+    for (dimension, &size) in shape.iter().enumerate() {
+        if size == 0 {
+            continue;
+        }
+        coords[dimension] += 1;
+        if coords[dimension] < size {
+            return;
+        }
+        coords[dimension] = 0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,5 +438,54 @@ mod tests {
                     .expect("expected tensor")
             )
         );
+    }
+
+    #[test]
+    fn extrema_preserves_uint64_and_matlab_dimension_indices() {
+        let storage = IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX, 3, 2]);
+        let min = extrema(
+            &storage,
+            &[2, 2],
+            vec![1, 2],
+            &[0],
+            &[true, false],
+            &[1],
+            false,
+            false,
+            ExtremaDirection::Min,
+            ExtremaComparison::Natural,
+        )
+        .expect("min");
+        assert_eq!(
+            min.values,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX - 1, 2]), vec![1, 2])
+                    .expect("values")
+            )
+        );
+        assert_eq!(
+            min.indices,
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap())
+        );
+    }
+
+    #[test]
+    fn extrema_absolute_comparison_handles_int64_minimum_without_overflow() {
+        let storage = IntegerStorage::I64(vec![i64::MIN, -3, 3]);
+        let result = extrema(
+            &storage,
+            &[3, 1],
+            vec![1, 1],
+            &[0],
+            &[true, false],
+            &[1],
+            false,
+            false,
+            ExtremaDirection::Max,
+            ExtremaComparison::Absolute,
+        )
+        .expect("max by absolute value");
+        assert_eq!(result.values, Value::Int(IntValue::I64(i64::MIN)));
+        assert_eq!(result.indices, Value::Num(1.0));
     }
 }

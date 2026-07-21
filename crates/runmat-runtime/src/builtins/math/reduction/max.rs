@@ -1063,10 +1063,77 @@ async fn reduction_max_gpu(
 }
 
 fn reduction_max_host(value: Value, args: &ReductionArgs) -> BuiltinResult<MaxEvaluation> {
+    if let Value::Int(value) = &value {
+        let storage = crate::builtins::math::reduction::integer_native::storage_from_scalar(value);
+        return reduce_integer_max(&storage, vec![1, 1], args);
+    }
+    if let Some((storage, shape)) = native_integer_input(&value) {
+        return reduce_integer_max(storage, shape, args);
+    }
     match materialize_for_max("max", value)? {
         InputData::Real(tensor) => reduce_real_tensor(tensor, args),
         InputData::Complex(tensor) => reduce_complex_tensor(tensor, args),
     }
+}
+
+fn native_integer_input(value: &Value) -> Option<(&runmat_builtins::IntegerStorage, Vec<usize>)> {
+    match value {
+        Value::Tensor(tensor) => tensor
+            .integer_storage()
+            .map(|storage| (storage, tensor.shape.clone())),
+        _ => None,
+    }
+}
+
+fn reduce_integer_max(
+    storage: &runmat_builtins::IntegerStorage,
+    shape: Vec<usize>,
+    args: &ReductionArgs,
+) -> BuiltinResult<MaxEvaluation> {
+    if storage.is_empty() {
+        // Integer extrema preserve the empty input shape for every reduction
+        // selector. A non-empty reduced shape cannot represent an empty typed
+        // payload, and MATLAB extrema of an empty array stay empty.
+        let output_shape = shape;
+        let values = crate::builtins::math::reduction::integer_native::empty_like(
+            storage,
+            output_shape.clone(),
+        )
+        .map_err(|error| max_internal_error(format!("max: {error}")))?;
+        let indices = Tensor::new(Vec::new(), output_shape)
+            .map_err(|error| max_internal_error(format!("max: {error}")))?;
+        return Ok(MaxEvaluation {
+            values,
+            indices: tensor::tensor_into_value(indices),
+        });
+    }
+
+    let resolved = resolve_reduction_dims(&shape, &args.selection)?;
+    let comparison = match args.comparison {
+        ComparisonMethod::Auto | ComparisonMethod::Real => {
+            crate::builtins::math::reduction::integer_native::ExtremaComparison::Natural
+        }
+        ComparisonMethod::Abs => {
+            crate::builtins::math::reduction::integer_native::ExtremaComparison::Absolute
+        }
+    };
+    let extrema = crate::builtins::math::reduction::integer_native::extrema(
+        storage,
+        &shape,
+        resolved.output_shape,
+        &resolved.reduced_dims,
+        &resolved.dims_mask,
+        &resolved.reduce_strides,
+        resolved.reduce_all,
+        args.linear_index,
+        crate::builtins::math::reduction::integer_native::ExtremaDirection::Max,
+        comparison,
+    )
+    .map_err(|error| max_internal_error(format!("max: {error}")))?;
+    Ok(MaxEvaluation {
+        values: extrema.values,
+        indices: extrema.indices,
+    })
 }
 
 enum InputData {
@@ -2414,6 +2481,94 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         assert_eq!(values, Value::Num(5.0));
         assert_eq!(indices, Value::Num(3.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn max_native_integer_reduction_preserves_uint64_values_and_indices() {
+        let input = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX, 3, 2]),
+            vec![2, 2],
+        )
+        .expect("input");
+        let (values, indices) = evaluate(Value::Tensor(input), &[])
+            .expect("max")
+            .into_pair();
+        assert_eq!(
+            values,
+            Value::Tensor(
+                Tensor::new_integer(
+                    runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 3]),
+                    vec![1, 2],
+                )
+                .expect("values"),
+            )
+        );
+        assert_eq!(
+            indices,
+            Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![1, 2]).expect("indices")),
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn max_native_integer_abs_all_uses_exact_int64_minimum() {
+        let input = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![i64::MIN, -3, 3]),
+            vec![3, 1],
+        )
+        .expect("input");
+        let args = vec![
+            placeholder(),
+            Value::from("all"),
+            Value::from("ComparisonMethod"),
+            Value::from("abs"),
+        ];
+        let (values, indices) = evaluate(Value::Tensor(input), &args)
+            .expect("max")
+            .into_pair();
+        assert_eq!(values, Value::Int(IntValue::I64(i64::MIN)));
+        assert_eq!(indices, Value::Num(1.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn max_native_integer_empty_array_retains_its_class() {
+        let input =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U32(Vec::new()), vec![0, 0])
+                .expect("input");
+        let (values, indices) = evaluate(Value::Tensor(input), &[])
+            .expect("max")
+            .into_pair();
+        assert_eq!(
+            values,
+            Value::Tensor(
+                Tensor::new_integer(runmat_builtins::IntegerStorage::U32(Vec::new()), vec![0, 0])
+                    .expect("values"),
+            )
+        );
+        assert_eq!(
+            indices,
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("indices")),
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn max_native_integer_empty_all_reduction_remains_empty() {
+        let input =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(Vec::new()), vec![0, 0])
+                .expect("input");
+        let values = evaluate(Value::Tensor(input), &[placeholder(), Value::from("all")])
+            .expect("max")
+            .into_value();
+        assert_eq!(
+            values,
+            Value::Tensor(
+                Tensor::new_integer(runmat_builtins::IntegerStorage::I16(Vec::new()), vec![0, 0])
+                    .expect("values"),
+            )
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

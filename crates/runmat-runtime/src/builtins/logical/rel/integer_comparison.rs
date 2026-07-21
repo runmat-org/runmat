@@ -55,6 +55,12 @@ struct IntegerOperand<'a> {
     shape: Vec<usize>,
 }
 
+impl IntegerOperand<'_> {
+    fn value_at(&self, index: usize) -> IntValue {
+        self.storage.value_at(index)
+    }
+}
+
 enum IntegerStorageRef<'a> {
     Scalar(&'a IntValue),
     Array(&'a IntegerStorage),
