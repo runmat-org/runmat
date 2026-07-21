@@ -83,6 +83,61 @@ fn integer_array_elementwise_arithmetic_preserves_native_storage() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn integer_relations_keep_uint64_and_signed_values_exact() {
+    let max_unsigned = Value::Int(IntValue::U64(u64::MAX));
+    let max_signed = Value::Int(IntValue::I64(i64::MAX));
+    assert_eq!(
+        runmat_runtime::call_builtin("eq", &[max_unsigned.clone(), max_signed.clone()])
+            .expect("eq"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        runmat_runtime::call_builtin("ne", &[max_unsigned.clone(), max_signed.clone()])
+            .expect("ne"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        runmat_runtime::call_builtin("gt", &[max_unsigned.clone(), max_signed.clone()])
+            .expect("gt"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        runmat_runtime::call_builtin("ge", &[max_unsigned, max_signed]).expect("ge"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        runmat_runtime::call_builtin(
+            "lt",
+            &[Value::Int(IntValue::I8(-1)), Value::Int(IntValue::U8(0))],
+        )
+        .expect("lt"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        runmat_runtime::call_builtin(
+            "le",
+            &[Value::Int(IntValue::I8(-1)), Value::Int(IntValue::U8(0))],
+        )
+        .expect("le"),
+        Value::Bool(true)
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn integer_relation_size_errors_keep_builtin_identifier() {
+    let lhs = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![1, 2]).expect("lhs"),
+    );
+    let rhs = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U8(vec![1, 2, 3]), vec![1, 3]).expect("rhs"),
+    );
+    let error = runmat_runtime::call_builtin("eq", &[lhs, rhs]).expect_err("size mismatch");
+    assert_eq!(error.identifier(), Some("RunMat:eq:SizeMismatch"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn integer_class_and_string() {
     let i = Value::Int(IntValue::U16(42));
     let cls = runmat_runtime::call_builtin("class", [i.clone()].as_slice()).unwrap();

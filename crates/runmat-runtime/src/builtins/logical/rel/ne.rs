@@ -15,6 +15,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::logical::rel::integer_comparison::{
+    try_integer_comparison, IntegerComparisonError, IntegerComparisonOp,
+};
 use crate::builtins::logical::type_resolvers::logical_binary_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -172,6 +175,15 @@ async fn ne_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     }
 
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
+
+    if let Some(result) = try_integer_comparison(&lhs, &rhs, IntegerComparisonOp::Ne).map_err(
+        |error| match error {
+            IntegerComparisonError::SizeMismatch => ne_error(&NE_ERROR_SIZE_MISMATCH),
+            IntegerComparisonError::Internal => ne_error(&NE_ERROR_INVALID_INPUT),
+        },
+    )? {
+        return Ok(result);
+    }
 
     if let Some(result) = scalar_ne_value(&lhs, &rhs) {
         return result;
