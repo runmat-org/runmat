@@ -349,6 +349,20 @@ mod integer_storage_tests {
             .expect_err("shape mismatch");
         assert!(err.contains("doesn't match shape"));
     }
+
+    #[test]
+    fn reshape_preserves_exact_integer_storage() {
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![-1, i64::MAX]), vec![1, 2])
+            .expect("integer tensor")
+            .reshape(vec![2, 1])
+            .expect("reshape");
+
+        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::I64(vec![-1, i64::MAX]))
+        );
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -584,6 +598,40 @@ impl Tensor {
 
     pub fn integer_storage(&self) -> Option<&IntegerStorage> {
         self.integer_data.as_ref()
+    }
+
+    /// Change only shape metadata while retaining the underlying numeric storage.
+    pub fn reshape(mut self, shape: Vec<usize>) -> Result<Self, String> {
+        let expected: usize = shape.iter().product();
+        if self.data.len() != expected {
+            return Err(format!(
+                "Tensor data length {} doesn't match shape {:?} ({} elements)",
+                self.data.len(),
+                shape,
+                expected
+            ));
+        }
+        if let Some(storage) = &self.integer_data {
+            if storage.len() != expected {
+                return Err(format!(
+                    "integer tensor data length {} doesn't match shape {:?} ({} elements)",
+                    storage.len(),
+                    shape,
+                    expected
+                ));
+            }
+        }
+        let (rows, cols) = if shape.len() >= 2 {
+            (shape[0], shape[1])
+        } else if shape.len() == 1 {
+            (1, shape[0])
+        } else {
+            (0, 0)
+        };
+        self.shape = shape;
+        self.rows = rows;
+        self.cols = cols;
+        Ok(self)
     }
 
     pub fn zeros(shape: Vec<usize>) -> Self {
