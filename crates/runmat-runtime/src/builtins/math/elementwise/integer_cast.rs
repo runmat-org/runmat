@@ -4,7 +4,7 @@ use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, tensor};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IntegerTarget {
     I8,
     I16,

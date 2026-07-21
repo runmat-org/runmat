@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::elementwise::sparse::{try_sparse_binary, SparseBinaryOp};
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
@@ -657,6 +658,11 @@ fn plus_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     }
     if let Some(result) = try_sparse_binary(&lhs, &rhs, SparseBinaryOp::Add, BUILTIN_NAME) {
         return result;
+    }
+    if let Some(result) =
+        try_integer_binary(&lhs, &rhs, IntegerBinaryOp::Add, BUILTIN_NAME).map_err(builtin_error)?
+    {
+        return Ok(result);
     }
     if let Some(result) = scalar_plus_value(&lhs, &rhs) {
         return Ok(result);
