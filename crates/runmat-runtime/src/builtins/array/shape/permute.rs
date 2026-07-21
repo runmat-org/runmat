@@ -338,15 +338,19 @@ pub(crate) fn permute_tensor(
         integer_data,
         ..
     } = tensor;
-    let (out, new_shape) = permute_generic(builtin, &data, &shape, order)?;
     match integer_data {
         Some(storage) => {
-            let storage = permute_integer_storage(builtin, storage, &shape, order)?;
+            // Exact integer storage is the authoritative buffer. Do not first
+            // permute the lossy f64 compatibility view on this fast path.
+            let (storage, new_shape) = permute_integer_storage(builtin, storage, &shape, order)?;
             Tensor::new_integer(storage, new_shape)
                 .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
         }
-        None => Tensor::new(out, new_shape)
-            .map_err(|e| permute_error(builtin, format!("{builtin}: {e}"))),
+        None => {
+            let (out, new_shape) = permute_generic(builtin, &data, &shape, order)?;
+            Tensor::new(out, new_shape)
+                .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
+        }
     }
 }
 
@@ -355,13 +359,13 @@ fn permute_integer_storage(
     storage: runmat_builtins::IntegerStorage,
     shape: &[usize],
     order: &[usize],
-) -> crate::BuiltinResult<runmat_builtins::IntegerStorage> {
+) -> crate::BuiltinResult<(runmat_builtins::IntegerStorage, Vec<usize>)> {
     use runmat_builtins::IntegerStorage;
 
     macro_rules! permute_storage {
         ($values:expr, $variant:ident) => {{
-            let (values, _) = permute_generic(builtin, &$values, shape, order)?;
-            Ok(IntegerStorage::$variant(values))
+            let (values, new_shape) = permute_generic(builtin, &$values, shape, order)?;
+            Ok((IntegerStorage::$variant(values), new_shape))
         }};
     }
 
