@@ -26,6 +26,12 @@ pub(crate) enum CumulativeDirection {
     Reverse,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CumulativeExtremaDirection {
+    Min,
+    Max,
+}
+
 pub(crate) struct IntegerExtrema {
     pub(crate) values: Value,
     pub(crate) indices: Value,
@@ -318,6 +324,81 @@ pub(crate) fn cumulative(
         }
     };
     integer_storage_into_value(output, shape)
+}
+
+/// Computes cumulative extrema in exact integer storage, with MATLAB's
+/// one-based position indices along the scanned dimension.
+pub(crate) fn cumulative_extrema(
+    storage: &IntegerStorage,
+    shape: &[usize],
+    dim: usize,
+    direction: CumulativeDirection,
+    extrema: CumulativeExtremaDirection,
+) -> Result<IntegerExtrema, String> {
+    if dim == 0 {
+        return Err("cumulative integer extrema dimension must be >= 1".to_string());
+    }
+    let shape = normalized_shape(shape);
+    if storage.is_empty() {
+        return Ok(IntegerExtrema {
+            values: integer_storage_into_value(storage.clone(), shape.clone())?,
+            indices: numeric_tensor_into_value(Vec::new(), shape)?,
+        });
+    }
+    if dim > shape.len() {
+        return Ok(IntegerExtrema {
+            values: integer_storage_into_value(storage.clone(), shape.clone())?,
+            indices: numeric_tensor_into_value(vec![1.0; storage.len()], shape)?,
+        });
+    }
+
+    let dim_index = dim - 1;
+    let segment_len = shape[dim_index];
+    let stride_before = element_count(&shape[..dim_index]);
+    let stride_after = element_count(&shape[dim..]);
+    let block = stride_before.saturating_mul(segment_len);
+    let mut selected = vec![0usize; storage.len()];
+    let mut indices = vec![0.0f64; storage.len()];
+
+    for after in 0..stride_after {
+        let base = after * block;
+        for before in 0..stride_before {
+            let mut current = 0usize;
+            let mut has_value = false;
+            macro_rules! scan {
+                ($offsets:expr) => {
+                    for offset in $offsets {
+                        let index = base + before + offset * stride_before;
+                        if !has_value
+                            || should_replace(
+                                &storage_value(storage, current),
+                                &storage_value(storage, index),
+                                match extrema {
+                                    CumulativeExtremaDirection::Min => ExtremaDirection::Min,
+                                    CumulativeExtremaDirection::Max => ExtremaDirection::Max,
+                                },
+                                ExtremaComparison::Natural,
+                            )
+                        {
+                            current = index;
+                            has_value = true;
+                        }
+                        selected[index] = current;
+                        let position = (current - base - before) / stride_before + 1;
+                        indices[index] = position as f64;
+                    }
+                };
+            }
+            match direction {
+                CumulativeDirection::Forward => scan!(0..segment_len),
+                CumulativeDirection::Reverse => scan!((0..segment_len).rev()),
+            }
+        }
+    }
+    Ok(IntegerExtrema {
+        values: integer_storage_into_value(selected_storage(storage, &selected), shape.clone())?,
+        indices: numeric_tensor_into_value(indices, shape)?,
+    })
 }
 
 pub(crate) fn storage_from_scalar(value: &IntValue) -> IntegerStorage {
