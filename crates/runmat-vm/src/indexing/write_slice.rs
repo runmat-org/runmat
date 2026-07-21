@@ -23,7 +23,7 @@ fn is_empty_delete_rhs(value: &Value) -> bool {
     )
 }
 
-fn deleted_vector_shape(rows: usize, _cols: usize, len: usize) -> Vec<usize> {
+pub(crate) fn deleted_vector_shape(rows: usize, _cols: usize, len: usize) -> Vec<usize> {
     if len == 0 {
         vec![0, 0]
     } else if rows == 1 {
