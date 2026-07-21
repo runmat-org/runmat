@@ -342,6 +342,7 @@ mod tests {
         let _ = futures::executor::block_on(imagesc_builtin(vec![
             Value::Tensor(Tensor {
                 data: vec![10.0, 20.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -349,6 +350,7 @@ mod tests {
             }),
             Value::Tensor(Tensor {
                 data: vec![1.0, 2.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -374,6 +376,7 @@ mod tests {
         let _ = futures::executor::block_on(imagesc_builtin(vec![
             Value::Tensor(Tensor {
                 data: vec![10.0, 20.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -381,6 +384,7 @@ mod tests {
             }),
             Value::Tensor(Tensor {
                 data: vec![1.0, 5.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,

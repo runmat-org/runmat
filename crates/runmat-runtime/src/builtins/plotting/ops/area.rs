@@ -691,6 +691,7 @@ fn parse_area_args(
         let (rows, _) = area_shape_from_tensor(&y);
         let x = Tensor {
             data: (1..=rows).map(|i| i as f64).collect(),
+            integer_data: None,
             shape: vec![rows],
             rows,
             cols: 1,
@@ -704,6 +705,7 @@ fn parse_area_args(
         let (rows, _) = area_shape_from_tensor(&y);
         let x = Tensor {
             data: (1..=rows).map(|i| i as f64).collect(),
+            integer_data: None,
             shape: vec![rows],
             rows,
             cols: 1,
@@ -846,6 +848,7 @@ mod tests {
         let handle = area_builtin(vec![
             Value::Tensor(Tensor {
                 data: vec![1.0, 2.0, 3.0, 4.0, 5.0],
+                integer_data: None,
                 shape: vec![5],
                 rows: 5,
                 cols: 1,
@@ -888,6 +891,7 @@ mod tests {
         let _ = area_builtin(vec![
             Value::Tensor(Tensor {
                 data: vec![0.0, 0.2, 0.4, 0.6],
+                integer_data: None,
                 shape: vec![4],
                 rows: 4,
                 cols: 1,
@@ -895,6 +899,7 @@ mod tests {
             }),
             Value::Tensor(Tensor {
                 data: vec![2.0, 2.2, 2.4, 2.6],
+                integer_data: None,
                 shape: vec![1, 4],
                 rows: 1,
                 cols: 4,

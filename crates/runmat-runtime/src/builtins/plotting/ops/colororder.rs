@@ -299,6 +299,7 @@ fn colors_to_tensor(colors: Vec<Vec4>) -> Value {
         shape: vec![rows, 3],
         rows,
         cols: 3,
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }
@@ -507,6 +508,7 @@ mod tests {
         let _guard = setup_plot_tests();
         let y = Value::Tensor(Tensor {
             data: vec![1.0, 2.0, 3.0],
+            integer_data: None,
             shape: vec![1, 3],
             rows: 1,
             cols: 3,

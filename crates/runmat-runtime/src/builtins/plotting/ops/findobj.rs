@@ -578,6 +578,7 @@ fn handle_array(handles: Vec<f64>) -> Value {
         cols: 1,
         shape: vec![handles.len(), 1],
         data: handles,
+        integer_data: None,
         dtype: NumericDType::F64,
     })
 }

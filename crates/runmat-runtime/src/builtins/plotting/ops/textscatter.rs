@@ -1377,6 +1377,7 @@ fn vector_value(values: Vec<f64>) -> Value {
         cols: len,
         shape: vec![1, len],
         data: values,
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }
@@ -1389,6 +1390,7 @@ fn color_data_value(colors: Option<&[Vec4]>) -> Value {
             cols: 0,
             shape: vec![0, 0],
             data: Vec::new(),
+            integer_data: None,
             dtype: runmat_builtins::NumericDType::F64,
         }),
     }
@@ -1407,6 +1409,7 @@ fn color_matrix_value(colors: &[Vec4]) -> Value {
         cols: 3,
         shape: vec![rows, 3],
         data,
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }

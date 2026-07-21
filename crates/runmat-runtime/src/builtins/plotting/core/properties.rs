@@ -886,6 +886,7 @@ fn get_axes_property(
                 cols: 2,
                 shape: vec![1, 2],
                 data: vec![az, el],
+                integer_data: None,
                 dtype: runmat_builtins::NumericDType::F64,
             }))
         }
@@ -2609,6 +2610,7 @@ fn figure_position_value(position: [f64; 4]) -> Value {
         cols: 4,
         shape: vec![1, 4],
         data: position.to_vec(),
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }
@@ -2650,6 +2652,7 @@ fn text_position_value(position: glam::Vec3) -> Value {
         cols: 3,
         shape: vec![1, 3],
         data: vec![position.x as f64, position.y as f64, position.z as f64],
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }
@@ -6693,6 +6696,7 @@ fn handles_value(handles: Vec<f64>) -> Value {
         cols: handles.len(),
         shape: vec![1, handles.len()],
         data: handles,
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }
@@ -6703,6 +6707,7 @@ fn tensor_from_vec(data: Vec<f64>) -> Value {
         cols: data.len(),
         shape: vec![1, data.len()],
         data,
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }
@@ -6754,6 +6759,7 @@ fn tensor_from_matrix(data: Vec<Vec<f64>>) -> Value {
         cols,
         shape: vec![rows, cols],
         data: flat,
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }
@@ -6794,6 +6800,7 @@ fn surface_grid_to_tensor(grid: &[Vec<f64>]) -> Value {
         cols,
         shape: vec![rows, cols],
         data,
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }
@@ -6996,6 +7003,7 @@ fn vertices_tensor(vertices: &[glam::Vec3]) -> Value {
         cols,
         shape: vec![rows, cols],
         data,
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }
@@ -7018,6 +7026,7 @@ fn faces_tensor(faces: &[Vec<usize>]) -> Value {
         cols,
         shape: vec![rows, cols],
         data,
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }

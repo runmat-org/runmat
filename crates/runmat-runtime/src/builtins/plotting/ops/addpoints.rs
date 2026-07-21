@@ -280,6 +280,7 @@ mod tests {
     fn vector(values: &[f64]) -> Value {
         Value::Tensor(Tensor {
             data: values.to_vec(),
+            integer_data: None,
             rows: 1,
             cols: values.len(),
             shape: vec![1, values.len()],

@@ -1089,6 +1089,7 @@ fn handles_value(handles: &[FigureHandle]) -> Value {
     } else {
         Value::Tensor(Tensor {
             data: handles.iter().map(|h| h.as_u32() as f64).collect(),
+            integer_data: None,
             shape: vec![1, handles.len()],
             rows: 1,
             cols: handles.len(),
@@ -1277,6 +1278,7 @@ mod tests {
     fn tensor(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,
@@ -1338,6 +1340,7 @@ mod tests {
         block_on(plot_builtin(vec![Value::Tensor(tensor(&[3.0, 2.0, 1.0]))])).expect("plot two");
         let handles = Value::Tensor(Tensor {
             data: vec![first, second],
+            integer_data: None,
             shape: vec![1, 2],
             rows: 1,
             cols: 2,
@@ -1373,6 +1376,7 @@ mod tests {
         block_on(plot_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))])).expect("plot");
         let handles = Value::Tensor(Tensor {
             data: vec![fig, fig],
+            integer_data: None,
             shape: vec![1, 2],
             rows: 1,
             cols: 2,

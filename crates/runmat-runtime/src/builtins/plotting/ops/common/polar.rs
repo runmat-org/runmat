@@ -174,6 +174,7 @@ pub(crate) fn is_real_numeric_value(value: &Value) -> bool {
 pub(crate) fn scalar_tensor(value: f64) -> Tensor {
     Tensor {
         data: vec![value],
+        integer_data: None,
         shape: vec![1],
         rows: 1,
         cols: 1,

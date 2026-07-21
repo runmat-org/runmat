@@ -489,6 +489,7 @@ fn tensor_from_vec(data: Vec<f64>) -> Tensor {
         cols: 1,
         shape: vec![data.len()],
         data,
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     }
 }
@@ -667,6 +668,7 @@ mod tests {
     fn tensor(data: &[f64]) -> Value {
         Value::Tensor(Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,
@@ -685,6 +687,7 @@ mod tests {
             tensor(&[0.0, 0.2, 1.0, 2.0]),
             Value::Tensor(Tensor {
                 data: vec![0.0, 1.0, 2.0, 3.0],
+                integer_data: None,
                 shape: vec![1, 4],
                 rows: 1,
                 cols: 4,

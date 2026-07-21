@@ -535,6 +535,7 @@ fn column_tensor(tensor: &Tensor, col: usize) -> Tensor {
         cols: 1,
         shape: vec![tensor.rows, 1],
         data,
+        integer_data: None,
         dtype: tensor.dtype,
     }
 }
@@ -593,6 +594,7 @@ mod tests {
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor {
             data: data.to_vec(),
+            integer_data: None,
             rows,
             cols,
             shape: vec![rows, cols],

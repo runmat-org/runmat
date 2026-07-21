@@ -1169,6 +1169,7 @@ impl MemmapFormat {
             let shape_values = self.shape.iter().map(|value| *value as f64).collect();
             let shape = Value::Tensor(Tensor {
                 data: shape_values,
+                integer_data: None,
                 shape: vec![1, self.shape.len()],
                 rows: 1,
                 cols: self.shape.len(),
@@ -1220,6 +1221,7 @@ impl MemmapFormat {
         };
         let tensor = Value::Tensor(Tensor {
             data,
+            integer_data: None,
             shape,
             rows,
             cols,
@@ -1463,6 +1465,7 @@ mod tests {
         std::fs::write(&path, [1u8, 0, 2, 0]).unwrap();
         let shape = Value::Tensor(Tensor {
             data: vec![2.0, 1.0],
+            integer_data: None,
             shape: vec![1, 2],
             rows: 1,
             cols: 2,

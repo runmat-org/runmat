@@ -175,6 +175,7 @@ mod tests {
     fn tensor_from(data: &[f64], rows: usize, cols: usize) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![rows, cols],
             rows,
             cols,

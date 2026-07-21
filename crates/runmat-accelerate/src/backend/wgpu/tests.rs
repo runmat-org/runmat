@@ -94,6 +94,7 @@ async fn cholesky_qr_matches_host_qr() {
 
     let tensor_gram = Tensor {
         data: gram.clone(),
+        integer_data: None,
         shape: vec![cols, cols],
         rows: cols,
         cols,

@@ -400,6 +400,7 @@ fn transpose_for_surface(tensor: &Tensor) -> Tensor {
         shape: vec![tensor.cols, tensor.rows],
         rows: tensor.cols,
         cols: tensor.rows,
+        integer_data: None,
         dtype: tensor.dtype,
     }
 }

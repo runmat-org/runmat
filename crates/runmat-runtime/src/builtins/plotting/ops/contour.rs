@@ -2021,6 +2021,7 @@ pub(crate) mod tests {
         }
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape,
             rows,
             cols,

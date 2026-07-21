@@ -400,6 +400,7 @@ pub(crate) mod tests {
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,
@@ -416,6 +417,7 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(Tensor {
                 data: vec![0.0],
+                integer_data: None,
                 shape: vec![1],
                 rows: 1,
                 cols: 1,
@@ -460,6 +462,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         let handle = futures::executor::block_on(meshc_builtin(vec![Value::Tensor(Tensor {
             data: vec![0.0, 1.0, 1.0, 0.0],
+            integer_data: None,
             shape: vec![2, 2],
             rows: 2,
             cols: 2,

@@ -690,6 +690,7 @@ mod tests {
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor {
             data: data.to_vec(),
+            integer_data: None,
             rows,
             cols,
             shape: vec![rows, cols],

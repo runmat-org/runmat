@@ -162,6 +162,7 @@ fn ancestor_array(
         shape: vec![1, len],
         rows: 1,
         cols: len,
+        integer_data: None,
         dtype: NumericDType::F64,
     }))
 }

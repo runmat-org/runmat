@@ -643,6 +643,7 @@ pub(crate) mod tests {
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,
@@ -659,6 +660,7 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[0.0])),
             Value::Tensor(Tensor {
                 data: vec![0.0],
+                integer_data: None,
                 shape: vec![1],
                 rows: 1,
                 cols: 1,
@@ -706,6 +708,7 @@ pub(crate) mod tests {
         //      0 1 2]
         let x = Tensor {
             data: vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
+            integer_data: None,
             shape: vec![2, 3],
             rows: 2,
             cols: 3,
@@ -715,6 +718,7 @@ pub(crate) mod tests {
         //      20 20 20]
         let y = Tensor {
             data: vec![10.0, 20.0, 10.0, 20.0, 10.0, 20.0],
+            integer_data: None,
             shape: vec![2, 3],
             rows: 2,
             cols: 3,
@@ -723,6 +727,7 @@ pub(crate) mod tests {
         // Z is 2x3 surface heights (any values), column-major.
         let z = Tensor {
             data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            integer_data: None,
             shape: vec![2, 3],
             rows: 2,
             cols: 3,
@@ -746,6 +751,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         let out = futures::executor::block_on(surf_builtin(vec![Value::Tensor(Tensor {
             data: vec![1.0, 2.0, 3.0, 4.0],
+            integer_data: None,
             shape: vec![2, 2],
             rows: 2,
             cols: 2,
@@ -756,6 +762,7 @@ pub(crate) mod tests {
             crate::builtins::plotting::op_common::surface_inputs::parse_surface_call_args_matlab_xy(
                 vec![Value::Tensor(Tensor {
                     data: vec![1.0, 2.0, 3.0, 4.0],
+        integer_data: None,
                     shape: vec![2, 2],
                     rows: 2,
                     cols: 2,
@@ -776,6 +783,7 @@ pub(crate) mod tests {
             crate::builtins::plotting::op_common::surface_inputs::parse_surface_call_args_matlab_xy(
                 vec![Value::Tensor(Tensor {
                     data: (1..=12).map(|v| v as f64).collect(),
+        integer_data: None,
                     shape: vec![3, 4],
                     rows: 3,
                     cols: 4,
@@ -794,6 +802,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         let handle = futures::executor::block_on(surf_builtin(vec![Value::Tensor(Tensor {
             data: vec![1.0, 2.0, 3.0, 4.0],
+            integer_data: None,
             shape: vec![2, 2],
             rows: 2,
             cols: 2,

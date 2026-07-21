@@ -522,6 +522,7 @@ mod tests {
     fn tensor(data: &[f64]) -> Value {
         Value::Tensor(Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,
@@ -581,6 +582,7 @@ mod tests {
     fn matrix_rho_expands_to_column_series() {
         let rho = Tensor {
             data: vec![1.0, 2.0, 3.0, 4.0],
+            integer_data: None,
             shape: vec![2, 2],
             rows: 2,
             cols: 2,
@@ -629,6 +631,7 @@ mod tests {
 
         let empty = Value::Tensor(Tensor {
             data: Vec::new(),
+            integer_data: None,
             shape: vec![0, 0],
             rows: 0,
             cols: 0,
@@ -658,6 +661,7 @@ mod tests {
         let theta = tensor(&[0.0, std::f64::consts::FRAC_PI_2]);
         let rho = Value::Tensor(Tensor {
             data: vec![1.0, 2.0, 3.0, 4.0],
+            integer_data: None,
             shape: vec![2, 2],
             rows: 2,
             cols: 2,

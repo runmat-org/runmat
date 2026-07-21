@@ -600,6 +600,7 @@ pub(super) fn handles_value(handles: Vec<f64>) -> Value {
             cols: handles.len(),
             shape: vec![1, handles.len()],
             data: handles,
+            integer_data: None,
             dtype: runmat_builtins::NumericDType::F64,
         })
     }
@@ -608,6 +609,7 @@ pub(super) fn handles_value(handles: Vec<f64>) -> Value {
 fn vector_value(data: &[f64]) -> Value {
     Value::Tensor(Tensor {
         data: data.to_vec(),
+        integer_data: None,
         rows: 1,
         cols: data.len(),
         shape: vec![1, data.len()],
@@ -663,6 +665,7 @@ mod tests {
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor {
             data: data.to_vec(),
+            integer_data: None,
             rows,
             cols,
             shape: vec![rows, cols],

@@ -646,6 +646,7 @@ mod tests {
     fn tensor(data: &[f64], shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: shape.clone(),
             rows: *shape.first().unwrap_or(&1),
             cols: *shape.get(1).unwrap_or(&data.len()),

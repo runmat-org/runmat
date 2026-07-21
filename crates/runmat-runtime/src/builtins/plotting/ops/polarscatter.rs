@@ -359,6 +359,7 @@ fn series_style_value(
             cols: 1,
             shape: vec![point_count, 1],
             data: column,
+            integer_data: None,
             dtype: tensor.dtype,
         });
     }
@@ -420,6 +421,7 @@ mod tests {
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![rows, cols],
             rows,
             cols,

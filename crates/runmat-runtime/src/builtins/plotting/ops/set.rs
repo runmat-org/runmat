@@ -295,6 +295,7 @@ mod tests {
                 cols: 2,
                 shape: vec![1, 2],
                 data: vec![2.0, 8.0],
+                integer_data: None,
                 dtype: runmat_builtins::NumericDType::F64,
             }),
             Value::String("Colorbar".into()),
@@ -471,6 +472,7 @@ mod tests {
                 cols: 1,
                 shape: vec![2],
                 data: vec![1.0, 2.0],
+                integer_data: None,
                 dtype: runmat_builtins::NumericDType::F64,
             },
         )])

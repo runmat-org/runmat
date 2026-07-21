@@ -399,6 +399,7 @@ fn rgb_tensor_from_colors(colors: &[[f64; 3]]) -> Tensor {
         shape: vec![rows, 3],
         rows,
         cols: 3,
+        integer_data: None,
         dtype: NumericDType::F64,
     }
 }
@@ -544,6 +545,7 @@ mod tests {
 
         let custom = Tensor {
             data: vec![0.0, 1.0, 0.0, 0.5, 1.0, 0.0],
+            integer_data: None,
             shape: vec![2, 3],
             rows: 2,
             cols: 3,

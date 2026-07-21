@@ -837,6 +837,7 @@ mod tests {
             cols: 6,
             shape: vec![1, 6],
             data: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            integer_data: None,
             dtype: NumericDType::F64,
         })])
         .unwrap();
@@ -866,6 +867,7 @@ mod tests {
             cols: 4,
             shape: vec![1, 4],
             data: vec![0.0, 10.0, -2.0, 2.0],
+            integer_data: None,
             dtype: NumericDType::F64,
         })])
         .unwrap();
@@ -1041,6 +1043,7 @@ mod tests {
             cols: 3,
             shape: vec![2, 3],
             data: vec![0.2, 0.8, 0.4, 0.1, 0.6, 0.0],
+            integer_data: None,
             dtype: NumericDType::F64,
         })])
         .unwrap();

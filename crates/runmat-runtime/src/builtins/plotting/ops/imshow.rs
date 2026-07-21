@@ -830,6 +830,7 @@ mod tests {
         let _guard = reset();
         let tensor = Tensor {
             data: vec![0.0, 128.0, 200.0, 255.0],
+            integer_data: None,
             shape: vec![2, 2],
             rows: 2,
             cols: 2,
@@ -857,6 +858,7 @@ mod tests {
         let _guard = reset();
         let tensor = Tensor {
             data: vec![0.0, 1000.0, 40000.0, 65535.0],
+            integer_data: None,
             shape: vec![2, 2],
             rows: 2,
             cols: 2,
@@ -888,6 +890,7 @@ mod tests {
         let _guard = reset();
         let tensor = Tensor {
             data: vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
+            integer_data: None,
             shape: vec![2, 2, 3],
             rows: 2,
             cols: 2,

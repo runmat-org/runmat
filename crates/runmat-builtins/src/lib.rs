@@ -231,6 +231,64 @@ pub enum NumericDType {
     U32,
 }
 
+/// Exact homogeneous backing storage for MATLAB integer arrays.
+///
+/// This deliberately stores each class in its native Rust representation so
+/// `int64` and `uint64` values never round through `f64` before an
+/// integer-aware runtime path consumes them.
+#[derive(Debug, Clone, PartialEq)]
+pub enum IntegerStorage {
+    I8(Vec<i8>),
+    I16(Vec<i16>),
+    I32(Vec<i32>),
+    I64(Vec<i64>),
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+    U64(Vec<u64>),
+}
+
+impl IntegerStorage {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::I8(values) => values.len(),
+            Self::I16(values) => values.len(),
+            Self::I32(values) => values.len(),
+            Self::I64(values) => values.len(),
+            Self::U8(values) => values.len(),
+            Self::U16(values) => values.len(),
+            Self::U32(values) => values.len(),
+            Self::U64(values) => values.len(),
+        }
+    }
+
+    pub fn class_name(&self) -> &'static str {
+        match self {
+            Self::I8(_) => "int8",
+            Self::I16(_) => "int16",
+            Self::I32(_) => "int32",
+            Self::I64(_) => "int64",
+            Self::U8(_) => "uint8",
+            Self::U16(_) => "uint16",
+            Self::U32(_) => "uint32",
+            Self::U64(_) => "uint64",
+        }
+    }
+
+    pub fn to_f64_vec(&self) -> Vec<f64> {
+        match self {
+            Self::I8(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::I16(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::I32(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::I64(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U8(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U16(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U32(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U64(values) => values.iter().map(|&value| value as f64).collect(),
+        }
+    }
+}
+
 impl NumericDType {
     pub fn class_name(self) -> &'static str {
         match self {
@@ -253,9 +311,48 @@ impl NumericDType {
     }
 }
 
+#[cfg(test)]
+mod integer_storage_tests {
+    use super::{IntegerStorage, Tensor};
+
+    #[test]
+    fn uint64_tensor_keeps_exact_backing_values() {
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
+            .expect("integer tensor");
+
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![0, u64::MAX]))
+        );
+        assert_eq!(tensor.data[1], u64::MAX as f64);
+    }
+
+    #[test]
+    fn integer_tensor_supports_empty_typed_arrays() {
+        let tensor = Tensor::new_integer(IntegerStorage::I64(Vec::new()), vec![0, 1])
+            .expect("empty integer tensor");
+
+        assert_eq!(
+            tensor.integer_storage().map(IntegerStorage::class_name),
+            Some("int64")
+        );
+        assert!(tensor.data.is_empty());
+    }
+
+    #[test]
+    fn integer_tensor_rejects_shape_length_mismatches() {
+        let err = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![3, 1])
+            .expect_err("shape mismatch");
+        assert!(err.contains("doesn't match shape"));
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
     pub data: Vec<f64>,
+    /// Exact homogeneous integer backing storage during the integer-dtype
+    /// migration. Floating tensors leave this unset.
+    pub integer_data: Option<IntegerStorage>,
     pub shape: Vec<usize>, // Column-major layout
     pub rows: usize,       // Compatibility for 2D usage
     pub cols: usize,       // Compatibility for 2D usage
@@ -415,6 +512,7 @@ impl Tensor {
         };
         Ok(Tensor {
             data,
+            integer_data: None,
             shape,
             rows,
             cols,
@@ -446,6 +544,44 @@ impl Tensor {
         Ok(t)
     }
 
+    /// Construct a tensor backed by an exact homogeneous integer buffer.
+    ///
+    /// The floating `data` member is retained only as a compatibility view for
+    /// legacy numeric consumers. Integer-aware code must use `integer_data`.
+    pub fn new_integer(storage: IntegerStorage, shape: Vec<usize>) -> Result<Self, String> {
+        let expected: usize = shape.iter().product();
+        if storage.len() != expected {
+            return Err(format!(
+                "integer tensor data length {} doesn't match shape {:?} ({} elements)",
+                storage.len(),
+                shape,
+                expected
+            ));
+        }
+
+        let (rows, cols) = if shape.len() >= 2 {
+            (shape[0], shape[1])
+        } else if shape.len() == 1 {
+            (1, shape[0])
+        } else {
+            (0, 0)
+        };
+        Ok(Tensor {
+            data: storage.to_f64_vec(),
+            integer_data: Some(storage),
+            shape,
+            rows,
+            cols,
+            // Legacy dtype consumers do not yet represent the complete
+            // integer class matrix. Integer-aware consumers inspect storage.
+            dtype: NumericDType::F64,
+        })
+    }
+
+    pub fn integer_storage(&self) -> Option<&IntegerStorage> {
+        self.integer_data.as_ref()
+    }
+
     pub fn zeros(shape: Vec<usize>) -> Self {
         let size: usize = shape.iter().product();
         let (rows, cols) = if shape.len() >= 2 {
@@ -457,6 +593,7 @@ impl Tensor {
         };
         Tensor {
             data: vec![0.0; size],
+            integer_data: None,
             shape,
             rows,
             cols,
@@ -475,6 +612,7 @@ impl Tensor {
         };
         Tensor {
             data: vec![1.0; size],
+            integer_data: None,
             shape,
             rows,
             cols,
@@ -525,6 +663,7 @@ impl Tensor {
     pub fn scalar_to_tensor2(scalar: f64, rows: usize, cols: usize) -> Tensor {
         Tensor {
             data: vec![scalar; rows * cols],
+            integer_data: None,
             shape: vec![rows, cols],
             rows,
             cols,

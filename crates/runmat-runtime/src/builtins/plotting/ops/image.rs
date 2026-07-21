@@ -590,6 +590,7 @@ mod tests {
     fn truecolor_tensor() -> Tensor {
         Tensor {
             data: vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
+            integer_data: None,
             shape: vec![2, 2, 3],
             rows: 2,
             cols: 2,
@@ -626,6 +627,7 @@ mod tests {
         let _ = clear_figure(None);
         let c = Tensor {
             data: (1..=12).map(|v| v as f64).collect(),
+            integer_data: None,
             shape: vec![3, 4],
             rows: 3,
             cols: 4,
@@ -634,6 +636,7 @@ mod tests {
         let _ = futures::executor::block_on(image_builtin(vec![
             Value::Tensor(Tensor {
                 data: vec![10.0, 20.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -641,6 +644,7 @@ mod tests {
             }),
             Value::Tensor(Tensor {
                 data: vec![1.0, 5.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,

@@ -224,6 +224,7 @@ pub(crate) fn reference_line_builtin(
     } else {
         Ok(Value::Tensor(Tensor {
             data: handles.clone(),
+            integer_data: None,
             rows: 1,
             cols: handles.len(),
             shape: vec![1, handles.len()],

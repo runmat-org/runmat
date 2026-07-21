@@ -1307,6 +1307,7 @@ pub(crate) mod tests {
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,
@@ -1317,6 +1318,7 @@ pub(crate) mod tests {
     fn matrix_tensor(data: &[f64], rows: usize, cols: usize) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![rows, cols],
             rows,
             cols,
@@ -1327,6 +1329,7 @@ pub(crate) mod tests {
     fn row_vector_tensor(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![1, data.len()],
             rows: 1,
             cols: data.len(),

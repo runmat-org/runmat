@@ -1420,6 +1420,7 @@ pub(crate) mod tests {
             &opts,
             &Value::Tensor(Tensor {
                 data: vec![0.1, 0.2, 1.0],
+                integer_data: None,
                 shape: vec![1, 3],
                 rows: 1,
                 cols: 3,
@@ -1495,6 +1496,7 @@ pub(crate) mod tests {
         let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);
         let rest = vec![Value::Tensor(Tensor {
             data: vec![0.8, 0.1, 0.2],
+            integer_data: None,
             shape: vec![1, 3],
             rows: 1,
             cols: 3,

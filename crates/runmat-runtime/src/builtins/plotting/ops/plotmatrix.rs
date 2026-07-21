@@ -408,6 +408,7 @@ fn matrix_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         rows,
         cols,
         shape: vec![rows, cols],
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }

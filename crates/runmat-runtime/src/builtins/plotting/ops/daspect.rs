@@ -228,6 +228,7 @@ fn ratio_value(ratio: [f64; 3]) -> Value {
         cols: 3,
         shape: vec![1, 3],
         data: ratio.to_vec(),
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }
@@ -351,6 +352,7 @@ mod tests {
             cols: values.len(),
             shape: vec![1, values.len()],
             data: values.to_vec(),
+            integer_data: None,
             dtype: runmat_builtins::NumericDType::F64,
         })
     }

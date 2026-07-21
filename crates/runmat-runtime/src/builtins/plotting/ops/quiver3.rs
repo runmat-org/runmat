@@ -720,6 +720,7 @@ fn default_quiver3_grid_from_value(value: &Value) -> crate::BuiltinResult<(Tenso
     Ok((
         Tensor {
             data: x,
+            integer_data: None,
             shape: vec![len],
             rows: len,
             cols: 1,
@@ -727,6 +728,7 @@ fn default_quiver3_grid_from_value(value: &Value) -> crate::BuiltinResult<(Tenso
         },
         Tensor {
             data: y,
+            integer_data: None,
             shape: vec![len],
             rows: len,
             cols: 1,
@@ -853,6 +855,7 @@ mod tests {
     fn vec_tensor(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,
@@ -863,6 +866,7 @@ mod tests {
     fn mat_tensor(rows: usize, cols: usize, data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![rows, cols],
             rows,
             cols,
@@ -873,6 +877,7 @@ mod tests {
     fn nd_tensor(shape: Vec<usize>, data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             rows: shape.first().copied().unwrap_or(data.len()).max(1),
             cols: shape.get(1).copied().unwrap_or(1).max(1),
             shape,
