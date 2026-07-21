@@ -572,6 +572,9 @@ fn format_seconds_field(seconds: f64) -> String {
 }
 
 fn format_duration_value(days: f64, format: &str) -> BuiltinResult<String> {
+    if days.is_nan() {
+        return Ok("NaN".to_string());
+    }
     if !days.is_finite() {
         return Err(duration_error("duration: values must be finite"));
     }
@@ -1112,6 +1115,23 @@ mod tests {
             .expect("duration text");
         assert!(rendered.contains("01:15:00"));
         assert!(rendered.contains("02:45:00"));
+    }
+
+    #[test]
+    fn duration_missing_days_render_without_error() {
+        let value = duration_object_from_days_tensor(
+            Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap(),
+            DEFAULT_DURATION_FORMAT,
+        )
+        .expect("duration object");
+        let rendered = duration_string_array(&value)
+            .expect("string array")
+            .expect("duration strings");
+        assert_eq!(rendered.data, vec!["NaN".to_string()]);
+        assert_eq!(
+            duration_display_text(&value).expect("display"),
+            Some("NaN".to_string())
+        );
     }
 
     #[test]

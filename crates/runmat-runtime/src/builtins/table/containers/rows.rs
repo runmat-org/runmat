@@ -7,11 +7,11 @@ pub(in crate::builtins::table) fn table_to_cell_array(
     let names = table_variable_names_from_object(object)?;
     let variables = table_variables(object)?;
     let mut data = Vec::with_capacity(height * names.len());
-    for col_name in &names {
-        let value = variables.fields.get(col_name).ok_or_else(|| {
-            invalid_variable(format!("table2cell: missing variable '{col_name}'"))
-        })?;
-        for row in 0..height {
+    for row in 0..height {
+        for col_name in &names {
+            let value = variables.fields.get(col_name).ok_or_else(|| {
+                invalid_variable(format!("table2cell: missing variable '{col_name}'"))
+            })?;
             data.push(row_value(value, row)?);
         }
     }

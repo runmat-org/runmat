@@ -64,6 +64,7 @@ const PROVIDER_ID_BLOCK_SIZE: u64 = 1_000_000_000;
 
 static REGISTRY: OnceCell<Mutex<HashMap<u64, Vec<f64>>>> = OnceCell::new();
 static NEXT_PROVIDER_ID_BASE: AtomicU64 = AtomicU64::new(PROVIDER_ID_BLOCK_SIZE);
+static NEXT_INPROCESS_DEVICE_ID: AtomicU64 = AtomicU64::new(1);
 
 fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
@@ -667,6 +668,7 @@ fn next_normal_pair(state: &mut u64) -> (f64, f64) {
 }
 
 pub struct InProcessProvider {
+    device_id: u32,
     next_id: AtomicU64,
     id_limit: u64,
     telemetry: AccelTelemetry,
@@ -674,12 +676,19 @@ pub struct InProcessProvider {
 
 impl InProcessProvider {
     pub fn new() -> Self {
+        let device_id = NEXT_INPROCESS_DEVICE_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .expect("in-process provider device ids exhausted");
+        let device_id = u32::try_from(device_id).expect("in-process provider device ids exhausted");
         let id_base = NEXT_PROVIDER_ID_BASE
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(PROVIDER_ID_BLOCK_SIZE)
             })
             .expect("in-process provider id range exhausted");
         Self {
+            device_id,
             next_id: AtomicU64::new(id_base),
             id_limit: id_base
                 .checked_add(PROVIDER_ID_BLOCK_SIZE)
@@ -714,7 +723,7 @@ impl InProcessProvider {
             .insert(id, data);
         let handle = GpuTensorHandle {
             shape,
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         };
         runmat_accelerate_api::set_handle_storage(&handle, storage);
@@ -2596,7 +2605,7 @@ fn simple_trapezoid(
 
 impl AccelProvider for InProcessProvider {
     fn device_id(&self) -> u32 {
-        0
+        self.device_id
     }
 
     fn spawn_handle_concurrency(&self) -> runmat_accelerate_api::SpawnHandleConcurrency {
@@ -2721,7 +2730,7 @@ impl AccelProvider for InProcessProvider {
         self.telemetry.record_upload_bytes(bytes);
         let handle = GpuTensorHandle {
             shape: host.shape.to_vec(),
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         };
         runmat_accelerate_api::set_handle_precision(&handle, self.precision());
@@ -2763,7 +2772,7 @@ impl AccelProvider for InProcessProvider {
 
     fn device_info_struct(&self) -> runmat_accelerate_api::ApiDeviceInfo {
         runmat_accelerate_api::ApiDeviceInfo {
-            device_id: 0,
+            device_id: self.device_id,
             name: "InProcess".to_string(),
             vendor: "RunMat".to_string(),
             memory_bytes: None,
@@ -3263,7 +3272,7 @@ impl AccelProvider for InProcessProvider {
         registry().lock().unwrap().insert(id, out);
         Ok(GpuTensorHandle {
             shape: vec![out_rows, out_cols],
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -3296,7 +3305,7 @@ impl AccelProvider for InProcessProvider {
         registry().lock().unwrap().insert(id, out);
         Ok(GpuTensorHandle {
             shape: vec![diag_len, 1],
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -3449,7 +3458,7 @@ impl AccelProvider for InProcessProvider {
         guard.insert(id, vec![1.0; len]);
         Ok(GpuTensorHandle {
             shape: shape.to_vec(),
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -3466,7 +3475,7 @@ impl AccelProvider for InProcessProvider {
         guard.insert(id, data);
         Ok(GpuTensorHandle {
             shape,
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -3496,7 +3505,7 @@ impl AccelProvider for InProcessProvider {
         registry().lock().unwrap().insert(id, data);
         Ok(GpuTensorHandle {
             shape: vec![1, count],
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -3516,7 +3525,7 @@ impl AccelProvider for InProcessProvider {
         buf_guard.insert(id, data);
         Ok(GpuTensorHandle {
             shape: shape.to_vec(),
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -3542,7 +3551,7 @@ impl AccelProvider for InProcessProvider {
             .insert(id, data);
         Ok(GpuTensorHandle {
             shape: shape.to_vec(),
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -3564,7 +3573,7 @@ impl AccelProvider for InProcessProvider {
             .insert(id, data);
         Ok(GpuTensorHandle {
             shape: shape.to_vec(),
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -3589,7 +3598,7 @@ impl AccelProvider for InProcessProvider {
             .insert(id, data);
         Ok(GpuTensorHandle {
             shape: shape.to_vec(),
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -3610,7 +3619,7 @@ impl AccelProvider for InProcessProvider {
             .insert(id, data);
         Ok(GpuTensorHandle {
             shape: shape.to_vec(),
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -3709,7 +3718,7 @@ impl AccelProvider for InProcessProvider {
         registry().lock().unwrap().insert(id, data);
         Ok(GpuTensorHandle {
             shape: shape.to_vec(),
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -3751,7 +3760,7 @@ impl AccelProvider for InProcessProvider {
         registry().lock().unwrap().insert(id, values);
         Ok(GpuTensorHandle {
             shape: vec![1, k],
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -4875,7 +4884,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -4906,7 +4915,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: y.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5008,7 +5017,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5047,7 +5056,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5068,7 +5077,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5148,7 +5157,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5169,7 +5178,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5190,7 +5199,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5253,7 +5262,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5274,7 +5283,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5296,7 +5305,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5318,7 +5327,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5340,7 +5349,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5403,7 +5412,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5436,7 +5445,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5645,7 +5654,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5664,7 +5673,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5683,7 +5692,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5705,7 +5714,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5727,7 +5736,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, abuf);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5749,7 +5758,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5771,7 +5780,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5803,7 +5812,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: a.shape.clone(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -5834,7 +5843,7 @@ impl AccelProvider for InProcessProvider {
         guard2.insert(id, out);
         Ok(GpuTensorHandle {
             shape: mantissa.shape.clone(),
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -6731,7 +6740,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, vec![s]);
             Ok(GpuTensorHandle {
                 shape: vec![1, 1],
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -6789,7 +6798,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape,
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -6811,7 +6820,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, vec![p]);
             Ok(GpuTensorHandle {
                 shape: vec![1, 1],
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -6864,7 +6873,7 @@ impl AccelProvider for InProcessProvider {
             };
             Ok(GpuTensorHandle {
                 shape,
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -6889,7 +6898,7 @@ impl AccelProvider for InProcessProvider {
             registry().lock().unwrap().insert(id, vec![mean]);
             Ok(GpuTensorHandle {
                 shape: vec![1, 1],
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -6941,7 +6950,7 @@ impl AccelProvider for InProcessProvider {
             };
             Ok(GpuTensorHandle {
                 shape,
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -7176,7 +7185,7 @@ impl AccelProvider for InProcessProvider {
             registry().lock().unwrap().insert(id, vec![median]);
             Ok(GpuTensorHandle {
                 shape: vec![1, 1],
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -7251,7 +7260,7 @@ impl AccelProvider for InProcessProvider {
             };
             Ok(GpuTensorHandle {
                 shape,
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -7282,7 +7291,7 @@ impl AccelProvider for InProcessProvider {
             registry().lock().unwrap().insert(id, vec![m]);
             Ok(GpuTensorHandle {
                 shape: vec![1, 1],
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -7341,12 +7350,12 @@ impl AccelProvider for InProcessProvider {
             Ok(runmat_accelerate_api::ReduceDimResult {
                 values: GpuTensorHandle {
                     shape: shape_vals,
-                    device_id: 0,
+                    device_id: self.device_id,
                     buffer_id: idv,
                 },
                 indices: GpuTensorHandle {
                     shape: shape_inds,
-                    device_id: 0,
+                    device_id: self.device_id,
                     buffer_id: idi,
                 },
             })
@@ -7368,7 +7377,7 @@ impl AccelProvider for InProcessProvider {
             registry().lock().unwrap().insert(id, vec![m]);
             Ok(GpuTensorHandle {
                 shape: vec![1, 1],
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -7427,12 +7436,12 @@ impl AccelProvider for InProcessProvider {
             Ok(runmat_accelerate_api::ReduceDimResult {
                 values: GpuTensorHandle {
                     shape: shape_vals,
-                    device_id: 0,
+                    device_id: self.device_id,
                     buffer_id: idv,
                 },
                 indices: GpuTensorHandle {
                     shape: shape_inds,
-                    device_id: 0,
+                    device_id: self.device_id,
                     buffer_id: idi,
                 },
             })
@@ -7724,7 +7733,7 @@ impl AccelProvider for InProcessProvider {
             guard2.insert(id, out);
             Ok(GpuTensorHandle {
                 shape: vec![ar, bc],
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             })
         })
@@ -8354,7 +8363,7 @@ impl AccelProvider for InProcessProvider {
             registry().lock().unwrap().insert(id, Vec::new());
             return Ok(GpuTensorHandle {
                 shape: output_shape.to_vec(),
-                device_id: 0,
+                device_id: self.device_id,
                 buffer_id: id,
             });
         }
@@ -8403,7 +8412,7 @@ impl AccelProvider for InProcessProvider {
         registry().lock().unwrap().insert(id, output);
         Ok(GpuTensorHandle {
             shape: output_shape.to_vec(),
-            device_id: 0,
+            device_id: self.device_id,
             buffer_id: id,
         })
     }
@@ -8479,6 +8488,39 @@ mod tests {
                 shape,
             })
             .expect("upload real")
+    }
+
+    #[test]
+    fn inprocess_handles_keep_provider_device_identity() {
+        runmat_accelerate_api::clear_provider();
+        let provider_a: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+        let provider_b: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+
+        unsafe {
+            runmat_accelerate_api::register_provider(provider_a);
+            runmat_accelerate_api::register_provider(provider_b);
+        }
+
+        let handle_a = real_handle(provider_a, &[1.0, 2.0], &[2, 1]);
+        let handle_b = real_handle(provider_b, &[3.0, 4.0], &[2, 1]);
+
+        assert_ne!(provider_a.device_id(), provider_b.device_id());
+        assert_eq!(handle_a.device_id, provider_a.device_id());
+        assert_eq!(handle_b.device_id, provider_b.device_id());
+        assert_eq!(
+            runmat_accelerate_api::provider_for_handle(&handle_a)
+                .expect("provider for first handle")
+                .device_id(),
+            provider_a.device_id()
+        );
+        assert_eq!(
+            runmat_accelerate_api::provider_for_handle(&handle_b)
+                .expect("provider for second handle")
+                .device_id(),
+            provider_b.device_id()
+        );
+
+        runmat_accelerate_api::clear_provider();
     }
 
     fn assert_complex_close(
@@ -8845,7 +8887,7 @@ mod tests {
         provider.next_id.store(9_000_000, Ordering::Relaxed);
         let stale = GpuTensorHandle {
             shape: vec![1, 1],
-            device_id: 0,
+            device_id: provider.device_id(),
             buffer_id: 9_000_000,
         };
         runmat_accelerate_api::set_handle_precision(&stale, ProviderPrecision::F32);

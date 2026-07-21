@@ -568,7 +568,7 @@ fn encode_initializer(initializer: &Initializer) -> Vec<u8> {
         put_varint_field(&mut out, 1, *dim as u64);
     }
     put_varint_field(&mut out, 2, ONNX_DOUBLE as u64);
-    put_string_field(&mut out, 4, &initializer.name);
+    put_string_field(&mut out, 8, &initializer.name);
     let mut raw = Vec::with_capacity(initializer.data.len() * 8);
     for value in &initializer.data {
         raw.extend_from_slice(&value.to_le_bytes());
@@ -664,4 +664,33 @@ fn put_varint(out: &mut Vec<u8>, mut value: u64) {
         value >>= 7;
     }
     out.push(value as u8);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn has_length_delimited_field(bytes: &[u8], field: u32, payload: &[u8]) -> bool {
+        let key = ((field as u64) << 3) | 2;
+        let mut expected = Vec::new();
+        put_varint(&mut expected, key);
+        put_varint(&mut expected, payload.len() as u64);
+        expected.extend_from_slice(payload);
+        bytes
+            .windows(expected.len())
+            .any(|window| window == expected.as_slice())
+    }
+
+    #[test]
+    fn initializer_name_uses_tensor_proto_name_field() {
+        let initializer = Initializer {
+            name: "fc.Weights".to_string(),
+            dims: vec![2, 3],
+            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        };
+        let encoded = encode_initializer(&initializer);
+
+        assert!(has_length_delimited_field(&encoded, 8, b"fc.Weights"));
+        assert!(!has_length_delimited_field(&encoded, 4, b"fc.Weights"));
+    }
 }

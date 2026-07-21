@@ -315,6 +315,31 @@ fn forward_preserves_dlarray_wrapper() {
 }
 
 #[test]
+fn forward_rejects_gpu_backed_dlarray_before_host_gather() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+        let shape = [1usize, 2usize];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &shape,
+            })
+            .expect("upload");
+        provider.reset_telemetry();
+        let dl = block_on(dlarray_builtin(
+            Value::GpuTensor(handle),
+            vec![Value::String("CB".into())],
+        ))
+        .expect("gpu dlarray");
+
+        let err = block_on(forward_builtin(net, dl, vec![])).unwrap_err();
+
+        assert!(err.to_string().contains("GPU-backed dlarray execution"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
 fn export_onnx_network_writes_supported_feedforward_graph() {
     let input = block_on(feature_input_layer_builtin(
         Value::Num(2.0),

@@ -61,8 +61,91 @@ pub(in crate::builtins::table) fn parse_row_selector_for_object(
         if selector_object.is_class(ROWFILTER_CLASS) {
             return parse_rowfilter_selector(selector_object, object);
         }
+        if selector_object.is_class("datetime") || selector_object.is_class("duration") {
+            return parse_row_time_selector(selector, object);
+        }
+    }
+    if let Some(rows) = parse_row_name_selector(selector, object)? {
+        return Ok(rows);
     }
     parse_row_selector(Some(selector), height)
+}
+
+fn parse_row_name_selector(
+    selector: &Value,
+    object: &ObjectInstance,
+) -> BuiltinResult<Option<Vec<usize>>> {
+    let Ok(selected) = string_list(selector) else {
+        return Ok(None);
+    };
+    let props = table_public_properties(object)?;
+    let Some(row_names_value) = props.fields.get(ROW_NAMES) else {
+        return Ok(None);
+    };
+    let row_names = string_list(row_names_value)?;
+    if row_names.is_empty() {
+        return Ok(None);
+    }
+    let mut rows = Vec::with_capacity(selected.len());
+    for name in selected {
+        let idx = row_names
+            .iter()
+            .position(|row_name| row_name == &name)
+            .ok_or_else(|| invalid_index(format!("table: unrecognized row name '{name}'")))?;
+        rows.push(idx);
+    }
+    Ok(Some(rows))
+}
+
+fn parse_row_time_selector(selector: &Value, object: &ObjectInstance) -> BuiltinResult<Vec<usize>> {
+    if !object.is_class(TIMETABLE_CLASS) {
+        return Err(invalid_index(
+            "table: datetime or duration row-time selectors require a timetable",
+        ));
+    }
+    let row_times = timetable_row_times(object)?
+        .ok_or_else(|| invalid_index("timetable row-time selector requires RowTimes"))?;
+    let selector_kind = row_time_kind(selector)?;
+    if row_time_kind(&row_times)? != selector_kind {
+        return Err(invalid_index(
+            "timetable row-time selector type must match timetable RowTimes",
+        ));
+    }
+    let row_values = selector_numeric_values(&row_times)?;
+    let selected_values = selector_numeric_values(selector)?;
+    let mut rows = Vec::new();
+    for selected in selected_values {
+        let before = rows.len();
+        for (idx, row_time) in row_values.iter().enumerate() {
+            if (*row_time - selected).abs() <= 1e-12 {
+                rows.push(idx);
+            }
+        }
+        if rows.len() == before {
+            return Err(invalid_index(
+                "timetable: row-time selector did not match any rows",
+            ));
+        }
+    }
+    Ok(rows)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RowTimeKind {
+    Datetime,
+    Duration,
+    Numeric,
+}
+
+fn row_time_kind(value: &Value) -> BuiltinResult<RowTimeKind> {
+    match value {
+        Value::Object(obj) if obj.is_class("datetime") => Ok(RowTimeKind::Datetime),
+        Value::Object(obj) if obj.is_class("duration") => Ok(RowTimeKind::Duration),
+        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => Ok(RowTimeKind::Numeric),
+        other => Err(invalid_index(format!(
+            "timetable: unsupported row-time selector {other:?}"
+        ))),
+    }
 }
 
 pub(in crate::builtins::table) fn parse_variable_selector(

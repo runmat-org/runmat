@@ -493,7 +493,7 @@ fn matrix_points(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<[f64
             "3-D DelaunayTri triangulation is not yet supported",
         ));
     }
-    if tensor.cols < 2 {
+    if tensor.cols != 2 {
         return Err(invalid(format!(
             "{builtin}: points must be an N-by-2 matrix"
         )));
@@ -726,6 +726,17 @@ mod tests {
         assert_eq!(tri.rows, 2);
         assert!(dt.properties.contains_key("ConnectivityList"));
         assert!(dt.properties.contains_key("Points"));
+    }
+
+    #[test]
+    fn delaunaytri_rejects_point_matrices_that_are_not_two_dimensional() {
+        let err = block_on(delaunay_tri_builtin(vec![tensor(
+            &[0.0, 1.0, 0.0, 1.0, 4.0, 5.0, 6.0, 7.0],
+            2,
+            4,
+        )]))
+        .expect_err("4-column point matrix should fail");
+        assert!(err.message.contains("N-by-2"));
     }
 
     #[test]

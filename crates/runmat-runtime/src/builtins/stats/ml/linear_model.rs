@@ -9,12 +9,6 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor;
-use crate::builtins::stats::ml::classification_linear::{
-    predict_classification_linear_object, CLASSIFICATION_LINEAR_CLASS,
-};
-use crate::builtins::stats::ml::classification_tree::{
-    predict_classification_tree_object, CLASSIFICATION_TREE_CLASS,
-};
 use crate::builtins::stats::summary::distribution_math::{student_t_cdf_upper, student_t_inv};
 use crate::builtins::table::{
     is_tabular_object, table_from_columns, table_height, table_variable_names_from_object,
@@ -289,7 +283,7 @@ fn fitlm_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
 
-fn predict_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+pub(crate) fn predict_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
 
@@ -327,7 +321,7 @@ fn fitlm_internal(message: impl Into<String>) -> RuntimeError {
     fitlm_error(message, &ERROR_FITLM_INTERNAL)
 }
 
-fn predict_invalid(message: impl Into<String>) -> RuntimeError {
+pub(crate) fn predict_invalid(message: impl Into<String>) -> RuntimeError {
     predict_error(message, &ERROR_PREDICT_INVALID_ARGUMENT)
 }
 
@@ -453,61 +447,23 @@ async fn fitlm_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     model_object(spec, fit).map(Value::Object)
 }
 
-#[runtime_builtin(
-    name = "predict",
-    category = "stats/ml",
-    summary = "Predict responses from a fitted model.",
-    keywords = "predict,fitlm,linear model,regression,prediction",
-    type_resolver(predict_type),
-    descriptor(crate::builtins::stats::ml::linear_model::PREDICT_DESCRIPTOR),
-    builtin_path = "crate::builtins::stats::ml::linear_model"
-)]
+#[cfg(test)]
 pub(crate) async fn predict_builtin(
     model: Value,
     xnew: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let model = gather(model)
-        .await
-        .map_err(|err| predict_invalid(err.message))?;
-    let xnew = gather(xnew)
-        .await
-        .map_err(|err| predict_invalid(err.message))?;
-    let rest = gather_all(rest)
-        .await
-        .map_err(|err| predict_invalid(err.message))?;
-    let output = match model {
-        Value::Object(object)
-            if crate::builtins::deep_learning::model::is_deep_learning_network_object(&object) =>
-        {
-            crate::builtins::deep_learning::model::predict_deep_learning_object(object, xnew, rest)?
-        }
-        Value::Object(object) if object.class_name == CLASSIFICATION_TREE_CLASS => {
-            predict_classification_tree_object(object, xnew, rest)?
-        }
-        Value::Object(object) if object.class_name == CLASSIFICATION_LINEAR_CLASS => {
-            predict_classification_linear_object(object, xnew, rest)?
-        }
-        other => {
-            let options = parse_predict_options(rest)?;
-            let output = predict_linear_model(other, xnew, options)?;
-            vec![output.0, output.1]
-        }
-    };
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![output[0].clone()])),
-        Some(out_count) if out_count > output.len() => {
-            Err(predict_invalid("predict: too many output arguments"))
-        }
-        Some(out_count) => Ok(crate::output_count::output_list_with_padding(
-            out_count, output,
-        )),
-        None => Ok(output
-            .into_iter()
-            .next()
-            .expect("predict dispatch always returns at least one output")),
-    }
+    super::predict::predict_builtin(model, xnew, rest).await
+}
+
+pub(crate) fn predict_linear_model_dispatch(
+    model: Value,
+    xnew: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Vec<Value>> {
+    let options = parse_predict_options(rest)?;
+    let output = predict_linear_model(model, xnew, options)?;
+    Ok(vec![output.0, output.1])
 }
 
 async fn gather(value: Value) -> BuiltinResult<Value> {

@@ -721,17 +721,17 @@ fn mad_slice(values: &[f64], flag: usize) -> f64 {
         return f64::NAN;
     }
     if flag == 0 {
-        let center = arithmetic_mean(values);
-        arithmetic_mean(
-            &values
+        let center = median(values.to_vec());
+        median(
+            values
                 .iter()
                 .map(|value| (value - center).abs())
                 .collect::<Vec<_>>(),
         )
     } else {
-        let center = median(values.to_vec());
-        median(
-            values
+        let center = arithmetic_mean(values);
+        arithmetic_mean(
+            &values
                 .iter()
                 .map(|value| (value - center).abs())
                 .collect::<Vec<_>>(),
@@ -1235,9 +1235,16 @@ mod tests {
     }
 
     #[test]
-    fn mad_supports_mean_and_median_modes() {
+    fn mad_supports_median_default_and_mean_flag_modes() {
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 10.0], vec![1, 3]).unwrap());
-        let mean_mad = block_on(mad::mad_builtin(
+        let default_mad = block_on(mad::mad_builtin(
+            x.clone(),
+            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+        ))
+        .unwrap();
+        assert_close(tensor_values(default_mad).0[0], 1.0);
+
+        let median_mad = block_on(mad::mad_builtin(
             x.clone(),
             vec![
                 Value::Num(0.0),
@@ -1245,9 +1252,9 @@ mod tests {
             ],
         ))
         .unwrap();
-        assert_close(tensor_values(mean_mad).0[0], 34.0 / 9.0);
+        assert_close(tensor_values(median_mad).0[0], 1.0);
 
-        let median_mad = block_on(mad::mad_builtin(
+        let mean_mad = block_on(mad::mad_builtin(
             x,
             vec![
                 Value::Num(1.0),
@@ -1255,7 +1262,7 @@ mod tests {
             ],
         ))
         .unwrap();
-        assert_close(tensor_values(median_mad).0[0], 1.0);
+        assert_close(tensor_values(mean_mad).0[0], 34.0 / 9.0);
     }
 
     #[test]

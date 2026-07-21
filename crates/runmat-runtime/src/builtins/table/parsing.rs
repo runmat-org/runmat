@@ -113,7 +113,9 @@ pub(super) fn raw_variable_name_list(value: &Value) -> BuiltinResult<Vec<String>
 }
 
 pub(super) fn variable_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
-    raw_variable_name_list(value).map(make_unique_variable_names)
+    let names = raw_variable_name_list(value)?;
+    validate_variable_names(&names)?;
+    Ok(names)
 }
 
 pub(super) fn optional_variable_type_list(

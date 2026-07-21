@@ -644,10 +644,11 @@ mod tests {
     fn findobj_returns_root_figure_axes_and_plot_children() {
         let _guard = setup();
         let line = block_on(plot_builtin(vec![row(&[1.0, 2.0, 3.0])])).unwrap();
+        let figure = state::current_figure_handle().as_u32() as f64;
 
         let all = handles(findobj_builtin(Vec::new()).unwrap());
         assert!(all.contains(&0.0));
-        assert!(all.contains(&1.0));
+        assert!(all.contains(&figure));
         assert!(all.contains(&line));
         assert!(all.iter().any(|handle| {
             matches!(

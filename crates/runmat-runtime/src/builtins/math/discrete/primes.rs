@@ -168,23 +168,24 @@ fn scalar_from_tensor(tensor: Tensor) -> BuiltinResult<PrimeRequest> {
 
 fn scalar_from_int(value: IntValue) -> BuiltinResult<PrimeRequest> {
     let (limit, output) = match value {
-        IntValue::I8(_) | IntValue::I16(_) | IntValue::I32(_) | IntValue::I64(_) => {
-            return Err(error_with_detail(
-                &ERROR_INVALID_INPUT,
-                "signed integer output arrays are not yet supported",
-            ))
-        }
+        IntValue::I8(v) => (signed_limit(i64::from(v)), OutputKind::F64),
+        IntValue::I16(v) => (signed_limit(i64::from(v)), OutputKind::F64),
+        IntValue::I32(v) => (signed_limit(i64::from(v)), OutputKind::F64),
+        IntValue::I64(v) => (signed_limit(v), OutputKind::F64),
         IntValue::U8(v) => (u64::from(v), OutputKind::U8),
         IntValue::U16(v) => (u64::from(v), OutputKind::U16),
         IntValue::U32(v) => (u64::from(v), OutputKind::U32),
-        IntValue::U64(_) => {
-            return Err(error_with_detail(
-                &ERROR_INVALID_INPUT,
-                "uint64 output arrays are not yet supported",
-            ))
-        }
+        IntValue::U64(v) => (v, OutputKind::F64),
     };
     Ok(PrimeRequest { limit, output })
+}
+
+fn signed_limit(value: i64) -> u64 {
+    if value < 2 {
+        0
+    } else {
+        value as u64
+    }
 }
 
 fn scalar_from_f64(value: f64, output: OutputKind) -> BuiltinResult<PrimeRequest> {
@@ -305,18 +306,21 @@ mod tests {
     }
 
     #[test]
-    fn primes_rejects_integer_classes_without_array_storage() {
-        let err = block_on(primes_builtin(Value::Int(IntValue::I16(12)), Vec::new()))
-            .expect_err("signed integer arrays are unsupported");
-        assert!(err
-            .to_string()
-            .contains("signed integer output arrays are not yet supported"));
+    fn primes_accepts_signed_integer_and_uint64_scalar_bounds() {
+        let signed = call(Value::Int(IntValue::I32(12))).expect("signed integer primes");
+        assert_eq!(signed.dtype, NumericDType::F64);
+        assert_eq!(signed.shape, vec![1, 5]);
+        assert_eq!(signed.data, vec![2.0, 3.0, 5.0, 7.0, 11.0]);
 
-        let err = block_on(primes_builtin(Value::Int(IntValue::U64(12)), Vec::new()))
-            .expect_err("uint64 arrays are unsupported");
-        assert!(err
-            .to_string()
-            .contains("uint64 output arrays are not yet supported"));
+        let negative = call(Value::Int(IntValue::I16(-4))).expect("negative integer primes");
+        assert_eq!(negative.dtype, NumericDType::F64);
+        assert_eq!(negative.shape, vec![1, 0]);
+        assert!(negative.data.is_empty());
+
+        let unsigned = call(Value::Int(IntValue::U64(12))).expect("uint64 primes");
+        assert_eq!(unsigned.dtype, NumericDType::F64);
+        assert_eq!(unsigned.shape, vec![1, 5]);
+        assert_eq!(unsigned.data, vec![2.0, 3.0, 5.0, 7.0, 11.0]);
     }
 
     #[test]

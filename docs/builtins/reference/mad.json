@@ -13,15 +13,15 @@
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
   "tested": { "unit": "builtins::stats::summary::descriptive::tests", "integration": null },
-  "description": "`mad(X)` computes mean absolute deviation from the mean. `mad(X,1)` computes median absolute deviation from the median. Dimension, vector-dimension, and `\"all\"` forms are supported.",
+  "description": "`mad(X)` computes median absolute deviation from the median. `mad(X,1)` computes mean absolute deviation from the mean. Dimension, vector-dimension, and `\"all\"` forms are supported.",
   "behaviors": [
-    "The default flag `0` uses mean absolute deviation from the mean.",
-    "Flag `1` uses median absolute deviation from the median.",
+    "The default flag `0` uses median absolute deviation from the median.",
+    "Flag `1` uses mean absolute deviation from the mean.",
     "NaNs are treated as missing and omitted from each slice by default.",
     "Empty slices return `NaN`."
   ],
-  "examples": [{ "description": "Median absolute deviation", "input": "d = mad([1 2 10], 1, \"all\")" }],
-  "faqs": [{ "question": "What is the default deviation center?", "answer": "`mad(X)` uses the arithmetic mean as the center. Pass flag `1` to use the median." }],
+  "examples": [{ "description": "Median absolute deviation", "input": "d = mad([1 2 10], 0, \"all\")" }],
+  "faqs": [{ "question": "What is the default deviation center?", "answer": "`mad(X)` uses the median as the center. Pass flag `1` to use the arithmetic mean." }],
   "links": [{ "label": "mean", "url": "./mean" }, { "label": "median", "url": "./median" }],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs`",

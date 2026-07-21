@@ -34,7 +34,7 @@ fn transform_axis(value: f32, is_log: u32) -> f32 {
         if (value <= 0.0) {
             return 1e30;
         }
-        return log10(value);
+        return log(value) / log(10.0);
     }
     return value;
 }

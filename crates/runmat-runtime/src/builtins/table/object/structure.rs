@@ -75,7 +75,7 @@ pub(in crate::builtins::table) fn table_from_columns_with_class(
             "table: number of variable names must match number of variables",
         ));
     }
-    let names = make_unique_names(names);
+    validate_unique_names(&names)?;
     let height = validate_column_heights(&names, &columns)?;
     if let Some(row_names) = &row_names {
         if row_names.len() != height {

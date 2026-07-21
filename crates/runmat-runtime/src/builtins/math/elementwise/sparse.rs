@@ -180,7 +180,12 @@ fn sparse_sparse(
         return match op {
             SparseBinaryOp::Add => sparse_sparse_union(lhs, rhs, |a, b| a + b, builtin),
             SparseBinaryOp::Sub => sparse_sparse_union(lhs, rhs, |a, b| a - b, builtin),
-            SparseBinaryOp::Mul => sparse_sparse_intersection(lhs, rhs, |a, b| a * b, builtin),
+            SparseBinaryOp::Mul
+                if sparse_stored_values_are_finite(lhs) && sparse_stored_values_are_finite(rhs) =>
+            {
+                sparse_sparse_intersection(lhs, rhs, |a, b| a * b, builtin)
+            }
+            SparseBinaryOp::Mul => sparse_sparse_union(lhs, rhs, |a, b| a * b, builtin),
         };
     }
     if is_sparse_scalar(lhs) {
@@ -223,7 +228,15 @@ fn sparse_scalar_sparse(
                 )
             }
         }
-        SparseBinaryOp::Mul => scale_sparse(sparse, scalar, builtin),
+        SparseBinaryOp::Mul if scalar.is_finite() || !sparse_has_implicit_zeros(sparse) => {
+            scale_sparse(sparse, scalar, builtin)
+        }
+        SparseBinaryOp::Mul => sparse_sparse_scalar_full(
+            sparse,
+            scalar,
+            |sparse_value, scalar| scalar * sparse_value,
+            builtin,
+        ),
     }
 }
 
@@ -258,7 +271,15 @@ fn sparse_sparse_scalar(
                 )
             }
         }
-        SparseBinaryOp::Mul => scale_sparse(sparse, scalar, builtin),
+        SparseBinaryOp::Mul if scalar.is_finite() || !sparse_has_implicit_zeros(sparse) => {
+            scale_sparse(sparse, scalar, builtin)
+        }
+        SparseBinaryOp::Mul => sparse_sparse_scalar_full(
+            sparse,
+            scalar,
+            |sparse_value, scalar| sparse_value * scalar,
+            builtin,
+        ),
     }
 }
 
@@ -467,7 +488,12 @@ fn sparse_scalar(
             }
             sparse_dense_scalar_result(sparse, scalar, |a, b| a - b, sparse_is_lhs, builtin)
         }
-        SparseBinaryOp::Mul => scale_sparse(sparse, scalar, builtin),
+        SparseBinaryOp::Mul if scalar.is_finite() || !sparse_has_implicit_zeros(sparse) => {
+            scale_sparse(sparse, scalar, builtin)
+        }
+        SparseBinaryOp::Mul => {
+            sparse_dense_scalar_result(sparse, scalar, |a, b| a * b, sparse_is_lhs, builtin)
+        }
     }
 }
 
@@ -551,7 +577,18 @@ fn sparse_dense(
         ),
         SparseBinaryOp::Mul => {
             if output_shape == sparse_shape {
-                sparse_dense_times_preserve_sparse(sparse, dense, sparse_is_lhs, builtin)
+                if dense_has_nonfinite_at_sparse_implicit_zero(sparse, dense) {
+                    sparse_dense_full(
+                        sparse,
+                        dense,
+                        &output_shape,
+                        |a, b| a * b,
+                        sparse_is_lhs,
+                        builtin,
+                    )
+                } else {
+                    sparse_dense_times_preserve_sparse(sparse, dense, sparse_is_lhs, builtin)
+                }
             } else {
                 sparse_dense_full(
                     sparse,
@@ -595,6 +632,36 @@ fn sparse_dense_full(
     Tensor::new(out, output_shape.to_vec())
         .map(Value::Tensor)
         .map_err(|err| map_internal_error(builtin, err))
+}
+
+fn sparse_has_implicit_zeros(sparse: &SparseTensor) -> bool {
+    match sparse.rows.checked_mul(sparse.cols) {
+        Some(len) => sparse.nnz() < len,
+        None => true,
+    }
+}
+
+fn sparse_stored_values_are_finite(sparse: &SparseTensor) -> bool {
+    sparse.values.iter().all(|value| value.is_finite())
+}
+
+fn dense_has_nonfinite_at_sparse_implicit_zero(sparse: &SparseTensor, dense: &Tensor) -> bool {
+    if dense.data.iter().all(|value| value.is_finite()) {
+        return false;
+    }
+    if dense.data.len() == 1 {
+        return !dense.data[0].is_finite() && sparse_has_implicit_zeros(sparse);
+    }
+
+    for col in 0..sparse.cols {
+        for row in 0..sparse.rows {
+            let dense_idx = dense_index_for_sparse_position(dense, row, col);
+            if !dense.data[dense_idx].is_finite() && sparse.get(row, col).is_none() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn sparse_dense_times_preserve_sparse(
@@ -818,6 +885,62 @@ mod tests {
         assert_eq!(result.get(0, 0), Some(10.0));
         assert_eq!(result.get(2, 0), Some(90.0));
         assert_eq!(result.get(1, 1), Some(100.0));
+    }
+
+    #[test]
+    fn sparse_dense_times_materializes_nonfinite_implicit_zero_results() {
+        let dense =
+            Tensor::new(vec![1.0, f64::NAN, 3.0, 4.0, 5.0, 6.0], vec![3, 2]).expect("dense");
+        let result = expect_tensor(
+            sparse_binary(
+                &Value::SparseTensor(sparse_a()),
+                &Value::Tensor(dense),
+                SparseBinaryOp::Mul,
+                "times",
+            )
+            .expect("sparse times dense with nan"),
+        );
+        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(result.data[0], 10.0);
+        assert!(result.data[1].is_nan());
+        assert_eq!(result.data[2], 90.0);
+        assert_eq!(result.data[4], 100.0);
+    }
+
+    #[test]
+    fn sparse_sparse_times_keeps_nan_from_stored_value_times_implicit_zero() {
+        let lhs = SparseTensor::new(2, 1, vec![0, 1], vec![0], vec![f64::NAN]).unwrap();
+        let rhs = SparseTensor::new(2, 1, vec![0, 1], vec![1], vec![5.0]).unwrap();
+        let result = expect_sparse(
+            sparse_binary(
+                &Value::SparseTensor(lhs),
+                &Value::SparseTensor(rhs),
+                SparseBinaryOp::Mul,
+                "times",
+            )
+            .expect("sparse nan times implicit zero"),
+        );
+        assert_eq!(result.shape(), vec![2, 1]);
+        assert!(result.get(0, 0).expect("stored nan").is_nan());
+        assert_eq!(result.get(1, 0).unwrap_or(0.0), 0.0);
+    }
+
+    #[test]
+    fn sparse_scalar_times_nonfinite_materializes_implicit_zero_results() {
+        let result = expect_tensor(
+            sparse_binary(
+                &Value::SparseTensor(sparse_a()),
+                &Value::Num(f64::INFINITY),
+                SparseBinaryOp::Mul,
+                "times",
+            )
+            .expect("sparse times inf"),
+        );
+        assert_eq!(result.shape, vec![3, 2]);
+        assert!(result.data[1].is_nan());
+        assert!(result.data[3].is_nan());
+        assert!(result.data[5].is_nan());
+        assert!(result.data[0].is_infinite());
     }
 
     #[test]

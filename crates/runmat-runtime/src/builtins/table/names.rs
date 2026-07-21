@@ -14,6 +14,45 @@ pub(super) fn make_unique_variable_names(names: Vec<String>) -> Vec<String> {
     )
 }
 
+pub(super) fn validate_variable_names(names: &[String]) -> BuiltinResult<()> {
+    if names.is_empty() {
+        return Err(invalid_variable("table: variable names must not be empty"));
+    }
+    let mut used = HashSet::new();
+    for name in names {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(invalid_variable("table: variable names must not be blank"));
+        }
+        let valid = trimmed == name && make_valid_variable_name(name, 1) == name.as_str();
+        if !valid {
+            return Err(invalid_variable(format!(
+                "table: invalid variable name '{name}'"
+            )));
+        }
+        let key = name.to_ascii_lowercase();
+        if !used.insert(key) {
+            return Err(invalid_variable(format!(
+                "table: duplicate variable name '{name}'"
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_unique_names(names: &[String]) -> BuiltinResult<()> {
+    let mut used = HashSet::new();
+    for name in names {
+        let key = name.to_ascii_lowercase();
+        if !used.insert(key) {
+            return Err(invalid_variable(format!(
+                "table: duplicate variable name '{name}'"
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn make_unique_names(names: Vec<String>) -> Vec<String> {
     let mut used = HashSet::new();
     let mut out = Vec::with_capacity(names.len());

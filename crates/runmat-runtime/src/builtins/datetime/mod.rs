@@ -801,6 +801,9 @@ fn naive_from_datenum(serial: f64) -> BuiltinResult<NaiveDateTime> {
 }
 
 fn format_serial(serial: f64, format: &str) -> BuiltinResult<String> {
+    if serial.is_nan() {
+        return Ok("NaT".to_string());
+    }
     let naive = naive_from_datenum(serial)?;
     let chrono_format = format_token_to_strftime(format);
     Ok(naive.format(&chrono_format).to_string())
@@ -3557,6 +3560,23 @@ mod tests {
             .expect("string array")
             .expect("datetime strings");
         assert_eq!(rendered.data, vec!["14-Mar-2024 09:26:53".to_string()]);
+    }
+
+    #[test]
+    fn datetime_missing_serial_renders_as_nat() {
+        let value = datetime_object_from_serial_tensor(
+            Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap(),
+            DEFAULT_DATETIME_FORMAT,
+        )
+        .expect("datetime object");
+        let rendered = datetime_string_array(&value)
+            .expect("string array")
+            .expect("datetime strings");
+        assert_eq!(rendered.data, vec!["NaT".to_string()]);
+        assert_eq!(
+            datetime_display_text(&value).expect("display"),
+            Some("NaT".to_string())
+        );
     }
 
     #[test]

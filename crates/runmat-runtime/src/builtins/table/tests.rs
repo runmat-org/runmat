@@ -1203,6 +1203,39 @@ fn table_paren_selects_rows_and_named_variables() {
 }
 
 #[test]
+fn table_paren_selects_rows_by_row_names() {
+    let a = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
+    let table = object(
+        table_from_columns_with_properties(
+            vec!["A".into()],
+            vec![a],
+            Some(vec!["r1".into(), "r2".into(), "r3".into()]),
+        )
+        .unwrap(),
+    );
+    let selector = CellArray::new(
+        vec![
+            Value::Cell(CellArray::new(vec![Value::from("r3"), Value::from("r1")], 1, 2).unwrap()),
+            Value::from(":"),
+        ],
+        1,
+        2,
+    )
+    .unwrap();
+
+    let subset = object(table_paren_get(&table, &Value::Cell(selector)).unwrap());
+    match table_member_get(&subset, &Value::from("A")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0, 1.0]),
+        other => panic!("expected tensor, got {other:?}"),
+    }
+    let props = table_public_properties(&subset).unwrap();
+    match props.fields.get(ROW_NAMES).unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data, vec!["r3", "r1"]),
+        other => panic!("expected selected row names, got {other:?}"),
+    }
+}
+
+#[test]
 fn sortrows_preserves_row_names() {
     let values = Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![2, 1]).unwrap());
     let table = table_from_columns_with_properties(
@@ -1527,12 +1560,42 @@ fn table_conversion_builtins_round_trip_arrays_cells_and_structs() {
         Value::Cell(cell) => {
             assert_eq!(cell.rows, 2);
             assert_eq!(cell.cols, 2);
+            assert_eq!(cell.get(0, 0).unwrap(), Value::Num(1.0));
+            assert_eq!(cell.get(0, 1).unwrap(), Value::Num(3.0));
+            assert_eq!(cell.get(1, 0).unwrap(), Value::Num(2.0));
+            assert_eq!(cell.get(1, 1).unwrap(), Value::Num(4.0));
         }
         other => panic!("expected cell, got {other:?}"),
     }
     let st = block_on(table2struct_builtin(table.clone(), Vec::new())).unwrap();
     let round_trip = block_on(struct2table_builtin(st, Vec::new())).unwrap();
     assert_eq!(table_width(&object(round_trip)).unwrap(), 2);
+}
+
+#[test]
+fn explicit_variable_names_reject_duplicates_and_invalid_identifiers() {
+    let duplicate = block_on(table_builtin(vec![
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap()),
+        Value::from("VariableNames"),
+        Value::Cell(CellArray::new(vec![Value::from("A"), Value::from("A")], 1, 2).unwrap()),
+    ]));
+    assert!(duplicate
+        .unwrap_err()
+        .message
+        .contains("duplicate variable name"));
+
+    let invalid = block_on(array2table_builtin(
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        vec![
+            Value::from("VariableNames"),
+            Value::Cell(CellArray::new(vec![Value::from("1bad"), Value::from("B")], 1, 2).unwrap()),
+        ],
+    ));
+    assert!(invalid
+        .unwrap_err()
+        .message
+        .contains("invalid variable name"));
 }
 
 #[test]
@@ -2179,6 +2242,37 @@ fn table_selector_objects_filter_rows_and_variables() {
     match table_member_get(&ranged, &Value::from("X")).unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.data, vec![20.0]),
         other => panic!("expected openright range result, got {other:?}"),
+    }
+
+    let datetime_row_times = crate::builtins::datetime::datetime_object_from_serial_tensor(
+        Tensor::new(vec![100.0, 200.0, 300.0], vec![3, 1]).unwrap(),
+        "yyyy-MM-dd",
+    )
+    .unwrap();
+    let datetime_selector = crate::builtins::datetime::datetime_object_from_serial_tensor(
+        Tensor::new(vec![200.0], vec![1, 1]).unwrap(),
+        "yyyy-MM-dd",
+    )
+    .unwrap();
+    let tt = block_on(timetable_builtin(vec![
+        datetime_row_times,
+        Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap()),
+        Value::from("VariableNames"),
+        Value::Cell(CellArray::new(vec![Value::from("X")], 1, 1).unwrap()),
+    ]))
+    .unwrap();
+    let tt_obj = object(tt);
+    let selected = object(
+        table_paren_get(
+            &tt_obj,
+            &Value::Cell(CellArray::new(vec![datetime_selector, Value::from(":")], 1, 2).unwrap()),
+        )
+        .unwrap(),
+    );
+    assert_eq!(selected.class_name, TIMETABLE_CLASS);
+    match table_member_get(&selected, &Value::from("X")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![20.0]),
+        other => panic!("expected datetime row-time selection, got {other:?}"),
     }
 }
 

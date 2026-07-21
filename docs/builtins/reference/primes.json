@@ -32,7 +32,7 @@
     "`n` must be a scalar, finite, real integer value.",
     "Double scalar inputs return a double row vector.",
     "Single and supported unsigned integer tensor/scalar inputs preserve their output dtype (`single`, `uint8`, `uint16`, or `uint32`).",
-    "Signed integer and `uint64` scalar inputs currently raise an error because RunMat tensors do not yet include signed integer or `uint64` array storage, and returning double would silently change MATLAB's documented class behavior.",
+    "Signed integer and `uint64` scalar bounds are accepted and return a double row vector until RunMat tensors include signed integer and `uint64` array storage.",
     "Logical, complex, non-scalar, non-finite, and fractional inputs raise an error.",
     "Requests above RunMat's bounded sieve safety limit are rejected before allocation."
   ],
@@ -64,7 +64,7 @@
     },
     {
       "question": "Does primes keep integer output classes?",
-      "answer": "RunMat preserves supported unsigned integer tensor classes. Signed integer and `uint64` array classes are not yet represented by RunMat tensors, so those scalar inputs currently raise an explicit error instead of silently returning the wrong class."
+      "answer": "RunMat preserves supported unsigned integer tensor classes. Signed integer and `uint64` array classes are not yet represented by RunMat tensors, so those scalar bounds are accepted and returned as double row vectors for compatibility with common MATLAB call sites."
     }
   ],
   "links": [

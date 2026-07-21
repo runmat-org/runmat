@@ -6,6 +6,7 @@ use crate::BuiltinResult;
 use super::{
     any_type, autodiff, deep_learning_error, gather_args, layer_names, layers_from_value,
     numeric_values, object, parse_name_values, scalar_text, string_array, tensor_value,
+    unsupported_error,
 };
 
 pub(crate) const DLNETWORK_CLASS: &str = "dlnetwork";
@@ -59,6 +60,12 @@ pub(super) async fn forward_builtin(
             "forward: name-value options are not supported for RunMat network forward execution",
         ));
     }
+    if is_gpu_backed_dlarray(&input) {
+        return Err(unsupported_error(
+            "forward",
+            "forward: GPU-backed dlarray execution requires provider-resident deep-learning kernels",
+        ));
+    }
     let network = crate::gather_if_needed_async(&network).await?;
     let input = crate::gather_if_needed_async(&input).await?;
     let wrap_dlarray = matches!(&input, Value::Object(object) if object.class_name == "dlarray");
@@ -87,6 +94,18 @@ pub(super) async fn forward_builtin(
     } else {
         Ok(Value::Tensor(output))
     }
+}
+
+fn is_gpu_backed_dlarray(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Object(object)
+            if object.class_name == "dlarray"
+                && object
+                    .properties
+                    .get("Data")
+                    .is_some_and(crate::value_contains_gpu)
+    )
 }
 
 pub(crate) fn is_deep_learning_network_object(object: &ObjectInstance) -> bool {

@@ -1029,16 +1029,18 @@ mod imp {
         if !rest.is_empty() {
             return write_dataset_selection(builtin, &file, &dataset_path, data, rest);
         }
+        let data = WritableData::from_value(builtin, data)?;
         if file.link_exists(&dataset_path) {
-            file.unlink(&dataset_path).map_err(|err| {
+            let ds = file.dataset(&dataset_path).map_err(|err| {
                 io_error(
                     builtin,
-                    format!("{builtin}: unable to replace {dataset_path}"),
+                    format!("{builtin}: unable to open existing dataset {dataset_path}"),
                     err,
                 )
             })?;
+            return write_existing_dataset(builtin, &ds, &dataset_path, data);
         }
-        match WritableData::from_value(builtin, data)? {
+        match data {
             WritableData::Numeric { data, shape } => {
                 let row_major = col_major_to_row_major(&data, &shape);
                 let ds = file
@@ -1108,6 +1110,50 @@ mod imp {
             }
         }
         Ok(())
+    }
+
+    fn write_existing_dataset(
+        builtin: &'static str,
+        ds: &Dataset,
+        dataset_path: &str,
+        data: WritableData,
+    ) -> BuiltinResult<()> {
+        match data {
+            WritableData::Numeric { data, shape } => {
+                validate_full_write_shape(builtin, &shape, &ds.shape())?;
+                let row_major = col_major_to_row_major(&data, &shape);
+                ds.write_raw(&row_major).map_err(|err| {
+                    io_error(
+                        builtin,
+                        format!("{builtin}: unable to write existing dataset {dataset_path}"),
+                        err,
+                    )
+                })
+            }
+            WritableData::Logical { data, shape } => {
+                validate_full_write_shape(builtin, &shape, &ds.shape())?;
+                let row_major = col_major_to_row_major(&data, &shape);
+                ds.write_raw(&row_major).map_err(|err| {
+                    io_error(
+                        builtin,
+                        format!("{builtin}: unable to write existing dataset {dataset_path}"),
+                        err,
+                    )
+                })
+            }
+            WritableData::Strings { data, shape } => {
+                validate_full_write_shape(builtin, &shape, &ds.shape())?;
+                let row_major = col_major_to_row_major(&data, &shape);
+                let encoded = encode_strings(builtin, &row_major)?;
+                ds.write_raw(&encoded).map_err(|err| {
+                    io_error(
+                        builtin,
+                        format!("{builtin}: unable to write existing dataset {dataset_path}"),
+                        err,
+                    )
+                })
+            }
+        }
     }
 
     fn write_dataset_selection(
@@ -1438,6 +1484,23 @@ mod imp {
             builtin,
             &ERR_ARGUMENT,
             format!("{builtin}: data shape must match the selected HDF5 count"),
+        ))
+    }
+
+    fn validate_full_write_shape(
+        builtin: &'static str,
+        data_shape: &[usize],
+        dataset_shape: &[usize],
+    ) -> BuiltinResult<()> {
+        if data_shape == dataset_shape {
+            return Ok(());
+        }
+        Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!(
+                "{builtin}: data shape {data_shape:?} must match existing HDF5 dataset shape {dataset_shape:?}"
+            ),
         ))
     }
 
@@ -1996,6 +2059,57 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn h5write_full_existing_dataset_preserves_attributes() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("rewrite_preserves_attrs.h5");
+        block_on(h5write_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/data".to_string()),
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+            Vec::new(),
+        ))
+        .expect("initial write");
+        block_on(h5writeatt_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/data".to_string()),
+            Value::String("units".to_string()),
+            Value::String("arb".to_string()),
+        ))
+        .expect("write attr");
+
+        block_on(h5write_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/data".to_string()),
+            Value::Tensor(Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap()),
+            Vec::new(),
+        ))
+        .expect("rewrite existing");
+
+        let out = block_on(h5read_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/data".to_string()),
+            Vec::new(),
+        ))
+        .expect("read rewritten");
+        assert!(matches!(out, Value::Tensor(t) if t.data == vec![3.0, 4.0]));
+
+        let info = block_on(h5info_builtin(
+            Value::String(path.display().to_string()),
+            vec![Value::String("/data".to_string())],
+        ))
+        .expect("dataset info");
+        let Value::Struct(info) = info else {
+            panic!("expected dataset info struct");
+        };
+        let Value::Cell(attributes) = info.fields.get("Attributes").unwrap() else {
+            panic!("expected attributes cell");
+        };
+        assert!(attributes.data.iter().any(|value| {
+            matches!(value, Value::Struct(attr) if attr.fields.get("Name") == Some(&Value::String("units".to_string())))
+        }));
     }
 
     #[test]

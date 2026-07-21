@@ -752,6 +752,8 @@ pub enum ProviderInterp1Extrapolation {
 
 #[derive(Debug, Clone)]
 pub struct ProviderInterp1Request<'a> {
+    /// Strictly increasing, finite sample coordinates validated by the runtime
+    /// before dispatch. Providers may assume this monotonic domain invariant.
     pub x: &'a GpuTensorHandle,
     pub y: &'a GpuTensorHandle,
     pub xq: &'a GpuTensorHandle,

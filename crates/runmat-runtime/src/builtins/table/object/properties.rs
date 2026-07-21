@@ -130,7 +130,7 @@ pub(in crate::builtins::table) fn rename_table_variables(
             "table: VariableNames assignment must preserve variable count",
         ));
     }
-    let new_names = make_unique_variable_names(new_names);
+    validate_variable_names(&new_names)?;
     let variables = table_variables(object)?;
     let mut renamed = StructValue::new();
     for (old, new) in old_names.iter().zip(new_names.iter()) {

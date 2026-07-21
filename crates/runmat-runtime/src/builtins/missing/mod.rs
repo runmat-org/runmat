@@ -1022,21 +1022,96 @@ fn remove_missing_cell(
     cell: CellArray,
     options: RemoveOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
-    remove_missing_column_major(
-        cell.data,
-        cell.rows,
-        cell.cols,
-        vec![cell.rows, cell.cols],
-        options,
-        |value| any_missing(value).unwrap_or(false),
-        |data, shape| {
-            let rows = shape.first().copied().unwrap_or(0);
-            let cols = shape.get(1).copied().unwrap_or(0);
-            CellArray::new(data, rows, cols)
+    let rows = cell.rows;
+    let cols = cell.cols;
+    let is_missing = |row: usize, col: usize| -> bool {
+        cell.get(row, col)
+            .ok()
+            .and_then(|value| any_missing(&value).ok())
+            .unwrap_or(false)
+    };
+
+    if rows == 1 || cols == 1 {
+        let mut out = Vec::new();
+        let mut removed = Vec::with_capacity(cell.data.len());
+        for value in cell.data {
+            if any_missing(&value).unwrap_or(false) {
+                removed.push(1);
+            } else {
+                removed.push(0);
+                out.push(value);
+            }
+        }
+        let out_shape = if rows == 1 {
+            vec![1, out.len()]
+        } else {
+            vec![out.len(), 1]
+        };
+        let removed_len = removed.len();
+        let out_rows = out_shape.first().copied().unwrap_or(0);
+        let out_cols = out_shape.get(1).copied().unwrap_or(0);
+        return Ok((
+            CellArray::new(out, out_rows, out_cols)
                 .map(Value::Cell)
-                .map_err(internal_error)
-        },
-    )
+                .map_err(internal_error)?,
+            LogicalArray::new(removed, vec![1, removed_len]).map_err(internal_error)?,
+        ));
+    }
+
+    if matches!(options.dim, RemoveDim::Columns) {
+        let mut removed = vec![0u8; cols];
+        for col in 0..cols {
+            for row in 0..rows {
+                if is_missing(row, col) {
+                    removed[col] = 1;
+                }
+            }
+        }
+        let kept_cols: Vec<usize> = removed
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, flag)| (*flag == 0).then_some(idx))
+            .collect();
+        let mut out = Vec::with_capacity(rows * kept_cols.len());
+        for row in 0..rows {
+            for col in &kept_cols {
+                out.push(cell.get(row, *col).map_err(internal_error)?);
+            }
+        }
+        let kept = kept_cols.len();
+        Ok((
+            CellArray::new(out, rows, kept)
+                .map(Value::Cell)
+                .map_err(internal_error)?,
+            LogicalArray::new(removed, vec![1, cols]).map_err(internal_error)?,
+        ))
+    } else {
+        let mut removed = vec![0u8; rows];
+        for row in 0..rows {
+            for col in 0..cols {
+                if is_missing(row, col) {
+                    removed[row] = 1;
+                }
+            }
+        }
+        let kept_rows: Vec<usize> = removed
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, flag)| (*flag == 0).then_some(idx))
+            .collect();
+        let mut out = Vec::with_capacity(kept_rows.len() * cols);
+        for row in &kept_rows {
+            for col in 0..cols {
+                out.push(cell.get(*row, col).map_err(internal_error)?);
+            }
+        }
+        Ok((
+            CellArray::new(out, kept_rows.len(), cols)
+                .map(Value::Cell)
+                .map_err(internal_error)?,
+            LogicalArray::new(removed, vec![rows, 1]).map_err(internal_error)?,
+        ))
+    }
 }
 
 fn remove_missing_column_major<T: Clone>(
@@ -2111,6 +2186,44 @@ mod tests {
         assert!(
             matches!(result, Value::Tensor(t) if t.shape == vec![3, 1] && t.data == vec![4.0, 5.0, 6.0])
         );
+    }
+
+    #[test]
+    fn rmmissing_cell_arrays_use_cell_row_major_order() {
+        let value = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::Num(1.0),
+                    Value::StringArray(
+                        StringArray::new(vec![MISSING_TEXT.into()], vec![1, 1]).unwrap(),
+                    ),
+                    Value::Num(2.0),
+                    Value::Num(3.0),
+                ],
+                2,
+                2,
+            )
+            .unwrap(),
+        );
+        let result = block_on(rmmissing_builtin(value.clone(), Vec::new())).unwrap();
+        match result {
+            Value::Cell(cell) => {
+                assert_eq!((cell.rows, cell.cols), (1, 2));
+                assert_eq!(cell.get(0, 0).unwrap(), Value::Num(2.0));
+                assert_eq!(cell.get(0, 1).unwrap(), Value::Num(3.0));
+            }
+            other => panic!("expected cell result, got {other:?}"),
+        }
+
+        let result = block_on(rmmissing_builtin(value, vec![Value::Num(2.0)])).unwrap();
+        match result {
+            Value::Cell(cell) => {
+                assert_eq!((cell.rows, cell.cols), (2, 1));
+                assert_eq!(cell.get(0, 0).unwrap(), Value::Num(1.0));
+                assert_eq!(cell.get(1, 0).unwrap(), Value::Num(2.0));
+            }
+            other => panic!("expected cell result, got {other:?}"),
+        }
     }
 
     #[test]

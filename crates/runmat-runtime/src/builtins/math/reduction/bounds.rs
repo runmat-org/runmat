@@ -54,7 +54,7 @@ const INPUT_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "nanflag",
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Optional,
-    default: Some("\"includenan\""),
+    default: Some("\"omitnan\""),
     description: "NaN handling mode: \"includenan\" or \"omitnan\".",
 };
 
@@ -239,6 +239,11 @@ mod tests {
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    #[test]
+    fn bounds_descriptor_declares_runtime_nanflag_default() {
+        assert_eq!(INPUT_NANFLAG.default, Some("\"omitnan\""));
     }
 
     #[tokio::test]

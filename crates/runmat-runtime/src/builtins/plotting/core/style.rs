@@ -790,6 +790,16 @@ pub(crate) fn parse_color_value(
     if tensor.data.len() != 3 {
         return Err(ctx_err(opts, "color vectors must contain three elements"));
     }
+    if tensor
+        .data
+        .iter()
+        .any(|component| !component.is_finite() || !(0.0..=1.0).contains(component))
+    {
+        return Err(ctx_err(
+            opts,
+            "RGB color components must be finite values in the range [0, 1]",
+        ));
+    }
     Ok(Vec4::new(
         tensor.data[0] as f32,
         tensor.data[1] as f32,
@@ -1400,6 +1410,38 @@ pub(crate) mod tests {
         let opts = LineStyleParseOptions::plot();
         let color = parse_marker_color_value(&opts, &Value::String("flat".into())).unwrap();
         assert_eq!(color, MarkerColor::Flat);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rgb_triplets_must_be_finite_unit_interval_values() {
+        let opts = LineStyleParseOptions::plot();
+        parse_color_value(
+            &opts,
+            &Value::Tensor(Tensor {
+                data: vec![0.1, 0.2, 1.0],
+                shape: vec![1, 3],
+                rows: 1,
+                cols: 3,
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+        )
+        .expect("valid rgb");
+
+        for data in [vec![1.2, 0.0, 0.0], vec![0.0, f64::NAN, 0.0]] {
+            let err = parse_color_value(
+                &opts,
+                &Value::Tensor(Tensor {
+                    data,
+                    shape: vec![1, 3],
+                    rows: 1,
+                    cols: 3,
+                    dtype: runmat_builtins::NumericDType::F64,
+                }),
+            )
+            .expect_err("invalid rgb should fail");
+            assert!(err.message.contains("RGB color components"));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
