@@ -190,6 +190,61 @@ fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispat
 }
 
 #[test]
+fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatch() {
+    let vars = execute_source(
+        "a = complex(uint64(reshape([9223372036854775808 18446744073709551615 3 4], 2, 2)), uint64(reshape([7 8 9 10], 2, 2))); p = permute(a, [2 1]); q = ipermute(p, [2 1]); r = repmat(a, 2, 2); s = squeeze(reshape(a, 1, 2, 2, 1)); qr = real(q); rr = real(r); sr = real(s);",
+    )
+    .expect("typed complex integer shape transforms should execute");
+
+    assert!(matches!(
+        &vars[2],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                == Some((
+                    &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 3, 4]),
+                    &IntegerStorage::U64(vec![7, 8, 9, 10]),
+                ))
+    ));
+    assert!(matches!(
+        &vars[3],
+        Value::ComplexTensor(tensor)
+            if tensor.shape == vec![4, 4]
+                && tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                    == Some((
+                        &IntegerStorage::U64(vec![
+                            9_223_372_036_854_775_808,
+                            u64::MAX,
+                            9_223_372_036_854_775_808,
+                            u64::MAX,
+                            3,
+                            4,
+                            3,
+                            4,
+                            9_223_372_036_854_775_808,
+                            u64::MAX,
+                            9_223_372_036_854_775_808,
+                            u64::MAX,
+                            3,
+                            4,
+                            3,
+                            4,
+                        ]),
+                        &IntegerStorage::U64(vec![7, 8, 7, 8, 9, 10, 9, 10, 7, 8, 7, 8, 9, 10, 9, 10]),
+                    ))
+    ));
+    assert!(matches!(
+        &vars[4],
+        Value::ComplexTensor(tensor)
+            if tensor.shape == vec![2, 2]
+                && tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                    == Some((
+                        &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 3, 4]),
+                        &IntegerStorage::U64(vec![7, 8, 9, 10]),
+                    ))
+    ));
+}
+
+#[test]
 fn integer_casts_preserve_complex_storage_for_every_integer_class_through_vm_dispatch() {
     let vars = execute_source(
         "z = complex([1.5 -2.5], [0.49 -1.5]); a = int8(z); b = int16(z); c = int32(z); d = int64(z); e = uint8(z); f = uint16(z); g = uint32(z); h = uint64(z); flags = [isreal(a) isreal(b) isreal(c) isreal(d) isreal(e) isreal(f) isreal(g) isreal(h)]; q = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); q64 = int64(q);",

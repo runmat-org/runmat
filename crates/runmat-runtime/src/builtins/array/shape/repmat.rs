@@ -15,7 +15,8 @@ use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
+    CellArray, CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray,
+    StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -515,8 +516,40 @@ fn repmat_complex_tensor(
     tensor: &ComplexTensor,
     reps: &[usize],
 ) -> crate::BuiltinResult<ComplexTensor> {
+    if let Some(storage) = &tensor.integer_data {
+        let (real, shape) = repmat_integer_storage(&storage.real, &tensor.shape, reps)?;
+        let (imag, imag_shape) = repmat_integer_storage(&storage.imag, &tensor.shape, reps)?;
+        debug_assert_eq!(shape, imag_shape);
+        return IntegerComplexStorage::new(real, imag)
+            .and_then(|storage| ComplexTensor::new_integer(storage, shape))
+            .map_err(|e| repmat_internal(format!("repmat: {e}")));
+    }
     let (data, shape) = repmat_column_major(&tensor.data, &tensor.shape, reps, "repmat")?;
     ComplexTensor::new(data, shape).map_err(|e| repmat_internal(format!("repmat: {e}")))
+}
+
+fn repmat_integer_storage(
+    storage: &IntegerStorage,
+    shape: &[usize],
+    reps: &[usize],
+) -> crate::BuiltinResult<(IntegerStorage, Vec<usize>)> {
+    macro_rules! tile_storage {
+        ($values:expr, $variant:ident) => {{
+            let (values, shape) = repmat_column_major($values, shape, reps, "repmat")?;
+            Ok((IntegerStorage::$variant(values), shape))
+        }};
+    }
+
+    match storage {
+        IntegerStorage::I8(values) => tile_storage!(values, I8),
+        IntegerStorage::I16(values) => tile_storage!(values, I16),
+        IntegerStorage::I32(values) => tile_storage!(values, I32),
+        IntegerStorage::I64(values) => tile_storage!(values, I64),
+        IntegerStorage::U8(values) => tile_storage!(values, U8),
+        IntegerStorage::U16(values) => tile_storage!(values, U16),
+        IntegerStorage::U32(values) => tile_storage!(values, U32),
+        IntegerStorage::U64(values) => tile_storage!(values, U64),
+    }
 }
 
 fn repmat_string_array(sa: &StringArray, reps: &[usize]) -> crate::BuiltinResult<StringArray> {
@@ -1010,6 +1043,48 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn repmat_typed_complex_integer_preserves_exact_paired_storage() {
+        let complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX]),
+                IntegerStorage::U64(vec![7, 8]),
+            )
+            .expect("storage"),
+            vec![1, 2],
+        )
+        .expect("complex");
+        let value = repmat_builtin(
+            Value::ComplexTensor(complex),
+            vec![Value::Int(IntValue::I32(2)), Value::Int(IntValue::I32(2))],
+        )
+        .expect("repmat");
+
+        let Value::ComplexTensor(output) = value else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(output.shape, vec![2, 4]);
+        assert_eq!(
+            output
+                .integer_data
+                .as_ref()
+                .map(|storage| (&storage.real, &storage.imag)),
+            Some((
+                &IntegerStorage::U64(vec![
+                    9_223_372_036_854_775_808,
+                    9_223_372_036_854_775_808,
+                    u64::MAX,
+                    u64::MAX,
+                    9_223_372_036_854_775_808,
+                    9_223_372_036_854_775_808,
+                    u64::MAX,
+                    u64::MAX,
+                ]),
+                &IntegerStorage::U64(vec![7, 7, 8, 8, 7, 7, 8, 8]),
+            ))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

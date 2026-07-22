@@ -15,7 +15,8 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, ResolveContext, StringArray,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -386,7 +387,20 @@ pub(crate) fn permute_complex_tensor(
     ct: ComplexTensor,
     order: &[usize],
 ) -> crate::BuiltinResult<ComplexTensor> {
-    let ComplexTensor { data, shape, .. } = ct;
+    let ComplexTensor {
+        data,
+        integer_data,
+        shape,
+        ..
+    } = ct;
+    if let Some(storage) = integer_data {
+        let (real, new_shape) = permute_integer_storage(builtin, storage.real, &shape, order)?;
+        let (imag, imag_shape) = permute_integer_storage(builtin, storage.imag, &shape, order)?;
+        debug_assert_eq!(new_shape, imag_shape);
+        return IntegerComplexStorage::new(real, imag)
+            .and_then(|storage| ComplexTensor::new_integer(storage, new_shape))
+            .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")));
+    }
     let (out, new_shape) = permute_generic(builtin, &data, &shape, order)?;
     ComplexTensor::new(out, new_shape)
         .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
@@ -594,7 +608,7 @@ fn is_vector(tensor: &Tensor) -> bool {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
     fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
         block_on(super::permute_builtin(value, order))
@@ -737,6 +751,37 @@ pub(crate) mod tests {
             }
             _ => panic!("expected complex tensor"),
         }
+    }
+
+    #[test]
+    fn permute_typed_complex_integer_preserves_exact_paired_storage() {
+        let complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1, 2, 9_223_372_036_854_775_808, u64::MAX]),
+                IntegerStorage::U64(vec![5, 6, 7, 8]),
+            )
+            .expect("storage"),
+            vec![2, 2],
+        )
+        .expect("complex");
+        let order = tensor(&[2.0, 1.0], &[1, 2]);
+        let value =
+            permute_builtin(Value::ComplexTensor(complex), Value::Tensor(order)).expect("permute");
+
+        let Value::ComplexTensor(output) = value else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(
+            output
+                .integer_data
+                .as_ref()
+                .map(|storage| (&storage.real, &storage.imag)),
+            Some((
+                &IntegerStorage::U64(vec![1, 9_223_372_036_854_775_808, 2, u64::MAX]),
+                &IntegerStorage::U64(vec![5, 7, 6, 8]),
+            ))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

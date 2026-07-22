@@ -203,6 +203,10 @@ fn squeeze_complex_tensor(ct: ComplexTensor) -> crate::BuiltinResult<ComplexTens
     if shape == ct.shape {
         return Ok(ct);
     }
+    if let Some(storage) = ct.integer_data {
+        return ComplexTensor::new_integer(storage, shape)
+            .map_err(|e| squeeze_error(format!("squeeze: {e}")));
+    }
     ComplexTensor::new(ct.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
@@ -272,7 +276,7 @@ pub(crate) mod tests {
         block_on(super::squeeze_builtin(value))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
 
     #[test]
     fn squeeze_type_preserves_logical_shape() {
@@ -316,6 +320,35 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn squeeze_preserves_exact_typed_complex_integer_storage() {
+        let complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                IntegerStorage::I64(vec![7, -8]),
+            )
+            .expect("storage"),
+            vec![1, 2, 1],
+        )
+        .expect("complex");
+        let value = squeeze_builtin(Value::ComplexTensor(complex)).expect("squeeze");
+
+        let Value::ComplexTensor(output) = value else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(
+            output
+                .integer_data
+                .as_ref()
+                .map(|storage| (&storage.real, &storage.imag)),
+            Some((
+                &IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                &IntegerStorage::I64(vec![7, -8]),
+            ))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

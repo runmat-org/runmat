@@ -243,11 +243,14 @@ pub(crate) mod tests {
         block_on(super::ipermute_builtin(value, order))
     }
     use crate::builtins::array::shape::permute::{
-        parse_order_argument, permute_char_array, permute_gpu, permute_logical_array,
-        permute_string_array, permute_tensor,
+        parse_order_argument, permute_char_array, permute_complex_tensor, permute_gpu,
+        permute_logical_array, permute_string_array, permute_tensor,
     };
     use crate::builtins::common::{tensor, test_support};
-    use runmat_builtins::{CharArray, LogicalArray, StringArray, Tensor, Value};
+    use runmat_builtins::{
+        CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
+        Tensor, Value,
+    };
 
     #[test]
     fn ipermute_type_uses_order_len() {
@@ -289,6 +292,39 @@ pub(crate) mod tests {
             }
             _ => panic!("expected tensor pair"),
         }
+    }
+
+    #[test]
+    fn ipermute_restores_typed_complex_integer_storage_exactly() {
+        let original = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1, 2, 9_223_372_036_854_775_808, u64::MAX]),
+                IntegerStorage::U64(vec![5, 6, 7, 8]),
+            )
+            .expect("storage"),
+            vec![2, 2],
+        )
+        .expect("complex");
+        let order = make_tensor(&[2.0, 1.0], &[1, 2]);
+        let order_vec =
+            parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
+        let permuted = permute_complex_tensor("ipermute", original, &order_vec).expect("permute");
+        let value = ipermute_builtin(Value::ComplexTensor(permuted), Value::Tensor(order))
+            .expect("ipermute");
+
+        let Value::ComplexTensor(output) = value else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(
+            output
+                .integer_data
+                .as_ref()
+                .map(|storage| (&storage.real, &storage.imag)),
+            Some((
+                &IntegerStorage::U64(vec![1, 2, 9_223_372_036_854_775_808, u64::MAX]),
+                &IntegerStorage::U64(vec![5, 6, 7, 8]),
+            ))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
