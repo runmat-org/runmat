@@ -706,9 +706,18 @@ fn circshift_complex_tensor(
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<ComplexTensor> {
-    let ComplexTensor { data, shape, .. } = tensor;
+    let ComplexTensor {
+        data,
+        integer_data,
+        shape,
+        ..
+    } = tensor;
     let plan = build_shift_plan(&shape, dims, shifts)?;
     if data.is_empty() || plan.is_noop() {
+        if let Some(storage) = integer_data {
+            return ComplexTensor::new_integer(storage, shape)
+                .map_err(|e| circshift_internal(format!("circshift: {e}")));
+        }
         return ComplexTensor::new(data, shape)
             .map_err(|e| circshift_internal(format!("circshift: {e}")));
     }
@@ -717,6 +726,15 @@ fn circshift_complex_tensor(
         positive,
         ..
     } = plan;
+    if let Some(storage) = integer_data {
+        let storage = storage
+            .reorder(|values| {
+                circshift_generic(values, &ext_shape, &positive).map_err(|e| e.to_string())
+            })
+            .map_err(|e| circshift_internal(format!("circshift: {e}")))?;
+        return ComplexTensor::new_integer(storage, ext_shape)
+            .map_err(|e| circshift_internal(format!("circshift: {e}")));
+    }
     let rotated = circshift_generic(&data, &ext_shape, &positive)?;
     ComplexTensor::new(rotated, ext_shape)
         .map_err(|e| circshift_internal(format!("circshift: {e}")))
