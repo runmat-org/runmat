@@ -195,6 +195,23 @@ fn typed_complex_integer_gpuarray_is_rejected_before_provider_dispatch() {
 }
 
 #[test]
+fn typed_complex_integer_analytic_operations_are_rejected_before_f64_coercion() {
+    for builtin in [
+        "abs", "angle", "exp", "expm1", "gamma", "log", "log10", "log1p", "log2", "sign", "sqrt",
+    ] {
+        let source =
+            format!("z = complex(uint64(9223372036854775808), uint64(1)); out = {builtin}(z);");
+        let err = execute_source(&source).expect_err(builtin);
+        assert!(
+            err.to_string().contains(
+                "operations involving complex numbers with integer types are not supported"
+            ),
+            "{builtin} returned an unexpected error: {err}"
+        );
+    }
+}
+
+#[test]
 fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispatch() {
     let vars = execute_source(
         "a = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); rhs = complex(uint64([18446744073709551615 9223372036854775808]), uint64([7 8])); a(:, :) = rhs; ar = real(a); ai = imag(a); b = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); b(1:end, :) = rhs;",

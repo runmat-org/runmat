@@ -6,7 +6,7 @@ use runmat_accelerate_api::handle_is_logical;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, NumericDType, SparseTensor, Value,
+    CellArray, CharArray, ComplexTensor, NumericDType, SparseTensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -20,6 +20,22 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 /// execution paths so exact integer components are never coerced to `f64`.
 pub fn is_typed_complex_integer(value: &Value) -> bool {
     matches!(value, Value::ComplexTensor(tensor) if tensor.integer_data.is_some())
+}
+
+/// Reject operations that would consume the lossy `f64` compatibility view of
+/// a typed complex integer tensor. MATLAB permits storage/inspection of these
+/// values, but not operations on them.
+pub fn reject_typed_complex_integer_tensor(
+    tensor: &ComplexTensor,
+    builtin: &str,
+) -> BuiltinResult<()> {
+    if tensor.integer_data.is_some() {
+        return Err(build_runtime_error(format!(
+            "{builtin}: operations involving complex numbers with integer types are not supported"
+        ))
+        .build());
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -142,7 +142,10 @@ async fn log_builtin(value: Value) -> BuiltinResult<Value> {
             let (r, i) = log_complex_parts(re, im);
             Ok(Value::Complex(r, i))
         }
-        Value::ComplexTensor(ct) => log_complex_tensor(ct),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "log")?;
+            log_complex_tensor(ct)
+        }
         Value::CharArray(ca) => log_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(log_error_with_detail(
             &LOG_ERROR_INVALID_INPUT,

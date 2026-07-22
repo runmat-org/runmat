@@ -196,7 +196,10 @@ async fn gamma_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let base = match value {
         Value::GpuTensor(handle) => gamma_gpu(handle).await?,
         Value::Complex(re, im) => gamma_complex_scalar_value(Complex64::new(re, im)),
-        Value::ComplexTensor(ct) => gamma_complex_tensor(ct)?,
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "gamma")?;
+            gamma_complex_tensor(ct)?
+        }
         Value::CharArray(ca) => gamma_char_array(ca)?,
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)

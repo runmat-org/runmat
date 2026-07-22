@@ -125,7 +125,10 @@ async fn angle_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => angle_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Num(angle_scalar(re, im))),
-        Value::ComplexTensor(ct) => angle_complex_tensor(ct),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "angle")?;
+            angle_complex_tensor(ct)
+        }
         Value::CharArray(ca) => angle_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(builtin_error_with_detail(
             &ANGLE_ERROR_INVALID_INPUT,

@@ -139,7 +139,10 @@ async fn exp_builtin(value: Value) -> BuiltinResult<Value> {
             exp_complex_re(re, im),
             exp_complex_im(re, im),
         )),
-        Value::ComplexTensor(ct) => exp_complex_tensor(ct),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "exp")?;
+            exp_complex_tensor(ct)
+        }
         Value::CharArray(ca) => exp_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(exp_error_with_detail(
             &EXP_ERROR_INVALID_INPUT,

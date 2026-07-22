@@ -139,7 +139,10 @@ async fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
             let (real, imag) = expm1_complex_parts(re, im);
             Ok(Value::Complex(real, imag))
         }
-        Value::ComplexTensor(ct) => expm1_complex_tensor(ct),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "expm1")?;
+            expm1_complex_tensor(ct)
+        }
         Value::CharArray(ca) => expm1_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(expm1_error_with_detail(
             &EXPM1_ERROR_INVALID_INPUT,

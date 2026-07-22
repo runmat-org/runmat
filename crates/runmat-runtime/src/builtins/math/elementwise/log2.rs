@@ -138,7 +138,10 @@ async fn log2_builtin(value: Value) -> BuiltinResult<Value> {
             let (r, i) = log2_complex_parts(re, im);
             Ok(Value::Complex(r, i))
         }
-        Value::ComplexTensor(ct) => log2_complex_tensor(ct),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "log2")?;
+            log2_complex_tensor(ct)
+        }
         Value::CharArray(ca) => log2_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(log2_error_with_detail(
             &LOG2_ERROR_INVALID_INPUT,

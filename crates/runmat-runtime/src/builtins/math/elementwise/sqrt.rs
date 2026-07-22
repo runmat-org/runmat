@@ -140,7 +140,10 @@ async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => sqrt_gpu(handle).await,
         Value::Complex(re, im) => Ok(sqrt_complex_value(re, im)),
-        Value::ComplexTensor(ct) => sqrt_complex_tensor(ct),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "sqrt")?;
+            sqrt_complex_tensor(ct)
+        }
         Value::CharArray(ca) => sqrt_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(sqrt_error_with_detail(
             &SQRT_ERROR_INVALID_INPUT,

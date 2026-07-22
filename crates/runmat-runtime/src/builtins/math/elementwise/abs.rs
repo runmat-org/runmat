@@ -117,7 +117,10 @@ async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => abs_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Num(complex_magnitude(re, im))),
-        Value::ComplexTensor(ct) => abs_complex_tensor(ct),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "abs")?;
+            abs_complex_tensor(ct)
+        }
         Value::CharArray(ca) => abs_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(builtin_error_with_detail(
             &ABS_ERROR_INVALID_INPUT,

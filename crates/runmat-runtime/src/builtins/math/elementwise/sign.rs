@@ -130,7 +130,10 @@ async fn sign_builtin(value: Value) -> BuiltinResult<Value> {
             let (re_out, im_out) = sign_complex(re, im);
             Ok(Value::Complex(re_out, im_out))
         }
-        Value::ComplexTensor(ct) => sign_complex_tensor(ct),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "sign")?;
+            sign_complex_tensor(ct)
+        }
         Value::CharArray(ca) => sign_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(sign_error_with_detail(
             &SIGN_ERROR_INVALID_INPUT,

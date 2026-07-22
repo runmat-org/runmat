@@ -143,7 +143,10 @@ async fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
             let (real, imag) = log1p_complex_parts(re, im);
             Ok(Value::Complex(real, imag))
         }
-        Value::ComplexTensor(ct) => log1p_complex_tensor(ct),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "log1p")?;
+            log1p_complex_tensor(ct)
+        }
         Value::CharArray(ca) => log1p_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(log1p_error_with_detail(
             &LOG1P_ERROR_INVALID_INPUT,
