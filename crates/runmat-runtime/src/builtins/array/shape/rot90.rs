@@ -369,6 +369,19 @@ fn rot90_complex_tensor(
     if steps == 0 {
         return Ok(tensor);
     }
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        let (ignored, shape) = rot90_generic(&tensor.data, &tensor.shape, steps)?;
+        drop(ignored);
+        let storage = storage
+            .reorder(|values| {
+                rot90_generic(values, &tensor.shape, steps)
+                    .map(|(values, _)| values)
+                    .map_err(|e| e.to_string())
+            })
+            .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))?;
+        return ComplexTensor::new_integer(storage, shape)
+            .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL));
+    }
     let (data, shape) = rot90_generic(&tensor.data, &tensor.shape, steps)?;
     ComplexTensor::new(data, shape)
         .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
