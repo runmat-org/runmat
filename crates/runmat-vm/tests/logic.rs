@@ -230,6 +230,17 @@ fn find_preserves_typed_complex_integer_values_through_vm_dispatch() {
 }
 
 #[test]
+fn isequal_preserves_typed_complex_integer_precision_through_vm_dispatch() {
+    let vars = execute_source(
+        "base = uint64(9223372036854775808); next = base + 1; a = complex(base, uint64(1)); b = complex(next, uint64(1)); same = isequal(a, a); different = isequal(a, b); different_n = isequaln(a, b);",
+    )
+    .expect("isequal should compare typed complex integer storage exactly");
+    assert_eq!(vars[4], Value::Bool(true));
+    assert_eq!(vars[5], Value::Bool(false));
+    assert_eq!(vars[6], Value::Bool(false));
+}
+
+#[test]
 fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispatch() {
     let vars = execute_source(
         "a = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); rhs = complex(uint64([18446744073709551615 9223372036854775808]), uint64([7 8])); a(:, :) = rhs; ar = real(a); ai = imag(a); b = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); b(1:end, :) = rhs;",

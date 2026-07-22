@@ -243,6 +243,11 @@ fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor, nan_equal: bool) 
     if a.data.len() != b.data.len() {
         return false;
     }
+    match (&a.integer_data, &b.integer_data) {
+        (Some(a), Some(b)) => return a == b,
+        (Some(_), None) | (None, Some(_)) => return false,
+        (None, None) => {}
+    }
     a.data
         .iter()
         .zip(b.data.iter())
