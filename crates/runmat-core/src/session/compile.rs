@@ -100,6 +100,35 @@ fn is_function_source_body(stmts: &[runmat_parser::Stmt]) -> bool {
             .all(|stmt| matches!(stmt, runmat_parser::Stmt::Function { .. }))
 }
 
+fn package_class_name_from_path(source_path: &Path, root_dir: &Path) -> Option<String> {
+    let relative = source_path.strip_prefix(root_dir).ok()?;
+    let class_name = source_path.file_stem()?.to_str()?;
+    let mut package_segments = Vec::new();
+    if let Some(parent) = relative.parent() {
+        for component in parent.components() {
+            let segment = component.as_os_str().to_str()?;
+            if let Some(pkg) = segment.strip_prefix('+') {
+                if pkg.is_empty() {
+                    return None;
+                }
+                package_segments.push(pkg.to_string());
+            } else if let Some(class) = segment.strip_prefix('@') {
+                if class.is_empty() {
+                    return None;
+                }
+                package_segments.push(class.to_string());
+            } else {
+                return None;
+            }
+        }
+    }
+    if package_segments.is_empty() {
+        return None;
+    }
+    package_segments.push(class_name.to_string());
+    Some(package_segments.join("."))
+}
+
 fn qualify_companion_classdefs(stmts: &mut [runmat_parser::Stmt], qualified_name: &str) {
     for stmt in stmts {
         if let runmat_parser::Stmt::ClassDef { name, .. } = stmt {
@@ -118,6 +147,28 @@ fn qualify_companion_functions(stmts: &mut [runmat_parser::Stmt], qualified_name
             }
         }
     }
+}
+
+fn source_index_qualified_function_name(
+    source: &runmat_config::project::ProjectSourceFile,
+) -> Option<&str> {
+    if source.is_private {
+        return None;
+    }
+    (source.package_path.is_some() || source.class_name.is_some())
+        .then_some(source.qualified_name.as_str())
+        .filter(|name| name.contains('.'))
+}
+
+fn source_index_qualified_class_name(
+    source: &runmat_config::project::ProjectSourceFile,
+) -> Option<&str> {
+    source.package_path.as_ref().and_then(|_| {
+        source
+            .qualified_name
+            .contains('.')
+            .then_some(source.qualified_name.as_str())
+    })
 }
 
 fn is_private_dir(path: &Path) -> bool {
