@@ -9,6 +9,12 @@ pub(crate) enum IntegerAssignmentValue {
     Float(f64),
 }
 
+#[derive(Clone)]
+pub(crate) struct ComplexIntegerAssignmentValue {
+    pub real: IntegerAssignmentValue,
+    pub imag: IntegerAssignmentValue,
+}
+
 pub(crate) fn values(storage: &IntegerStorage) -> Vec<IntValue> {
     match storage {
         IntegerStorage::I8(values) => values.iter().copied().map(IntValue::I8).collect(),

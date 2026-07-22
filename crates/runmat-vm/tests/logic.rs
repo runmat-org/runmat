@@ -292,6 +292,34 @@ fn typed_complex_integer_deletion_preserves_paired_exact_storage_through_vm_disp
 }
 
 #[test]
+fn typed_complex_integer_scalar_assignment_preserves_paired_exact_storage_through_vm_dispatch() {
+    let vars = execute_source(
+        "a = complex(uint64([9223372036854775808 2]), uint64([7 8])); a(2) = complex(uint64(18446744073709551615), uint64(3)); a(3) = complex(4, 5); b = complex(int8([1 2; 3 4]), int8([-1 -2; -3 -4])); b(2, 1) = complex(int8(-128), int8(127));",
+    )
+    .expect("typed complex integer scalar assignment should execute");
+
+    assert!(matches!(
+        &vars[0],
+        Value::ComplexTensor(tensor)
+            if tensor.shape == vec![1, 3]
+                && tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                    == Some((
+                        &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX, 4]),
+                        &IntegerStorage::U64(vec![7, 3, 5]),
+                    ))
+    ));
+    assert!(matches!(
+        &vars[1],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                == Some((
+                    &IntegerStorage::I8(vec![1, i8::MIN, 2, 4]),
+                    &IntegerStorage::I8(vec![-1, i8::MAX, -2, -4]),
+                ))
+    ));
+}
+
+#[test]
 fn issparse_reports_sparse_storage_through_vm_dispatch() {
     let vars = execute_source(
         "s = sparse([1 2], [1 2], [10 20], 2, 2); a = issparse(s); b = issparse([10 0; 0 20]); c = issparse(42);",

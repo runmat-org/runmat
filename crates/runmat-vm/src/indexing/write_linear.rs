@@ -1,4 +1,6 @@
-use crate::indexing::integer_assignment::{self, IntegerAssignmentValue};
+use crate::indexing::integer_assignment::{
+    self, ComplexIntegerAssignmentValue, IntegerAssignmentValue,
+};
 use crate::indexing::write_slice::{
     delete_integer_complex_storage_positions, deleted_vector_shape,
 };
@@ -59,6 +61,36 @@ async fn rhs_to_integer_assignment_scalar(
         _ => rhs_to_real_scalar(rhs)
             .await
             .map(IntegerAssignmentValue::Float),
+    }
+}
+
+async fn rhs_to_complex_integer_assignment_scalar(
+    rhs: &Value,
+) -> Result<ComplexIntegerAssignmentValue, RuntimeError> {
+    let scalar = |real, imag| ComplexIntegerAssignmentValue {
+        real: IntegerAssignmentValue::Float(real),
+        imag: IntegerAssignmentValue::Float(imag),
+    };
+    match rhs {
+        Value::Complex(real, imag) => Ok(scalar(*real, *imag)),
+        Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
+            if let Some(storage) = &tensor.integer_data {
+                return Ok(ComplexIntegerAssignmentValue {
+                    real: IntegerAssignmentValue::Exact(
+                        storage.real.value_at(0).expect("scalar component"),
+                    ),
+                    imag: IntegerAssignmentValue::Exact(
+                        storage.imag.value_at(0).expect("scalar component"),
+                    ),
+                });
+            }
+            let (real, imag) = tensor.data[0];
+            Ok(scalar(real, imag))
+        }
+        _ => Ok(ComplexIntegerAssignmentValue {
+            real: rhs_to_integer_assignment_scalar(rhs).await?,
+            imag: IntegerAssignmentValue::Float(0.0),
+        }),
     }
 }
 
@@ -600,12 +632,6 @@ pub async fn assign_complex_scalar(
     rhs: &Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
-    if !delete && t.integer_data.is_some() {
-        return Err(mex(
-            "UnsupportedTypedComplexInteger",
-            "typed complex integer assignment is not implemented",
-        ));
-    }
     if indices.len() == 1 {
         let total = t.rows * t.cols;
         let idx = indices[0];
@@ -623,6 +649,9 @@ pub async fn assign_complex_scalar(
                 ));
             }
             return delete_complex_linear(t, idx);
+        }
+        if t.integer_data.is_some() {
+            return assign_typed_complex_integer_scalar(t, idx, rhs).await;
         }
         let val = rhs_to_complex_scalar(rhs).await?;
         if idx > total {
@@ -662,8 +691,11 @@ pub async fn assign_complex_scalar(
                 "Indexed deletion is only supported for linear vector indices",
             ));
         }
-        let val = rhs_to_complex_scalar(rhs).await?;
         let idx = (i - 1) + (j - 1) * rows;
+        if t.integer_data.is_some() {
+            return assign_typed_complex_integer_scalar(t, idx + 1, rhs).await;
+        }
+        let val = rhs_to_complex_scalar(rhs).await?;
         t.data[idx] = val;
         Ok(Value::ComplexTensor(t))
     } else {
@@ -672,6 +704,50 @@ pub async fn assign_complex_scalar(
             "Only 1D/2D scalar assignment supported",
         ))
     }
+}
+
+async fn assign_typed_complex_integer_scalar(
+    mut tensor: ComplexTensor,
+    index: usize,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    let total = tensor.rows * tensor.cols;
+    if index == 0 {
+        return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+    }
+    if index > total {
+        if !(tensor.rows == 1 || tensor.cols == 1) {
+            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        if tensor.rows == 1 {
+            tensor.cols = index;
+            tensor.shape = vec![1, tensor.cols];
+        } else {
+            tensor.rows = index;
+            tensor.shape = vec![tensor.rows, 1];
+        }
+    }
+    let rhs = rhs_to_complex_integer_assignment_scalar(rhs).await?;
+    let storage = tensor
+        .integer_data
+        .take()
+        .expect("typed complex assignment requires exact storage");
+    let real = assign_integer_storage(
+        storage.real,
+        index - 1,
+        tensor.rows * tensor.cols,
+        &rhs.real,
+    );
+    let imag = assign_integer_storage(
+        storage.imag,
+        index - 1,
+        tensor.rows * tensor.cols,
+        &rhs.imag,
+    );
+    runmat_builtins::IntegerComplexStorage::new(real, imag)
+        .and_then(|storage| ComplexTensor::new_integer(storage, tensor.shape))
+        .map(Value::ComplexTensor)
+        .map_err(map_assignment_shape_error)
 }
 
 pub async fn assign_gpu_scalar(
