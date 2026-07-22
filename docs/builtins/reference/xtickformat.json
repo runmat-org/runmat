@@ -1,0 +1,78 @@
+{
+  "title": "xtickformat",
+  "category": "plotting",
+  "keywords": [
+    "xtickformat",
+    "x tick format",
+    "tick label format",
+    "axes"
+  ],
+  "summary": "Query or set the X-axis tick label format for the current axes, a specified axes handle, or an axes array.",
+  "status": "done",
+  "version_added": "0.5.3",
+  "tests": {
+    "unit": "builtins::plotting::xtickformat::tests",
+    "vm": "runmat-vm plotting::tickformat_dispatches_and_updates_axes_properties"
+  },
+  "description": "`xtickformat` controls automatic X-axis tick label formatting. It supports query, numeric format assignment, MATLAB shorthand formats such as `usd` and `percentage`, custom printf-style numeric formats, date/duration format strings for compatibility, scalar axes query forms, and axes-array setter forms.",
+  "syntax": [
+    "fmt = xtickformat()",
+    "xtickformat(fmt)",
+    "fmt = xtickformat(ax)",
+    "xtickformat(ax, fmt)"
+  ],
+  "arguments": [
+    {
+      "name": "fmt",
+      "type": "string scalar | character vector",
+      "description": "Tick label format. `auto` maps to `%g`; shorthands include `usd`, `eur`, `gbp`, `jpy`, `degrees`, and `percentage`; custom numeric formats use printf-style conversions such as `%.2f` or `$%,.0f`."
+    },
+    {
+      "name": "ax",
+      "type": "axes handle | axes handle array",
+      "description": "Target axes handle or axes handle array. Query forms require a scalar axes handle; setter forms apply to every axes in the array. If omitted, the current axes are used."
+    }
+  ],
+  "examples": [
+    {
+      "description": "Show X-axis tick labels with units",
+      "input": "plot(1:3, [10 20 30]);\nxticks([1 2 3]);\nxtickformat('%.1f s');\nxticklabels()",
+      "output": "{'1.0 s', '2.0 s', '3.0 s'}"
+    },
+    {
+      "description": "Apply a format to a specific subplot",
+      "input": "ax1 = subplot(1, 2, 1);\nplot(ax1, 1:3);\nax2 = subplot(1, 2, 2);\nplot(ax2, 10:10:30);\nxtickformat(ax2, 'usd');",
+      "output": "% Only ax2 receives the dollar tick-label format"
+    }
+  ],
+  "notes": [
+    "`xtickformat` shares state with the X-axis ruler `TickLabelFormat` property, so `set(get(gca, 'XAxis'), 'TickLabelFormat', fmt)` and `xtickformat(fmt)` are equivalent for the current axes.",
+    "Explicit `xticklabels` values take precedence over automatic formatting until tick label mode is returned to automatic.",
+    "Date and duration format strings are stored and returned for compatibility. Current RunMat plotting axes are numeric, so nonnumeric date/duration rendering falls back to numeric label formatting until datetime/duration axes are introduced."
+  ],
+  "gpu_residency": "`xtickformat` only reads and writes axes metadata. It does not inspect, gather, or transform GPU-resident plot data; formatted labels are generated from tick metadata at render/query time.",
+  "related": [
+    {
+      "label": "ytickformat",
+      "url": "./ytickformat"
+    },
+    {
+      "label": "xticklabels",
+      "url": "./xticklabels"
+    },
+    {
+      "label": "xticks",
+      "url": "./xticks"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "implemented_in": [
+    {
+      "label": "crates/runmat-runtime/src/builtins/plotting/ops/xtickformat.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/xtickformat.rs"
+    }
+  ]
+}

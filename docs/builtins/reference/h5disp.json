@@ -1,0 +1,15 @@
+{
+  "title": "h5disp",
+  "category": "io/hdf5",
+  "keywords": ["h5disp", "hdf5", "metadata", "display", "dataset", "group", "file", "io"],
+  "summary": "Return a textual summary of an HDF5 file, group, or dataset.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Display traversal is host file I/O."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::io::hdf5::tests::h5writeatt_h5info_and_h5disp_report_metadata", "integration": null},
+  "description": "`h5disp(filename)` returns a display string for the file root. `h5disp(filename, location)` returns a display string for a specific object.",
+  "behaviors": ["The output lists groups, datasets, shapes, datatypes, and attributes.", "RunMat returns the display text as a string so scripts can capture or print it deterministically."],
+  "examples": [{"description": "Display file metadata", "input": "txt = h5disp('measurements.h5');"}],
+  "links": [{"label": "h5info", "url": "./h5info"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/io/hdf5.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5.rs"}
+}

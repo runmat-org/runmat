@@ -1,0 +1,107 @@
+{
+  "title": "polarhistogram",
+  "category": "plotting",
+  "keywords": [
+    "polarhistogram",
+    "polar histogram",
+    "angular histogram",
+    "theta bins",
+    "matlab polarhistogram",
+    "plotting"
+  ],
+  "summary": "Create histogram charts in polar coordinates.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`polarhistogram` is a rendering sink. Angular samples are materialized for `histcounts` binning, then the resulting bin counts are rendered as polar wedge geometry through `runmat-plot`."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::polarhistogram::tests and runmat_plot::plots::bar::tests",
+    "vm": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`polarhistogram(theta)` bins angular samples in radians and renders each bin as a polar wedge whose radius is the bin count or normalized bin value. Theta values wrap periodically into the selected angular range. The returned handle reuses MATLAB-style histogram object properties such as `BinEdges`, `BinCounts`, `Values`, `Data`, `NumBins`, `BinWidth`, `BinLimits`, `Normalization`, `DisplayStyle`, `FaceColor`, `FaceAlpha`, `EdgeColor`, and `DisplayName`.",
+  "behaviors": [
+    "`polarhistogram(theta)` creates a histogram object handle and marks the target axes as polar with equal x/y scaling. With no bin controls it uses six angular bins spanning `[0, 2*pi]`.",
+    "`polarhistogram(theta, nbins)` and `polarhistogram(theta, edges)` use the same scalar bin-count and explicit edge-vector semantics as `histcounts`.",
+    "Finite theta samples are wrapped into the chosen angular range before binning; non-finite samples are ignored by the histogram counts and exposed as `NaN` in normalized stored `Data`.",
+    "Name/value bin controls such as `BinEdges`, `NumBins`, `BinWidth`, `BinLimits`, `Normalization`, and `BinMethod` are forwarded through the same binning implementation as `histogram`.",
+    "`polarhistogram('BinEdges', edges, 'BinCounts', counts)` creates a polar histogram from precomputed bin counts without sample data.",
+    "`DisplayStyle` accepts `bar` and `stairs`; `stairs` renders the outer polar bin arcs without filled radial wedges.",
+    "Common bar styling arguments such as `FaceColor`, `EdgeColor`, `LineWidth`, `BarWidth`, `FaceAlpha`, and `DisplayName` are accepted.",
+    "The target axes form `polarhistogram(ax, ...)` plots into an existing axes handle.",
+    "The returned handle has type `histogram`; `get` exposes histogram state and supported `set` calls update `Normalization`, `DisplayName`, `DisplayStyle`, `FaceColor`, `FaceAlpha`, and `EdgeColor`."
+  ],
+  "examples": [
+    {
+      "description": "Create a polar histogram",
+      "input": "theta = 2*pi*rand(1, 1000);\nh = polarhistogram(theta);",
+      "output": "% h is a histogram object handle"
+    },
+    {
+      "description": "Use explicit angular bin edges",
+      "input": "theta = [0 0.2 1.0 2.0];\nedges = 0:pi/4:2*pi;\nh = polarhistogram(theta, edges);\nget(h, 'BinEdges');"
+    },
+    {
+      "description": "Normalize and style the chart",
+      "input": "theta = 2*pi*rand(1, 500);\nh = polarhistogram(theta, 'NumBins', 16, 'Normalization', 'probability', 'FaceColor', 'red', 'DisplayName', 'angles');\nget(h, 'Normalization')",
+      "output": "ans =\n    'probability'"
+    },
+    {
+      "description": "Plot precomputed polar bin counts with stairs display",
+      "input": "edges = [0 pi 2*pi];\ncounts = [4 2];\nh = polarhistogram('BinEdges', edges, 'BinCounts', counts, 'DisplayStyle', 'stairs');\nget(h, 'BinCounts');"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Are theta values interpreted in degrees?",
+      "answer": "No. Like MATLAB, `polarhistogram` interprets theta samples and explicit bin edges in radians."
+    },
+    {
+      "question": "Does polarhistogram return a special handle type?",
+      "answer": "The returned object follows the histogram handle path, so `get(h, 'Type')` returns `histogram` and histogram properties such as `BinEdges`, `BinCounts`, `Values`, `Data`, `NumBins`, `BinWidth`, `BinLimits`, `Normalization`, `DisplayStyle`, and `DisplayName` are available."
+    },
+    {
+      "question": "What happens to angles outside 0 to 2*pi?",
+      "answer": "Finite values are wrapped periodically into the selected angular range before binning. For example, `0`, `2*pi`, and `-2*pi` contribute to the same default angular bin."
+    },
+    {
+      "question": "Can polarhistogram plot GPU arrays?",
+      "answer": "GPU-resident inputs are accepted through the underlying histogram evaluation path, but the current implementation gathers angular samples for binning before rendering polar wedge geometry. A direct provider binning fast path belongs to the queued GPU audit work."
+    }
+  ],
+  "links": [
+    {
+      "label": "histogram",
+      "url": "./histogram"
+    },
+    {
+      "label": "histcounts",
+      "url": "./histcounts"
+    },
+    {
+      "label": "polarplot",
+      "url": "./polarplot"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/polarhistogram.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/polarhistogram.rs"
+  }
+}

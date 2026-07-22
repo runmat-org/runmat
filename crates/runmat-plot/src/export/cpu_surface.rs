@@ -1,4 +1,4 @@
-use crate::core::{Camera, PipelineType, ProjectionType, RenderData};
+use crate::core::{Camera, ImageData, PipelineType, ProjectionType, RenderData};
 use crate::plots::surface::ColorMap;
 use crate::plots::{AxesKind, Figure, PlotElement};
 use crate::styling::PlotThemeConfig;
@@ -14,9 +14,16 @@ struct AxesView {
     camera_3d: Option<Camera>,
     has_3d_content: bool,
     title: Option<String>,
+    subtitle: Option<String>,
     x_label: Option<String>,
     y_label: Option<String>,
     z_label: Option<String>,
+    x_ticks: Option<Vec<f64>>,
+    y_ticks: Option<Vec<f64>>,
+    x_tick_format: Option<String>,
+    y_tick_format: Option<String>,
+    x_tick_label_rotation: f64,
+    y_tick_label_rotation: f64,
     title_scale: u32,
     label_scale: u32,
     tick_scale: u32,
@@ -28,12 +35,29 @@ struct AxesView {
     colormap: ColorMap,
 }
 
+#[derive(Clone, Debug, Default)]
+struct AxesTextLabels {
+    title: Option<String>,
+    subtitle: Option<String>,
+    x_label: Option<String>,
+    y_label: Option<String>,
+    z_label: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct ScreenVertex {
     x: f32,
     y: f32,
     z: f32,
     color: [u8; 4],
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BitmapTextAnchor {
+    x: i32,
+    y: i32,
+    frac_x: f32,
+    frac_y: f32,
 }
 
 struct Canvas {
@@ -437,12 +461,33 @@ fn compute_tiled_viewports(
     out
 }
 
-fn compute_plot_rect(viewport: (u32, u32, u32, u32), has_3d: bool) -> (u32, u32, u32, u32) {
+fn rotation_margin(angle_degrees: f64, margin: u32) -> u32 {
+    if angle_degrees.abs() <= f64::EPSILON {
+        0
+    } else {
+        margin
+    }
+}
+
+fn compute_plot_rect(
+    viewport: (u32, u32, u32, u32),
+    has_3d: bool,
+    x_tick_label_rotation: f64,
+    y_tick_label_rotation: f64,
+) -> (u32, u32, u32, u32) {
     let (vx, vy, vw, vh) = viewport;
-    let left = if has_3d { 48 } else { 62 };
+    let left = if has_3d {
+        48
+    } else {
+        62 + rotation_margin(y_tick_label_rotation, 24)
+    };
     let right = 24;
     let top = if has_3d { 34 } else { 40 };
-    let bottom = if has_3d { 48 } else { 54 };
+    let bottom = if has_3d {
+        48
+    } else {
+        54 + rotation_margin(x_tick_label_rotation, 32)
+    };
 
     let px = vx + left.min(vw.saturating_sub(2));
     let py = vy + top.min(vh.saturating_sub(2));
@@ -568,21 +613,41 @@ fn choose_axes_bounds(
             min_y = b as f32;
             max_y = t as f32;
         }
-        if meta.axis_equal {
-            let cx = (min_x + max_x) * 0.5;
-            let cy = (min_y + max_y) * 0.5;
-            let size = (max_x - min_x).abs().max((max_y - min_y).abs()).max(0.1);
-            min_x = cx - size * 0.5;
-            max_x = cx + size * 0.5;
-            min_y = cy - size * 0.5;
-            max_y = cy + size * 0.5;
+        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
+            (min_x, max_x, min_y, max_y) =
+                data_aspect_adjusted_bounds(min_x, max_x, min_y, max_y, meta.data_aspect_ratio);
         }
     }
 
     (min_x, max_x, min_y, max_y)
 }
 
+fn data_aspect_adjusted_bounds(
+    x_min: f32,
+    x_max: f32,
+    y_min: f32,
+    y_max: f32,
+    ratio: [f64; 3],
+) -> (f32, f32, f32, f32) {
+    let x_ratio = (ratio[0].abs().max(1.0e-12)) as f32;
+    let y_ratio = (ratio[1].abs().max(1.0e-12)) as f32;
+    let cx = (x_min + x_max) * 0.5;
+    let cy = (y_min + y_max) * 0.5;
+    let x_span = (x_max - x_min).abs().max(0.1);
+    let y_span = (y_max - y_min).abs().max(0.1);
+    let units = (x_span / x_ratio).max(y_span / y_ratio).max(0.1);
+    let next_x = units * x_ratio;
+    let next_y = units * y_ratio;
+    (
+        cx - next_x * 0.5,
+        cx + next_x * 0.5,
+        cy - next_y * 0.5,
+        cy + next_y * 0.5,
+    )
+}
+
 fn choose_axes_bounds_3d(
+    figure: &Figure,
     axes_index: usize,
     render_data: &[(usize, RenderData)],
     bounds_2d: (f32, f32, f32, f32),
@@ -600,7 +665,7 @@ fn choose_axes_bounds_3d(
         }
     }
 
-    if !min.x.is_finite() || !max.x.is_finite() {
+    let (mut min, mut max) = if !min.x.is_finite() || !max.x.is_finite() {
         (
             Vec3::new(bounds_2d.0, bounds_2d.2, -1.0),
             Vec3::new(bounds_2d.1, bounds_2d.3, 1.0),
@@ -611,7 +676,42 @@ fn choose_axes_bounds_3d(
             max.z += 0.5;
         }
         (min, max)
+    };
+
+    if let Some(meta) = figure.axes_metadata(axes_index) {
+        if let Some((lo, hi)) = meta.x_limits {
+            min.x = lo as f32;
+            max.x = hi as f32;
+        }
+        if let Some((lo, hi)) = meta.y_limits {
+            min.y = lo as f32;
+            max.y = hi as f32;
+        }
+        if let Some((lo, hi)) = meta.z_limits {
+            min.z = lo as f32;
+            max.z = hi as f32;
+        }
+        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
+            (min, max) = data_aspect_adjusted_bounds_3d(min, max, meta.data_aspect_ratio);
+        }
     }
+    (min, max)
+}
+
+fn data_aspect_adjusted_bounds_3d(min: Vec3, max: Vec3, ratio: [f64; 3]) -> (Vec3, Vec3) {
+    let aspect = Vec3::new(
+        ratio[0].abs().max(1.0e-12) as f32,
+        ratio[1].abs().max(1.0e-12) as f32,
+        ratio[2].abs().max(1.0e-12) as f32,
+    );
+    let center = (min + max) * 0.5;
+    let span = (max - min).abs().max(Vec3::splat(0.1));
+    let units = (span.x / aspect.x)
+        .max(span.y / aspect.y)
+        .max(span.z / aspect.z)
+        .max(0.1);
+    let next = aspect * units;
+    (center - next * 0.5, center + next * 0.5)
 }
 
 fn default_3d_camera_for_bounds(min: Vec3, max: Vec3) -> Camera {
@@ -657,19 +757,15 @@ fn choose_axes_camera(
     cam
 }
 
-fn get_axes_title_and_labels(
-    figure: &Figure,
-    axes_index: usize,
-) -> (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-) {
+fn get_axes_title_and_labels(figure: &Figure, axes_index: usize) -> AxesTextLabels {
     let meta = figure.axes_metadata(axes_index);
     let title = meta
         .and_then(|m| m.title.as_ref())
         .or(figure.title.as_ref())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let subtitle = meta
+        .and_then(|m| m.subtitle.as_ref())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
     let x_label = meta
@@ -687,7 +783,13 @@ fn get_axes_title_and_labels(
         .or(figure.z_label.as_ref())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    (title, x_label, y_label, z_label)
+    AxesTextLabels {
+        title,
+        subtitle,
+        x_label,
+        y_label,
+        z_label,
+    }
 }
 
 fn text_scale_from_font_size(font_size: Option<f32>, default_scale: u32) -> u32 {
@@ -710,7 +812,10 @@ fn get_axes_style_and_display_prefs(
         );
     };
 
-    let title_scale = text_scale_from_font_size(meta.title_style.font_size, 2);
+    let title_scale = text_scale_from_font_size(
+        meta.title_style.font_size.or(meta.subtitle_style.font_size),
+        2,
+    );
     let label_font = meta
         .x_label_style
         .font_size
@@ -773,6 +878,87 @@ fn draw_bitmap_text(canvas: &mut Canvas, x: i32, y: i32, text: &str, scale: u32,
     }
 }
 
+fn bitmap_text_size(text: &str, scale: u32) -> (i32, i32) {
+    let sc = scale.max(1) as i32;
+    ((text.chars().count() as i32) * (8 * sc + sc), 8 * sc)
+}
+
+fn draw_bitmap_text_rotated(
+    canvas: &mut Canvas,
+    anchor: BitmapTextAnchor,
+    text: &str,
+    scale: u32,
+    color: [u8; 4],
+    angle_degrees: f64,
+) {
+    if angle_degrees.abs() <= f64::EPSILON {
+        draw_bitmap_text(canvas, anchor.x, anchor.y, text, scale, color);
+        return;
+    }
+
+    let sc = scale.max(1) as i32;
+    let (text_w, text_h) = bitmap_text_size(text, scale);
+    let local_anchor = Vec2::new(text_w as f32 * anchor.frac_x, text_h as f32 * anchor.frac_y);
+    let fallback = BASIC_FONTS.get('?').unwrap_or([0u8; 8]);
+    let sin = (angle_degrees as f32).to_radians().sin();
+    let cos = (angle_degrees as f32).to_radians().cos();
+    let mut cursor_x = 0i32;
+
+    for ch in text.chars() {
+        let glyph = BASIC_FONTS
+            .get(ch)
+            .or_else(|| BASIC_FONTS.get(' '))
+            .unwrap_or(fallback);
+        for (row, bits) in glyph.iter().enumerate() {
+            for col in 0..8i32 {
+                if ((bits >> col) & 1) == 0 {
+                    continue;
+                }
+                for sy in 0..sc {
+                    for sx in 0..sc {
+                        let local_x = cursor_x + col * sc + sx;
+                        let local_y = row as i32 * sc + sy;
+                        let local = Vec2::new(local_x as f32, local_y as f32) - local_anchor;
+                        let rx = local.x * cos - local.y * sin;
+                        let ry = local.x * sin + local.y * cos;
+                        canvas.blend_pixel(
+                            anchor.x + rx.round() as i32,
+                            anchor.y + ry.round() as i32,
+                            color,
+                            0.0,
+                            false,
+                        );
+                    }
+                }
+            }
+        }
+        cursor_x += 8 * sc + sc;
+    }
+}
+
+fn draw_tick_text(
+    canvas: &mut Canvas,
+    anchor: BitmapTextAnchor,
+    text: &str,
+    scale: u32,
+    color: [u8; 4],
+    angle_degrees: f64,
+) {
+    let (text_w, text_h) = bitmap_text_size(text, scale);
+    if angle_degrees.abs() <= f64::EPSILON {
+        draw_bitmap_text(
+            canvas,
+            anchor.x - (text_w as f32 * anchor.frac_x).round() as i32,
+            anchor.y - (text_h as f32 * anchor.frac_y).round() as i32,
+            text,
+            scale,
+            color,
+        );
+    } else {
+        draw_bitmap_text_rotated(canvas, anchor, text, scale, color, angle_degrees);
+    }
+}
+
 fn draw_text_centered(
     canvas: &mut Canvas,
     center_x: i32,
@@ -785,18 +971,6 @@ fn draw_text_centered(
     let text_w = (text.chars().count() as i32) * (8 * sc + sc);
     let x = center_x - text_w / 2;
     draw_bitmap_text(canvas, x, y, text, scale, color);
-}
-
-fn format_tick(v: f32) -> String {
-    if !v.is_finite() {
-        return "nan".to_string();
-    }
-    let abs = v.abs();
-    if abs >= 1000.0 || (abs > 0.0 && abs < 0.01) {
-        format!("{v:.2e}")
-    } else {
-        format!("{v:.3}")
-    }
 }
 
 fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
@@ -824,6 +998,30 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
         draw_axes_titles_and_labels(canvas, axes, text_color);
         return;
     }
+
+    let (x_min, x_max, y_min, y_max) = axes.bounds_2d;
+    let data_to_x = |value: f32| -> Option<i32> {
+        if value < x_min || value > x_max {
+            return None;
+        }
+        let span = x_max - x_min;
+        if !span.is_finite() || span.abs() <= f32::EPSILON {
+            return None;
+        }
+        let t = (value - x_min) / span;
+        Some((left as f32 + t * (right - left) as f32).round() as i32)
+    };
+    let data_to_y = |value: f32| -> Option<i32> {
+        if value < y_min || value > y_max {
+            return None;
+        }
+        let span = y_max - y_min;
+        if !span.is_finite() || span.abs() <= f32::EPSILON {
+            return None;
+        }
+        let t = (y_max - value) / span;
+        Some((top as f32 + t * (bottom - top) as f32).round() as i32)
+    };
 
     if axes.show_minor_grid {
         let subdivisions = 5;
@@ -873,11 +1071,24 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
     }
 
     if axes.show_grid {
-        for i in 0..=6 {
-            let t = i as f32 / 6.0;
-            let x = (left as f32 + t * (right - left) as f32).round() as i32;
-            let y = (top as f32 + t * (bottom - top) as f32).round() as i32;
-
+        let x_grid: Vec<i32> = axes
+            .x_ticks
+            .as_ref()
+            .map(|ticks| {
+                ticks
+                    .iter()
+                    .filter_map(|value| data_to_x(*value as f32))
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                (0..=6)
+                    .map(|i| {
+                        let t = i as f32 / 6.0;
+                        (left as f32 + t * (right - left) as f32).round() as i32
+                    })
+                    .collect()
+            });
+        for x in x_grid {
             let gv = ScreenVertex {
                 x: x as f32,
                 y: top as f32,
@@ -891,7 +1102,26 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
                 color: grid_color,
             };
             canvas.draw_line(gv, gv2, 1.0, 0, false);
+        }
 
+        let y_grid: Vec<i32> = axes
+            .y_ticks
+            .as_ref()
+            .map(|ticks| {
+                ticks
+                    .iter()
+                    .filter_map(|value| data_to_y(*value as f32))
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                (0..=6)
+                    .map(|i| {
+                        let t = i as f32 / 6.0;
+                        (top as f32 + t * (bottom - top) as f32).round() as i32
+                    })
+                    .collect()
+            });
+        for y in y_grid {
             let gh = ScreenVertex {
                 x: left as f32,
                 y: y as f32,
@@ -938,31 +1168,69 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
         }
     }
 
-    let (x_min, x_max, y_min, y_max) = axes.bounds_2d;
     let tick_sc = axes.tick_scale as i32;
-    for i in 0..=4 {
-        let t = i as f32 / 4.0;
+    let x_tick_formatter = crate::core::plot_renderer::plot_utils::TickLabelFormatter::new(
+        axes.x_tick_format.as_deref(),
+    );
+    let y_tick_formatter = crate::core::plot_renderer::plot_utils::TickLabelFormatter::new(
+        axes.y_tick_format.as_deref(),
+    );
+    let x_ticks = axes
+        .x_ticks
+        .as_ref()
+        .map(|ticks| ticks.iter().map(|value| *value as f32).collect::<Vec<_>>())
+        .unwrap_or_else(|| {
+            (0..=4)
+                .map(|i| x_min + (i as f32 / 4.0) * (x_max - x_min))
+                .collect()
+        });
+    for xv in x_ticks {
+        if xv < x_min || xv > x_max {
+            continue;
+        }
+        let t = (xv - x_min) / (x_max - x_min).max(f32::EPSILON);
         let x = (left as f32 + t * (right - left) as f32).round() as i32;
-        let y = (top as f32 + t * (bottom - top) as f32).round() as i32;
-
-        let xv = x_min + t * (x_max - x_min);
-        let yv = y_max - t * (y_max - y_min);
-
-        draw_bitmap_text(
+        draw_tick_text(
             canvas,
-            x - 12 * tick_sc,
-            bottom + 6 + tick_sc,
-            &format_tick(xv),
+            BitmapTextAnchor {
+                x,
+                y: bottom + 6 + tick_sc,
+                frac_x: 0.5,
+                frac_y: 0.0,
+            },
+            &x_tick_formatter.format(xv as f64),
             axes.tick_scale,
             with_alpha(text_color, 0.9),
+            axes.x_tick_label_rotation,
         );
-        draw_bitmap_text(
+    }
+    let y_ticks = axes
+        .y_ticks
+        .as_ref()
+        .map(|ticks| ticks.iter().map(|value| *value as f32).collect::<Vec<_>>())
+        .unwrap_or_else(|| {
+            (0..=4)
+                .map(|i| y_max - (i as f32 / 4.0) * (y_max - y_min))
+                .collect()
+        });
+    for yv in y_ticks {
+        if yv < y_min || yv > y_max {
+            continue;
+        }
+        let t = (y_max - yv) / (y_max - y_min).max(f32::EPSILON);
+        let y = (top as f32 + t * (bottom - top) as f32).round() as i32;
+        draw_tick_text(
             canvas,
-            left - 56 * tick_sc,
-            y - 4 * tick_sc,
-            &format_tick(yv),
+            BitmapTextAnchor {
+                x: left - 8 * tick_sc,
+                y,
+                frac_x: 1.0,
+                frac_y: 0.5,
+            },
+            &y_tick_formatter.format(yv as f64),
             axes.tick_scale,
             with_alpha(text_color, 0.9),
+            axes.y_tick_label_rotation,
         );
     }
 
@@ -978,6 +1246,16 @@ fn draw_axes_titles_and_labels(canvas: &mut Canvas, axes: &AxesView, text_color:
             title,
             axes.title_scale,
             text_color,
+        );
+    }
+    if let Some(subtitle) = &axes.subtitle {
+        draw_text_centered(
+            canvas,
+            (axes.viewport.0 + axes.viewport.2 / 2) as i32,
+            axes.viewport.1 as i32 + 8 + (10 * axes.title_scale) as i32,
+            subtitle,
+            axes.title_scale.saturating_sub(1).max(1),
+            with_alpha(text_color, 0.9),
         );
     }
     if let Some(x_label) = &axes.x_label {
@@ -1486,7 +1764,13 @@ pub async fn render_figure_rgba_bytes(
         .enumerate()
         .map(|(axes_index, vp)| {
             let has_3d = has_3d_flags[axes_index];
-            let mut rect = compute_plot_rect(*vp, has_3d);
+            let meta = figure.axes_metadata(axes_index);
+            let mut rect = compute_plot_rect(
+                *vp,
+                has_3d,
+                meta.and_then(|m| m.x_tick_label_rotation).unwrap_or(0.0),
+                meta.and_then(|m| m.y_tick_label_rotation).unwrap_or(0.0),
+            );
             if !has_3d && figure.axes_kind(axes_index) == AxesKind::Polar {
                 rect = square_plot_rect(rect);
             }
@@ -1505,12 +1789,18 @@ pub async fn render_figure_rgba_bytes(
     for axes_index in 0..axes_count {
         let has_3d = has_3d_flags[axes_index];
         let viewport = viewports[axes_index];
-        let mut plot_rect = compute_plot_rect(viewport, has_3d);
+        let meta = figure.axes_metadata(axes_index);
+        let mut plot_rect = compute_plot_rect(
+            viewport,
+            has_3d,
+            meta.and_then(|m| m.x_tick_label_rotation).unwrap_or(0.0),
+            meta.and_then(|m| m.y_tick_label_rotation).unwrap_or(0.0),
+        );
         if !has_3d && figure.axes_kind(axes_index) == AxesKind::Polar {
             plot_rect = square_plot_rect(plot_rect);
         }
         let bounds_2d = choose_axes_bounds(&figure, axes_index, &render_items);
-        let (bmin, bmax) = choose_axes_bounds_3d(axes_index, &render_items, bounds_2d);
+        let (bmin, bmax) = choose_axes_bounds_3d(&figure, axes_index, &render_items, bounds_2d);
         let camera_3d = if has_3d {
             Some(if axes_count == 1 {
                 camera.cloned().unwrap_or_else(|| {
@@ -1523,7 +1813,27 @@ pub async fn render_figure_rgba_bytes(
             None
         };
 
-        let (title, x_label, y_label, z_label) = get_axes_title_and_labels(&figure, axes_index);
+        let text = get_axes_title_and_labels(&figure, axes_index);
+        let (
+            x_ticks,
+            y_ticks,
+            x_tick_format,
+            y_tick_format,
+            x_tick_label_rotation,
+            y_tick_label_rotation,
+        ) = figure
+            .axes_metadata(axes_index)
+            .map(|meta| {
+                (
+                    meta.x_ticks.clone(),
+                    meta.y_ticks.clone(),
+                    meta.x_tick_format.clone(),
+                    meta.y_tick_format.clone(),
+                    meta.x_tick_label_rotation.unwrap_or(0.0),
+                    meta.y_tick_label_rotation.unwrap_or(0.0),
+                )
+            })
+            .unwrap_or((None, None, None, None, 0.0, 0.0));
         let (title_scale, label_scale, tick_scale, show_grid, show_minor_grid, show_box) =
             get_axes_style_and_display_prefs(&figure, axes_index);
         let (colorbar_enabled, colormap) = get_axes_colorbar_prefs(&figure, axes_index);
@@ -1535,10 +1845,17 @@ pub async fn render_figure_rgba_bytes(
             bounds_3d: (bmin, bmax),
             camera_3d,
             has_3d_content: has_3d,
-            title,
-            x_label,
-            y_label,
-            z_label,
+            title: text.title,
+            subtitle: text.subtitle,
+            x_label: text.x_label,
+            y_label: text.y_label,
+            z_label: text.z_label,
+            x_ticks,
+            y_ticks,
+            x_tick_format,
+            y_tick_format,
+            x_tick_label_rotation,
+            y_tick_label_rotation,
             title_scale,
             label_scale,
             tick_scale,
@@ -1587,7 +1904,9 @@ fn get_axes_colorbar_prefs(figure: &Figure, axes_index: usize) -> (bool, ColorMa
         || meta
             .map(|meta| meta.colorbar_enabled)
             .unwrap_or(figure.colorbar_enabled);
-    let colormap = meta.map(|meta| meta.colormap).unwrap_or(figure.colormap);
+    let colormap = meta
+        .map(|meta| meta.colormap.clone())
+        .unwrap_or_else(|| figure.colormap.clone());
     (enabled, colormap)
 }
 
@@ -1628,7 +1947,9 @@ fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesVi
     let style_code = render_data.material.metallic as i32;
 
     match render_data.pipeline_type {
-        PipelineType::Lines => {
+        PipelineType::Lines | PipelineType::LinesNoDepth => {
+            let depth_test =
+                axes.has_3d_content && render_data.pipeline_type != PipelineType::LinesNoDepth;
             for segment in render_data.vertices.chunks_exact(2) {
                 let Some(a) = project_vertex(&segment[0], axes) else {
                     continue;
@@ -1636,7 +1957,7 @@ fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesVi
                 let Some(b) = project_vertex(&segment[1], axes) else {
                     continue;
                 };
-                canvas.draw_line(a, b, width_px, style_code, axes.has_3d_content);
+                canvas.draw_line(a, b, width_px, style_code, depth_test);
             }
         }
         PipelineType::Points | PipelineType::Scatter3 => {
@@ -1690,18 +2011,118 @@ fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesVi
             }
         }
         PipelineType::Textured => {
-            for tri in render_data.vertices.chunks_exact(3) {
-                let (Some(p0), Some(p1), Some(p2)) = (
-                    project_vertex(&tri[0], axes),
-                    project_vertex(&tri[1], axes),
-                    project_vertex(&tri[2], axes),
-                ) else {
-                    continue;
-                };
-                canvas.fill_triangle(p0, p1, p2, axes.has_3d_content);
+            if draw_textured_image(canvas, render_data, axes) {
+                return;
+            }
+
+            if let Some(indices) = &render_data.indices {
+                for tri in indices.chunks_exact(3) {
+                    let (Some(v0), Some(v1), Some(v2)) = (
+                        render_data.vertices.get(tri[0] as usize),
+                        render_data.vertices.get(tri[1] as usize),
+                        render_data.vertices.get(tri[2] as usize),
+                    ) else {
+                        continue;
+                    };
+                    let (Some(p0), Some(p1), Some(p2)) = (
+                        project_vertex(v0, axes),
+                        project_vertex(v1, axes),
+                        project_vertex(v2, axes),
+                    ) else {
+                        continue;
+                    };
+                    canvas.fill_triangle(p0, p1, p2, axes.has_3d_content);
+                }
+            } else {
+                for tri in render_data.vertices.chunks_exact(3) {
+                    let (Some(p0), Some(p1), Some(p2)) = (
+                        project_vertex(&tri[0], axes),
+                        project_vertex(&tri[1], axes),
+                        project_vertex(&tri[2], axes),
+                    ) else {
+                        continue;
+                    };
+                    canvas.fill_triangle(p0, p1, p2, axes.has_3d_content);
+                }
             }
         }
     }
+}
+
+fn draw_textured_image(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesView) -> bool {
+    let Some(ImageData::Rgba8 {
+        width,
+        height,
+        data,
+    }) = render_data.image.as_ref()
+    else {
+        return false;
+    };
+    if *width == 0 || *height == 0 || data.len() < (*width as usize * *height as usize * 4) {
+        return false;
+    }
+
+    let projected: Vec<ScreenVertex> = render_data
+        .vertices
+        .iter()
+        .filter_map(|vertex| project_vertex(vertex, axes))
+        .collect();
+    if projected.is_empty() {
+        return false;
+    }
+
+    let min_x = projected
+        .iter()
+        .map(|vertex| vertex.x)
+        .fold(f32::INFINITY, f32::min)
+        .floor()
+        .max(0.0) as i32;
+    let max_x = projected
+        .iter()
+        .map(|vertex| vertex.x)
+        .fold(f32::NEG_INFINITY, f32::max)
+        .ceil()
+        .min(canvas.width as f32 - 1.0) as i32;
+    let min_y = projected
+        .iter()
+        .map(|vertex| vertex.y)
+        .fold(f32::INFINITY, f32::min)
+        .floor()
+        .max(0.0) as i32;
+    let max_y = projected
+        .iter()
+        .map(|vertex| vertex.y)
+        .fold(f32::NEG_INFINITY, f32::max)
+        .ceil()
+        .min(canvas.height as f32 - 1.0) as i32;
+    if min_x > max_x || min_y > max_y {
+        return false;
+    }
+
+    let dst_w = (max_x - min_x).max(1) as f32;
+    let dst_h = (max_y - min_y).max(1) as f32;
+    let src_w = (*width).saturating_sub(1).max(1) as f32;
+    let src_h = (*height).saturating_sub(1).max(1) as f32;
+    let depth = projected.iter().map(|vertex| vertex.z).sum::<f32>() / projected.len() as f32;
+
+    for y in min_y..=max_y {
+        let v = (y - min_y) as f32 / dst_h;
+        let src_y = (v * src_h).round().clamp(0.0, src_h) as usize;
+        for x in min_x..=max_x {
+            let u = (x - min_x) as f32 / dst_w;
+            let src_x = (u * src_w).round().clamp(0.0, src_w) as usize;
+            let src = (src_y * *width as usize + src_x) * 4;
+            canvas.blend_pixel(
+                x,
+                y,
+                [data[src], data[src + 1], data[src + 2], data[src + 3]],
+                depth,
+                axes.has_3d_content,
+            );
+        }
+    }
+
+    true
 }
 
 pub fn encode_png_bytes(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {

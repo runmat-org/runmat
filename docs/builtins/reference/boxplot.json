@@ -1,0 +1,40 @@
+{
+  "title": "boxplot",
+  "category": "stats/summary",
+  "keywords": ["boxplot", "box plot", "statistics", "quartile", "outlier", "visualization"],
+  "summary": "Visualize sample quartiles, whiskers, medians, and outliers.",
+  "signatures": [
+    "boxplot(x)",
+    "boxplot(x,g)",
+    "boxplot(ax,___)",
+    "boxplot(___,Name,Value)",
+    "h = boxplot(___)"
+  ],
+  "description": "`boxplot(x)` plots one box for a vector and one box per matrix column. `boxplot(x,g)` groups vector data by numeric, text, cell, or categorical grouping variables. With an output, RunMat returns a row vector of graphics handles for the line and scatter primitives used to draw the boxes.",
+  "notes": [
+    "NaN data values are omitted from quartile, median, whisker, and outlier calculations.",
+    "Quartiles use linear interpolation over sorted finite observations. Whiskers extend to the most extreme observations within `Whisker` times the interquartile range.",
+    "Grouping variables can be numeric vectors, string arrays, character matrices, cell arrays of scalar group labels, categorical arrays, or cell arrays of grouping vectors. Missing group labels are omitted.",
+    "`DataLim`, `ExtremeMode`, and `Jitter` control outlier display. `ExtremeMode` clips or compresses outlier markers outside the data limits, and traditional plots default to no jitter.",
+    "Recognized options include `Labels`, `GroupOrder`, `Orientation`, `Positions`, `Widths`, `Whisker`, `Colors`, `Symbol`, `OutlierSize`, `PlotStyle`, `BoxStyle`, `MedianStyle`, `Notch`, `DataLim`, `ExtremeMode`, `Jitter`, `LabelOrientation`, `LabelVerbosity`, and factor display validation options.",
+    "`BoxStyle`, `MedianStyle`, `Notch`, and factor display layout options are accepted for compatibility; the current renderer draws an outline box, median line, whiskers, caps, and optional outlier markers."
+  ],
+  "examples": [
+    {
+      "description": "Plot one box for each matrix column",
+      "input": "boxplot([1 10; 2 20; 3 30; 4 40])"
+    },
+    {
+      "description": "Plot grouped vector data with labels",
+      "input": "h = boxplot([1;2;10;20], {'A';'A';'B';'B'}, 'Labels', {'First','Second'})"
+    },
+    {
+      "description": "Plot horizontal boxes with a custom whisker length",
+      "input": "boxplot([1;2;3;100], 'Orientation', 'horizontal', 'Whisker', 1)"
+    }
+  ],
+  "links": [
+    { "label": "ecdf", "url": "./ecdf" },
+    { "label": "histogram", "url": "./histogram" }
+  ]
+}

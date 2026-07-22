@@ -1,0 +1,159 @@
+use super::*;
+
+pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
+    match value {
+        Value::String(text) => Ok(text.clone()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        _ => Err(invalid_argument(format!(
+            "table: {context} must be a string scalar or character vector"
+        ))),
+    }
+}
+
+pub(super) fn bool_scalar(value: &Value, context: &str) -> BuiltinResult<bool> {
+    match value {
+        Value::Bool(flag) => Ok(*flag),
+        Value::Int(value) => Ok(value.to_i64() != 0),
+        Value::Num(value) if value.is_finite() => Ok(*value != 0.0),
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
+            let text = scalar_text(value, context)?;
+            match text.to_ascii_lowercase().as_str() {
+                "true" | "on" | "yes" => Ok(true),
+                "false" | "off" | "no" => Ok(false),
+                _ => Err(invalid_argument(format!(
+                    "table: {context} must be logical"
+                ))),
+            }
+        }
+        _ => Err(invalid_argument(format!(
+            "table: {context} must be logical"
+        ))),
+    }
+}
+
+pub(super) fn nonnegative_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
+    match value {
+        Value::Int(value) if value.to_i64() >= 0 => Ok(value.to_i64() as usize),
+        Value::Num(value)
+            if value.is_finite()
+                && *value >= 0.0
+                && (value.round() - value).abs() <= f64::EPSILON =>
+        {
+            Ok(value.round() as usize)
+        }
+        _ => Err(invalid_argument(format!(
+            "table: {context} must be a non-negative integer"
+        ))),
+    }
+}
+
+pub(super) fn positive_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
+    let value = nonnegative_usize(value, context)?;
+    if value == 0 {
+        return Err(invalid_argument(format!(
+            "table: {context} must be a positive integer"
+        )));
+    }
+    Ok(value)
+}
+
+pub(super) fn option_value_is_empty(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text.trim().is_empty(),
+        Value::CharArray(array) => {
+            array.data.is_empty()
+                || (array.rows == 1 && array.data.iter().all(|ch| ch.is_whitespace()))
+        }
+        Value::StringArray(array) => {
+            array.data.is_empty() || (array.data.len() == 1 && array.data[0].trim().is_empty())
+        }
+        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::LogicalArray(array) => array.data.is_empty(),
+        Value::Cell(cell) => {
+            cell.data.is_empty() || cell.data.iter().all(|handle| option_value_is_empty(handle))
+        }
+        _ => false,
+    }
+}
+
+pub(super) fn string_list(value: &Value) -> BuiltinResult<Vec<String>> {
+    match value {
+        Value::String(text) => Ok(vec![text.clone()]),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(vec![ca.data.iter().collect()]),
+        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::Cell(cell) => {
+            let mut out = Vec::with_capacity(cell.data.len());
+            for handle in &cell.data {
+                let value = handle;
+                out.extend(string_list(value)?);
+            }
+            Ok(out)
+        }
+        _ => Err(invalid_argument(
+            "table: expected string, string array, character vector, or cellstr",
+        )),
+    }
+}
+
+pub(super) fn optional_raw_variable_name_list(value: &Value) -> BuiltinResult<Option<Vec<String>>> {
+    if option_value_is_empty(value) {
+        Ok(None)
+    } else {
+        raw_variable_name_list(value).map(Some)
+    }
+}
+
+pub(super) fn raw_variable_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
+    let names = string_list(value)?;
+    if names.is_empty() {
+        return Err(invalid_variable("table: variable names must not be empty"));
+    }
+    Ok(names)
+}
+
+pub(super) fn variable_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
+    let names = raw_variable_name_list(value)?;
+    validate_variable_names(&names)?;
+    Ok(names)
+}
+
+pub(super) fn optional_variable_type_list(
+    value: &Value,
+) -> BuiltinResult<Option<Vec<ImportVariableType>>> {
+    if option_value_is_empty(value) {
+        Ok(None)
+    } else {
+        variable_type_list(value).map(Some)
+    }
+}
+
+pub(super) fn variable_type_list(value: &Value) -> BuiltinResult<Vec<ImportVariableType>> {
+    string_list(value)?
+        .iter()
+        .map(|raw| ImportVariableType::parse(raw))
+        .collect()
+}
+
+pub(super) fn variable_type_names(value: &Value) -> BuiltinResult<Vec<String>> {
+    string_list(value)?
+        .iter()
+        .map(|raw| ImportVariableType::canonical_label(raw))
+        .collect()
+}
+
+pub(super) fn optional_range_spec(value: &Value) -> BuiltinResult<Option<RangeSpec>> {
+    if option_value_is_empty(value) {
+        Ok(None)
+    } else {
+        RangeSpec::parse(value).map(Some)
+    }
+}
+
+pub(super) fn optional_sheet_selector(value: &Value) -> BuiltinResult<Option<SheetSelector>> {
+    if option_value_is_empty(value) {
+        Ok(None)
+    } else {
+        SheetSelector::parse(value).map(Some)
+    }
+}

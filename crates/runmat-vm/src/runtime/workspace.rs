@@ -374,6 +374,9 @@ pub fn workspace_remove(name: &str) -> Result<(), String> {
         let ws = &mut frame.state;
         let vars = unsafe { &mut *frame.vars_ptr };
         if let Some(idx) = ws.names.remove(name) {
+            if let Some(value) = vars.get_mut(idx) {
+                *value = Value::Num(0.0);
+            }
             ws.assigned.remove(name);
             mark_slot_unassigned(ws, idx, name.to_string());
             frame.vars_snapshot = vars.clone();

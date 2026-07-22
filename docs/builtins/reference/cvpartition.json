@@ -1,0 +1,90 @@
+{
+  "title": "cvpartition",
+  "category": "stats/ml",
+  "keywords": [
+    "cvpartition",
+    "cross validation",
+    "kfold",
+    "holdout",
+    "leaveout",
+    "resubstitution",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Create cross-validation partition objects.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["logical", "f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Partition construction is metadata-oriented and runs on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::cvpartition::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`cvpartition` creates a `cvpartition` object for K-fold, holdout, leave-one-out, resubstitution, or custom cross-validation masks. Use `training` and `test` to extract logical masks.",
+  "behaviors": [
+    "`cvpartition(n,'KFold',k)` creates `k` deterministic round-robin folds for `n` observations, with `k` in the interval `[2,n)`.",
+    "`cvpartition(stratvar,'KFold',k)` and `cvpartition(stratvar,'Holdout',p)` stratify by default. Use `'Stratify',false` to partition only by observation order.",
+    "`cvpartition(n,'Holdout',p)` accepts a fraction in `(0,1)` or an integer count in `[1,n)`.",
+    "`cvpartition(n,'Leaveout')` creates one test set per observation.",
+    "`cvpartition(n,'Resubstitution')` creates a single partition with all observations in training and none in test.",
+    "`cvpartition('CustomPartition',testSets)` accepts a logical vector or matrix whose columns are test sets, or a positive-integer vector whose values identify test-set numbers.",
+    "Numeric stratification labels containing `NaN` are treated as missing; those rows remain in `NumObservations` but are false in returned training and test masks.",
+    "The returned object exposes `NumObservations`, `NumTestSets`, `TestSize`, `TrainSize`, `Type`, `IsCustom`, `IsGrouped`, and `IsStratified` properties.",
+    "Fold assignment is deterministic for reproducibility; it does not attempt to reproduce MATLAB's RNG-dependent exact fold order."
+  ],
+  "examples": [
+    {
+      "description": "Create K-fold masks",
+      "input": "c = cvpartition(6, 'KFold', 3);\nidxTest = test(c, 1);\nidxTrainAll = training(c, 'all')",
+      "output": "`idxTest` is a 6-by-1 logical vector. `idxTrainAll` is a 6-by-3 logical matrix."
+    },
+    {
+      "description": "Create a stratified holdout partition",
+      "input": "group = [1; 1; 2; 2];\nc = cvpartition(group, 'Holdout', 0.5);\nidx = test(c)",
+      "output": "`idx` selects one observation from each group."
+    },
+    {
+      "description": "Use custom test sets",
+      "input": "c = cvpartition('CustomPartition', logical([1 0; 0 1; 0 0]));\nidx = test(c, 'all')",
+      "output": "`idx` preserves the supplied test-set columns."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does RunMat randomize partitions?",
+      "answer": "No. RunMat uses deterministic fold and holdout assignment so results are reproducible across runs."
+    },
+    {
+      "question": "How do I get masks for all folds?",
+      "answer": "Use `test(c,'all')` or `training(c,'all')`; columns correspond to partition test sets."
+    }
+  ],
+  "links": [
+    {
+      "label": "training",
+      "url": "./training"
+    },
+    {
+      "label": "test",
+      "url": "./test"
+    },
+    {
+      "label": "lasso",
+      "url": "./lasso"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/cvpartition.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/cvpartition.rs"
+  }
+}

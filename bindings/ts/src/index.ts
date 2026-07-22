@@ -516,6 +516,7 @@ export interface ExecuteRequest {
     topLevelAwait?: boolean;
   };
   requestedOutputs?: number;
+  retainFigures?: boolean;
 }
 
 export interface ExecuteResult {

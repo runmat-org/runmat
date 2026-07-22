@@ -201,7 +201,7 @@ impl WgpuProvider {
         {
             GpuTensorStorage::ComplexInterleaved
         } else {
-            entry.storage.clone()
+            entry.storage
         };
         let storage_factor = match storage {
             GpuTensorStorage::Real => 1usize,

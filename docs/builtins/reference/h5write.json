@@ -1,0 +1,20 @@
+{
+  "title": "h5write",
+  "category": "io/hdf5",
+  "keywords": ["h5write", "hdf5", "dataset", "file", "io"],
+  "summary": "Write dense numeric, logical, string, or char data to an HDF5 dataset.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "HDF5 serialization is host file I/O; GPU inputs are gathered before writing."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::io::hdf5::tests", "integration": null},
+  "description": "`h5write(filename, dataset, data)` creates or replaces a dense HDF5 dataset, creating intermediate groups as needed. `h5write(filename, dataset, data, start, count)` and `h5write(filename, dataset, data, start, count, stride)` write one-based hyperslab selections into an existing dataset.",
+  "behaviors": [
+    "Numeric data is written as double, logical data as HDF5 booleans, and string/char data as UTF-8 variable-length strings.",
+    "RunMat column-major arrays are converted to HDF5 row-major raw order while preserving visible dimensions.",
+    "Partial writes use native HDF5 hyperslab writes and require the data shape to match the selected `count`.",
+    "Sparse, complex, cell, struct, object, and handle values raise deterministic unsupported-type errors."
+  ],
+  "examples": [{"description": "Write a matrix", "input": "h5write('out.h5', '/A', magic(3));"}],
+  "links": [{"label": "h5read", "url": "./h5read"}, {"label": "h5writeatt", "url": "./h5writeatt"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/io/hdf5.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5.rs"}
+}

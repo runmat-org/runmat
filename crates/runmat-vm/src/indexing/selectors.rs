@@ -7,6 +7,16 @@ use runmat_runtime::{
 
 pub type VmResult<T> = Result<T, RuntimeError>;
 
+fn checked_total_len_from_shape(shape: &[usize]) -> VmResult<usize> {
+    if runmat_runtime::builtins::common::shape::is_scalar_shape(shape) {
+        return Ok(1);
+    }
+    shape.iter().try_fold(1usize, |acc, &dim| {
+        acc.checked_mul(dim)
+            .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))
+    })
+}
+
 fn map_index_gather_error(err: impl std::fmt::Display) -> RuntimeError {
     mex(
         "AccelerationOperationFailed",
@@ -214,7 +224,7 @@ pub async fn build_slice_selectors(
 ) -> VmResult<Vec<SliceSelector>> {
     let mut selectors = Vec::with_capacity(dims);
     if dims == 1 {
-        let total_len = total_len_from_shape(base_shape);
+        let total_len = checked_total_len_from_shape(base_shape)?;
         if (colon_mask & 1u32) != 0 {
             selectors.push(SliceSelector::Colon);
             return Ok(selectors);

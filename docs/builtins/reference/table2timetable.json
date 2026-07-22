@@ -1,0 +1,15 @@
+{
+  "title": "table2timetable",
+  "category": "table",
+  "keywords": ["table2timetable", "table", "timetable", "RowTimes"],
+  "summary": "Convert a table into a timetable.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Tabular containers are host values."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
+  "description": "`table2timetable(T, 'RowTimes', times)` converts table variables into a timetable with row-time metadata.",
+  "behaviors": ["Provided row times must match table height and keep all table variables as data variables.", "If row times are omitted, RunMat consumes the first variable only when it is datetime-like or duration-like; otherwise sequential numeric row times are generated and all variables are retained."],
+  "examples": [{"description": "Convert with row times", "input": "TT = table2timetable(T, 'RowTimes', [1;2])", "output": "TT = timetable object"}],
+  "links": [{"label": "timetable2table", "url": "./timetable2table"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

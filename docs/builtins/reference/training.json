@@ -1,0 +1,65 @@
+{
+  "title": "training",
+  "category": "stats/ml",
+  "keywords": [
+    "training",
+    "cvpartition",
+    "cross validation",
+    "mask",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Return training-set masks from a cvpartition object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["logical"],
+    "broadcasting": "none",
+    "notes": "Operates on host-side cvpartition metadata and returns logical arrays."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::cvpartition::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`training(c)` returns a logical training mask for single-test-set partitions. `training(c,i)` returns masks for selected K-fold, leaveout, or custom test sets.",
+  "behaviors": [
+    "`training(c)` works for holdout, resubstitution, and custom partitions with one test-set column.",
+    "`training(c,i)` accepts a one-based numeric scalar or vector of test-set indices.",
+    "`training(c,'all')` returns one logical mask column per test set.",
+    "For every returned column, training observations are the complement of that column's test mask."
+  ],
+  "examples": [
+    {
+      "description": "Get training masks for every fold",
+      "input": "c = cvpartition(6, 'KFold', 3);\nidx = training(c, 'all')",
+      "output": "`idx` is a 6-by-3 logical matrix."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `training(c)` error for K-fold partitions?",
+      "answer": "K-fold partitions have multiple test sets, so specify a fold index or use `'all'`."
+    }
+  ],
+  "links": [
+    {
+      "label": "cvpartition",
+      "url": "./cvpartition"
+    },
+    {
+      "label": "test",
+      "url": "./test"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/cvpartition.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/cvpartition.rs"
+  }
+}

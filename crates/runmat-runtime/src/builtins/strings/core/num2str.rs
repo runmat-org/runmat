@@ -4,7 +4,7 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -275,6 +275,11 @@ enum NumericData {
     },
     Complex {
         data: Vec<(f64, f64)>,
+        rows: usize,
+        cols: usize,
+    },
+    Integer {
+        storage: IntegerStorage,
         rows: usize,
         cols: usize,
     },
@@ -568,8 +573,8 @@ async fn extract_numeric_data(value: Value) -> BuiltinResult<NumericData> {
             rows: 1,
             cols: 1,
         }),
-        Value::Int(i) => Ok(NumericData::Real {
-            data: vec![i.to_f64()],
+        Value::Int(i) => Ok(NumericData::Integer {
+            storage: integer_storage_from_scalar(i),
             rows: 1,
             cols: 1,
         }),
@@ -622,11 +627,18 @@ fn tensor_to_numeric_data(tensor: Tensor) -> BuiltinResult<NumericData> {
             cols,
         });
     }
-    Ok(NumericData::Real {
-        data: tensor.data,
-        rows,
-        cols,
-    })
+    match tensor.integer_data {
+        Some(storage) => Ok(NumericData::Integer {
+            storage,
+            rows,
+            cols,
+        }),
+        None => Ok(NumericData::Real {
+            data: tensor.data,
+            rows,
+            cols,
+        }),
+    }
 }
 
 fn complex_tensor_to_data(tensor: ComplexTensor) -> BuiltinResult<NumericData> {
@@ -657,6 +669,24 @@ fn format_numeric_data(data: NumericData, options: &FormatOptions) -> BuiltinRes
         NumericData::Complex { data, rows, cols } => {
             format_complex_matrix(&data, rows, cols, options)
         }
+        NumericData::Integer {
+            storage,
+            rows,
+            cols,
+        } => format_integer_matrix(&storage, rows, cols, options),
+    }
+}
+
+fn integer_storage_from_scalar(value: IntValue) -> IntegerStorage {
+    match value {
+        IntValue::I8(value) => IntegerStorage::I8(vec![value]),
+        IntValue::I16(value) => IntegerStorage::I16(vec![value]),
+        IntValue::I32(value) => IntegerStorage::I32(vec![value]),
+        IntValue::I64(value) => IntegerStorage::I64(vec![value]),
+        IntValue::U8(value) => IntegerStorage::U8(vec![value]),
+        IntValue::U16(value) => IntegerStorage::U16(vec![value]),
+        IntValue::U32(value) => IntegerStorage::U32(vec![value]),
+        IntValue::U64(value) => IntegerStorage::U64(vec![value]),
     }
 }
 
@@ -713,6 +743,73 @@ fn format_real_matrix(
 
     let rows_str = assemble_rows(entries, col_widths);
     rows_to_char_array(rows_str)
+}
+
+fn format_integer_matrix(
+    storage: &IntegerStorage,
+    rows: usize,
+    cols: usize,
+    options: &FormatOptions,
+) -> BuiltinResult<CharArray> {
+    if rows == 0 {
+        return CharArray::new(Vec::new(), 0, 0)
+            .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
+    }
+    if cols == 0 {
+        return CharArray::new(Vec::new(), rows, 0)
+            .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
+    }
+
+    let mut entries = vec![
+        vec![
+            CellEntry {
+                text: String::new(),
+                width: 0,
+            };
+            cols
+        ];
+        rows
+    ];
+    let mut col_widths = vec![0usize; cols];
+
+    for (col, width) in col_widths.iter_mut().enumerate() {
+        for (row, row_entries) in entries.iter_mut().enumerate() {
+            let text = format_integer(
+                integer_storage_decimal(storage, row + col * rows),
+                &options.spec,
+                options.decimal,
+            );
+            let entry_width = text.chars().count();
+            row_entries[col] = CellEntry {
+                text,
+                width: entry_width,
+            };
+            *width = (*width).max(entry_width);
+        }
+    }
+
+    if cols > 1 {
+        for (idx, width) in col_widths.iter_mut().enumerate() {
+            if idx > 0 {
+                *width += 1;
+            }
+        }
+    }
+
+    rows_to_char_array(assemble_rows(entries, col_widths))
+}
+
+fn integer_storage_decimal(storage: &IntegerStorage, index: usize) -> String {
+    match storage {
+        IntegerStorage::I8(values) => values[index].to_string(),
+        IntegerStorage::I16(values) => values[index].to_string(),
+        IntegerStorage::I32(values) => values[index].to_string(),
+        IntegerStorage::I64(values) => values[index].to_string(),
+        IntegerStorage::U8(values) => values[index].to_string(),
+        IntegerStorage::U16(values) => values[index].to_string(),
+        IntegerStorage::U32(values) => values[index].to_string(),
+        IntegerStorage::U64(values) => values[index].to_string(),
+    }
 }
 
 fn format_complex_matrix(
@@ -821,6 +918,116 @@ fn format_real(value: f64, spec: &FormatSpec, decimal: char) -> String {
         FormatSpec::Custom(custom) => format_custom(value, custom),
     };
     apply_decimal_locale(text, decimal)
+}
+
+fn format_integer(value: String, spec: &FormatSpec, decimal: char) -> String {
+    let (negative, digits) = value
+        .strip_prefix('-')
+        .map_or((false, value.as_str()), |digits| (true, digits));
+    let text = match spec {
+        FormatSpec::General { digits: precision } => {
+            format_integer_general(negative, digits, *precision, false)
+        }
+        FormatSpec::Custom(custom) => {
+            let precision = custom.precision.unwrap_or(match custom.kind {
+                CustomKind::Fixed | CustomKind::Exponent => 6,
+                CustomKind::General => DEFAULT_PRECISION,
+            });
+            let text = match custom.kind {
+                CustomKind::Fixed => format_integer_fixed(negative, digits, precision),
+                CustomKind::Exponent => {
+                    format_integer_exponent(negative, digits, precision + 1, custom.uppercase)
+                }
+                CustomKind::General => {
+                    format_integer_general(negative, digits, precision.max(1), custom.uppercase)
+                }
+            };
+            apply_format_flags(text, custom)
+        }
+    };
+    apply_decimal_locale(text, decimal)
+}
+
+fn format_integer_fixed(negative: bool, digits: &str, precision: usize) -> String {
+    let mut text = String::new();
+    if negative {
+        text.push('-');
+    }
+    text.push_str(digits);
+    if precision > 0 {
+        text.push('.');
+        text.extend(std::iter::repeat_n('0', precision));
+    }
+    text
+}
+
+fn format_integer_general(
+    negative: bool,
+    digits: &str,
+    precision: usize,
+    uppercase: bool,
+) -> String {
+    let significant = precision.max(1);
+    if digits.len() <= significant {
+        let mut text = String::new();
+        if negative {
+            text.push('-');
+        }
+        text.push_str(digits);
+        return text;
+    }
+    format_integer_exponent(negative, digits, significant, uppercase)
+}
+
+fn format_integer_exponent(
+    negative: bool,
+    digits: &str,
+    significant: usize,
+    uppercase: bool,
+) -> String {
+    let (rounded, exponent) = round_integer_significant(digits, significant.max(1));
+    let mut text = String::new();
+    if negative {
+        text.push('-');
+    }
+    let first = rounded.as_bytes()[0] as char;
+    text.push(first);
+    let fraction = rounded.get(1..).unwrap_or("").trim_end_matches('0');
+    if !fraction.is_empty() {
+        text.push('.');
+        text.push_str(fraction);
+    }
+    text.push(if uppercase { 'E' } else { 'e' });
+    text.push('+');
+    text.push_str(&exponent.to_string());
+    text
+}
+
+fn round_integer_significant(digits: &str, significant: usize) -> (String, usize) {
+    let exponent = digits.len() - 1;
+    if digits.len() <= significant {
+        return (digits.to_string(), exponent);
+    }
+
+    let mut rounded: Vec<u8> = digits.as_bytes()[..significant].to_vec();
+    if digits.as_bytes()[significant] >= b'5' {
+        for position in (0..rounded.len()).rev() {
+            if rounded[position] < b'9' {
+                rounded[position] += 1;
+                break;
+            }
+            rounded[position] = b'0';
+            if position == 0 {
+                let mut carry = String::from("1");
+                carry.extend(std::iter::repeat_n('0', significant.saturating_sub(1)));
+                return (carry, exponent + 1);
+            }
+        }
+    }
+    (
+        String::from_utf8(rounded).expect("integer digits are ascii"),
+        exponent,
+    )
 }
 
 fn format_complex(re: f64, im: f64, spec: &FormatSpec, decimal: char) -> String {
@@ -1095,6 +1302,46 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
                 assert_eq!(text, "1.23  5.68");
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn num2str_preserves_exact_uint64_across_format_modes() {
+        let scalar = num2str_builtin(Value::Int(IntValue::U64(u64::MAX)), Vec::new())
+            .expect("default integer format");
+        match scalar {
+            Value::CharArray(ca) => {
+                let text: String = ca.data.iter().collect();
+                assert_eq!(text, "1.84467440737096e+19");
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+
+        let fixed = num2str_builtin(
+            Value::Int(IntValue::U64(u64::MAX)),
+            vec![Value::String("%.2f".into())],
+        )
+        .expect("fixed integer format");
+        match fixed {
+            Value::CharArray(ca) => {
+                let text: String = ca.data.iter().collect();
+                assert_eq!(text, format!("{}.00", u64::MAX));
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+
+        let rounded = num2str_builtin(
+            Value::Int(IntValue::U64(u64::MAX)),
+            vec![Value::Int(IntValue::I32(4))],
+        )
+        .expect("precision integer format");
+        match rounded {
+            Value::CharArray(ca) => {
+                let text: String = ca.data.iter().collect();
+                assert_eq!(text, "1.845e+19");
             }
             other => panic!("expected char array, got {other:?}"),
         }

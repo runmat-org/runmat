@@ -1,0 +1,76 @@
+{
+  "title": "isStringScalar",
+  "category": "strings/core",
+  "keywords": [
+    "isStringScalar",
+    "strings",
+    "core",
+    "matlab",
+    "compatibility"
+  ],
+  "summary": "Return true for a scalar MATLAB string.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "not applicable",
+    "notes": "Not eligible for fusion; this builtin materializes host text or logical results."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::compat::tests",
+    "integration": null
+  },
+  "description": "tf = isStringScalar(value) - Return true for a scalar MATLAB string.",
+  "signatures": [
+    {
+      "label": "tf = isStringScalar(value)",
+      "inputs": [
+        {
+          "name": "value",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Input value."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "tf",
+          "ty": "LogicalArray",
+          "arity": "Required",
+          "default": null,
+          "description": "Logical result."
+        }
+      ]
+    }
+  ],
+  "behaviors": [
+    "Return true for a scalar MATLAB string."
+  ],
+  "examples": [
+    "isStringScalar(\"runmat\") returns true."
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/compat.rs"
+  }
+}

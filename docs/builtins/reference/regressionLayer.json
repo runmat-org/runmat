@@ -1,0 +1,23 @@
+{
+  "title": "regressionLayer",
+  "category": "deep_learning",
+  "keywords": ["regressionLayer", "deep learning", "regression"],
+  "summary": "Create a regression output layer compatibility object.",
+  "description": "`regressionLayer` creates metadata for regression-output network definitions.",
+  "behaviors": ["Common output-layer name-value options are preserved as properties."],
+  "examples": [
+    {
+      "description": "Create Regression Output",
+      "input": "layer = regressionLayer('Name', 'regression')",
+      "output": "Regression output layer compatibility object."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "layer = regressionLayer\nlayer = regressionLayer(Name, Value)",
+      "output": "Layer compatibility object."
+    }
+  },
+  "gpu_residency": "Layer construction is host metadata work and has no provider kernel."
+}

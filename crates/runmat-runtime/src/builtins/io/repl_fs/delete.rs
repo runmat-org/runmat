@@ -455,6 +455,7 @@ async fn process_handle_value(
 ) -> BuiltinResult<usize> {
     match value {
         Value::HandleObject(handle) => {
+            let mut method_dispatched = false;
             if let Some((delete_method, _owner)) =
                 runmat_builtins::lookup_method(&handle.class_name, "delete")
             {
@@ -466,6 +467,18 @@ async fn process_handle_value(
                 .await
                 {
                     result?;
+                    method_dispatched = true;
+                } else if runmat_builtins::builtin_function_by_name(&delete_method.function_name)
+                    .is_some()
+                    && delete_method.function_name != "delete"
+                {
+                    crate::call_builtin_async_with_outputs(
+                        &delete_method.function_name,
+                        &[Value::HandleObject(handle.clone())],
+                        0,
+                    )
+                    .await?;
+                    method_dispatched = true;
                 } else {
                     return Err(delete_error_with(
                         &DELETE_ERROR_INVALID_HANDLE,
@@ -475,6 +488,12 @@ async fn process_handle_value(
                         ),
                     ));
                 }
+            }
+            if method_dispatched && !crate::is_handle_valid(handle) {
+                let mut invalid = handle.clone();
+                invalid.valid = false;
+                *mutated_last = Some(Value::HandleObject(invalid));
+                return Ok(1);
             }
             if !crate::set_handle_valid(handle, false) {
                 return Err(delete_error_with(

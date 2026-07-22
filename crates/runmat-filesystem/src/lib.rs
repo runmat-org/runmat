@@ -326,6 +326,17 @@ pub struct SaveFileDialogSelection {
     pub filter_index: Option<usize>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DirectoryDialogRequest {
+    pub title: Option<String>,
+    pub default_path: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DirectoryDialogSelection {
+    pub path: PathBuf,
+}
+
 impl DirEntry {
     pub fn new(path: PathBuf, file_name: OsString, file_type: FsFileType) -> Self {
         Self {
@@ -441,6 +452,13 @@ pub trait FsProvider: Send + Sync + 'static {
         &self,
         _request: &SaveFileDialogRequest,
     ) -> io::Result<Option<SaveFileDialogSelection>> {
+        Ok(None)
+    }
+
+    async fn select_directory(
+        &self,
+        _request: &DirectoryDialogRequest,
+    ) -> io::Result<Option<DirectoryDialogSelection>> {
         Ok(None)
     }
 }
@@ -872,6 +890,17 @@ pub async fn select_file_save_async(
     }
     let provider = current_provider();
     provider.select_file_save(&resolved).await
+}
+
+pub async fn select_directory_async(
+    request: &DirectoryDialogRequest,
+) -> io::Result<Option<DirectoryDialogSelection>> {
+    let mut resolved = request.clone();
+    if let Some(default_path) = resolved.default_path.as_mut() {
+        *default_path = resolve_path(default_path);
+    }
+    let provider = current_provider();
+    provider.select_directory(&resolved).await
 }
 
 pub async fn data_manifest_descriptor_async(
@@ -1625,6 +1654,22 @@ mod tests {
 
         let selection =
             futures::executor::block_on(select_file_save_async(&request)).expect("select file");
+
+        assert_eq!(selection, None);
+    }
+
+    #[test]
+    fn select_directory_defaults_to_cancelled_selection() {
+        let _guard = test_lock();
+        let provider: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
+        let _provider_guard = replace_provider(provider);
+        let request = DirectoryDialogRequest {
+            title: Some("Select folder".to_string()),
+            default_path: Some(PathBuf::from("data")),
+        };
+
+        let selection =
+            futures::executor::block_on(select_directory_async(&request)).expect("select folder");
 
         assert_eq!(selection, None);
     }

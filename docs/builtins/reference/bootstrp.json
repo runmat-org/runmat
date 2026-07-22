@@ -1,0 +1,58 @@
+{
+  "title": "bootstrp",
+  "category": "stats/random",
+  "keywords": ["bootstrp", "bootstrap", "resampling", "statistics", "weights"],
+  "summary": "Bootstrap samples and evaluate a statistic.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host before resampling and callback evaluation."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::random::sampling::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`bootstrp(nboot,bootfun,d)` draws `nboot` bootstrap samples with replacement from `d` and applies `bootfun` to each sample. `bootstrp(nboot,bootfun,d1,...,dN)` resamples rows jointly across nonscalar data arguments while scalar arguments are passed through unchanged. `[bootstat,bootsam] = bootstrp(...)` also returns one-based bootstrap sample indices.",
+  "behaviors": [
+    "Each row of `bootstat` contains one bootstrap replicate. Nonscalar `bootfun` outputs are flattened into one row per replicate.",
+    "A single vector input is sampled along its first nonsingleton dimension; multiple nonscalar inputs are sampled by rows and must have matching row counts.",
+    "`bootfun` can be a function handle, string function name, or empty array. Empty `bootfun` skips callback evaluation and returns an empty `bootstat` with `bootsam` available as the second output.",
+    "`\"Weights\",w` samples rows proportionally to nonnegative weights with at least one positive value.",
+    "`\"Options\",opts` accepts a statset-style options struct for compatibility. Parallel execution options are accepted but currently evaluated serially.",
+    "Numeric, logical, string, char, and cell data arrays are supported for sampling; `bootfun` must return numeric or logical values."
+  ],
+  "examples": [
+    { "description": "Bootstrap a mean", "input": "b = bootstrp(1000, @mean, x)" },
+    {
+      "description": "Return sample indices",
+      "input": "[b,bootsam] = bootstrp(200, @median, x)"
+    },
+    {
+      "description": "Bootstrap a two-input statistic",
+      "input": "b = bootstrp(500, @corr, x, y)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does bootstrp use the global random stream?",
+      "answer": "Yes. It uses RunMat's global random stream, like datasample and randsample."
+    },
+    {
+      "question": "Does bootstrp run callbacks in parallel?",
+      "answer": "No. RunMat accepts the Options name-value for MATLAB compatibility, but callback evaluation is currently serial."
+    }
+  ],
+  "links": [
+    { "label": "datasample", "url": "./datasample" },
+    { "label": "randsample", "url": "./randsample" },
+    { "label": "mean", "url": "./mean" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/random/sampling.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/sampling.rs"
+  }
+}

@@ -21,7 +21,7 @@ fn write_vertex(index: u32, pos: vec3<f32>, color: vec4<f32>) {
   out_vertices[index] = v;
 }
 
-fn include_segment(i:u32, style:u32)->bool { switch(style){ case 0u:{return true;} case 1u:{return (i%4u)<2u;} case 2u:{return (i%4u)==0u;} case 3u:{let m=i%6u; return (m<2u)||(m==3u);} default:{return true;} } }
+fn include_segment(i:u32, style:u32)->bool { switch(style){ case 0u:{return true;} case 1u:{return (i%4u)<2u;} case 2u:{return (i%4u)==0u;} case 3u:{let m=i%6u; return (m<2u)||(m==3u);} case 4u:{return false;} default:{return true;} } }
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -78,7 +78,7 @@ fn write_vertex(index: u32, pos: vec3<f32>, color: vec4<f32>) {
   out_vertices[index] = v;
 }
 
-fn include_segment(i:u32, style:u32)->bool { switch(style){ case 0u:{return true;} case 1u:{return (i%4u)<2u;} case 2u:{return (i%4u)==0u;} case 3u:{let m=i%6u; return (m<2u)||(m==3u);} default:{return true;} } }
+fn include_segment(i:u32, style:u32)->bool { switch(style){ case 0u:{return true;} case 1u:{return (i%4u)<2u;} case 2u:{return (i%4u)==0u;} case 3u:{let m=i%6u; return (m<2u)||(m==3u);} case 4u:{return false;} default:{return true;} } }
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {

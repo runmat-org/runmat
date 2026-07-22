@@ -1,4 +1,6 @@
-use runmat_accelerate_api::HostTensorView;
+use runmat_accelerate_api::{
+    GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderTrapezoidSpacing,
+};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, tensor};
@@ -10,6 +12,28 @@ pub(crate) enum SpacingSpec {
     Scalar(f64),
     Vector(Vec<f64>),
     Tensor(Tensor),
+}
+
+pub(crate) enum GpuIntegrationSpacing {
+    Unit,
+    Scalar(f64),
+    ScalarHandle(GpuTensorHandle),
+    Vector(GpuTensorHandle),
+    Tensor(GpuTensorHandle),
+}
+
+impl GpuIntegrationSpacing {
+    pub(crate) fn as_provider_spacing(&self) -> ProviderTrapezoidSpacing<'_> {
+        match self {
+            GpuIntegrationSpacing::Unit => ProviderTrapezoidSpacing::Unit,
+            GpuIntegrationSpacing::Scalar(value) => ProviderTrapezoidSpacing::Scalar(*value),
+            GpuIntegrationSpacing::ScalarHandle(handle) => {
+                ProviderTrapezoidSpacing::ScalarHandle(handle)
+            }
+            GpuIntegrationSpacing::Vector(handle) => ProviderTrapezoidSpacing::Vector(handle),
+            GpuIntegrationSpacing::Tensor(handle) => ProviderTrapezoidSpacing::Tensor(handle),
+        }
+    }
 }
 
 pub(crate) fn integration_error(name: &str, message: impl Into<String>) -> RuntimeError {
@@ -163,6 +187,90 @@ pub(crate) fn spacing_from_value(
         name,
         format!("{name}: X must be a scalar, vector, or the same size as Y"),
     ))
+}
+
+pub(crate) fn spacing_from_gpu_or_host_value(
+    name: &str,
+    value: Option<Value>,
+    y_shape: &[usize],
+    dim: usize,
+) -> BuiltinResult<GpuIntegrationSpacing> {
+    let Some(value) = value else {
+        return Ok(GpuIntegrationSpacing::Unit);
+    };
+    if is_empty_value(&value) {
+        return Ok(GpuIntegrationSpacing::Unit);
+    }
+
+    if let Value::GpuTensor(handle) = value {
+        if runmat_accelerate_api::handle_storage(&handle) != GpuTensorStorage::Real {
+            return Err(integration_error(
+                name,
+                format!("{name}: spacing must be real-valued"),
+            ));
+        }
+        let padded_y_shape = pad_shape_for_dim(y_shape, dim);
+        let len = tensor::element_count(&handle.shape);
+        if len == 1 {
+            return Ok(GpuIntegrationSpacing::ScalarHandle(handle));
+        }
+        if shapes_equal_with_trailing_ones(&handle.shape, &padded_y_shape) {
+            return Ok(GpuIntegrationSpacing::Tensor(handle));
+        }
+        if is_vector_shape(&handle.shape) {
+            let expected = padded_y_shape[dim - 1];
+            if len != expected {
+                return Err(integration_error(
+                    name,
+                    format!(
+                        "{name}: X must be a scalar, a vector with {} elements, or the same size as Y",
+                        expected
+                    ),
+                ));
+            }
+            return Ok(GpuIntegrationSpacing::Vector(handle));
+        }
+        return Err(integration_error(
+            name,
+            format!("{name}: X must be a scalar, vector, or the same size as Y"),
+        ));
+    }
+
+    match spacing_from_value(name, Some(value), y_shape, dim)? {
+        SpacingSpec::Unit => Ok(GpuIntegrationSpacing::Unit),
+        SpacingSpec::Scalar(value) => Ok(GpuIntegrationSpacing::Scalar(value)),
+        SpacingSpec::Vector(values) => {
+            let Some(provider) = runmat_accelerate_api::provider() else {
+                return Err(integration_error(
+                    name,
+                    format!("{name}: no acceleration provider"),
+                ));
+            };
+            let shape = vec![values.len(), 1];
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &values,
+                    shape: &shape,
+                })
+                .map_err(|err| integration_error(name, format!("{name}: {err}")))?;
+            Ok(GpuIntegrationSpacing::Vector(handle))
+        }
+        SpacingSpec::Tensor(tensor) => {
+            let Some(provider) = runmat_accelerate_api::provider() else {
+                return Err(integration_error(
+                    name,
+                    format!("{name}: no acceleration provider"),
+                ));
+            };
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &tensor.data,
+                    shape: &tensor.shape,
+                })
+                .map_err(|err| integration_error(name, format!("{name}: {err}")))?;
+            Ok(GpuIntegrationSpacing::Tensor(handle))
+        }
+    }
 }
 
 pub(crate) fn interval_width(spacing: &SpacingSpec, idx0: usize, idx1: usize, k: usize) -> f64 {

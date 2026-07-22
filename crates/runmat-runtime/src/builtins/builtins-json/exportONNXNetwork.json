@@ -1,0 +1,54 @@
+{
+  "title": "exportONNXNetwork",
+  "category": "deep_learning",
+  "keywords": ["exportONNXNetwork", "deep learning", "ONNX", "export", "dlnetwork", "SeriesNetwork"],
+  "summary": "Export supported feed-forward deep-learning networks to deterministic ONNX files.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "ONNX export is host graph serialization and file I/O. GPU-resident top-level values are gathered at the builtin boundary; no array provider kernels are applicable to the serializer."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::deep_learning::tests::{export_onnx_network_writes_supported_feedforward_graph,export_onnx_network_rejects_unexportable_forms_deterministically}",
+    "integration": null
+  },
+  "description": "`exportONNXNetwork(net, filename)` serializes RunMat `dlnetwork`, `SeriesNetwork`, and `DAGNetwork` compatibility objects that use the supported sequential feed-forward execution subset.",
+  "behaviors": [
+    "Supported exported layers are `featureInputLayer`, `fullyConnectedLayer`, `reluLayer`, `eluLayer`, `softmaxLayer`, and terminal `classificationLayer` or `regressionLayer` objects.",
+    "`fullyConnectedLayer` is emitted as ONNX `Gemm` with deterministic `Weights` and `Bias` initializers; ReLU, ELU, and Softmax are emitted as ONNX operators.",
+    "The exporter preserves RunMat double precision by writing ONNX DOUBLE tensor initializers and value-info element types.",
+    "`OpsetVersion` supports versions 13 through 20. `BatchSize`, `InputNames`, `OutputNames`, and `Verbose` are accepted when compatible with the single-input/single-output sequential exporter.",
+    "Unsupported layers, multi-input/multi-output naming, malformed learnables, non-terminal output layers, and unsupported options raise deterministic errors rather than writing partial files."
+  ],
+  "examples": [
+    {
+      "description": "Export a supported network",
+      "input": "layers = {featureInputLayer(2, \"Name\", \"features\"), fullyConnectedLayer(2, \"Name\", \"fc\"), softmaxLayer(\"Name\", \"prob\"), classificationLayer(\"Name\", \"class\")};\nnet = dlnetwork(layers);\nexportONNXNetwork(net, \"network.onnx\", \"OpsetVersion\", 14)",
+      "output": "network.onnx is written"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does exportONNXNetwork execute on the GPU?",
+      "answer": "No. It serializes graph metadata and learned parameters to a file; numeric compute kernels are not involved."
+    }
+  ],
+  "links": [
+    {"label": "dlnetwork", "url": "./dlnetwork"},
+    {"label": "fullyConnectedLayer", "url": "./fullyConnectedLayer"},
+    {"label": "softmaxLayer", "url": "./softmaxLayer"}
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/deep_learning/onnx.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/onnx.rs"
+  }
+}

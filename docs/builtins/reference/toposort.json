@@ -1,0 +1,11 @@
+{
+  "title": "toposort",
+  "category": "graph",
+  "keywords": ["toposort", "digraph", "dag"],
+  "summary": "Return a topological ordering for a directed acyclic graph.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`toposort(G)` returns node order for a `digraph` and errors when the graph contains a cycle.",
+  "signatures": [{"label": "order = toposort(G)", "description": "Return topological node order."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

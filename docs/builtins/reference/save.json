@@ -39,7 +39,7 @@
     "`save filename -regexp '^foo' 'bar$'` saves every variable whose name matches any of the supplied regular expressions.",
     "Existing files are overwritten unless `-append` is specified. With `-append`, RunMat reads the existing supported MAT variables, merges in the newly selected variables, and rewrites the file so newer variables replace older variables with the same name.",
     "Numeric/text format flags outside the MAT-file path (for example `-ascii`, `-double`, `-v6`, `-v7.3`) are not supported yet and report descriptive option errors.",
-    "Unsupported types (function handles, objects, opaque graphics handles) raise descriptive errors. Numeric, logical, character, string, cell, scalar struct, and real sparse data are stored using MATLAB Level-5 MAT-file layout.",
+    "Function handles and opaque graphics handles raise descriptive errors. Numeric, logical, character, string, cell, scalar struct, real sparse data, and RunMat objects are stored using MATLAB Level-5 MAT-file layout. Objects are written through `saveobj` when registered and otherwise through an internal scalar-struct object envelope.",
     "`save` returns `0` so scripts can treat it as a statement, matching MATLAB's void behaviour."
   ],
   "examples": [
@@ -91,7 +91,7 @@
     },
     {
       "question": "Are objects or function handles saved?",
-      "answer": "No. RunMat matches MATLAB by raising an error when unsupported types are encountered."
+      "answer": "Objects are supported through RunMat's object serialization envelope and registered `saveobj` hooks. Function handles remain unsupported and raise an error."
     },
     {
       "question": "Does `save` return a value?",
@@ -126,6 +126,10 @@
     {
       "label": "load",
       "url": "./load"
+    },
+    {
+      "label": "saveobj",
+      "url": "./saveobj"
     }
   ],
   "source": {

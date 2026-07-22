@@ -1,0 +1,86 @@
+{
+  "title": "superclasses",
+  "category": "introspection",
+  "keywords": [
+    "superclasses",
+    "classdef",
+    "inheritance",
+    "object",
+    "introspection"
+  ],
+  "summary": "Return visible superclass names for a class or object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Metadata-only class hierarchy query. gpuArray inputs stay resident while RunMat checks host class metadata."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::superclasses::tests",
+    "integration": "crates/runmat-vm/tests/functions.rs::superclasses_script_surface_reports_registered_parent_chain"
+  },
+  "description": "`superclasses(objOrClass)` returns the visible superclass names for a registered class or object as a cell row of character vectors.",
+  "behaviors": [
+    "Class-name character vectors, string scalars, and 1x1 string arrays are interpreted as class names.",
+    "Object and handle-object inputs are resolved through their runtime class names.",
+    "ClassRef inputs query the referenced class.",
+    "gpuArray inputs query the `gpuArray` class metadata without gathering provider buffers.",
+    "Superclass names are returned nearest-parent first, then continuing toward the root.",
+    "Classes with no registered visible superclasses return a 1x0 cell array.",
+    "RunMat currently models a single parent link per class. Multiple inheritance and hidden-superclass filtering are not represented until the broader metadata object model lands.",
+    "Unknown class names raise `RunMat:SuperclassesClassUnknown`; nonobject, nontext inputs raise `RunMat:SuperclassesClassInvalid`."
+  ],
+  "examples": [
+    {
+      "description": "Get superclass names from an object",
+      "input": "obj = Circle();\ns = superclasses(obj)",
+      "output": "s = {'Shape'}"
+    },
+    {
+      "description": "Get superclass names from a class name",
+      "input": "s = superclasses('Circle')",
+      "output": "s = {'Shape'}"
+    },
+    {
+      "description": "Class with no superclass",
+      "input": "s = superclasses('Point')",
+      "output": "s = 1x0 cell array"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `superclasses` return strings?",
+      "answer": "No. MATLAB returns a cell array of character vectors, and RunMat follows that shape."
+    },
+    {
+      "question": "Does it inspect full metadata objects?",
+      "answer": "It uses the current RunMat class registry parent chain. Full `matlab.metadata.Class` object lists and hidden-class filtering are still tracked separately."
+    }
+  ],
+  "links": [
+    {
+      "label": "metaclass",
+      "url": "./metaclass"
+    },
+    {
+      "label": "class",
+      "url": "./class"
+    },
+    {
+      "label": "ismethod",
+      "url": "./ismethod"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/superclasses.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/superclasses.rs"
+  }
+}

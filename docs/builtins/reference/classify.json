@@ -1,0 +1,83 @@
+{
+  "title": "classify",
+  "category": "stats/ml",
+  "keywords": [
+    "classify",
+    "discriminant analysis",
+    "lda",
+    "qda",
+    "classification",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Classify observations using discriminant analysis.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Discriminant model fitting and prediction run on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::classification::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`classify` assigns each row of `sample` to a class learned from rows of `training` and labels in `group` using discriminant analysis.",
+  "behaviors": [
+    "`classify(sample,training,group)` uses linear discriminant analysis with equal class priors.",
+    "`classify(sample,training,group,type)` supports `linear`, `quadratic`, `diagLinear`, `diagQuadratic`, and `mahalanobis` discriminants.",
+    "`classify(sample,training,group,type,prior)` accepts priors as a numeric vector, the string `empirical`, or a struct with `group` and `prob` fields.",
+    "`sample` and `training` must be finite numeric 2-D matrices with the same number of columns; observations are stored in rows.",
+    "`group` can be numeric, logical, string, character-row, or cell-string labels. Missing numeric labels (`NaN`) and empty or `<missing>` text labels are ignored during fitting.",
+    "Predicted labels preserve the input label family: numeric vectors return numeric labels, logical labels return logical arrays, string labels return string arrays, character-row labels return character matrices, and cell-string labels return cell arrays of character vectors.",
+    "With multiple outputs, `[class,err,posterior,logp,coeff]` returns prior-weighted apparent training error, posterior probabilities, unconditional log densities, and a pairwise discriminant coefficient struct array.",
+    "`mahalanobis` classification returns `NaN` posterior and log-density values because it is distance-based rather than prior-probability-based."
+  ],
+  "examples": [
+    {
+      "description": "Classify two samples with linear discriminants",
+      "input": "training = [0; 0.5; 2; 2.5];\ngroup = [1; 1; 2; 2];\n[class,err,posterior] = classify([0.2; 2.2], training, group)",
+      "output": "class is [1; 2], err is 0 for the separable training data, and posterior is a 2-by-2 matrix."
+    },
+    {
+      "description": "Use text labels and an empirical prior",
+      "input": "group = [\"low\"; \"low\"; \"high\"; \"high\"];\nclass = classify([0.1; 3.2], [0; 0.4; 3; 3.4], group, 'quadratic', 'empirical')",
+      "output": "class is a string array containing \"low\" and \"high\"."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `classify` train a reusable model object?",
+      "answer": "No. It performs one-shot discriminant classification from the supplied training data. Use model-fitting helpers such as `fitctree` when a reusable object is needed."
+    },
+    {
+      "question": "Are priors used with the `mahalanobis` type?",
+      "answer": "No. Mahalanobis classification is based on class distance; prior values are parsed for compatibility but do not affect class assignment."
+    }
+  ],
+  "links": [
+    {
+      "label": "fitctree",
+      "url": "./fitctree"
+    },
+    {
+      "label": "predict",
+      "url": "./predict"
+    },
+    {
+      "label": "cvpartition",
+      "url": "./cvpartition"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/classification.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification.rs"
+  }
+}

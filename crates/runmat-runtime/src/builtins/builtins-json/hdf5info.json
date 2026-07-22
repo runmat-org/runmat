@@ -1,0 +1,13 @@
+{
+  "title": "hdf5info",
+  "category": "io/hdf5",
+  "keywords": ["hdf5info", "h5info", "hdf5", "metadata", "legacy"],
+  "summary": "Legacy alias for HDF5 metadata traversal.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Uses the same host HDF5 path as `h5info`."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::io::hdf5::tests", "integration": null},
+  "description": "`hdf5info(filename)` and `hdf5info(filename, location)` delegate to `h5info` for legacy compatibility.",
+  "behaviors": ["Returns the same metadata structure as `h5info`."],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/io/hdf5.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5.rs"}
+}

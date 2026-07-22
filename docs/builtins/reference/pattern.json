@@ -1,0 +1,77 @@
+{
+  "title": "pattern",
+  "category": "strings/pattern",
+  "keywords": [
+    "pattern",
+    "strings",
+    "matlab",
+    "compatibility"
+  ],
+  "summary": "Create a literal string pattern.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "not applicable",
+    "notes": "Not eligible for fusion; this builtin materializes host text or logical results."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::compat::tests",
+    "integration": null
+  },
+  "description": "pat = pattern(text) - Create a literal string pattern.",
+  "signatures": [
+    {
+      "label": "pat = pattern(text)",
+      "inputs": [
+        {
+          "name": "text",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Input text."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Output value."
+        }
+      ]
+    }
+  ],
+  "behaviors": [
+    "Create a literal string pattern.",
+    "Pattern objects are accepted by matches, contains, startsWith, endsWith, erase, replace, and the boundary helpers added in this compatibility group.",
+    "Literal pattern text is escaped before matching."
+  ],
+  "examples": [
+    "pattern(\"run\") creates a literal pattern object for pattern-aware string APIs."
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/compat.rs"
+  }
+}

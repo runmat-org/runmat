@@ -1,0 +1,51 @@
+{
+  "title": "scatterhist",
+  "slug": "scatterhist",
+  "keywords": [
+    "scatterhist",
+    "scatter",
+    "histogram",
+    "marginal",
+    "statistics",
+    "plotting"
+  ],
+  "summary": "Create a scatter plot with marginal histograms.",
+  "description": "`scatterhist(x,y)` creates a scatter plot with marginal distributions for vector inputs `x` and `y`. `scatterhist(x,y,Name,Value)` supports common MATLAB-compatible controls including `NBins`, `Group`, `PlotGroup`, `Kernel`, `Style`, `Bandwidth`, `Legend`, `Location`, `Direction`, `Color`, `Marker`, `MarkerSize`, `LineStyle`, `LineWidth`, and `Parent`. The return value is a three-element axes-handle vector for the scatter axes, x marginal axes, and y marginal axes.",
+  "notes": [
+    "RunMat renders the chart using a 2-by-2 subplot grid. MATLAB's exact linked-axes geometry and UI container positioning are not modeled.",
+    "Default `NBins` values use Scott-rule estimates capped at 100 bins per marginal. Explicit `NBins` entries must be integers from 2 through 250.",
+    "The default `Location` is `southwest`, meaning the marginal histograms are below and left of the scatter axes. `Direction` controls whether marginal counts/densities extend toward (`in`) or away from (`out`) the scatter axes.",
+    "`Group` accepts numeric labels, character matrices, string arrays, cell labels, or categorical labels and renders one scatter/marginal series per group. Legends default on for grouped charts unless `Legend` is set to `off`, and grouped histograms default to stair outlines unless `Style` is set explicitly.",
+    "`Color`, `Marker`, `MarkerSize`, `LineStyle`, `LineWidth`, and `Bandwidth` accept scalar/single-value forms or cyclic per-group forms such as color-character sequences, string/cell style arrays, numeric vectors, and RGB or bandwidth matrices.",
+    "`Kernel` set to `on` renders Gaussian kernel-density marginal lines using Scott bandwidth estimates or `Bandwidth`. `Kernel` set to `overlay` renders both binned counts and kernel lines.",
+    "`Style` supports `bar` and `stairs`. Use `Kernel` to select kernel-density marginal lines or count/kernel overlays. `PlotGroup` set to `off` pools grouped observations for plotting."
+  ],
+  "examples": [
+    {
+      "description": "Create a scatter plot with marginal histograms",
+      "input": "h = scatterhist([0; 0.2; 0.8; 1], [0; 0.1; 0.9; 1], 'NBins', [2 2])",
+      "output": "h is a 3-by-1 vector of axes handles."
+    },
+    {
+      "description": "Group observations and show kernel marginals",
+      "input": "g = [\"a\"; \"b\"; \"a\"; \"b\"];\nh = scatterhist(x, y, 'Group', g, 'Kernel', 'overlay', 'Legend', 'on');",
+      "output": "RunMat renders grouped scatter series with marginal density lines."
+    }
+  ],
+  "errors": [
+    {
+      "identifier": "RunMat:scatterhist:InvalidArgument",
+      "message": "scatterhist: invalid argument"
+    },
+    {
+      "identifier": "RunMat:scatterhist:Internal",
+      "message": "scatterhist: internal error"
+    }
+  ],
+  "links": [
+    {
+      "label": "Source",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/scatterhist.rs"
+    }
+  ]
+}

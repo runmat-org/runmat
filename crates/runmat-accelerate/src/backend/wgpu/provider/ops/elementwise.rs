@@ -12,7 +12,8 @@ use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::resources::UniformBufferKey;
 use crate::backend::wgpu::shaders::elementwise::{
     complex_binary_broadcast_shader, complex_binary_shader, complex_from_real_imag_shader,
-    complex_from_real_shader, complex_unary_shader, ComplexBinaryOp, ComplexUnaryOp,
+    complex_from_real_shader, complex_unary_shader, round_digits_shader, ComplexBinaryOp,
+    ComplexUnaryOp,
 };
 use crate::backend::wgpu::shaders::logical::{
     ELEM_EQ_SHADER_F32, ELEM_EQ_SHADER_F64, ELEM_GE_SHADER_F32, ELEM_GE_SHADER_F64,
@@ -325,6 +326,130 @@ impl WgpuProvider {
         if let Ok(mut map) = self.pow2_of.lock() {
             map.insert(out.buffer_id, a.buffer_id);
         }
+        Ok(out)
+    }
+
+    pub(crate) fn round_digits_exec(
+        &self,
+        a: &GpuTensorHandle,
+        digits: i32,
+        significant: bool,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        let len = entry.len;
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-round-digits-out")?;
+        let input_is_complex = runmat_accelerate_api::handle_storage(a)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
+        if len == 0 {
+            let out = self.register_existing_buffer(out_buffer, entry.shape, entry.len);
+            if input_is_complex {
+                runmat_accelerate_api::set_handle_storage(
+                    &out,
+                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+                );
+            }
+            return Ok(out);
+        }
+        if len > (u32::MAX as usize) {
+            return Err(gpu_dispatch_length_limit_error("round_digits", len));
+        }
+
+        let shader = round_digits_shader(self.precision, significant);
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-round-digits-shader",
+            &shader,
+        );
+        let layout = &self.pipelines.unary.layout;
+        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+            self.device_ref(),
+            "runmat-round-digits-pipeline-layout",
+            layout,
+        );
+        let layout_tag = if significant {
+            "runmat-round-significant"
+        } else {
+            "runmat-round-decimals"
+        };
+        let shader_hash = self.compute_pipeline_hash_bytes(
+            shader.as_bytes(),
+            layout_tag,
+            Some(crate::backend::wgpu::config::effective_workgroup_size()),
+        );
+        let pipeline = self.get_or_create_pipeline(
+            shader_hash,
+            &pipeline_layout,
+            &module,
+            "runmat-round-digits-pipeline",
+            Some(shader.as_bytes()),
+            Some(layout_tag),
+            Some(crate::backend::wgpu::config::effective_workgroup_size()),
+        );
+
+        let params_buffer = Arc::new(self.device_ref().create_buffer(&wgpu::BufferDescriptor {
+            label: Some("runmat-round-digits-params"),
+            size: std::mem::size_of::<crate::backend::wgpu::params::RoundDigitsParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        let bind_group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-round-digits-bind"),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params_buffer.as_ref().as_entire_binding(),
+                    },
+                ],
+            });
+
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let mut offset = 0usize;
+        let start = Instant::now();
+        while offset < len {
+            let chunk_len = (len - offset).min(chunk_capacity);
+            let params = crate::backend::wgpu::params::RoundDigitsParams {
+                len: chunk_len as u32,
+                offset: offset as u32,
+                total: len as u32,
+                digits,
+            };
+            self.queue
+                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                chunk_len as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::elementwise::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline,
+                &bind_group,
+                groups,
+            );
+            offset += chunk_len;
+        }
+
+        let out = self.register_existing_buffer(out_buffer, entry.shape, len);
+        if input_is_complex {
+            runmat_accelerate_api::set_handle_storage(
+                &out,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
+        }
+        self.telemetry
+            .record_fused_elementwise_duration(start.elapsed());
         Ok(out)
     }
 
@@ -1982,6 +2107,137 @@ mod tests {
         }
     }
 
+    fn assert_close(actual: &[f64], expected: &[f64], tol: f64) {
+        assert_eq!(actual.len(), expected.len());
+        for (idx, (&actual, &expected)) in actual.iter().zip(expected.iter()).enumerate() {
+            if expected.is_nan() {
+                assert!(actual.is_nan(), "lane {idx}: expected NaN, got {actual}");
+            } else {
+                assert!(
+                    (actual - expected).abs() <= tol,
+                    "lane {idx}: expected {expected}, got {actual}"
+                );
+            }
+        }
+    }
+
+    fn register_wgpu_provider_for_test(
+    ) -> Option<&'static crate::backend::wgpu::provider::WgpuProvider> {
+        match crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) {
+            Ok(provider) => Some(provider),
+            Err(err) if err.to_string() == "wgpu: no compatible adapter found" => None,
+            Err(err) => panic!("register wgpu provider failed: {err:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_provider_parity_samples_real_unary_and_broadcast_binary_paths() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-8,
+            runmat_accelerate_api::ProviderPrecision::F32 => 2e-4,
+        };
+
+        let unary_input = provider
+            .upload(&HostTensorView {
+                data: &[0.25, 0.5, 1.0, 1.5],
+                shape: &[4, 1],
+            })
+            .expect("upload unary");
+        let erf = provider.unary_erf(&unary_input).await.expect("erf");
+        let gammaln = provider.unary_gammaln(&unary_input).await.expect("gammaln");
+        let realsqrt = provider
+            .unary_sqrt(&unary_input)
+            .await
+            .expect("realsqrt provider sqrt");
+        let erf_host = provider.download(&erf).await.expect("download erf");
+        let gammaln_host = provider.download(&gammaln).await.expect("download gammaln");
+        let realsqrt_host = provider
+            .download(&realsqrt)
+            .await
+            .expect("download realsqrt");
+        for host in [&erf_host, &gammaln_host, &realsqrt_host] {
+            assert_eq!(host.shape, vec![4, 1]);
+            assert_eq!(host.storage, GpuTensorStorage::Real);
+        }
+        assert_close(
+            &erf_host.data,
+            &[
+                libm::erf(0.25),
+                libm::erf(0.5),
+                libm::erf(1.0),
+                libm::erf(1.5),
+            ],
+            tol,
+        );
+        assert_close(
+            &gammaln_host.data,
+            &[
+                libm::lgamma(0.25),
+                libm::lgamma(0.5),
+                libm::lgamma(1.0),
+                libm::lgamma(1.5),
+            ],
+            tol,
+        );
+        assert_close(
+            &realsqrt_host.data,
+            &[0.5, 0.5_f64.sqrt(), 1.0, 1.5_f64.sqrt()],
+            tol,
+        );
+
+        let lhs = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                shape: &[2, 3],
+            })
+            .expect("upload lhs");
+        let rhs = provider
+            .upload(&HostTensorView {
+                data: &[10.0, 20.0, 30.0],
+                shape: &[1, 3],
+            })
+            .expect("upload rhs");
+        let add = provider.elem_add(&lhs, &rhs).await.expect("add");
+        let sub = provider.elem_sub(&lhs, &rhs).await.expect("sub");
+        let mul = provider.elem_mul(&lhs, &rhs).await.expect("mul");
+        let div = provider.elem_div(&lhs, &rhs).await.expect("div");
+        let pow = provider.elem_pow(&lhs, &rhs).await.expect("pow");
+        let add_host = provider.download(&add).await.expect("download add");
+        let sub_host = provider.download(&sub).await.expect("download sub");
+        let mul_host = provider.download(&mul).await.expect("download mul");
+        let div_host = provider.download(&div).await.expect("download div");
+        let pow_host = provider.download(&pow).await.expect("download pow");
+        for host in [&add_host, &sub_host, &mul_host, &div_host, &pow_host] {
+            assert_eq!(host.shape, vec![2, 3]);
+            assert_eq!(host.storage, GpuTensorStorage::Real);
+        }
+        assert_close(&add_host.data, &[11.0, 12.0, 23.0, 24.0, 35.0, 36.0], tol);
+        assert_close(
+            &sub_host.data,
+            &[-9.0, -8.0, -17.0, -16.0, -25.0, -24.0],
+            tol,
+        );
+        assert_close(&mul_host.data, &[10.0, 20.0, 60.0, 80.0, 150.0, 180.0], tol);
+        assert_close(&div_host.data, &[0.1, 0.2, 0.15, 0.2, 5.0 / 30.0, 0.2], tol);
+        assert_close(
+            &pow_host.data,
+            &[
+                1.0_f64.powf(10.0),
+                2.0_f64.powf(10.0),
+                3.0_f64.powf(20.0),
+                4.0_f64.powf(20.0),
+                5.0_f64.powf(30.0),
+                6.0_f64.powf(30.0),
+            ],
+            tol * 1.0e6,
+        );
+    }
+
     fn sin_complex_host(re: f64, im: f64) -> (f64, f64) {
         (re.sin() * im.cosh(), re.cos() * im.sinh())
     }
@@ -1999,12 +2255,110 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wgpu_complex_binary_ops_match_cpu() {
-        crate::backend::wgpu::provider::register_wgpu_provider(
+    async fn wgpu_erfcinv_matches_erfc_inverse() {
+        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        )
-        .expect("register wgpu provider");
-        let provider = runmat_accelerate_api::provider().expect("provider");
+        ) else {
+            return;
+        };
+        let shape = [9, 1];
+        let input = [0.0, 0.25, 0.5, 1.0, 1.5, 1.75, 2.0, -0.1, 2.1];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &input,
+                shape: &shape,
+            })
+            .expect("upload");
+
+        let result = provider.unary_erfcinv(&handle).await.expect("erfcinv");
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&result),
+            GpuTensorStorage::Real
+        );
+        let host = provider.download(&result).await.expect("download erfcinv");
+        assert_eq!(host.shape, shape.to_vec());
+        assert!(host.data[0].is_infinite() && host.data[0].is_sign_positive());
+        assert_eq!(host.data[3], 0.0);
+        assert!(host.data[6].is_infinite() && host.data[6].is_sign_negative());
+        assert!(host.data[7].is_nan());
+        assert!(host.data[8].is_nan());
+
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-8,
+            runmat_accelerate_api::ProviderPrecision::F32 => 2e-4,
+        };
+        for (idx, (&actual, &expected_input)) in
+            host.data[1..6].iter().zip(input[1..6].iter()).enumerate()
+        {
+            let roundtrip = libm::erfc(actual);
+            assert!(
+                (roundtrip - expected_input).abs() <= tol,
+                "lane {}: erfc(erfcinv({expected_input})) = {roundtrip}, value {actual}",
+                idx + 1
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_round_ops_match_cpu() {
+        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let shape = [6, 1];
+        let input = [-2.5, -0.2, 0.5, 1.2345, 149.9, 98765.0];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &input,
+                shape: &shape,
+            })
+            .expect("upload");
+
+        let integer = provider.unary_round(&handle).await.expect("round");
+        let decimals = provider
+            .round_digits(&handle, -2, false)
+            .await
+            .expect("round decimals");
+        let significant = provider
+            .round_digits(&handle, 3, true)
+            .await
+            .expect("round significant");
+
+        let integer_host = provider.download(&integer).await.expect("download integer");
+        let decimals_host = provider
+            .download(&decimals)
+            .await
+            .expect("download decimals");
+        let significant_host = provider
+            .download(&significant)
+            .await
+            .expect("download significant");
+
+        assert_eq!(integer_host.data, vec![-3.0, 0.0, 1.0, 1.0, 150.0, 98765.0]);
+        assert_eq!(
+            decimals_host.data,
+            vec![-0.0, -0.0, 0.0, 0.0, 100.0, 98800.0]
+        );
+        let expected = [-2.5, -0.2, 0.5, 1.23, 150.0, 98800.0];
+        for (idx, (actual, expected)) in significant_host
+            .data
+            .iter()
+            .zip(expected.iter())
+            .enumerate()
+        {
+            assert!(
+                (actual - expected).abs() < 1e-8,
+                "significant lane {idx}: expected {expected}, got {actual}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_complex_binary_ops_match_cpu() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
         let shape = [2, 2];
         let a = complex_pair(
             provider,
@@ -2216,11 +2570,9 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_complex_real_mix_and_scalar_ops_stay_complex() {
-        crate::backend::wgpu::provider::register_wgpu_provider(
-            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        )
-        .expect("register wgpu provider");
-        let provider = runmat_accelerate_api::provider().expect("provider");
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
         let shape = [3, 1];
         let complex = complex_pair(provider, &[1.0, -2.0, 4.0], &[0.5, 3.0, -1.5], &shape).await;
         let real = provider

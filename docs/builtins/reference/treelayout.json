@@ -1,0 +1,11 @@
+{
+  "title": "treelayout",
+  "category": "graph",
+  "keywords": ["treelayout", "tree", "layout", "graph"],
+  "summary": "Compute simple tree-layout coordinates from a parent vector.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`treelayout(parent)` computes deterministic x/y coordinates for a rooted tree encoded by one-based parent ids, with `0` marking roots.",
+  "signatures": [{"label": "[x, y] = treelayout(parent)", "description": "Return row vectors of node coordinates."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

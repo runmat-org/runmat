@@ -1,0 +1,104 @@
+{
+  "title": "full",
+  "category": "array/creation",
+  "keywords": [
+    "full",
+    "sparse",
+    "dense",
+    "matrix",
+    "storage"
+  ],
+  "summary": "Convert sparse matrix storage to full storage.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`full` densifies host sparse matrices. Already-full dense gpuArray handles remain resident because RunMat does not currently expose native sparse GPU storage."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline",
+    "notes": "Storage conversion executes outside numeric fusion."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::full::tests",
+    "integration": "crates/runmat-vm/tests/logic.rs::full_densifies_sparse_storage_through_vm_dispatch"
+  },
+  "description": "`A = full(S)` converts a RunMat sparse double matrix to dense full storage. Inputs that are already full numeric, logical, character, complex, or gpuArray values are returned unchanged.",
+  "behaviors": [
+    "`full(S)` converts `SparseTensor` values to dense double tensors with the same row and column shape.",
+    "Stored sparse values are materialized in column-major order and unstored entries become explicit zeros.",
+    "Empty sparse matrices such as `sparse(m,n)` become dense `m`-by-`n` zero tensors.",
+    "Dense numeric tensors, scalar numeric/logical values, logical arrays, character arrays, complex arrays, and dense `gpuArray` handles pass through unchanged.",
+    "Cells, structs, strings, objects, function handles, symbolic expressions, classes, and exceptions raise `RunMat:full:InvalidInput`."
+  ],
+  "examples": [
+    {
+      "description": "Convert sparse storage to a full matrix",
+      "input": "S = sparse([1; 3; 2], [1; 1; 2], [10; 30; 20], 3, 2);\nA = full(S)",
+      "output": "A = [10 0; 0 20; 30 0]"
+    },
+    {
+      "description": "Empty sparse matrices become dense zeros",
+      "input": "S = sparse(2, 3);\nA = full(S)",
+      "output": "A = [0 0 0; 0 0 0]"
+    },
+    {
+      "description": "Already-full arrays remain full",
+      "input": "A = full([1 0; 0 2])",
+      "output": "A = [1 0; 0 2]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `full` change matrix values?",
+      "answer": "No. It changes sparse storage into dense storage while preserving shape and values. Unstored sparse entries become explicit zeros."
+    },
+    {
+      "question": "Does `full` gather dense gpuArray values?",
+      "answer": "No. Dense gpuArray handles are already full, so RunMat returns the existing GPU handle unchanged."
+    },
+    {
+      "question": "Can `full` create native sparse GPU output?",
+      "answer": "No. RunMat's current sparse matrices are host-resident, and `full` only materializes them as host dense tensors."
+    }
+  ],
+  "links": [
+    {
+      "label": "issparse",
+      "url": "./issparse"
+    },
+    {
+      "label": "nnz",
+      "url": "./nnz"
+    },
+    {
+      "label": "find",
+      "url": "./find"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/full.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/full.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "A = full(S)",
+      "output": "`A` is a full matrix with the same values as `S`."
+    },
+    "points": [
+      "`S` may be a sparse matrix or an already-full matrix value.",
+      "`full` has one input and one output."
+    ]
+  },
+  "gpu_residency": "Already-full GPU tensors remain on the GPU. Sparse host matrices are converted to host dense tensors."
+}

@@ -3,8 +3,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, StructValue, Tensor,
-    Value,
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, StringArray,
+    StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -147,13 +147,13 @@ async fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     Ok(empty_return_value())
 }
 
-fn format_for_disp(value: &Value) -> Vec<String> {
+pub(crate) fn format_for_disp(value: &Value) -> Vec<String> {
     render_value(value, RenderMode::TopLevel)
 }
 
 fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
     match value {
-        Value::Object(obj) if obj.is_class(crate::builtins::table::TABLE_CLASS) => match mode {
+        Value::Object(_) if crate::builtins::table::is_table_value(value) => match mode {
             RenderMode::TopLevel => crate::builtins::table::table_display_text(value)
                 .unwrap_or_else(|_| value.to_string())
                 .lines()
@@ -272,7 +272,7 @@ fn format_numeric_tensor(tensor: &Tensor) -> Vec<String> {
         let rows = shape[0];
         let cols = shape.get(1).copied().unwrap_or(1);
         if tensor.data.len() == 1 {
-            return vec![format_scalar_number(tensor.data[0])];
+            return vec![format_tensor_value(tensor, 0)];
         }
         return format_table(
             rows,
@@ -282,7 +282,7 @@ fn format_numeric_tensor(tensor: &Tensor) -> Vec<String> {
             Align::Right,
             |r, c| {
                 let idx = r + c * rows;
-                format_scalar_number(tensor.data[idx])
+                format_tensor_value(tensor, idx)
             },
         );
     }
@@ -311,7 +311,7 @@ fn format_numeric_tensor_pages(tensor: &Tensor, dims: &[usize]) -> Vec<String> {
             Align::Right,
             |r, c| {
                 let idx = linear_index_with_tail(dims, r, c, &current_tail);
-                format_scalar_number(tensor.data[idx])
+                format_tensor_value(tensor, idx)
             },
         );
         lines.extend(table);
@@ -329,10 +329,34 @@ fn format_numeric_tensor_nested(tensor: &Tensor) -> Vec<String> {
         return vec!["[]".to_string()];
     }
     if tensor.data.len() == 1 {
-        return vec![format_scalar_number(tensor.data[0])];
+        return vec![format_tensor_value(tensor, 0)];
     }
     let shape = canonical_dims(&tensor.shape);
-    vec![format!("[{} double]", dims_to_string(&shape))]
+    let class_name = tensor
+        .integer_storage()
+        .map(IntegerStorage::class_name)
+        .unwrap_or("double");
+    vec![format!("[{} {class_name}]", dims_to_string(&shape))]
+}
+
+fn format_tensor_value(tensor: &Tensor, index: usize) -> String {
+    tensor
+        .integer_storage()
+        .map(|storage| format_integer_storage_value(storage, index))
+        .unwrap_or_else(|| format_scalar_number(tensor.data[index]))
+}
+
+fn format_integer_storage_value(storage: &IntegerStorage, index: usize) -> String {
+    match storage {
+        IntegerStorage::I8(values) => values[index].to_string(),
+        IntegerStorage::I16(values) => values[index].to_string(),
+        IntegerStorage::I32(values) => values[index].to_string(),
+        IntegerStorage::I64(values) => values[index].to_string(),
+        IntegerStorage::U8(values) => values[index].to_string(),
+        IntegerStorage::U16(values) => values[index].to_string(),
+        IntegerStorage::U32(values) => values[index].to_string(),
+        IntegerStorage::U64(values) => values[index].to_string(),
+    }
 }
 
 fn format_complex_tensor(tensor: &ComplexTensor) -> Vec<String> {
@@ -556,11 +580,15 @@ fn summarize_for_cell(value: &Value) -> String {
             if tensor.data.is_empty() {
                 "[]".to_string()
             } else if tensor.data.len() == 1 {
-                format!("[{}]", format_scalar_number(tensor.data[0]))
+                format!("[{}]", format_tensor_value(tensor, 0))
             } else {
+                let class_name = tensor
+                    .integer_storage()
+                    .map(IntegerStorage::class_name)
+                    .unwrap_or("double");
                 format!(
-                    "[{} double]",
-                    dims_to_string(&canonical_dims(&tensor.shape))
+                    "[{} {class_name}]",
+                    dims_to_string(&canonical_dims(&tensor.shape)),
                 )
             }
         }
@@ -781,7 +809,7 @@ fn dims_to_by_string(dims: &[usize]) -> String {
         .join("-by-")
 }
 
-fn empty_return_value() -> Value {
+pub(crate) fn empty_return_value() -> Value {
     Value::Tensor(Tensor::zeros(vec![0, 0]))
 }
 
@@ -933,6 +961,31 @@ pub(crate) mod tests {
     fn integer_64_bit_display() {
         let lines = format_for_disp(&Value::Int(IntValue::U64(u64::MAX)));
         assert_eq!(lines, vec![u64::MAX.to_string()]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn integer_tensor_display_uses_exact_backing_storage() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
+                .expect("integer tensor");
+
+        let lines = format_for_disp(&Value::Tensor(tensor));
+
+        assert_eq!(lines, vec![format!("{}  {}", u64::MAX, 1_u64 << 63)]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn integer_tensor_nested_summary_preserves_class() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2])
+            .expect("integer tensor");
+        let mut fields = StructValue::new();
+        fields.insert("values", Value::Tensor(tensor));
+
+        let lines = render_value(&Value::Struct(fields), RenderMode::TopLevel);
+
+        assert_eq!(lines, vec!["    values: [1x2 int16]".to_string()]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

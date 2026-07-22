@@ -10,13 +10,13 @@ use runmat_macros::runtime_builtin;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::math::reduction::integration_common::{
     canonical_shape_complex, canonical_shape_tensor, default_dimension_from_shape, dim_product,
     gather_host_value, interval_width, is_dimension_candidate, is_scalar_like, pad_shape_for_dim,
-    parse_optional_dim, promote_real_value_to_gpu, spacing_from_value, value_has_gpu_tensor,
-    value_into_complex_tensor, SpacingSpec,
+    parse_optional_dim, promote_real_value_to_gpu, spacing_from_gpu_or_host_value,
+    spacing_from_value, value_has_gpu_tensor, value_into_complex_tensor, SpacingSpec,
 };
 use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -164,14 +164,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("trapezoidal-integral"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[],
+    provider_hooks: &[ProviderHook::Custom("trapz_dim")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "GPU inputs currently gather to the host for trapezoidal integration and re-upload real-valued outputs so downstream code can remain device-resident.",
+    notes: "Real, logical, and complex-interleaved GPU sample inputs route through provider `trapz_dim` for unit, scalar, vector, and tensor real spacing; provider-missing cases fall back to host semantics.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::trapz")]
@@ -223,6 +223,27 @@ fn trapz_internal_error(detail: impl AsRef<str>) -> RuntimeError {
 )]
 async fn trapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let parsed = parse_arguments(first, rest)?;
+    if let Value::GpuTensor(handle) = &parsed.y {
+        if let Some(provider) = runmat_accelerate_api::provider() {
+            let shape = if handle.shape.is_empty() {
+                vec![1, 1]
+            } else {
+                handle.shape.clone()
+            };
+            let dim = parsed
+                .dim
+                .unwrap_or_else(|| default_dimension_from_shape(&shape));
+            let spacing = spacing_from_gpu_or_host_value(NAME, parsed.spacing.clone(), &shape, dim)
+                .map_err(|err| {
+                    trapz_error_with_detail(&TRAPZ_ERROR_INVALID_ARGUMENT, err.message())
+                })?;
+            if let Ok(result) =
+                provider.trapz_dim(handle, dim.saturating_sub(1), spacing.as_provider_spacing())
+            {
+                return Ok(Value::GpuTensor(result));
+            }
+        }
+    }
     let wants_gpu_result = value_has_gpu_tensor(&parsed.y)
         || parsed
             .spacing
@@ -416,6 +437,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LiteralValue};
 
@@ -546,7 +569,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn trapz_gpu_input_reuploads_real_result() {
+    fn trapz_gpu_input_preserves_real_result_residency() {
         test_support::with_test_provider(|provider| {
             let y = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let handle = provider
@@ -563,5 +586,123 @@ pub(crate) mod tests {
             assert_eq!(gathered.shape, vec![1, 1]);
             assert_eq!(gathered.data, vec![4.0]);
         });
+    }
+
+    #[test]
+    fn trapz_complex_gpu_input_preserves_result_residency() {
+        test_support::with_test_provider(|provider| {
+            let y =
+                ComplexTensor::new(vec![(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)], vec![1, 3]).unwrap();
+            let handle = crate::builtins::common::gpu_helpers::upload_complex_tensor(provider, &y)
+                .expect("upload complex");
+            provider.reset_telemetry();
+
+            let result =
+                run_trapz(Value::GpuTensor(handle.clone()), Vec::new()).expect("trapz complex gpu");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected gpu result");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let gathered = block_on(provider.download(&out)).expect("download");
+            assert_eq!(
+                gathered.storage,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.data, vec![4.0, 4.0]);
+            let _ = provider.free(&handle);
+            let _ = provider.free(&out);
+        });
+    }
+
+    #[test]
+    fn trapz_gpu_input_uses_vector_spacing_on_provider() {
+        test_support::with_test_provider(|provider| {
+            let x = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
+            let y = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &y.data,
+                    shape: &y.shape,
+                })
+                .expect("upload y");
+            let result =
+                run_trapz(Value::Tensor(x), vec![Value::GpuTensor(handle)]).expect("trapz gpu");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected gpu result");
+            };
+            let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
+            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.data, vec![3.5]);
+        });
+    }
+
+    #[test]
+    fn trapz_gpu_input_uses_tensor_spacing_on_provider() {
+        test_support::with_test_provider(|provider| {
+            let x = Tensor::new(vec![0.0, 0.0, 1.0, 1.0, 3.0, 3.0], vec![2, 3]).unwrap();
+            let y = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
+            let y_handle = provider
+                .upload(&HostTensorView {
+                    data: &y.data,
+                    shape: &y.shape,
+                })
+                .expect("upload y");
+            let x_handle = provider
+                .upload(&HostTensorView {
+                    data: &x.data,
+                    shape: &x.shape,
+                })
+                .expect("upload x");
+            let result = run_trapz(
+                Value::GpuTensor(x_handle),
+                vec![Value::GpuTensor(y_handle), Value::Int(IntValue::I32(2))],
+            )
+            .expect("trapz gpu");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected gpu result");
+            };
+            let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 1]);
+            assert_eq!(gathered.data, vec![6.5, 15.5]);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn trapz_wgpu_matches_cpu_vector_spacing() {
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        runmat_accelerate_api::set_thread_provider(Some(provider));
+        let x = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
+        let y = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
+        let cpu = run_trapz(Value::Tensor(x.clone()), vec![Value::Tensor(y.clone())]).unwrap();
+        let y_handle = provider
+            .upload(&HostTensorView {
+                data: &y.data,
+                shape: &y.shape,
+            })
+            .unwrap();
+        let gpu = run_trapz(Value::Tensor(x), vec![Value::GpuTensor(y_handle)]).unwrap();
+        let gathered = test_support::gather(gpu).expect("gather gpu");
+        let expected = match cpu {
+            Value::Num(value) => value,
+            other => panic!("unexpected cpu result {other:?}"),
+        };
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
+        assert_eq!(gathered.shape, vec![1, 1]);
+        assert!((gathered.data[0] - expected).abs() < tol);
     }
 }

@@ -1,0 +1,99 @@
+{
+  "title": "underlyingType",
+  "category": "introspection",
+  "keywords": [
+    "underlyingType",
+    "underlying data type",
+    "type inspection",
+    "gpuArray",
+    "class"
+  ],
+  "summary": "Return the underlying MATLAB data type that determines array behavior.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "No GPU kernels run. RunMat inspects gpuArray class-name, logical, and precision metadata without gathering data."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::underlying_type::tests",
+    "integration": "crates/runmat-vm/tests/functions.rs::underlying_type_script_surface"
+  },
+  "description": "`underlyingType(X)` returns the name of the underlying data type that determines how `X` behaves. For most values this matches `class(X)`. For `gpuArray` values, `class(X)` returns `\"gpuArray\"` while `underlyingType(X)` returns the resident element type such as `\"double\"`, `\"single\"`, `\"int32\"`, `\"uint8\"`, or `\"logical\"`.",
+  "behaviors": [
+    "Double scalars, complex values, sparse arrays, and double tensors report `\"double\"`.",
+    "Single-precision tensors report `\"single\"`; integer values report their concrete integer class such as `\"int32\"` or `\"uint16\"`.",
+    "Logical scalars and logical arrays report `\"logical\"`. Character arrays report `\"char\"`, and string scalars or arrays report `\"string\"`.",
+    "Cell arrays, structs, objects, handles, listeners, function handles, and metadata values report the same name as `class` because their behavior is not modeled by a different underlying numeric element type.",
+    "`gpuArray` inputs are metadata-only: RunMat checks handle class-name, logical, and precision metadata and does not copy the device buffer back to the host."
+  ],
+  "examples": [
+    {
+      "description": "Query a scalar double",
+      "input": "t = underlyingType(42)",
+      "output": "t = \"double\""
+    },
+    {
+      "description": "Query a single-precision array",
+      "input": "A = single([1 2 3]);\nt = underlyingType(A)",
+      "output": "t = \"single\""
+    },
+    {
+      "description": "Compare class and underlying type for gpuArray data",
+      "input": "G = gpuArray(single([1 2 3]));\nc = class(G);\nt = underlyingType(G)",
+      "output": "c = \"gpuArray\"\nt = \"single\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `underlyingType` different from `class`?",
+      "answer": "For ordinary RunMat values they usually match. For gpuArray values, `class` reports `\"gpuArray\"` while `underlyingType` reports the underlying element type that controls numeric behavior."
+    },
+    {
+      "question": "Does `underlyingType` gather gpuArray data?",
+      "answer": "No. RunMat reads handle metadata and leaves device buffers resident."
+    },
+    {
+      "question": "What does it return for objects and containers?",
+      "answer": "Objects and containers such as cells and structs return the same name as `class` unless RunMat has a distinct underlying storage type for that value family."
+    }
+  ],
+  "links": [
+    {
+      "label": "class",
+      "url": "./class"
+    },
+    {
+      "label": "isUnderlyingType",
+      "url": "./isUnderlyingType"
+    },
+    {
+      "label": "isa",
+      "url": "./isa"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/underlying_type.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/underlying_type.rs"
+  },
+  "gpu_residency": "`underlyingType` is metadata-only for gpuArray inputs. It does not launch kernels, copy buffers, or change residency.",
+  "gpu_behavior": [
+    "For gpuArray values uploaded through RunMat, exact class-name metadata is preferred so integer device arrays report names such as `\"int32\"` or `\"uint8\"`. If only provider precision is available, F32 maps to `\"single\"` and F64 or unannotated numeric handles map to `\"double\"`."
+  ]
+}

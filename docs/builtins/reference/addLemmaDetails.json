@@ -1,0 +1,93 @@
+{
+  "title": "addLemmaDetails",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "addLemmaDetails",
+    "tokenizedDocument",
+    "text analytics",
+    "lemma",
+    "lemmatization"
+  ],
+  "summary": "Add lemma forms to tokenized documents.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`addLemmaDetails` analyzes host token strings and updates tokenizedDocument metadata; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::lemmas::tests",
+    "integration": null
+  },
+  "description": "`addLemmaDetails(documents)` adds lemma metadata to a RunMat `tokenizedDocument` compatibility object. Use `tokenDetails` to view the resulting `Lemma` column.",
+  "behaviors": [
+    "`documents` must be a RunMat `tokenizedDocument` object.",
+    "`addLemmaDetails(documents,'DiscardKnownValues',tf)` controls whether existing lemma details are preserved or recomputed.",
+    "`DiscardKnownValues` defaults to `false`, so existing known lemma details are preserved while missing or empty entries are filled.",
+    "`DiscardKnownValues`, `true` recomputes every stored lemma.",
+    "For English documents, RunMat applies the same lightweight English lemmatizer used by `normalizeWords(...,'Style','lemma')`, including common irregulars such as `ran` to `run`, plural reduction, and simple verb-suffix normalization.",
+    "Punctuation, numbers, URLs, email addresses, hashtags, mentions, emoji, and other non-word tokens keep their original token text as the lemma.",
+    "If an existing tokenizedDocument object already carries Japanese or Korean language metadata, RunMat preserves token text as the lemma. Public Japanese/Korean tokenizedDocument construction still requires MeCab-compatible tokenization and remains tracked. German documents are rejected because MATLAB `addLemmaDetails` does not document German support."
+  ],
+  "examples": [
+    {
+      "description": "Add Lemma Details",
+      "input": "documents = tokenizedDocument([\"The dogs ran after the cat.\"; \"I am building a house.\"]);\ndocuments = addLemmaDetails(documents);\ntdetails = tokenDetails(documents)",
+      "output": "`tdetails.Lemma` contains values such as `\"dog\"`, `\"run\"`, `\"be\"`, and `\"build\"`."
+    },
+    {
+      "description": "Recompute Lemma Details",
+      "input": "documents = addLemmaDetails(documents, \"DiscardKnownValues\", true)",
+      "output": "`documents` has refreshed lemma details."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `addLemmaDetails` use a full NLP model?",
+      "answer": "No. This compatibility slice uses RunMat's deterministic English lemmatizer and records exact model parity as remaining Text Analytics work."
+    },
+    {
+      "question": "Does `addLemmaDetails` execute on the GPU?",
+      "answer": "No. It updates host tokenizedDocument metadata."
+    }
+  ],
+  "links": [
+    {
+      "label": "tokenDetails",
+      "url": "./tokenDetails"
+    },
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "normalizeWords",
+      "url": "./normalizeWords"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "updatedDocuments = addLemmaDetails(documents)\nupdatedDocuments = addLemmaDetails(documents, 'DiscardKnownValues', tf)",
+      "output": "`updatedDocuments` is a `tokenizedDocument` compatibility object."
+    },
+    "points": [
+      "`documents` must be a RunMat `tokenizedDocument` object.",
+      "`tf` must be a logical scalar or numeric 0/1 scalar.",
+      "Use `tokenDetails(updatedDocuments)` to view the resulting `Lemma` table column."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/lemmas.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/lemmas.rs"
+  },
+  "gpu_residency": "`addLemmaDetails` updates host tokenizedDocument metadata and has no provider kernel."
+}

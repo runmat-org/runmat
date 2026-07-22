@@ -1,0 +1,26 @@
+{
+  "title": "tiedrank",
+  "category": "stats/summary",
+  "keywords": ["tiedrank", "rank", "ties", "statistics"],
+  "summary": "Rank observations using average ranks for ties.",
+  "gpu_support": { "elementwise": false, "reduction": false, "precisions": ["f64"], "broadcasting": "none", "notes": "GPU inputs are gathered to host." },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::order_stats::tests", "integration": null },
+  "description": "`tiedrank(X)` assigns ascending average ranks to numeric observations and preserves the input shape. `[R,tieadj] = tiedrank(X)` also returns tie adjustment terms.",
+  "behaviors": [
+    "Equal values receive the average of their occupied ranks.",
+    "`NaN` inputs remain `NaN` in the output.",
+    "Vector inputs are ranked across all elements.",
+    "Matrix inputs are ranked independently within each column.",
+    "N-dimensional inputs are ranked along the second dimension.",
+    "`tieadj` is a scalar for vector inputs and has the ranked dimension collapsed to length one for array inputs."
+  ],
+  "examples": [{ "description": "Average tied ranks", "input": "r = tiedrank([10 20 20 NaN])" }],
+  "faqs": [{ "question": "How are ties handled?", "answer": "All observations in a tie group receive the average rank for that group. The second output reports the sum of `t^3 - t` terms for tie groups in each ranked slice." }],
+  "links": [{ "label": "corr", "url": "./corr" }, { "label": "sort", "url": "./sort" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/order_stats.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/order_stats.rs"
+  }
+}

@@ -54,7 +54,7 @@ pub(crate) fn block_comment_skip(lex: &mut Lexer<Token>) -> Filter<()> {
         lex.extras.line_start = true;
         lex.extras.last_was_value = false;
     }
-    Filter::Skip
+    Filter::Emit(())
 }
 
 pub(crate) fn line_comment_start(lex: &mut Lexer<Token>) -> Filter<()> {

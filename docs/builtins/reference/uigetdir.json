@@ -1,0 +1,72 @@
+{
+  "title": "uigetdir",
+  "category": "io/repl_fs",
+  "keywords": [
+    "uigetdir",
+    "folder dialog",
+    "directory picker",
+    "filesystem"
+  ],
+  "summary": "Open a host folder-selection dialog and return the selected folder path.",
+  "status": "implemented",
+  "coverage": {
+    "unit": "builtins::io::repl_fs::uigetdir::tests",
+    "integration": "crates/runmat-vm/tests/io_uigetdir.rs"
+  },
+  "description": "`uigetdir` requests a folder selection from the active RunMat filesystem provider and returns MATLAB-compatible output values. Interactive hosts can implement the provider hook to show a native or browser folder picker; noninteractive hosts return the standard cancellation value.",
+  "signatures": [
+    {
+      "label": "folder = uigetdir()",
+      "description": "Open a folder-selection dialog using the provider's default starting folder."
+    },
+    {
+      "label": "folder = uigetdir(startPath)",
+      "description": "Open a folder-selection dialog with an initial folder."
+    },
+    {
+      "label": "folder = uigetdir(startPath, title)",
+      "description": "Open a folder-selection dialog with an initial folder and title."
+    }
+  ],
+  "examples": [
+    {
+      "input": "folder = uigetdir;\nif isequal(folder, 0)\n    return;\nend\nlisting = dir(folder);",
+      "description": "Prompt for a folder and list its contents unless the dialog is cancelled."
+    },
+    {
+      "input": "folder = uigetdir(pwd, 'Select input image folder');",
+      "description": "Use the current folder as the initial location and set a dialog title."
+    }
+  ],
+  "returns": [
+    "`folder` is a character vector containing the selected folder path.",
+    "`folder` is `0` when the user cancels or the active noninteractive provider has no folder picker."
+  ],
+  "notes": [
+    "`uigetdir` does not create, read, or list folders itself; it only returns the selected folder path.",
+    "RunMat validates malformed provider selections and reports deterministic `RunMat:uigetdir:*` errors."
+  ],
+  "errors": [
+    {
+      "identifier": "RunMat:uigetdir:InvalidArgument",
+      "when": "The start path or title is not a scalar text value, or too many input arguments are supplied."
+    },
+    {
+      "identifier": "RunMat:uigetdir:TooManyOutputs",
+      "when": "More than one output argument is requested."
+    },
+    {
+      "identifier": "RunMat:uigetdir:HostError",
+      "when": "The active filesystem provider fails while opening the folder-selection UI."
+    },
+    {
+      "identifier": "RunMat:uigetdir:InvalidSelection",
+      "when": "The active filesystem provider returns an empty or otherwise malformed folder path."
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/uigetdir.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/uigetdir.rs"
+  },
+  "gpu_residency": "No. Folder-selection dialogs are host/UI operations and always execute outside GPU residency. Textual arguments are gathered before provider dispatch."
+}

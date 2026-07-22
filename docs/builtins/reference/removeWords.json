@@ -1,0 +1,110 @@
+{
+  "title": "removeWords",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "removeWords",
+    "tokenizedDocument",
+    "bagOfWords",
+    "text analytics",
+    "filter"
+  ],
+  "summary": "Remove selected words from tokenized documents or bag-of-words models.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`removeWords` filters host text-model objects and does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::documents::tests",
+    "integration": null
+  },
+  "description": "`removeWords(documents, words)` removes selected tokens from RunMat `tokenizedDocument` compatibility objects. `removeWords(bag, words)` removes matching vocabulary columns from RunMat `bagOfWords` objects. `words` can also be numeric 1-based vocabulary indices or a logical mask the same length as the object's vocabulary.",
+  "behaviors": [
+    "`documents` must be a RunMat `tokenizedDocument` object created by `tokenizedDocument`.",
+    "`bag` must be a RunMat `bagOfWords` object created by `bagOfWords`.",
+    "`words` can be a string vector, character vector, or cell array of character vectors. A character vector is treated as one word.",
+    "`idx` can be a numeric vector of positive integer vocabulary positions or a logical array whose length matches the object's `Vocabulary`.",
+    "`removeWords(___, 'IgnoreCase', true)` removes string-selected or index-selected vocabulary words without case sensitivity. The default is case-sensitive.",
+    "For tokenized documents, the result preserves `Shape`, `TokenizeMethod`, and `Language` metadata while recomputing document lengths and vocabulary.",
+    "For bag-of-words models, the result preserves document row count and removes matching count columns."
+  ],
+  "examples": [
+    {
+      "description": "Remove Words From Documents",
+      "input": "documents = tokenizedDocument([\"an example of a short sentence\"; \"a second short sentence\"]);\nnewDocuments = removeWords(documents, [\"short\" \"second\"])",
+      "output": "`newDocuments` contains `an example of a sentence` and `a sentence`."
+    },
+    {
+      "description": "Remove Words By Vocabulary Index",
+      "input": "documents = tokenizedDocument([\"I love MATLAB\"; \"I love MathWorks\"]);\nnewDocuments = removeWords(documents, [1 3])",
+      "output": "`newDocuments` removes the first and third vocabulary entries."
+    },
+    {
+      "description": "Remove Words From A Bag",
+      "input": "documents = tokenizedDocument([\"an example of a short sentence\"; \"a second short sentence\"]);\nbag = bagOfWords(documents);\nnewBag = removeWords(bag, stopWords)",
+      "output": "`newBag` removes count columns for the selected vocabulary words."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is `removeWords` case-sensitive?",
+      "answer": "Yes by default. Use `removeWords(___, 'IgnoreCase', true)` for case-insensitive matching."
+    },
+    {
+      "question": "Does a logical index mask need to match the vocabulary length?",
+      "answer": "Yes. RunMat rejects logical masks whose length differs from the object's vocabulary length."
+    },
+    {
+      "question": "Does `removeWords` execute on the GPU?",
+      "answer": "No. It filters host text/model metadata and has no `runmat-accelerate` provider path."
+    }
+  ],
+  "links": [
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "bagOfWords",
+      "url": "./bagOfWords"
+    },
+    {
+      "label": "stopWords",
+      "url": "./stopWords"
+    },
+    {
+      "label": "removeShortWords",
+      "url": "./removeShortWords"
+    },
+    {
+      "label": "removeLongWords",
+      "url": "./removeLongWords"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "newDocuments = removeWords(documents, words)\nnewBag = removeWords(bag, words)\nnewDocuments = removeWords(___, 'IgnoreCase', true)\nnewDocuments = removeWords(documents, idx)\nnewBag = removeWords(bag, idx)",
+      "output": "`newDocuments` is a `tokenizedDocument` compatibility object. `newBag` is a `bagOfWords` compatibility object."
+    },
+    "points": [
+      "Input objects must be RunMat Text Analytics compatibility objects from this module.",
+      "Numeric indices are 1-based positive integers into the object's vocabulary.",
+      "Logical masks must have the same number of elements as the object's vocabulary."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs"
+  },
+  "gpu_residency": "`removeWords` filters host text/model objects and has no provider kernel."
+}

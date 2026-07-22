@@ -2,6 +2,7 @@
 
 pub(crate) mod brent;
 pub(crate) mod common;
+pub mod coneprog;
 pub mod fminbnd;
 pub mod fminunc;
 pub mod fsolve;
@@ -10,6 +11,7 @@ pub mod integral;
 pub(crate) mod least_squares;
 pub mod linprog;
 pub mod lsqcurvefit;
+pub mod lsqnonlin;
 pub mod optimoptions;
 pub mod optimset;
 pub mod quad;

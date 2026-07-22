@@ -1,0 +1,27 @@
+{
+  "title": "layerGraph",
+  "category": "deep_learning",
+  "keywords": ["layerGraph", "deep learning", "network graph"],
+  "summary": "Create a layer graph compatibility object.",
+  "description": "`layerGraph` creates a host metadata graph object from zero inputs or a layer collection.",
+  "behaviors": [
+    "Accepts zero inputs, a layer object, a cell array of layer objects, or an object list.",
+    "Stores `Layers`, `LayerNames`, and an empty `Connections` structure.",
+    "Connection editing helpers such as `addLayers` and `connectLayers` remain outside this slice."
+  ],
+  "examples": [
+    {
+      "description": "Create Graph From Layers",
+      "input": "layers = {featureInputLayer(4,'Name','in'); fullyConnectedLayer(2,'Name','fc')};\ngraph = layerGraph(layers)",
+      "output": "Layer graph compatibility object."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "graph = layerGraph\ngraph = layerGraph(layers)",
+      "output": "Layer graph compatibility object."
+    }
+  },
+  "gpu_residency": "Layer graph construction is host metadata work and has no provider kernel."
+}

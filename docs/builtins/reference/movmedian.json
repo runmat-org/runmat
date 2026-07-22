@@ -1,0 +1,65 @@
+{
+  "title": "movmedian",
+  "category": "math/reduction",
+  "keywords": [
+    "movmedian",
+    "moving",
+    "window",
+    "median",
+    "omitnan"
+  ],
+  "summary": "Compute moving medians in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Real dense gpuArray inputs use the provider moving-window order-statistics hook for count-window `movmedian` forms, preserving residency for shrink, discard, fill, includenan, and omitnan cases. The WGPU provider uses a native rank-selection kernel for windows up to 256 elements; larger windows, SamplePoints, and complex inputs use the host MATLAB-compatible fallback because they require scalable order-statistics kernels, irregular window membership, or complex magnitude/phase ordering."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::moving::tests",
+    "integration": null
+  },
+  "description": "`movmedian(A,k)` returns the median value in each sliding window.",
+  "behaviors": [
+    "`k` may be a positive scalar window length or a two-element `[kb kf]` backward/forward window.",
+    "Pass an explicit `dim` to move along a chosen dimension.",
+    "`'includenan'` is the default; `'omitnan'` and `'omitmissing'` skip NaN values inside each window.",
+    "`'Endpoints'` supports `'shrink'` (default), `'discard'`, `'fill'`, and numeric scalar fill values.",
+    "`'SamplePoints', sp` uses a strictly increasing numeric point vector for irregular moving windows. With sample points, RunMat currently supports shrink endpoints.",
+    "For even window counts, the median is the average of the two middle values. Complex inputs are ordered by magnitude with phase as the tie breaker.",
+    "This implementation covers numeric, logical, complex, and gpuArray inputs; table/timetable `DataVariables` forms are tracked separately."
+  ],
+  "gpu_residency": "Count-window real dense gpuArray inputs dispatch through `runmat-accelerate` provider kernels and return a resident gpuArray result when the active provider accepts the request. The simple provider mirrors the same semantics for parity tests, and the WGPU provider runs a native rank-selection shader for each output window up to 256 elements. Unsupported provider forms gather once, run the host reference implementation, and re-upload the result when a provider is active.",
+  "examples": [
+    {
+      "description": "Moving median with an even window",
+      "input": "M = movmedian([1 10 3 8], 2)",
+      "output": "M = [1 5.5 6.5 5.5]"
+    }
+  ],
+  "links": [
+    {
+      "label": "median",
+      "url": "./median"
+    },
+    {
+      "label": "movmean",
+      "url": "./movmean"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/moving.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/moving.rs"
+  }
+}

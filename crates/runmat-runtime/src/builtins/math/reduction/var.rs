@@ -283,7 +283,7 @@ enum NormParse {
     descriptor(crate::builtins::math::reduction::var::VAR_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::var"
 )]
-async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => var_gpu(handle, &parsed).await,

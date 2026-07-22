@@ -40,6 +40,7 @@ fn should_draw(segment: u32, style: u32) -> bool {
             let m = segment % 6u;
             return (m < 2u) || (m == 3u); // DashDot: on,on,off,on,off,off
         }
+        case 4u: { return false; } // None: markers only
         default: { return true; }
     }
 }
@@ -174,6 +175,7 @@ fn should_draw(segment: u32, style: u32) -> bool {
             let m = segment % 6u;
             return (m < 2u) || (m == 3u);
         }
+        case 4u: { return false; } // None: markers only
         default: { return true; }
     }
 }

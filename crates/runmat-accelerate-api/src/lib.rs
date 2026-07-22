@@ -31,6 +31,8 @@ static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<u64, TransposeInfo>>> =
 
 static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<u64, ProviderPrecision>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static HANDLE_CLASS_NAMES: Lazy<RwLock<HashMap<u64, String>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 static HANDLE_STORAGES: Lazy<RwLock<HashMap<u64, GpuTensorStorage>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
@@ -134,6 +136,32 @@ pub fn clear_handle_precision(handle: &GpuTensorHandle) {
     }
 }
 
+/// Record the MATLAB underlying class associated with a GPU tensor handle.
+///
+/// Precision alone cannot represent integer gpuArray classes, so runtime
+/// introspection and validation use this metadata when the upload path knows
+/// the exact requested or inferred class.
+pub fn set_handle_class_name(handle: &GpuTensorHandle, class_name: impl Into<String>) {
+    if let Ok(mut guard) = HANDLE_CLASS_NAMES.write() {
+        guard.insert(handle.buffer_id, class_name.into());
+    }
+}
+
+/// Look up the recorded MATLAB underlying class for a GPU tensor handle.
+pub fn handle_class_name(handle: &GpuTensorHandle) -> Option<String> {
+    HANDLE_CLASS_NAMES
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&handle.buffer_id).cloned())
+}
+
+/// Clear any recorded MATLAB underlying class metadata for a GPU tensor handle.
+pub fn clear_handle_class_name(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = HANDLE_CLASS_NAMES.write() {
+        guard.remove(&handle.buffer_id);
+    }
+}
+
 /// Annotate a GPU tensor handle as logically-typed (`logical` in MATLAB terms)
 /// or clear the logical flag when `logical` is `false`.
 pub fn set_handle_logical(handle: &GpuTensorHandle, logical: bool) {
@@ -201,7 +229,7 @@ pub fn handle_is_transposed(handle: &GpuTensorHandle) -> bool {
     handle_transpose_info(handle).is_some()
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GpuTensorStorage {
     Real,
     ComplexInterleaved,
@@ -709,6 +737,35 @@ pub enum ProviderNormOrder {
     P(f64),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderInterp1Method {
+    Linear,
+    Nearest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderInterp1Extrapolation {
+    Nan,
+    Extrapolate,
+    Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderInterp1Request<'a> {
+    /// Strictly increasing, finite sample coordinates validated by the runtime
+    /// before dispatch. Providers may assume this monotonic domain invariant.
+    pub x: &'a GpuTensorHandle,
+    pub y: &'a GpuTensorHandle,
+    pub xq: &'a GpuTensorHandle,
+    pub sample_len: usize,
+    pub series_count: usize,
+    pub query_len: usize,
+    pub output_shape: &'a [usize],
+    pub method: ProviderInterp1Method,
+    pub extrapolation: ProviderInterp1Extrapolation,
+    pub extrapolation_value: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderEigResult {
     pub eigenvalues: GpuTensorHandle,
@@ -893,11 +950,103 @@ pub enum ProviderNanMode {
     Omit,
 }
 
+/// Moving-window reduction operation executed by acceleration providers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderMovingWindowOp {
+    Sum,
+    Mean,
+    Prod,
+    Min,
+    Max,
+    Median,
+    Std,
+    Var,
+}
+
+/// Endpoint handling for provider-backed moving-window reductions.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ProviderMovingWindowEndpoints {
+    Shrink,
+    Discard,
+    Fill(f64),
+}
+
+/// Request for provider-backed count-window moving reductions.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderMovingWindowRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    pub output_shape: &'a [usize],
+    /// Zero-based dimension along which the moving window is applied.
+    pub dim: usize,
+    pub before: usize,
+    pub after: usize,
+    pub op: ProviderMovingWindowOp,
+    pub endpoints: ProviderMovingWindowEndpoints,
+    pub nan_mode: ProviderNanMode,
+    pub normalization: ProviderStdNormalization,
+}
+
+/// Dimension selection for provider-backed `mode` reductions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderModeAxes {
+    /// First non-singleton dimension selected by MATLAB default rules.
+    Default,
+    /// Zero-based dimension supplied by `mode(A, dim)`.
+    Dim(usize),
+    /// Collapse every element, as in `mode(A, "all")`.
+    All,
+}
+
+/// Request for provider-backed modal reductions.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderModeRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    pub axes: ProviderModeAxes,
+    pub want_frequency: bool,
+    pub want_ties: bool,
+}
+
+/// Sorted tied modal values for each output slice.
+///
+/// `values` stores all tied values for all slices in ascending per-slice order.
+/// `offsets` and `counts` are one entry per output slice and describe the
+/// slice-local range inside `values`. Runtime callers convert this ragged
+/// representation into MATLAB cell output `C`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderModeTiedSets {
+    pub values: HostTensorOwned,
+    pub offsets: Vec<usize>,
+    pub counts: Vec<usize>,
+}
+
+/// Result of a provider-backed `mode` reduction.
+///
+/// `values` is the MATLAB `M` output and stays resident. `frequencies`, when
+/// requested, is the MATLAB `F` output and stays resident. `ties`, when
+/// requested, carries the MATLAB `C` tied-set data in a host ragged form because
+/// the public runtime value is a cell array.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderModeResult {
+    pub values: GpuTensorHandle,
+    pub frequencies: Option<GpuTensorHandle>,
+    pub ties: Option<ProviderModeTiedSets>,
+}
+
 /// Direction used when computing prefix sums on the device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderScanDirection {
     Forward,
     Reverse,
+}
+
+/// Spacing input for provider-backed trapezoidal integration.
+#[derive(Debug, Clone, Copy)]
+pub enum ProviderTrapezoidSpacing<'a> {
+    Unit,
+    Scalar(f64),
+    ScalarHandle(&'a GpuTensorHandle),
+    Vector(&'a GpuTensorHandle),
+    Tensor(&'a GpuTensorHandle),
 }
 
 /// Sort direction used by acceleration providers.
@@ -1133,6 +1282,11 @@ pub struct ProviderIirFilterOptions {
     pub dim: usize,
     /// Optional initial conditions (state vector) residing on the device.
     pub zi: Option<GpuTensorHandle>,
+    /// Caller has already validated that `a` is the scalar denominator `[1]`.
+    ///
+    /// Providers may use this FIR-only path to avoid reading coefficient buffers
+    /// back to the host for normalization.
+    pub unit_denominator: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1244,8 +1398,12 @@ pub trait AccelProvider: Send + Sync {
         None
     }
 
-    /// Gather elements from `source` at the provided zero-based linear `indices`, materialising
-    /// a dense tensor with the specified `output_shape`.
+    /// Gather logical elements from `source` at the provided zero-based linear `indices`,
+    /// materialising a dense tensor with the specified `output_shape`.
+    ///
+    /// Indices address MATLAB logical elements, not raw provider storage lanes. Providers that
+    /// store complex values as interleaved lanes must copy both lanes for each selected element
+    /// and preserve the source storage kind on the output handle.
     fn gather_linear(
         &self,
         _source: &GpuTensorHandle,
@@ -1255,9 +1413,12 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!("gather_linear not supported by provider"))
     }
 
-    /// Scatter the contents of `values` into `target` at the provided zero-based linear `indices`.
+    /// Scatter logical elements from `values` into `target` at the provided zero-based linear
+    /// `indices`.
     ///
-    /// The provider must ensure `values.len() == indices.len()` and update `target` in place.
+    /// Indices address MATLAB logical elements, not raw provider storage lanes. Providers must
+    /// ensure `values` has one logical element per index, copy all lanes for the handle storage
+    /// kind, and update `target` in place without changing its shape or storage.
     fn scatter_linear(
         &self,
         _target: &GpuTensorHandle,
@@ -1290,6 +1451,25 @@ pub trait AccelProvider: Send + Sync {
     /// Allocate a zero-initialised tensor with the provided shape on the device.
     fn zeros(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("zeros not supported by provider"))
+    }
+
+    /// Allocate a zero-initialised tensor with the provided shape and storage layout.
+    ///
+    /// `shape` is the logical MATLAB shape. Providers must allocate enough raw lanes for the
+    /// requested storage kind, e.g. two interleaved numeric lanes per logical element for complex
+    /// tensors.
+    fn zeros_with_storage(
+        &self,
+        shape: &[usize],
+        storage: GpuTensorStorage,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        if storage == GpuTensorStorage::Real {
+            self.zeros(shape)
+        } else {
+            Err(anyhow::anyhow!(
+                "zeros_with_storage not supported by provider for {storage:?}"
+            ))
+        }
     }
 
     /// Allocate a one-initialised tensor with the provided shape on the device.
@@ -1367,6 +1547,39 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!("meshgrid not supported by provider"))
     }
 
+    /// Construct MATLAB-style N-D coordinate grids from resident GPU axis vectors.
+    fn ndgrid(&self, _request: &ProviderNdgridRequest<'_>) -> anyhow::Result<ProviderNdgridResult> {
+        Err(anyhow::anyhow!("ndgrid not supported by provider"))
+    }
+
+    /// Compute vectorized Black-Scholes European call and put prices on resident GPU inputs.
+    fn black_scholes_price(
+        &self,
+        _request: &ProviderBlackScholesPriceRequest<'_>,
+    ) -> anyhow::Result<ProviderBlackScholesPriceResult> {
+        Err(anyhow::anyhow!(
+            "black_scholes_price not supported by provider"
+        ))
+    }
+
+    /// Apply the Adam optimizer update to resident parameter and state tensors.
+    fn adam_update(
+        &self,
+        _request: &ProviderAdamUpdateRequest<'_>,
+    ) -> anyhow::Result<ProviderAdamUpdateResult> {
+        Err(anyhow::anyhow!("adam_update not supported by provider"))
+    }
+
+    /// Compute per-element cross-entropy loss terms for resident prediction and target tensors.
+    fn crossentropy_terms(
+        &self,
+        _request: &ProviderCrossentropyRequest<'_>,
+    ) -> anyhow::Result<ProviderCrossentropyResult> {
+        Err(anyhow::anyhow!(
+            "crossentropy_terms not supported by provider"
+        ))
+    }
+
     /// Construct a diagonal matrix from a vector-like tensor. `offset` matches MATLAB semantics.
     fn diag_from_vector(
         &self,
@@ -1375,6 +1588,21 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!(
             "diag_from_vector not supported by provider"
+        ))
+    }
+
+    /// Construct a diagonal matrix with an explicit shape from a vector-like tensor.
+    /// `offset` matches MATLAB semantics; values that do not fit inside the requested
+    /// rectangle are ignored.
+    fn diag_from_vector_sized(
+        &self,
+        _vector: &GpuTensorHandle,
+        _offset: isize,
+        _rows: usize,
+        _cols: usize,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "diag_from_vector_sized not supported by provider"
         ))
     }
 
@@ -1629,6 +1857,16 @@ pub trait AccelProvider: Send + Sync {
         unsupported_future("corrcoef not supported by provider")
     }
 
+    /// Convert a resident covariance matrix into correlation and sigma outputs.
+    fn covariance_to_correlation(
+        &self,
+        _matrix: &GpuTensorHandle,
+    ) -> anyhow::Result<ProviderCovarianceToCorrelationResult> {
+        Err(anyhow::anyhow!(
+            "covariance_to_correlation not supported by provider"
+        ))
+    }
+
     // Optional operator hooks (default to unsupported)
     fn linspace(&self, _start: f64, _stop: f64, _count: usize) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("linspace not supported by provider"))
@@ -1838,6 +2076,24 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("unary_gamma not supported by provider")
     }
+    fn unary_gammaln<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_gammaln not supported by provider")
+    }
+    fn unary_erf<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_erf not supported by provider")
+    }
+    fn unary_erfcinv<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_erfcinv not supported by provider")
+    }
     fn unary_factorial<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
@@ -1921,6 +2177,14 @@ pub trait AccelProvider: Send + Sync {
         _a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("unary_round not supported by provider")
+    }
+    fn round_digits<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _digits: i32,
+        _significant: bool,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("round_digits not supported by provider")
     }
     fn unary_fix<'a>(
         &'a self,
@@ -2175,6 +2439,12 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { Err(anyhow::anyhow!("norm not supported by provider")) })
     }
+    fn interp1<'a>(
+        &'a self,
+        _request: &'a ProviderInterp1Request<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("interp1 not supported by provider")
+    }
     fn rank<'a>(
         &'a self,
         _matrix: &'a GpuTensorHandle,
@@ -2322,6 +2592,16 @@ pub trait AccelProvider: Send + Sync {
         _spacing: f64,
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("gradient_dim not supported by provider"))
+    }
+    fn gradient_dim_with_coordinates(
+        &self,
+        _handle: &GpuTensorHandle,
+        _dim: usize,
+        _coordinates: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "gradient_dim_with_coordinates not supported by provider"
+        ))
     }
     /// Perform an in-place FFT along a zero-based dimension, optionally padding/truncating to `len`.
     fn fft_dim<'a>(
@@ -2547,6 +2827,18 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("reduce_median_dim not supported by provider")
     }
+    fn mode_values<'a>(
+        &'a self,
+        _request: &'a ProviderModeRequest<'a>,
+    ) -> AccelProviderFuture<'a, ProviderModeResult> {
+        unsupported_future("mode_values not supported by provider")
+    }
+    fn moving_window<'a>(
+        &'a self,
+        _request: &'a ProviderMovingWindowRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("moving_window not supported by provider")
+    }
     fn reduce_min<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
@@ -2581,6 +2873,22 @@ pub trait AccelProvider: Send + Sync {
         _nan_mode: ProviderNanMode,
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("cumsum_scan not supported by provider"))
+    }
+    fn trapz_dim(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("trapz_dim not supported by provider"))
+    }
+    fn cumtrapz_dim(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("cumtrapz_dim not supported by provider"))
     }
     fn cumprod_scan(
         &self,
@@ -3049,6 +3357,106 @@ pub struct MeshgridAxisView<'a> {
 #[derive(Debug, Clone)]
 pub struct ProviderMeshgridResult {
     pub outputs: Vec<GpuTensorHandle>,
+}
+
+/// Single resident GPU axis supplied to provider-side `ndgrid`.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderNdgridAxis<'a> {
+    pub handle: &'a GpuTensorHandle,
+}
+
+/// Provider-side `ndgrid` request. `output_shape` is already MATLAB-normalized
+/// by the runtime, including the single-axis `[n, 1]` case.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderNdgridRequest<'a> {
+    pub axes: &'a [ProviderNdgridAxis<'a>],
+    pub output_shape: &'a [usize],
+    pub output_count: usize,
+}
+
+/// Provider-side ndgrid result containing coordinate tensor handles.
+#[derive(Debug, Clone)]
+pub struct ProviderNdgridResult {
+    pub outputs: Vec<GpuTensorHandle>,
+}
+
+/// Single broadcastable resident GPU input supplied to provider-side Black-Scholes pricing.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderBlackScholesPriceInput<'a> {
+    pub handle: &'a GpuTensorHandle,
+    /// Input shape aligned to `output_shape` rank using MATLAB implicit-expansion rules.
+    pub shape: &'a [usize],
+    /// Column-major strides for `shape`.
+    pub strides: &'a [usize],
+}
+
+/// Provider-side Black-Scholes price request. Inputs are ordered as
+/// Price, Strike, Rate, Time, Volatility, Yield.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderBlackScholesPriceRequest<'a> {
+    pub inputs: &'a [ProviderBlackScholesPriceInput<'a>],
+    pub output_shape: &'a [usize],
+    pub len: usize,
+}
+
+/// Provider-side Black-Scholes price result containing call and put handles.
+#[derive(Debug, Clone)]
+pub struct ProviderBlackScholesPriceResult {
+    pub call: GpuTensorHandle,
+    pub put: GpuTensorHandle,
+}
+
+/// Provider-side covariance-to-correlation result containing the correlation
+/// matrix and column-vector standard deviations.
+#[derive(Debug, Clone)]
+pub struct ProviderCovarianceToCorrelationResult {
+    pub correlation: GpuTensorHandle,
+    pub sigma: GpuTensorHandle,
+}
+
+/// Provider-side Adam optimizer update request.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderAdamUpdateRequest<'a> {
+    pub parameters: &'a GpuTensorHandle,
+    pub gradient: &'a GpuTensorHandle,
+    pub average_grad: Option<&'a GpuTensorHandle>,
+    pub average_sq_grad: Option<&'a GpuTensorHandle>,
+    pub iteration: usize,
+    pub learn_rate: f64,
+    pub gradient_decay_factor: f64,
+    pub squared_gradient_decay_factor: f64,
+    pub epsilon: f64,
+}
+
+/// Provider-side Adam optimizer update result.
+#[derive(Debug, Clone)]
+pub struct ProviderAdamUpdateResult {
+    pub parameters: GpuTensorHandle,
+    pub average_grad: GpuTensorHandle,
+    pub average_sq_grad: GpuTensorHandle,
+}
+
+/// Provider-side cross-entropy mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderCrossentropyMode {
+    SingleLabel,
+    MultiLabel,
+}
+
+/// Provider-side cross-entropy request.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderCrossentropyRequest<'a> {
+    pub predictions: &'a GpuTensorHandle,
+    pub targets: &'a GpuTensorHandle,
+    pub weights: Option<&'a GpuTensorHandle>,
+    pub mask: Option<&'a GpuTensorHandle>,
+    pub mode: ProviderCrossentropyMode,
+}
+
+/// Provider-side cross-entropy result containing per-element loss terms.
+#[derive(Debug, Clone)]
+pub struct ProviderCrossentropyResult {
+    pub losses: GpuTensorHandle,
 }
 
 /// Descriptor for GEMM epilogues applied to `C = A * B` before storing to `C`.

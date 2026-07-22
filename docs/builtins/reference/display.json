@@ -1,0 +1,102 @@
+{
+  "title": "display",
+  "category": "io",
+  "keywords": [
+    "display",
+    "disp",
+    "object display",
+    "command window",
+    "print"
+  ],
+  "summary": "Display a value with a MATLAB-style variable-name header.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`display` is a side-effecting output sink. GPU-resident inputs are gathered to host memory before formatting, matching `disp`."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::display::tests",
+    "vm": "crates/runmat-vm/tests/functions.rs"
+  },
+  "description": "`display(X)` prints a MATLAB-style display block for `X`. When the callsite argument is a simple variable name, RunMat uses that name as the header. Expression and literal arguments use `ans` as the header. For classdef objects that define or inherit a registered `display` method, RunMat dispatches the object method first; otherwise it falls back to the generic formatter shared with `disp`.",
+  "behaviors": [
+    "`display(X)` prints `X = ...` for simple variable arguments.",
+    "`display(expr)` prints `ans = ...` when the argument text is an expression, literal, or otherwise unavailable.",
+    "Single-line values are printed on the same line as the header.",
+    "Multi-line values such as matrices, structs, tables, datetime arrays, duration arrays, and N-D pages are printed below the header.",
+    "Objects and handle objects with a registered or inherited `display` method are dispatched through the class method surface before generic formatting.",
+    "`display` returns an empty numeric matrix placeholder internally and suppresses automatic output."
+  ],
+  "limitations": [
+    "RunMat does not yet implement the full `matlab.mixin.CustomDisplay` override protocol. Class-specific output currently requires a registered or inherited `display` method.",
+    "Object-array display customization remains bounded by RunMat's current object-array and classdef infrastructure.",
+    "The generic fallback formatter is the same host-side formatter used by `disp`; unsupported object families fall back to their runtime summary string."
+  ],
+  "examples": [
+    {
+      "description": "Display a named variable",
+      "input": "A = [1 2; 3 4];\ndisplay(A)",
+      "output": "A =\n     1       2\n     3       4"
+    },
+    {
+      "description": "Display an expression",
+      "input": "display(1 + 2)",
+      "output": "ans = 3"
+    },
+    {
+      "description": "Display a string",
+      "input": "msg = \"ready\";\ndisplay(msg)",
+      "output": "msg = ready"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `display` different from `disp`?",
+      "answer": "`disp(X)` prints only the value. `display(X)` prints a variable-name header such as `X =` before the value."
+    },
+    {
+      "question": "Does `display` support class-specific output?",
+      "answer": "Yes for classes with a registered `display` method. The full `matlab.mixin.CustomDisplay` protocol is not yet modeled."
+    },
+    {
+      "question": "Does `display` gather GPU arrays?",
+      "answer": "Yes. Like `disp`, `display` formats on the CPU and gathers provider-resident data through the active acceleration provider."
+    }
+  ],
+  "links": [
+    {
+      "label": "disp",
+      "url": "./disp"
+    },
+    {
+      "label": "inputname",
+      "url": "./inputname"
+    },
+    {
+      "label": "class",
+      "url": "./class"
+    },
+    {
+      "label": "ismethod",
+      "url": "./ismethod"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/display.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/display.rs"
+  },
+  "gpu_residency": "`display` is a sink. Provider-resident inputs are gathered to host memory for formatting and the returned placeholder is host-side.",
+  "gpu_behavior": [
+    "`display` performs no provider kernel dispatch and is excluded from fusion planning.",
+    "Gather behavior is inherited from the same runtime gather path used by `disp`."
+  ]
+}

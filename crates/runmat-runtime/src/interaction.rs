@@ -185,14 +185,22 @@ pub fn default_read_line(prompt: &str, echo: bool) -> Result<String, String> {
         }
         let mut line = String::new();
         let stdin = io::stdin();
-        stdin
+        let bytes_read = stdin
             .read_line(&mut line)
             .map_err(|err| format!("input: failed to read from stdin ({err})"))?;
-        if !echo {
-            // When echo is disabled we still read the full line; no additional handling needed.
-        }
-        Ok(line.trim_end_matches(&['\r', '\n'][..]).to_string())
+        normalize_line_read(line, bytes_read, echo)
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn normalize_line_read(line: String, bytes_read: usize, echo: bool) -> Result<String, String> {
+    if bytes_read == 0 {
+        return Err("input: stdin reached EOF before input was available".to_string());
+    }
+    if !echo {
+        // When echo is disabled we still read the full line; no additional handling needed.
+    }
+    Ok(line.trim_end_matches(&['\r', '\n'][..]).to_string())
 }
 
 pub fn default_wait_for_key(prompt: &str) -> Result<(), String> {
@@ -278,4 +286,21 @@ pub fn replace_eval_hook(hook: Option<Arc<EvalHookFn>>) -> EvalHookGuard {
 /// Return the currently installed eval hook, if any.
 pub fn current_eval_hook() -> Option<Arc<EvalHookFn>> {
     eval_hook_slot().read().ok().and_then(|slot| slot.clone())
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eof_line_read_is_interaction_error() {
+        let err = normalize_line_read(String::new(), 0, true).expect_err("EOF should fail");
+        assert!(err.contains("stdin reached EOF"));
+    }
+
+    #[test]
+    fn blank_line_with_bytes_is_valid_empty_response() {
+        let line = normalize_line_read("\n".to_string(), 1, true).expect("blank line");
+        assert_eq!(line, "");
+    }
 }

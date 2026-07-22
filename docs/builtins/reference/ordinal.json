@@ -1,0 +1,56 @@
+{
+  "title": "ordinal",
+  "category": "table",
+  "keywords": ["ordinal", "categorical", "categories", "statistics"],
+  "summary": "Create an ordinal categorical array object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Ordinal categorical arrays are host metadata objects."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::table::tests::ordinal_constructor_sets_ordered_categorical_semantics",
+    "integration": "crates/runmat-vm/tests/tables_timetables.rs"
+  },
+  "description": "`ordinal(A)` creates a categorical object whose categories are ordered. It is a compatibility constructor equivalent to `categorical(..., 'Ordinal', true)`.",
+  "behaviors": [
+    "String, char, cellstr, numeric, and logical inputs are accepted through the same label conversion path as `categorical`.",
+    "`ordinal(A)` derives sorted unique categories from non-missing labels.",
+    "`ordinal(A, categories)` uses the supplied category order and marks labels not present in that list as missing.",
+    "`ordinal(A, valueset, catnames)` maps source values through `valueset` and stores the corresponding category names from `catnames`.",
+    "The returned object has class `categorical`, stores one-based category codes, and has its `Ordinal` metadata flag set to true.",
+    "Equality and relational operators compare category order; categorical-to-categorical comparisons require matching category lists.",
+    "`min` and `max` reduce ordinal categorical arrays by category order and return categorical results; undefined elements follow the numeric `NaN` behavior of `includenan` and `omitnan`, and multi-output forms return numeric indices."
+  ],
+  "examples": [
+    {
+      "description": "Create an ordered categorical array",
+      "input": "O = ordinal({'medium'; 'low'}, {'low','medium','high'})",
+      "output": "O = categorical object"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `ordinal` different from `categorical`?",
+      "answer": "`ordinal` always sets the categorical `Ordinal` flag to true, so category order is meaningful for compatibility code that checks ordinal categorical metadata."
+    }
+  ],
+  "links": [
+    { "label": "categorical", "url": "./categorical" },
+    { "label": "iscategorical", "url": "./iscategorical" },
+    { "label": "isordinal", "url": "./isordinal" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/table/builtins/constructors.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/constructors.rs"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "title": "iscellstr",
+  "category": "cells/core",
+  "keywords": ["iscellstr", "cellstr", "cell", "char"],
+  "summary": "Return true for cell arrays of character row vectors.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host metadata/content predicate."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::cells::core::iscellstr::tests",
+    "integration": null
+  },
+  "description": "`iscellstr(C)` returns true when `C` is a cell array and every element is a character row vector.",
+  "behaviors": [
+    "Empty cell arrays return true.",
+    "A cell containing only 1-by-N character arrays returns true.",
+    "String arrays, string scalars, numeric values, and cells containing non-character values return false."
+  ],
+  "examples": [
+    {
+      "description": "Checking a cell array of character vectors",
+      "input": "tf = iscellstr({'red','blue'})",
+      "output": "tf = logical(1)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Do MATLAB string scalars count?",
+      "answer": "No. `iscellstr` is the legacy cell-array-of-character-vectors predicate."
+    }
+  ],
+  "links": [
+    { "label": "cellstr", "url": "./cellstr" },
+    { "label": "iscell", "url": "./iscell" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/cells/core/iscellstr.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/iscellstr.rs"
+  },
+  "gpu_residency": "The result is a host logical scalar.",
+  "gpu_behavior": ["No GPU kernels are launched."]
+}

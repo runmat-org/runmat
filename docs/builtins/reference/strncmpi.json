@@ -1,0 +1,90 @@
+{
+  "title": "strncmpi",
+  "category": "strings/core",
+  "keywords": [
+    "strncmpi",
+    "strings",
+    "core",
+    "matlab",
+    "compatibility"
+  ],
+  "summary": "Compare text inputs case-insensitively up to N leading characters.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "not applicable",
+    "notes": "Not eligible for fusion; this builtin materializes host text or logical results."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::compat::tests",
+    "integration": null
+  },
+  "description": "tf = strncmpi(A, B, N) - Compare text inputs case-insensitively up to N leading characters.",
+  "signatures": [
+    {
+      "label": "tf = strncmpi(A, B, N)",
+      "inputs": [
+        {
+          "name": "A",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "First text input."
+        },
+        {
+          "name": "B",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Second text input."
+        },
+        {
+          "name": "N",
+          "ty": "IntegerScalar",
+          "arity": "Required",
+          "default": null,
+          "description": "Number of leading characters to compare."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "tf",
+          "ty": "LogicalArray",
+          "arity": "Required",
+          "default": null,
+          "description": "Logical result."
+        }
+      ]
+    }
+  ],
+  "behaviors": [
+    "Compare text inputs case-insensitively up to N leading characters."
+  ],
+  "examples": [
+    "strncmpi(\"RunMat\", \"runway\", 3) returns true."
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/compat.rs"
+  }
+}

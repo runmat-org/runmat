@@ -1,5 +1,6 @@
 //! String transformation builtins.
 
+pub mod compat;
 pub mod erase;
 pub mod erasebetween;
 pub mod extractbetween;

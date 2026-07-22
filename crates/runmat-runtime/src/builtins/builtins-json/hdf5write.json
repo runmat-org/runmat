@@ -1,0 +1,13 @@
+{
+  "title": "hdf5write",
+  "category": "io/hdf5",
+  "keywords": ["hdf5write", "h5write", "hdf5", "dataset", "legacy"],
+  "summary": "Legacy alias for writing dense HDF5 datasets.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Uses the same host HDF5 path as `h5write`."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::io::hdf5::tests", "integration": null},
+  "description": "`hdf5write(filename, dataset, data)` delegates to `h5write` for legacy compatibility.",
+  "behaviors": ["Supports the same dense write and native hyperslab selection subset as `h5write`."],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/io/hdf5.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5.rs"}
+}

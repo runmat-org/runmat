@@ -1,0 +1,79 @@
+{
+  "title": "bi2de",
+  "category": "comms/conversion",
+  "keywords": [
+    "bi2de",
+    "binary",
+    "decimal",
+    "base",
+    "communications",
+    "right-msb",
+    "left-msb"
+  ],
+  "summary": "Convert rows of binary or base-p digits to decimal integers in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "gpuArray inputs are gathered to the host for MATLAB-compatible digit validation and conversion."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::comms::binary_conversion::tests",
+    "integration": "runmat-vm/tests/comms.rs"
+  },
+  "description": "`bi2de(B)` treats each row of `B` as one binary number and returns decimal values. The default digit order is `'right-msb'`, so the first column contains the least significant digit. `bi2de(B, P)` converts base-`P` digits, and the optional `'left-msb'` flag makes the first column the most significant digit.",
+  "behaviors": [
+    "`B` may be a scalar, vector, logical array, or 2-D numeric matrix.",
+    "For matrix inputs, each row is converted independently and the result is a column vector.",
+    "`P` must be an integer greater than one.",
+    "Every digit must be a finite nonnegative integer in the range `[0, P-1]`.",
+    "`'right-msb'` is the default and interprets column 1 as the least significant digit.",
+    "`'left-msb'` interprets column 1 as the most significant digit.",
+    "Results that exceed RunMat's exact integer range are rejected instead of silently losing precision."
+  ],
+  "examples": [
+    {
+      "description": "Default right-MSB binary conversion",
+      "input": "d = bi2de([1 0 1 0])",
+      "output": "d = 5"
+    },
+    {
+      "description": "Left-MSB binary conversion",
+      "input": "d = bi2de([1 0 1 0], 'left-msb')",
+      "output": "d = 10"
+    },
+    {
+      "description": "Convert rows of a base-3 matrix",
+      "input": "d = bi2de([2 1 0; 0 1 2], 3, 'left-msb')",
+      "output": "d = [21; 5]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What is the default bit ordering?",
+      "answer": "`'right-msb'`, matching MATLAB's Communications Toolbox default. The leftmost column is the least significant digit unless you pass `'left-msb'`."
+    },
+    {
+      "question": "Does bi2de support bases other than two?",
+      "answer": "Yes. Pass the base as `P`, for example `bi2de(B, 3)` for ternary digits."
+    }
+  ],
+  "links": [
+    {
+      "label": "de2bi",
+      "url": "./de2bi"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/comms/binary_conversion.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/comms/binary_conversion.rs"
+  }
+}

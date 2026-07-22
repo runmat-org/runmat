@@ -1,0 +1,103 @@
+{
+  "title": "trainWordEmbedding",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "trainWordEmbedding",
+    "wordEmbedding",
+    "text analytics",
+    "training",
+    "embedding"
+  ],
+  "summary": "Train a local word embedding compatibility model.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`trainWordEmbedding` tokenizes host file or document data and builds host model metadata; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 23,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::embeddings::tests",
+    "integration": null
+  },
+  "description": "`trainWordEmbedding(filename)` and `trainWordEmbedding(documents)` return a RunMat `wordEmbedding` compatibility object trained from local text. File input is UTF-8 text with one document per line and whitespace-separated words. `tokenizedDocument` input uses the stored document tokens.",
+  "behaviors": [
+    "`filename` may be a string scalar, character vector, scalar string array, or 1-by-1 cell containing a text filename.",
+    "`documents` must be a RunMat `tokenizedDocument` compatibility object.",
+    "`Dimension`, `Window`, `Model`, `DiscardFactor`, `LossFunction`, `NumNegativeSamples`, `NumEpochs`, `MinCount`, `NGramRange`, `InitialLearnRate`, `UpdateRate`, and `Verbose` are parsed and validated using the documented MATLAB option names.",
+    "`MinCount` filters vocabulary words before model construction. Vocabulary order is descending frequency with first-seen order as the tie-breaker.",
+    "The returned object exposes `Dimension` and `Vocabulary` and stores dense vectors in the same implementation-detail property used by `word2vec` and `vec2word`.",
+    "RunMat uses a deterministic local compatibility trainer based on lexical/subword hashing and windowed co-occurrence features. This is suitable for repeatable scripts and downstream embedding lookup, but it is not MATLAB's exact fastText optimizer.",
+    "Very large dense embedding outputs are rejected with a controlled error until sparse/model-storage infrastructure is added."
+  ],
+  "examples": [
+    {
+      "description": "Train From File",
+      "input": "emb = trainWordEmbedding(\"training.txt\", \"Dimension\", 50, \"MinCount\", 1)",
+      "output": "`emb` is a RunMat `wordEmbedding` compatibility object."
+    },
+    {
+      "description": "Train From Tokenized Documents",
+      "input": "documents = tokenizedDocument([\"alpha beta\"; \"beta gamma\"]);\nemb = trainWordEmbedding(documents, \"Window\", 2)",
+      "output": "`emb.Vocabulary` contains the retained document tokens."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does RunMat implement MATLAB's exact fastText training algorithm?",
+      "answer": "Not yet. This slice implements a deterministic local compatibility trainer and keeps exact optimizer parity in the broader Text Analytics queue."
+    },
+    {
+      "question": "Can the trained model be used with `word2vec` and `vec2word`?",
+      "answer": "Yes. The output is the same RunMat `wordEmbedding` compatibility object used by the existing embedding lookup builtins."
+    },
+    {
+      "question": "Does `trainWordEmbedding` execute on the GPU?",
+      "answer": "No. It reads host text/model data and builds host vectors."
+    }
+  ],
+  "links": [
+    {
+      "label": "readWordEmbedding",
+      "url": "./readWordEmbedding"
+    },
+    {
+      "label": "word2vec",
+      "url": "./word2vec"
+    },
+    {
+      "label": "vec2word",
+      "url": "./vec2word"
+    },
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "emb = trainWordEmbedding(filename)\nemb = trainWordEmbedding(documents)\nemb = trainWordEmbedding(___, Name, Value)",
+      "output": "`emb` is a `wordEmbedding` compatibility object."
+    },
+    "points": [
+      "`Dimension`, `NumEpochs`, `MinCount`, `NumNegativeSamples`, and `UpdateRate` must be positive integers.",
+      "`Window` must be a nonnegative integer.",
+      "`Model` must be `\"skipgram\"` or `\"cbow\"`.",
+      "`LossFunction` must be `\"ns\"`, `\"hs\"`, or `\"softmax\"`; `NumNegativeSamples` is only valid with `\"ns\"`.",
+      "`NGramRange` must be a two-element nonnegative integer vector `[min max]` with `min <= max`; `[0 0]` disables subword features."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs"
+  },
+  "gpu_residency": "`trainWordEmbedding` performs host text processing and model construction and has no provider kernel."
+}

@@ -905,8 +905,10 @@ impl GeometrySceneChunk {
     }
 
     fn is_edge_chunk(&self) -> bool {
-        self.render_data.pipeline_type == PipelineType::Lines
-            || self.chunk_id.contains(":edges")
+        matches!(
+            self.render_data.pipeline_type,
+            PipelineType::Lines | PipelineType::LinesNoDepth
+        ) || self.chunk_id.contains(":edges")
             || self
                 .label
                 .as_ref()

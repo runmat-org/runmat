@@ -18,6 +18,8 @@ pub struct ScatterPlot {
     /// Raw data points (x, y coordinates)
     pub x_data: Vec<f64>,
     pub y_data: Vec<f64>,
+    pub theta_data: Option<Vec<f64>>,
+    pub r_data: Option<Vec<f64>>,
 
     /// Visual styling
     pub color: Vec4,
@@ -144,6 +146,8 @@ impl ScatterPlot {
         Ok(Self {
             x_data,
             y_data,
+            theta_data: None,
+            r_data: None,
             color: Vec4::new(1.0, 0.2, 0.2, 1.0), // Brighter red
             edge_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
             edge_thickness: 1.0,
@@ -179,6 +183,8 @@ impl ScatterPlot {
         Self {
             x_data: Vec::new(),
             y_data: Vec::new(),
+            theta_data: None,
+            r_data: None,
             color: style.color,
             edge_color: style.edge_color,
             edge_thickness: style.edge_thickness,
@@ -206,6 +212,12 @@ impl ScatterPlot {
 
     pub fn with_gpu_source_inputs(mut self, inputs: Scatter2GpuInputs) -> Self {
         self.gpu_inputs = Some(inputs);
+        self
+    }
+
+    pub fn with_polar_data(mut self, theta: Vec<f64>, r: Vec<f64>) -> Self {
+        self.theta_data = Some(theta);
+        self.r_data = Some(r);
         self
     }
 

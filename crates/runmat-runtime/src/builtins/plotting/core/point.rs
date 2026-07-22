@@ -274,7 +274,26 @@ pub(crate) fn convert_size_vector(
     point_count: usize,
     context: &'static str,
 ) -> BuiltinResult<Vec<f32>> {
-    let mut tensor = tensor_from_value(value, context)?;
+    convert_size_tensor(tensor_from_value(value, context)?, point_count, context)
+}
+
+pub(crate) async fn convert_size_vector_async(
+    value: &Value,
+    point_count: usize,
+    context: &'static str,
+) -> BuiltinResult<Vec<f32>> {
+    convert_size_tensor(
+        tensor_from_value_async(value, context).await?,
+        point_count,
+        context,
+    )
+}
+
+fn convert_size_tensor(
+    mut tensor: Tensor,
+    point_count: usize,
+    context: &'static str,
+) -> BuiltinResult<Vec<f32>> {
     if tensor.data.is_empty() {
         return Err(plotting_error(
             context,
@@ -318,7 +337,26 @@ pub(crate) fn convert_scalar_color_values(
     point_count: usize,
     context: &'static str,
 ) -> BuiltinResult<Vec<f64>> {
-    let mut tensor = tensor_from_value(value, context)?;
+    convert_scalar_color_tensor(tensor_from_value(value, context)?, point_count, context)
+}
+
+pub(crate) async fn convert_scalar_color_values_async(
+    value: &Value,
+    point_count: usize,
+    context: &'static str,
+) -> BuiltinResult<Vec<f64>> {
+    convert_scalar_color_tensor(
+        tensor_from_value_async(value, context).await?,
+        point_count,
+        context,
+    )
+}
+
+fn convert_scalar_color_tensor(
+    mut tensor: Tensor,
+    point_count: usize,
+    context: &'static str,
+) -> BuiltinResult<Vec<f64>> {
     if tensor.data.is_empty() {
         return Err(plotting_error(
             context,
@@ -344,7 +382,26 @@ pub(crate) fn convert_rgb_color_matrix(
     point_count: usize,
     context: &'static str,
 ) -> BuiltinResult<Vec<Vec4>> {
-    let tensor = tensor_from_value(value, context)?;
+    convert_rgb_color_tensor(tensor_from_value(value, context)?, point_count, context)
+}
+
+pub(crate) async fn convert_rgb_color_matrix_async(
+    value: &Value,
+    point_count: usize,
+    context: &'static str,
+) -> BuiltinResult<Vec<Vec4>> {
+    convert_rgb_color_tensor(
+        tensor_from_value_async(value, context).await?,
+        point_count,
+        context,
+    )
+}
+
+fn convert_rgb_color_tensor(
+    tensor: Tensor,
+    point_count: usize,
+    context: &'static str,
+) -> BuiltinResult<Vec<Vec4>> {
     if tensor.cols != 3 && tensor.cols != 4 {
         return Err(plotting_error(
             context,

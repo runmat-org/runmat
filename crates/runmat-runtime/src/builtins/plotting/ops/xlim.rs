@@ -123,6 +123,7 @@ mod tests {
 
         let result = xlim_builtin(vec![Value::Tensor(runmat_builtins::Tensor {
             data: vec![0.0, 10.0],
+            integer_data: None,
             shape: vec![1, 2],
             rows: 1,
             cols: 2,

@@ -1,0 +1,19 @@
+{
+  "title": "movmad",
+  "category": "missing",
+  "keywords": ["movmad", "moving", "median", "absolute deviation"],
+  "summary": "Compute moving median absolute deviation.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Runs on the host."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::missing::tests", "integration": "crates/runmat-vm/tests/missing_values.rs"},
+  "description": "`movmad(A, k)` computes the median absolute deviation inside a centered moving window of length `k`.",
+  "behaviors": [
+    "Numeric vectors and matrices are supported.",
+    "The first non-singleton dimension is used by default; dimension `1` or `2` may be supplied as an argument or `\"dim\", value`.",
+    "`\"omitnan\"` ignores NaN values inside each moving window; `\"includenan\"` propagates NaN when present."
+  ],
+  "examples": [{"description": "Moving MAD over a column", "input": "M = movmad([1; 2; 100; 4; 5], 3)", "output": "M = [0.5; 1; 2; 1; 0.5]"}],
+  "links": [{"label": "nanmedian", "url": "./nanmedian"}, {"label": "median", "url": "./median"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/missing/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/missing/mod.rs"}
+}

@@ -4,11 +4,12 @@
 
 use crate::context::shared_wgpu_context;
 use crate::core::{
-    BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
+    BoundingBox, DrawCall, GpuVertexBuffer, ImageData, Material, PipelineType, RenderData, Vertex,
 };
 use crate::gpu::axis::OwnedAxisData;
 use crate::gpu::{util::readback_scalar_buffer_f64, ScalarType};
 use glam::{Vec3, Vec4};
+use std::fmt::Write;
 use std::sync::Arc;
 
 /// High-performance GPU-accelerated 3D surface plot
@@ -18,6 +19,9 @@ pub struct SurfacePlot {
     pub x_data: Vec<f64>,
     pub y_data: Vec<f64>,
     pub z_data: Option<Vec<Vec<f64>>>, // Host data when available
+    /// Optional full coordinate grids for parametric surfaces where X/Y are not separable axes.
+    pub x_grid: Option<Vec<Vec<f64>>>,
+    pub y_grid: Option<Vec<Vec<f64>>>,
     /// Grid resolution for rendering/index generation (kept even for GPU-backed plots).
     x_len: usize,
     y_len: usize,
@@ -82,7 +86,7 @@ pub struct SurfaceGpuColorGridSource {
 }
 
 /// Color mapping schemes
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum ColorMap {
     /// MATLAB-compatible colormaps
     Jet,
@@ -108,14 +112,65 @@ pub enum ColorMap {
     /// Perceptually uniform
     Parula,
 
+    /// MATLAB colorcube colormap
+    ColorCube,
+
     /// Custom color ranges
     Custom(Vec4, Vec4), // (min_color, max_color)
+
+    /// Explicit RGB lookup table from an m-by-3 MATLAB colormap matrix
+    Listed(Arc<[[f32; 3]]>),
+}
+
+impl std::fmt::Debug for ColorMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Jet => f.write_str("Jet"),
+            Self::Hot => f.write_str("Hot"),
+            Self::Cool => f.write_str("Cool"),
+            Self::Spring => f.write_str("Spring"),
+            Self::Summer => f.write_str("Summer"),
+            Self::Autumn => f.write_str("Autumn"),
+            Self::Winter => f.write_str("Winter"),
+            Self::Gray => f.write_str("Gray"),
+            Self::Bone => f.write_str("Bone"),
+            Self::Copper => f.write_str("Copper"),
+            Self::Pink => f.write_str("Pink"),
+            Self::Lines => f.write_str("Lines"),
+            Self::Viridis => f.write_str("Viridis"),
+            Self::Plasma => f.write_str("Plasma"),
+            Self::Inferno => f.write_str("Inferno"),
+            Self::Magma => f.write_str("Magma"),
+            Self::Turbo => f.write_str("Turbo"),
+            Self::Parula => f.write_str("Parula"),
+            Self::ColorCube => f.write_str("ColorCube"),
+            Self::Custom(min, max) => f.debug_tuple("Custom").field(min).field(max).finish(),
+            Self::Listed(colors) => f.debug_tuple("Listed").field(&colors.len()).finish(),
+        }
+    }
 }
 
 impl ColorMap {
     pub const CANONICAL_NAMES: &[&str] = &[
-        "parula", "viridis", "plasma", "inferno", "magma", "turbo", "jet", "hot", "cool", "spring",
-        "summer", "autumn", "winter", "gray", "bone", "copper", "pink", "lines",
+        "parula",
+        "colorcube",
+        "viridis",
+        "plasma",
+        "inferno",
+        "magma",
+        "turbo",
+        "jet",
+        "hot",
+        "cool",
+        "spring",
+        "summer",
+        "autumn",
+        "winter",
+        "gray",
+        "bone",
+        "copper",
+        "pink",
+        "lines",
     ];
 
     pub const ALIASES: &[&str] = &["grey"];
@@ -123,6 +178,7 @@ impl ColorMap {
     pub fn from_name(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
             "parula" => Some(Self::Parula),
+            "colorcube" => Some(Self::ColorCube),
             "viridis" => Some(Self::Viridis),
             "plasma" => Some(Self::Plasma),
             "inferno" => Some(Self::Inferno),
@@ -143,6 +199,82 @@ impl ColorMap {
             _ => None,
         }
     }
+
+    pub fn from_rgb_rows(colors: Vec<[f32; 3]>) -> Option<Self> {
+        if colors.is_empty() {
+            return None;
+        }
+        Some(Self::Listed(Arc::from(colors.into_boxed_slice())))
+    }
+
+    pub fn to_serialized_token(&self) -> String {
+        match self {
+            Self::Listed(colors) => {
+                let mut token = String::from("listed:");
+                for (idx, color) in colors.iter().enumerate() {
+                    if idx > 0 {
+                        token.push(';');
+                    }
+                    let _ = write!(token, "{:?},{:?},{:?}", color[0], color[1], color[2]);
+                }
+                token
+            }
+            Self::Custom(min, max) => format!(
+                "custom:{:?},{:?},{:?},{:?};{:?},{:?},{:?},{:?}",
+                min.x, min.y, min.z, min.w, max.x, max.y, max.z, max.w
+            ),
+            _ => format!("{self:?}"),
+        }
+    }
+
+    pub fn from_serialized_token(token: &str) -> Option<Self> {
+        let trimmed = token.trim();
+        if let Some(rest) = trimmed.strip_prefix("listed:") {
+            let mut colors = Vec::new();
+            for row in rest.split(';') {
+                if row.is_empty() {
+                    return None;
+                }
+                let mut parts = row.split(',');
+                let r = parts.next()?.parse::<f32>().ok()?;
+                let g = parts.next()?.parse::<f32>().ok()?;
+                let b = parts.next()?.parse::<f32>().ok()?;
+                if parts.next().is_some() {
+                    return None;
+                }
+                if ![r, g, b]
+                    .iter()
+                    .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                {
+                    return None;
+                }
+                colors.push([r, g, b]);
+            }
+            return Self::from_rgb_rows(colors);
+        }
+        if let Some(rest) = trimmed.strip_prefix("custom:") {
+            let mut rows = rest.split(';');
+            let min = parse_vec4_token(rows.next()?)?;
+            let max = parse_vec4_token(rows.next()?)?;
+            if rows.next().is_some() {
+                return None;
+            }
+            return Some(Self::Custom(min, max));
+        }
+        Self::from_name(trimmed)
+    }
+}
+
+fn parse_vec4_token(token: &str) -> Option<Vec4> {
+    let mut parts = token.split(',');
+    let x = parts.next()?.parse::<f32>().ok()?;
+    let y = parts.next()?.parse::<f32>().ok()?;
+    let z = parts.next()?.parse::<f32>().ok()?;
+    let w = parts.next()?.parse::<f32>().ok()?;
+    if parts.next().is_some() || ![x, y, z, w].iter().all(|value| value.is_finite()) {
+        return None;
+    }
+    Some(Vec4::new(x, y, z, w))
 }
 
 /// Surface shading modes
@@ -287,6 +419,52 @@ impl SurfacePlot {
             x_data,
             y_data,
             z_data: Some(z_data),
+            x_grid: None,
+            y_grid: None,
+            colormap: ColorMap::default(),
+            shading_mode: ShadingMode::default(),
+            wireframe: false,
+            alpha: 1.0,
+            flatten_z: false,
+            image_mode: false,
+            color_limits: None,
+            color_grid: None,
+            lighting_enabled: true,
+            ambient_strength: 0.2,
+            diffuse_strength: 0.8,
+            specular_strength: 0.5,
+            shininess: 32.0,
+            label: None,
+            visible: true,
+            vertices: None,
+            indices: None,
+            bounds: None,
+            dirty: true,
+            gpu_vertices: None,
+            gpu_vertex_count: None,
+            gpu_bounds: None,
+            gpu_source: None,
+            gpu_color_grid_source: None,
+        })
+    }
+
+    /// Create a new surface plot from full X/Y/Z coordinate grids.
+    pub fn from_coordinate_grids(
+        x_grid: Vec<Vec<f64>>,
+        y_grid: Vec<Vec<f64>>,
+        z_grid: Vec<Vec<f64>>,
+    ) -> Result<Self, String> {
+        validate_coordinate_grids(&x_grid, &y_grid, &z_grid)?;
+        let x_len = z_grid.len();
+        let y_len = z_grid.first().map_or(0, Vec::len);
+        Ok(Self {
+            x_data: (0..x_len).map(|i| i as f64 + 1.0).collect(),
+            y_data: (0..y_len).map(|i| i as f64 + 1.0).collect(),
+            z_data: Some(z_grid),
+            x_grid: Some(x_grid),
+            y_grid: Some(y_grid),
+            x_len,
+            y_len,
             colormap: ColorMap::default(),
             shading_mode: ShadingMode::default(),
             wireframe: false,
@@ -326,6 +504,8 @@ impl SurfacePlot {
             x_data: Vec::new(),
             y_data: Vec::new(),
             z_data: None,
+            x_grid: None,
+            y_grid: None,
             x_len,
             y_len,
             colormap: ColorMap::default(),
@@ -365,10 +545,78 @@ impl SurfacePlot {
         self
     }
 
+    pub fn update_axis_data(
+        &mut self,
+        x_data: Vec<f64>,
+        y_data: Vec<f64>,
+        z_data: Vec<Vec<f64>>,
+    ) -> Result<(), String> {
+        if z_data.len() != x_data.len() {
+            return Err(format!(
+                "Z data rows ({}) must match X data length ({})",
+                z_data.len(),
+                x_data.len()
+            ));
+        }
+        for (idx, row) in z_data.iter().enumerate() {
+            if row.len() != y_data.len() {
+                return Err(format!(
+                    "Z data row {idx} length ({}) must match Y data length ({})",
+                    row.len(),
+                    y_data.len()
+                ));
+            }
+        }
+
+        self.x_len = x_data.len();
+        self.y_len = y_data.len();
+        self.x_data = x_data;
+        self.y_data = y_data;
+        self.z_data = Some(z_data);
+        self.x_grid = None;
+        self.y_grid = None;
+        self.reset_source_data();
+        Ok(())
+    }
+
+    pub fn update_coordinate_grids(
+        &mut self,
+        x_grid: Vec<Vec<f64>>,
+        y_grid: Vec<Vec<f64>>,
+        z_grid: Vec<Vec<f64>>,
+    ) -> Result<(), String> {
+        validate_coordinate_grids(&x_grid, &y_grid, &z_grid)?;
+        let x_len = z_grid.len();
+        let y_len = z_grid.first().map_or(0, Vec::len);
+        self.x_data = (0..x_len).map(|i| i as f64 + 1.0).collect();
+        self.y_data = (0..y_len).map(|i| i as f64 + 1.0).collect();
+        self.z_data = Some(z_grid);
+        self.x_grid = Some(x_grid);
+        self.y_grid = Some(y_grid);
+        self.x_len = x_len;
+        self.y_len = y_len;
+        self.reset_source_data();
+        Ok(())
+    }
+
     fn drop_gpu_if_possible(&mut self) {
         if self.gpu_vertices.is_some() && self.z_data.is_some() {
             self.invalidate_gpu_data();
         }
+    }
+
+    fn reset_source_data(&mut self) {
+        self.vertices = None;
+        self.indices = None;
+        self.bounds = None;
+        self.gpu_color_grid_source = None;
+        self.invalidate_gpu_data();
+        if self.color_grid.as_ref().is_some_and(|grid| {
+            grid.len() != self.x_len || grid.iter().any(|row| row.len() != self.y_len)
+        }) {
+            self.color_grid = None;
+        }
+        self.dirty = true;
     }
 
     /// Create surface from a function
@@ -518,14 +766,29 @@ impl SurfacePlot {
         let mut min_z = f32::INFINITY;
         let mut max_z = f32::NEG_INFINITY;
 
-        for &x in &self.x_data {
-            min_x = min_x.min(x as f32);
-            max_x = max_x.max(x as f32);
-        }
+        if let (Some(x_grid), Some(y_grid)) = (&self.x_grid, &self.y_grid) {
+            for row in x_grid {
+                for &x in row {
+                    min_x = min_x.min(x as f32);
+                    max_x = max_x.max(x as f32);
+                }
+            }
+            for row in y_grid {
+                for &y in row {
+                    min_y = min_y.min(y as f32);
+                    max_y = max_y.max(y as f32);
+                }
+            }
+        } else {
+            for &x in &self.x_data {
+                min_x = min_x.min(x as f32);
+                max_x = max_x.max(x as f32);
+            }
 
-        for &y in &self.y_data {
-            min_y = min_y.min(y as f32);
-            max_y = max_y.max(y as f32);
+            for &y in &self.y_data {
+                min_y = min_y.min(y as f32);
+                max_y = max_y.max(y as f32);
+            }
         }
 
         if let Some(rows) = &self.z_data {
@@ -565,13 +828,24 @@ impl SurfacePlot {
 
     /// Estimate memory usage in bytes
     pub fn estimated_memory_usage(&self) -> usize {
+        let coordinate_grid_size = self
+            .x_grid
+            .as_ref()
+            .zip(self.y_grid.as_ref())
+            .map_or(0, |(x, y)| {
+                x.iter().map(Vec::len).sum::<usize>() + y.iter().map(Vec::len).sum::<usize>()
+            });
         let data_size = std::mem::size_of::<f64>()
-            * (self.x_data.len()
-                + self.y_data.len()
+            * (coordinate_grid_size
+                + if coordinate_grid_size == 0 {
+                    self.x_data.len() + self.y_data.len()
+                } else {
+                    0
+                }
                 + self
                     .z_data
                     .as_ref()
-                    .map_or(0, |z| z.len() * self.y_data.len()));
+                    .map_or(0, |z| z.iter().map(Vec::len).sum()));
 
         let vertices_size = self
             .vertices
@@ -630,8 +904,9 @@ impl SurfacePlot {
             let z_range = (max_z - min_z).max(f64::MIN_POSITIVE);
 
             // Generate vertices for each grid point
-            for (i, &x) in self.x_data.iter().enumerate() {
-                for (j, &y) in self.y_data.iter().enumerate() {
+            for i in 0..self.x_len {
+                for j in 0..self.y_len {
+                    let (x, y) = self.coordinate_at(i, j);
                     let z = z_rows[i][j];
                     let z_pos = if self.flatten_z { 0.0 } else { z as f32 };
                     let position = Vec3::new(x as f32, y as f32, z_pos);
@@ -654,8 +929,8 @@ impl SurfacePlot {
                         normal: normal.to_array(),
                         color: color.to_array(),
                         tex_coords: [
-                            i as f32 / (self.x_data.len() - 1).max(1) as f32,
-                            j as f32 / (self.y_data.len() - 1).max(1) as f32,
+                            i as f32 / (self.x_len - 1).max(1) as f32,
+                            j as f32 / (self.y_len - 1).max(1) as f32,
                         ],
                     });
                 }
@@ -665,6 +940,13 @@ impl SurfacePlot {
             self.vertices = Some(vertices);
         }
         self.vertices.as_ref().unwrap()
+    }
+
+    fn coordinate_at(&self, i: usize, j: usize) -> (f64, f64) {
+        match (&self.x_grid, &self.y_grid) {
+            (Some(x_grid), Some(y_grid)) => (x_grid[i][j], y_grid[i][j]),
+            _ => (self.x_data[i], self.y_data[j]),
+        }
     }
 
     /// Generate indices for surface triangulation
@@ -740,6 +1022,10 @@ impl SurfacePlot {
             self.y_len
         );
 
+        if self.image_mode && self.z_data.is_some() && self.gpu_vertices.is_none() {
+            return self.image_render_data();
+        }
+
         let using_gpu = self.gpu_vertices.is_some();
         let bounds = self.bounds();
         let vertices = if using_gpu {
@@ -798,6 +1084,147 @@ impl SurfacePlot {
             image: None,
         }
     }
+
+    fn image_render_data(&mut self) -> RenderData {
+        let bounds = self.bounds();
+        let x_min = bounds.min.x;
+        let x_max = bounds.max.x;
+        let y_min = bounds.min.y;
+        let y_max = bounds.max.y;
+        let z_rows = self
+            .z_data
+            .as_ref()
+            .expect("image-mode surfaces require host color data");
+        let width = self.x_len.max(1);
+        let height = self.y_len.max(1);
+        let color_limits = self.color_limits.or_else(|| {
+            let mut min_z = f64::INFINITY;
+            let mut max_z = f64::NEG_INFINITY;
+            for row in z_rows {
+                for &z in row {
+                    if z.is_finite() {
+                        min_z = min_z.min(z);
+                        max_z = max_z.max(z);
+                    }
+                }
+            }
+            if min_z.is_finite() && max_z.is_finite() {
+                Some((min_z, max_z))
+            } else {
+                None
+            }
+        });
+        let (min_z, max_z) = color_limits.unwrap_or((0.0, 1.0));
+        let z_range = (max_z - min_z).max(f64::MIN_POSITIVE);
+        let mut data = Vec::with_capacity(width * height * 4);
+
+        for row in 0..height {
+            let y_idx = height - 1 - row;
+            for x_idx in 0..width {
+                let color = if let Some(grid) = &self.color_grid {
+                    grid[x_idx][y_idx]
+                } else {
+                    let z = z_rows[x_idx][y_idx];
+                    let t = ((z - min_z) / z_range) as f32;
+                    let rgb = self.colormap.map_value(t.clamp(0.0, 1.0));
+                    Vec4::new(rgb.x, rgb.y, rgb.z, self.alpha)
+                };
+                data.push((color.x.clamp(0.0, 1.0) * 255.0).round() as u8);
+                data.push((color.y.clamp(0.0, 1.0) * 255.0).round() as u8);
+                data.push((color.z.clamp(0.0, 1.0) * 255.0).round() as u8);
+                data.push((color.w.clamp(0.0, 1.0) * 255.0).round() as u8);
+            }
+        }
+
+        let vertices = vec![
+            Vertex {
+                position: [x_min, y_min, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, self.alpha],
+                tex_coords: [0.0, 1.0],
+            },
+            Vertex {
+                position: [x_max, y_min, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, self.alpha],
+                tex_coords: [1.0, 1.0],
+            },
+            Vertex {
+                position: [x_max, y_max, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, self.alpha],
+                tex_coords: [1.0, 0.0],
+            },
+            Vertex {
+                position: [x_min, y_max, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, self.alpha],
+                tex_coords: [0.0, 0.0],
+            },
+        ];
+        let indices = vec![0, 1, 2, 0, 2, 3];
+
+        RenderData {
+            pipeline_type: PipelineType::Textured,
+            vertices,
+            indices: Some(indices.clone()),
+            gpu_vertices: None,
+            bounds: Some(bounds),
+            material: Material {
+                albedo: Vec4::new(1.0, 1.0, 1.0, self.alpha),
+                ..Default::default()
+            },
+            draw_calls: vec![DrawCall {
+                vertex_offset: 0,
+                vertex_count: 4,
+                index_offset: Some(0),
+                index_count: Some(indices.len()),
+                instance_count: 1,
+            }],
+            image: Some(ImageData::Rgba8 {
+                width: width as u32,
+                height: height as u32,
+                data,
+            }),
+        }
+    }
+}
+
+fn validate_coordinate_grids(
+    x_grid: &[Vec<f64>],
+    y_grid: &[Vec<f64>],
+    z_grid: &[Vec<f64>],
+) -> Result<(), String> {
+    if z_grid.is_empty() {
+        return Err("Z coordinate grid must not be empty".to_string());
+    }
+    if x_grid.len() != z_grid.len() || y_grid.len() != z_grid.len() {
+        return Err("X, Y, and Z coordinate grids must have the same row count".to_string());
+    }
+    let y_len = z_grid[0].len();
+    if y_len == 0 {
+        return Err("Z coordinate grid rows must not be empty".to_string());
+    }
+    for (idx, ((x_row, y_row), z_row)) in x_grid
+        .iter()
+        .zip(y_grid.iter())
+        .zip(z_grid.iter())
+        .enumerate()
+    {
+        if x_row.len() != y_len || y_row.len() != y_len || z_row.len() != y_len {
+            return Err(format!(
+                "X, Y, and Z coordinate grid row {idx} must all have length {y_len}"
+            ));
+        }
+        if x_row
+            .iter()
+            .chain(y_row.iter())
+            .any(|value| !value.is_finite())
+        {
+            return Err("X and Y coordinate grids must contain finite values".to_string());
+        }
+    }
+    Ok(())
 }
 
 /// Surface plot performance and data statistics
@@ -834,8 +1261,19 @@ impl ColorMap {
             ColorMap::Magma => self.magma_colormap(t),
             ColorMap::Turbo => self.turbo_colormap(t),
             ColorMap::Parula => self.parula_colormap(t),
+            ColorMap::ColorCube => self.colorcube_colormap(t),
             ColorMap::Custom(min_color, max_color) => {
                 min_color.truncate().lerp(max_color.truncate(), t)
+            }
+            ColorMap::Listed(colors) => {
+                let last = colors.len().saturating_sub(1);
+                let index = if t >= 1.0 {
+                    last
+                } else {
+                    (t.clamp(0.0, 1.0) * colors.len() as f32).floor() as usize
+                };
+                let color = colors[index.min(last)];
+                Vec3::new(color[0], color[1], color[2])
             }
         }
     }
@@ -1031,6 +1469,19 @@ impl ColorMap {
         Vec3::new(r, g, b)
     }
 
+    /// Colorcube colormap.
+    fn colorcube_colormap(&self, t: f32) -> Vec3 {
+        if t >= 1.0 {
+            return Vec3::ONE;
+        }
+        let levels = 6.0_f32;
+        let index = (t.clamp(0.0, 1.0) * levels.powi(3)).floor() as u32;
+        let r = (index % 6) as f32 / 5.0;
+        let g = ((index / 6) % 6) as f32 / 5.0;
+        let b = ((index / 36) % 6) as f32 / 5.0;
+        Vec3::new(r, g, b)
+    }
+
     /// Default colormap fallback
     #[allow(dead_code)] // Fallback method for colormap errors
     fn default_colormap(&self, t: f32) -> Vec3 {
@@ -1150,6 +1601,45 @@ mod tests {
     }
 
     #[test]
+    fn image_mode_surface_uses_textured_render_data() {
+        let x = vec![0.0, 1.0];
+        let y = vec![10.0, 20.0];
+        let z = vec![vec![0.0, 0.25], vec![0.75, 1.0]];
+
+        let mut surface = SurfacePlot::new(x, y, z)
+            .unwrap()
+            .with_image_mode(true)
+            .with_colormap(ColorMap::Gray)
+            .with_color_limits(Some((0.0, 1.0)));
+        let render_data = surface.render_data();
+
+        assert_eq!(render_data.pipeline_type, PipelineType::Textured);
+        assert_eq!(render_data.vertices.len(), 4);
+        assert_eq!(
+            render_data.indices.as_deref(),
+            Some(&[0, 1, 2, 0, 2, 3][..])
+        );
+
+        let Some(ImageData::Rgba8 {
+            width,
+            height,
+            data,
+        }) = render_data.image
+        else {
+            panic!("image-mode surfaces should carry an RGBA texture payload");
+        };
+        assert_eq!((width, height), (2, 2));
+        assert_eq!(data.len(), 16);
+
+        // Image data is row-major, top-to-bottom. The top image row corresponds to
+        // the highest Y data row.
+        assert_eq!(&data[0..4], &[64, 64, 64, 255]);
+        assert_eq!(&data[4..8], &[255, 255, 255, 255]);
+        assert_eq!(&data[8..12], &[0, 0, 0, 255]);
+        assert_eq!(&data[12..16], &[191, 191, 191, 255]);
+    }
+
+    #[test]
     fn test_colormap_mapping() {
         let jet = ColorMap::Jet;
 
@@ -1209,6 +1699,7 @@ mod tests {
     fn colormap_from_name_accepts_canonical_names_and_aliases() {
         let cases = [
             ("parula", ColorMap::Parula),
+            ("colorcube", ColorMap::ColorCube),
             ("viridis", ColorMap::Viridis),
             ("plasma", ColorMap::Plasma),
             ("inferno", ColorMap::Inferno),
@@ -1252,5 +1743,19 @@ mod tests {
         assert!(!ColorMap::CANONICAL_NAMES.contains(&"hsv"));
         assert!(!ColorMap::ALIASES.contains(&"hsv"));
         assert_eq!(ColorMap::from_name("not-a-colormap"), None);
+    }
+
+    #[test]
+    fn listed_colormap_serialization_preserves_rows() {
+        let map = ColorMap::from_rgb_rows(vec![[0.0, 0.5, 1.0], [1.0, 0.25, 0.0]])
+            .expect("listed colormap");
+        let token = map.to_serialized_token();
+        assert!(token.starts_with("listed:"));
+
+        let parsed = ColorMap::from_serialized_token(&token).expect("parse listed colormap");
+        let ColorMap::Listed(colors) = parsed else {
+            panic!("expected listed colormap");
+        };
+        assert_eq!(colors.as_ref(), &[[0.0, 0.5, 1.0], [1.0, 0.25, 0.0]]);
     }
 }

@@ -1,0 +1,79 @@
+{
+  "title": "nonzeros",
+  "category": "array/creation",
+  "keywords": [
+    "nonzeros",
+    "sparse",
+    "nonzero",
+    "column vector"
+  ],
+  "summary": "Return nonzero elements in column-major order.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "`nonzeros` gathers dense GPU input before scanning because sparse helper outputs are host values in this slice."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::sparse::tests::nonzeros_returns_column_order_for_dense_sparse_logical_and_complex"
+  },
+  "description": "`nonzeros(A)` returns a full column vector containing the nonzero elements of `A` in column-major order.",
+  "behaviors": [
+    "Sparse input returns the stored sparse values in CSC column order.",
+    "Dense numeric input is scanned in column-major order and zeros are omitted.",
+    "Logical input returns double ones for true elements.",
+    "Complex input returns a complex column vector and omits only elements whose real and imaginary parts are both zero."
+  ],
+  "examples": [
+    {
+      "description": "Read stored sparse values",
+      "input": "S = sparse([1; 3; 2], [1; 1; 2], [10; 30; 20], 3, 2);\nnonzeros(S)",
+      "output": "ans = [10; 30; 20]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is the output sparse?",
+      "answer": "No. MATLAB returns a full column vector, and RunMat does the same."
+    }
+  ],
+  "links": [
+    {
+      "label": "sparse",
+      "url": "./sparse"
+    },
+    {
+      "label": "find",
+      "url": "./find"
+    },
+    {
+      "label": "nnz",
+      "url": "./nnz"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "v = nonzeros(A)",
+      "output": "`v` is a full column vector."
+    },
+    "points": [
+      "`A` may be sparse, dense numeric, logical, scalar, or complex numeric."
+    ]
+  },
+  "gpu_residency": "`nonzeros` gathers dense GPU tensors before scanning. A future provider path can preserve residency for dense GPU reductions and compaction."
+}

@@ -1,0 +1,104 @@
+{
+  "title": "writeWordEmbedding",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "writeWordEmbedding",
+    "wordEmbedding",
+    "text analytics",
+    "word2vec",
+    "write"
+  ],
+  "summary": "Write a word embedding model to a UTF-8 word2vec text file.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`writeWordEmbedding` serializes host wordEmbedding metadata and writes a file; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::embeddings::tests",
+    "integration": null
+  },
+  "description": "`writeWordEmbedding(emb, filename)` writes a RunMat `wordEmbedding` compatibility object to a UTF-8 text file in word2vec text format.",
+  "behaviors": [
+    "`emb` must be a `wordEmbedding` compatibility object with `Dimension`, `Vocabulary`, and vector storage created by `readWordEmbedding`, `trainWordEmbedding`, or `fastTextWordEmbedding`.",
+    "`filename` may be a string scalar, character vector, or a 1-by-1 cell array containing a character vector.",
+    "The output file starts with a `numWords dimension` header followed by one row per vocabulary word and its vector values.",
+    "The target file is created or overwritten. Parent directories must already exist.",
+    "Vocabulary entries containing whitespace and non-finite vector values are rejected because word2vec text rows cannot represent them unambiguously.",
+    "Binary word2vec output, zip output, append mode, and format-selection options are not part of MATLAB's documented `writeWordEmbedding` syntax and are not accepted."
+  ],
+  "examples": [
+    {
+      "description": "Write a trained embedding",
+      "input": "documents = tokenizedDocument([\"red blue red\"; \"green blue\"]);\nemb = trainWordEmbedding(documents, 'Dimension', 8, 'MinCount', 1);\nwriteWordEmbedding(emb, \"colors.vec\")",
+      "output": "`colors.vec` contains UTF-8 word2vec text embedding data."
+    },
+    {
+      "description": "Round-trip an embedding file",
+      "input": "writeWordEmbedding(emb, \"model.vec\");\ncopy = readWordEmbedding(\"model.vec\");\ncopy.Dimension",
+      "output": "`copy` is a `wordEmbedding` compatibility object with the same vocabulary and vectors."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What file format does `writeWordEmbedding` use?",
+      "answer": "It writes UTF-8 word2vec text format with a header row and one word-vector row per vocabulary entry."
+    },
+    {
+      "question": "Does `writeWordEmbedding` create folders?",
+      "answer": "No. Create the parent folder first with `mkdir` if needed."
+    },
+    {
+      "question": "Does `writeWordEmbedding` execute on the GPU?",
+      "answer": "No. It is host object serialization and file I/O."
+    }
+  ],
+  "links": [
+    {
+      "label": "readWordEmbedding",
+      "url": "./readWordEmbedding"
+    },
+    {
+      "label": "trainWordEmbedding",
+      "url": "./trainWordEmbedding"
+    },
+    {
+      "label": "word2vec",
+      "url": "./word2vec"
+    },
+    {
+      "label": "vec2word",
+      "url": "./vec2word"
+    },
+    {
+      "label": "doc2sequence",
+      "url": "./doc2sequence"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "writeWordEmbedding(emb, filename)",
+      "output": "The embedding is written to `filename`."
+    },
+    "points": [
+      "`emb` must be a RunMat `wordEmbedding` object.",
+      "`filename` must identify a writable host filesystem path as a scalar text value or 1-by-1 cell containing a character vector.",
+      "The output text is UTF-8 and can be read back with `readWordEmbedding`."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs"
+  },
+  "gpu_residency": "`writeWordEmbedding` is a file-I/O sink. Any GPU-resident filename input is gathered before serialization; wordEmbedding objects are host metadata objects, and no provider kernels are launched."
+}

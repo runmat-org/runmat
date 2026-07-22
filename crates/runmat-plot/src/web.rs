@@ -977,6 +977,7 @@ impl WebRenderer {
 
                 // Render plot content into the plot area viewport(s) using the camera-to-viewport path.
                 let (rows, cols) = self.plot_renderer.figure_axes_grid();
+                let expected_axes = self.plot_renderer.figure_axes_count().max(1);
                 let rect_points = plot_area_points.unwrap_or_else(|| {
                     egui::Rect::from_min_size(
                         egui::Pos2::new(0.0, 0.0),
@@ -986,8 +987,8 @@ impl WebRenderer {
                         ),
                     )
                 });
-                let axes_plot_rects = if rows * cols > 1 {
-                    if overlay.plot_overlay.axes_plot_rects().len() == rows * cols {
+                let axes_plot_rects = if rows * cols > 1 || expected_axes > 1 {
+                    if overlay.plot_overlay.axes_plot_rects().len() == expected_axes {
                         overlay.plot_overlay.axes_plot_rects().to_vec()
                     } else {
                         overlay.plot_overlay.compute_subplot_plot_rects_snapped(
@@ -1011,7 +1012,7 @@ impl WebRenderer {
                     .collect();
                 self.plot_renderer
                     .ensure_scene_viewport_dependent_geometry_for_axes(&axes_plot_sizes_px);
-                if rows * cols > 1 {
+                if axes_plot_rects.len() > 1 {
                     let sw = self.surface_config.width as f32;
                     let sh = self.surface_config.height as f32;
                     let mut viewports: Vec<(u32, u32, u32, u32)> =

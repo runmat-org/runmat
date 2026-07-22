@@ -1,5 +1,6 @@
 //! Shape-manipulation builtins (reshape, squeeze, permute, …).
 
+pub(crate) mod blkdiag;
 pub(crate) mod cat;
 pub(crate) mod circshift;
 pub(crate) mod diag;
@@ -15,6 +16,7 @@ pub(crate) mod repmat;
 pub(crate) mod reshape;
 pub(crate) mod rot90;
 pub(crate) mod squeeze;
+pub(crate) mod toeplitz;
 pub(crate) mod tril;
 pub(crate) mod triu;
 pub(crate) mod vertcat;

@@ -1,0 +1,70 @@
+{
+  "title": "regress",
+  "category": "stats/ml",
+  "keywords": [
+    "regress",
+    "linear regression",
+    "least squares",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Fit a multiple linear regression model by ordinary least squares.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Regression fitting currently runs on CPU because it uses an SVD-based least-squares solve and interval diagnostics."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::regress::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`regress(y,X)` estimates coefficients for the linear model `y = X*b`. Include a column of ones in `X` when an intercept is required.",
+  "behaviors": [
+    "`y` must be a numeric vector with one element per row of `X`; `X` must be a 2-D numeric design matrix.",
+    "Rows containing `NaN` in `y` or any predictor are omitted before fitting.",
+    "`alpha` is optional and defaults to `0.05`; it controls coefficient and residual confidence intervals.",
+    "Requested outputs follow MATLAB's `[b,bint,r,rint,stats]` form, including partial forms such as `[b,bint]` and `[b,bint,r]`. `stats` is `[R2 F p errorVariance]`.",
+    "Rank-deficient designs use rank-revealing column pivoting, zero dependent-column coefficients, and return zero coefficient intervals for dependent columns.",
+    "Residual intervals use deleted-residual variance estimates for studentized residual diagnostics; interval outputs become `NaN` where degrees of freedom are insufficient."
+  ],
+  "examples": [
+    {
+      "description": "Fit a line with an explicit intercept column",
+      "input": "X = [ones(4,1) (0:3)']; y = [1;3;5;7]; [b,bint,r,rint,stats] = regress(y,X)",
+      "output": "b is approximately [1; 2] and stats(1) is 1."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `regress` add an intercept automatically?",
+      "answer": "No. Match MATLAB usage by adding a column of ones to `X` when the model should include an intercept."
+    }
+  ],
+  "links": [
+    {
+      "label": "fitlm",
+      "url": "./fitlm"
+    },
+    {
+      "label": "ridge",
+      "url": "./ridge"
+    },
+    {
+      "label": "lasso",
+      "url": "./lasso"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/regress.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/regress.rs"
+  }
+}

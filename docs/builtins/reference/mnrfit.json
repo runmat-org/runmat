@@ -1,0 +1,94 @@
+{
+  "title": "mnrfit",
+  "category": "stats/ml",
+  "keywords": [
+    "mnrfit",
+    "multinomial",
+    "logistic regression",
+    "nominal",
+    "binomial",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Fit nominal multinomial logistic regression coefficients.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. The multinomial logistic solver runs on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::mnrfit::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`mnrfit(X,Y)` fits nominal multinomial logistic regression coefficients for predictor matrix `X` and response `Y`. Rows of `X` are observations, columns are predictors, and columns of `B` correspond to all response classes except the final sorted reference class.",
+  "behaviors": [
+    "`X` must be a finite real numeric matrix with observations in rows and predictors in columns.",
+    "`Y` may be a numeric, logical, string, character, cellstr, or categorical class vector with one response per row of `X`. Classes are sorted, and the final class is used as the reference category.",
+    "`Y` may also be an `N`-by-K numeric grouped-counts matrix. Columns are treated as response categories, and row totals become multinomial observation weights.",
+    "`B = mnrfit(...)` returns a coefficient matrix with one row per model term and one column per non-reference class. A constant term is included by default.",
+    "`[B,dev,stats] = mnrfit(...)` returns model deviance and a stats structure containing `beta`, `se`, `t`, `p`, `covb`, `coeffcorr`, `dfe`, `s`, `estdisp`, and `classNames`.",
+    "`Model` currently supports `\"nominal\"`; `Link` supports `\"logit\"`; `Constant` accepts logical values or `\"on\"`/`\"off\"`; `Interactions` accepts `\"off\"`.",
+    "`Weights` accepts a nonnegative finite observation-weight vector with positive total weight. `IterationLimit` and `Tolerance` control Newton solver convergence and may also be supplied through a `statset`-style `Options` struct. `MaxIter` and `TolX` are accepted as compatibility aliases.",
+    "Rows with `NaN` in `X`, numeric `Y`, or grouped counts are omitted before fitting.",
+    "`Display` is accepted for compatibility. Overdispersion estimation is not implemented, so `EstDisp` must be `\"off\"`."
+  ],
+  "examples": [
+    {
+      "description": "Fit a binary nominal logistic model",
+      "input": "X = [0; 1; 2; 3; 4];\ny = [1; 2; 1; 2; 2];\n[B,dev,stats] = mnrfit(X, y)",
+      "output": "B has two rows, one intercept and one predictor coefficient. stats.se has the same shape as B."
+    },
+    {
+      "description": "Fit a three-class nominal model",
+      "input": "X = [0; 1; 0; 1; 2; 3];\ny = [1; 1; 2; 2; 3; 3];\nB = mnrfit(X, y, \"Model\", \"nominal\")",
+      "output": "B has two columns because the final sorted class is the reference category."
+    },
+    {
+      "description": "Fit binomial count responses",
+      "input": "X = [0; 1; 2; 3];\nY = [8 1 1; 5 3 2; 2 5 3; 1 6 4];\nB = mnrfit(X, Y, \"IterationLimit\", 200)",
+      "output": "Y columns contribute grouped response counts, and B has one column per non-reference category."
+    },
+    {
+      "description": "Fit text response labels",
+      "input": "X = [0; 1; 2; 3; 4];\ny = [\"low\"; \"high\"; \"low\"; \"high\"; \"high\"];\n[B,dev,stats] = mnrfit(X, y, \"Tolerance\", 1e-7)",
+      "output": "stats.classNames is returned as a string array containing the sorted response classes."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which response class is the reference class?",
+      "answer": "RunMat sorts numeric or logical response classes and uses the final sorted class as the reference, matching the default nominal coding used by MATLAB-style multinomial fits."
+    },
+    {
+      "question": "Does RunMat implement ordinal models?",
+      "answer": "No. The current implementation is for nominal multinomial logistic regression. `Model` values other than `\"nominal\"` return a compatibility error."
+    },
+    {
+      "question": "Does RunMat estimate overdispersion?",
+      "answer": "No. `EstDisp` is accepted only as `\"off\"`; stats.s is returned as 1."
+    }
+  ],
+  "links": [
+    {
+      "label": "lasso",
+      "url": "./lasso"
+    },
+    {
+      "label": "fitclinear",
+      "url": "./fitclinear"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/mnrfit.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit.rs"
+  }
+}

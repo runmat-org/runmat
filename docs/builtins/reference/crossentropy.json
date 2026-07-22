@@ -1,0 +1,46 @@
+{
+  "title": "crossentropy",
+  "category": "deep_learning",
+  "keywords": ["crossentropy", "deep learning", "loss"],
+  "summary": "Compute cross-entropy loss for numeric predictions and targets.",
+  "description": "`crossentropy(Y,T)` computes cross-entropy over same-sized host numeric arrays, host `dlarray` compatibility objects, or plain resident real `gpuArray` tensors.",
+  "behaviors": [
+    "Inputs must be finite, non-empty numeric arrays, host-backed `dlarray` objects, or plain real `gpuArray` tensors with the same number of elements.",
+    "Predictions are clipped to a small open interval before taking logarithms; targets must be probabilities in the range [0, 1].",
+    "The third positional argument or `Weights` name-value option may provide scalar, prediction-sized, channel-sized, or observation-sized weights.",
+    "Supported name-value options are `ClassificationMode`, `TargetCategories`, `Reduction`, `NormalizationFactor`, `DataFormat`, `WeightsFormat`, `Weights`, and `Mask`.",
+    "`DataFormat` and `WeightsFormat` validate RunMat's supported deep-learning labels `S`, `C`, `B`, `T`, and `U`; `WeightsFormat` maps weight dimensions to prediction dimensions by label.",
+    "`ClassificationMode` supports single-label/exclusive and multi-label/independent aliases.",
+    "`Reduction` supports `sum` and `none`; unreduced output preserves the prediction shape.",
+    "`NormalizationFactor` supports `all-elements`, `batch-size`, `mask-included`, `none`, and positive numeric scalars.",
+    "`Mask` must be a full-size logical or binary numeric array.",
+    "Plain real `gpuArray` prediction and target tensors use provider-side cross-entropy kernels for same-shape losses. Scalar, prediction-sized, channel-sized, and observation-sized host weights are materialized as temporary provider inputs; full prediction-sized resident real `gpuArray` weights and masks are consumed directly. `Reduction=\"none\"` returns a resident `gpuArray`; scalar reductions reduce on the provider and read back only the scalar result.",
+    "Host `dlarray` inputs return host `dlarray` compatibility outputs; reduced scalar losses and unreduced loss arrays are returned as unformatted `dlarray` objects.",
+    "Datastore/category target expansion, automatic differentiation, GPU-backed `dlarray`, `NormalizationFactor=\"mask-included\"` for GPU inputs, and non-full-size resident GPU weight remapping with `WeightsFormat` remain future work."
+  ],
+  "examples": [
+    {
+      "description": "Compute Loss",
+      "input": "loss = crossentropy([0.8 0.2], [1 0])",
+      "output": "Scalar loss."
+    },
+    {
+      "description": "Use Class Weights",
+      "input": "loss = crossentropy(Y, T, weights, \"DataFormat\", \"CB\")",
+      "output": "Weighted scalar loss normalized by batch size."
+    },
+    {
+      "description": "Unreduced Multi-Label Loss",
+      "input": "losses = crossentropy(Y, T, \"ClassificationMode\", \"multi-label\", \"Reduction\", \"none\")",
+      "output": "Array of per-element losses."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "loss = crossentropy(Y, T, weights, Name, Value)",
+      "output": "Numeric or `dlarray` loss."
+    }
+  },
+  "gpu_residency": "`crossentropy` preserves residency for plain real `gpuArray` prediction and target tensors through the `runmat-accelerate` `crossentropy_terms` provider hook. Unreduced losses remain resident; scalar reductions use provider reduction and read back only the scalar. Host weights and masks that can be expanded from scalar, prediction-sized, channel-sized, or observation-sized forms are uploaded as temporary provider tensors. Resident GPU weights and masks stay on the provider when they are real and exactly prediction-sized; `WeightsFormat` remapping and `NormalizationFactor=\"mask-included\"` still fall back to the host path."
+}

@@ -1,0 +1,27 @@
+{
+  "title": "fullyConnectedLayer",
+  "category": "deep_learning",
+  "keywords": ["fullyConnectedLayer", "deep learning", "layer"],
+  "summary": "Create a fully connected layer compatibility object.",
+  "description": "`fullyConnectedLayer(outputSize)` returns a RunMat Deep Learning Toolbox compatibility object with layer metadata and common name-value properties.",
+  "behaviors": [
+    "`outputSize` must be a positive integer.",
+    "`Name` and `Description` are stored as layer properties.",
+    "Additional common layer name-value options are preserved as properties for layer graph construction."
+  ],
+  "examples": [
+    {
+      "description": "Create A Named Layer",
+      "input": "layer = fullyConnectedLayer(10, 'Name', 'fc1')",
+      "output": "`layer` is a `nnet.cnn.layer.FullyConnectedLayer` compatibility object."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "layer = fullyConnectedLayer(outputSize)\nlayer = fullyConnectedLayer(outputSize, Name, Value)",
+      "output": "Layer compatibility object."
+    }
+  },
+  "gpu_residency": "Layer construction is host metadata work and has no provider kernel."
+}

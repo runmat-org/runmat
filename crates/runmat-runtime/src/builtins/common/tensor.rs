@@ -331,6 +331,11 @@ pub fn clamp_u16(value: f64) -> f64 {
     value.round().clamp(0.0, u16::MAX as f64)
 }
 
+/// Clamp a scalar f64 to the uint32 range [0, 4294967295], rounding to the nearest integer.
+pub fn clamp_u32(value: f64) -> f64 {
+    value.round().clamp(0.0, u32::MAX as f64)
+}
+
 /// Cast all elements of a tensor to the target dtype in-place, preserving the f64 backing store.
 pub fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
     match dtype {
@@ -354,6 +359,12 @@ pub fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
                 *value = clamp_u16(*value);
             }
             tensor.dtype = NumericDType::U16;
+        }
+        NumericDType::U32 => {
+            for value in &mut tensor.data {
+                *value = clamp_u32(*value);
+            }
+            tensor.dtype = NumericDType::U32;
         }
     }
     tensor

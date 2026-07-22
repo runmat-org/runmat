@@ -1,6 +1,6 @@
 use crate::hir::{
-    FunctionArgDefaultValue, FunctionArgDim, FunctionArgSizeSpec, FunctionArgValidator,
-    FunctionArgumentValidation,
+    FunctionArgDefaultValue, FunctionArgDim, FunctionArgRangeInclusivity, FunctionArgSizeSpec,
+    FunctionArgValidationLiteral, FunctionArgValidator, FunctionArgumentValidation,
 };
 use crate::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingId, BindingName, BindingOwner,
@@ -1396,8 +1396,18 @@ impl LoweringCtx {
             span,
         });
 
-        let resolved_super = super_class.and_then(|super_name| {
+        let builtin_super_class = super_class.and_then(|super_name| {
             if super_name.eq_ignore_ascii_case("handle") {
+                Some("handle".to_string())
+            } else if super_name.eq_ignore_ascii_case("dynamicprops") {
+                Some("dynamicprops".to_string())
+            } else {
+                None
+            }
+        });
+
+        let resolved_super = super_class.and_then(|super_name| {
+            if builtin_super_class.is_some() {
                 None
             } else {
                 self.class_names.get(super_name).copied().or_else(|| {
@@ -1413,7 +1423,9 @@ impl LoweringCtx {
         });
 
         let kind = if super_class
-            .map(|name| name.eq_ignore_ascii_case("handle"))
+            .map(|name| {
+                name.eq_ignore_ascii_case("handle") || name.eq_ignore_ascii_case("dynamicprops")
+            })
             .unwrap_or(false)
             || resolved_super
                 .and_then(|id| self.assembly.classes.iter().find(|class| class.id == id))
@@ -1429,6 +1441,7 @@ impl LoweringCtx {
             module: self.module,
             name: qualified,
             super_class: resolved_super,
+            builtin_super_class,
             kind,
             is_sealed,
             is_abstract,
@@ -1485,18 +1498,46 @@ impl LoweringCtx {
         span: Span,
     ) -> Result<FunctionArgValidator, HirError> {
         match validator.name.as_str() {
+            "mustBeA" => Ok(FunctionArgValidator::A(Self::lower_validator_text_list(
+                &validator.args,
+                span,
+            )?)),
+            "mustBeColumn" => Ok(FunctionArgValidator::Column),
+            "mustBeFile" => Ok(FunctionArgValidator::File),
             "mustBeFinite" => Ok(FunctionArgValidator::Finite),
+            "mustBeFloat" => Ok(FunctionArgValidator::Float),
+            "mustBeFolder" => Ok(FunctionArgValidator::Folder),
             "mustBeNumericOrLogical" => Ok(FunctionArgValidator::NumericOrLogical),
+            "mustBeNumeric" => Ok(FunctionArgValidator::Numeric),
             "mustBeText" => Ok(FunctionArgValidator::Text),
+            "mustBeTextScalar" => Ok(FunctionArgValidator::TextScalar),
+            "mustBeNonzeroLengthText" => Ok(FunctionArgValidator::NonzeroLengthText),
             "mustBeNonempty" => Ok(FunctionArgValidator::Nonempty),
             "mustBeScalarOrEmpty" => Ok(FunctionArgValidator::ScalarOrEmpty),
             "mustBeReal" => Ok(FunctionArgValidator::Real),
             "mustBeInteger" => Ok(FunctionArgValidator::Integer),
+            "mustBeVector" => Ok(FunctionArgValidator::Vector),
             "mustBePositive" => Ok(FunctionArgValidator::Positive),
             "mustBeNegative" => Ok(FunctionArgValidator::Negative),
             "mustBeNonnegative" => Ok(FunctionArgValidator::Nonnegative),
+            "mustBeNonmissing" => Ok(FunctionArgValidator::Nonmissing),
+            "mustBeNonNan" => Ok(FunctionArgValidator::NonNan),
             "mustBeNonzero" => Ok(FunctionArgValidator::Nonzero),
             "mustBeNonpositive" => Ok(FunctionArgValidator::Nonpositive),
+            "mustBeNonsparse" => Ok(FunctionArgValidator::Nonsparse),
+            "mustBeSparse" => Ok(FunctionArgValidator::Sparse),
+            "mustBeValidVariableName" => Ok(FunctionArgValidator::ValidVariableName),
+            "mustBeUnderlyingType" => Ok(FunctionArgValidator::UnderlyingType(
+                Self::lower_validator_text_list(&validator.args, span)?,
+            )),
+            "mustBeMember" => Ok(FunctionArgValidator::Member(
+                Self::lower_validator_literal_list(&validator.args, span)?,
+            )),
+            "mustBeInRange" => {
+                let (lower, upper, inclusivity) =
+                    Self::lower_validator_numeric_bounds(&validator.args, span)?;
+                Ok(FunctionArgValidator::InRange(lower, upper, inclusivity))
+            }
             "mustBeGreaterThanOrEqual" => {
                 let threshold = Self::lower_validator_numeric_threshold(&validator.args, span)?;
                 Ok(FunctionArgValidator::GreaterThanOrEqual(threshold))
@@ -1519,6 +1560,239 @@ impl LoweringCtx {
             ))
             .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
             .with_span(span)),
+        }
+    }
+
+    fn lower_validator_payload_arg(args: &[AstExpr], span: Span) -> Result<&AstExpr, HirError> {
+        match args {
+            [value] => Ok(value),
+            [_, value] => Ok(value),
+            _ => Err(
+                HirError::new("validator requires one literal payload argument")
+                    .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+                    .with_span(span),
+            ),
+        }
+    }
+
+    fn lower_validator_text_list(args: &[AstExpr], span: Span) -> Result<Vec<String>, HirError> {
+        let payload = Self::lower_validator_payload_arg(args, span)?;
+        let mut out = Vec::new();
+        Self::collect_validator_text_literals(payload, &mut out)?;
+        if out.is_empty() {
+            return Err(HirError::new("validator text payload must not be empty")
+                .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+                .with_span(span));
+        }
+        Ok(out)
+    }
+
+    fn collect_validator_text_literals(
+        expr: &AstExpr,
+        out: &mut Vec<String>,
+    ) -> Result<(), HirError> {
+        match expr {
+            AstExpr::String(value, _) => {
+                out.push(Self::normalize_validator_string_literal(value));
+                Ok(())
+            }
+            AstExpr::Tensor(rows, _) | AstExpr::Cell(rows, _) => {
+                for row in rows {
+                    for item in row {
+                        Self::collect_validator_text_literals(item, out)?;
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(HirError::new(
+                "validator text payload must be a string literal or literal string collection",
+            )
+            .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+            .with_span(expr.span())),
+        }
+    }
+
+    fn lower_validator_literal_list(
+        args: &[AstExpr],
+        span: Span,
+    ) -> Result<Vec<FunctionArgValidationLiteral>, HirError> {
+        let payload = Self::lower_validator_payload_arg(args, span)?;
+        let mut out = Vec::new();
+        Self::collect_validator_literals(payload, &mut out)?;
+        if out.is_empty() {
+            return Err(HirError::new("validator member payload must not be empty")
+                .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+                .with_span(span));
+        }
+        Ok(out)
+    }
+
+    fn collect_validator_literals(
+        expr: &AstExpr,
+        out: &mut Vec<FunctionArgValidationLiteral>,
+    ) -> Result<(), HirError> {
+        match expr {
+            AstExpr::String(value, _) => {
+                out.push(FunctionArgValidationLiteral::Text(
+                    Self::normalize_validator_string_literal(value),
+                ));
+                Ok(())
+            }
+            AstExpr::Number(_, _) | AstExpr::Unary(_, _, _) => {
+                let Some(value) = Self::lower_validator_numeric_literal_expr(expr) else {
+                    return Err(HirError::new(
+                        "validator member numeric payload must be a numeric literal",
+                    )
+                    .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+                    .with_span(expr.span()));
+                };
+                out.push(FunctionArgValidationLiteral::Number(value));
+                Ok(())
+            }
+            AstExpr::Ident(name, _) if name == "true" => {
+                out.push(FunctionArgValidationLiteral::Bool(true));
+                Ok(())
+            }
+            AstExpr::Ident(name, _) if name == "false" => {
+                out.push(FunctionArgValidationLiteral::Bool(false));
+                Ok(())
+            }
+            AstExpr::Tensor(rows, _) | AstExpr::Cell(rows, _) => {
+                for row in rows {
+                    for item in row {
+                        Self::collect_validator_literals(item, out)?;
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(HirError::new(
+                "validator member payload must be a literal scalar or literal collection",
+            )
+            .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+            .with_span(expr.span())),
+        }
+    }
+
+    fn lower_validator_numeric_bounds(
+        args: &[AstExpr],
+        span: Span,
+    ) -> Result<(f64, f64, FunctionArgRangeInclusivity), HirError> {
+        let (lower_expr, upper_expr, flag_exprs): (&AstExpr, &AstExpr, &[AstExpr]) = match args {
+            [lower, upper] => (lower, upper, &[]),
+            [first, second, third] if Self::validator_arg_is_explicit_value(first) => {
+                (second, third, &[])
+            }
+            [lower, upper, flag] => (lower, upper, std::slice::from_ref(flag)),
+            [first, second, third, flag] if Self::validator_arg_is_explicit_value(first) => {
+                (second, third, std::slice::from_ref(flag))
+            }
+            [lower, upper, _, _] => (lower, upper, &args[2..4]),
+            [first, second, third, _, _] if Self::validator_arg_is_explicit_value(first) => {
+                (second, third, &args[3..5])
+            }
+            _ => {
+                return Err(
+                    HirError::new("validator requires lower and upper numeric bounds")
+                        .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+                        .with_span(span),
+                )
+            }
+        };
+        let lower = Self::lower_validator_numeric_literal_expr(lower_expr).ok_or_else(|| {
+            HirError::new("validator lower bound must be a numeric literal")
+                .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+                .with_span(span)
+        })?;
+        let upper = Self::lower_validator_numeric_literal_expr(upper_expr).ok_or_else(|| {
+            HirError::new("validator upper bound must be a numeric literal")
+                .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+                .with_span(span)
+        })?;
+        let inclusivity = Self::lower_validator_range_inclusivity(flag_exprs, span)?;
+        Ok((lower, upper, inclusivity))
+    }
+
+    fn validator_arg_is_explicit_value(expr: &AstExpr) -> bool {
+        matches!(expr, AstExpr::Ident(_, _))
+    }
+
+    fn lower_validator_range_inclusivity(
+        flags: &[AstExpr],
+        span: Span,
+    ) -> Result<FunctionArgRangeInclusivity, HirError> {
+        match flags {
+            [] => Ok(FunctionArgRangeInclusivity::CLOSED),
+            [flag] => {
+                let flag = Self::lower_validator_text_literal(flag)?;
+                Self::lower_validator_single_range_flag(&flag, span)
+            }
+            [lower, upper] => {
+                let lower = Self::lower_validator_bound_flag(
+                    &Self::lower_validator_text_literal(lower)?,
+                    span,
+                )?;
+                let upper = Self::lower_validator_bound_flag(
+                    &Self::lower_validator_text_literal(upper)?,
+                    span,
+                )?;
+                Ok(FunctionArgRangeInclusivity { lower, upper })
+            }
+            _ => Err(
+                HirError::new("validator range accepts at most two inclusivity flags")
+                    .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+                    .with_span(span),
+            ),
+        }
+    }
+
+    fn lower_validator_text_literal(expr: &AstExpr) -> Result<String, HirError> {
+        match expr {
+            AstExpr::String(value, _) => Ok(Self::normalize_validator_string_literal(value)),
+            _ => Err(
+                HirError::new("validator range flag must be a string literal")
+                    .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+                    .with_span(expr.span()),
+            ),
+        }
+    }
+
+    fn lower_validator_single_range_flag(
+        flag: &str,
+        span: Span,
+    ) -> Result<FunctionArgRangeInclusivity, HirError> {
+        match flag.trim().to_ascii_lowercase().as_str() {
+            "inclusive" => Ok(FunctionArgRangeInclusivity::CLOSED),
+            "exclusive" => Ok(FunctionArgRangeInclusivity::OPEN),
+            "exclude-lower" | "openleft" | "open-left" => Ok(FunctionArgRangeInclusivity::OPEN_LEFT),
+            "exclude-upper" | "openright" | "open-right" => Ok(FunctionArgRangeInclusivity::OPEN_RIGHT),
+            _ => Err(HirError::new(
+                "validator range flag must be 'inclusive', 'exclusive', 'exclude-lower', or 'exclude-upper'",
+            )
+            .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+            .with_span(span)),
+        }
+    }
+
+    fn lower_validator_bound_flag(flag: &str, span: Span) -> Result<bool, HirError> {
+        match flag.trim().to_ascii_lowercase().as_str() {
+            "inclusive" => Ok(true),
+            "exclusive" => Ok(false),
+            _ => Err(HirError::new(
+                "validator range bound flag must be 'inclusive' or 'exclusive'",
+            )
+            .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+            .with_span(span)),
+        }
+    }
+
+    fn normalize_validator_string_literal(value: &str) -> String {
+        if value.len() >= 2
+            && ((value.starts_with('\'') && value.ends_with('\''))
+                || (value.starts_with('"') && value.ends_with('"')))
+        {
+            value[1..value.len() - 1].to_string()
+        } else {
+            value.to_string()
         }
     }
 
@@ -1558,17 +1832,34 @@ impl LoweringCtx {
         matches!(
             name,
             "mustBeFinite"
+                | "mustBeA"
+                | "mustBeColumn"
+                | "mustBeFile"
+                | "mustBeFloat"
+                | "mustBeFolder"
                 | "mustBeNumericOrLogical"
+                | "mustBeNumeric"
                 | "mustBeText"
+                | "mustBeTextScalar"
+                | "mustBeNonzeroLengthText"
                 | "mustBeNonempty"
                 | "mustBeScalarOrEmpty"
                 | "mustBeReal"
                 | "mustBeInteger"
+                | "mustBeVector"
                 | "mustBePositive"
                 | "mustBeNegative"
                 | "mustBeNonnegative"
+                | "mustBeNonmissing"
+                | "mustBeNonNan"
                 | "mustBeNonzero"
                 | "mustBeNonpositive"
+                | "mustBeNonsparse"
+                | "mustBeSparse"
+                | "mustBeValidVariableName"
+                | "mustBeUnderlyingType"
+                | "mustBeMember"
+                | "mustBeInRange"
                 | "mustBeGreaterThanOrEqual"
                 | "mustBeLessThanOrEqual"
                 | "mustBeGreaterThan"

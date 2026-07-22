@@ -1,0 +1,17 @@
+{
+  "title": "graph",
+  "category": "graph",
+  "keywords": ["graph", "nodes", "edges", "network"],
+  "summary": "Create an undirected graph object.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`graph` creates an undirected graph compatibility object with inspectable `Nodes` and `Edges` tables. It supports edge-list construction with numeric or named nodes, optional edge weights, optional node names, and dense adjacency matrices.",
+  "signatures": [
+    {"label": "G = graph(s, t)", "description": "Create an undirected graph from source and target node vectors."},
+    {"label": "G = graph(s, t, weights, names)", "description": "Create a weighted graph and assign node names."},
+    {"label": "G = graph(A)", "description": "Create a graph from a square dense adjacency matrix."}
+  ],
+  "notes": ["Unnamed graph `Nodes` tables include an `Index` column because RunMat's current table representation cannot encode a nonzero-height table with zero variables.", "Edge weights must be finite nonnegative values."],
+  "gpu_residency": "No. Graph construction and traversal are host metadata/control-flow operations.",
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

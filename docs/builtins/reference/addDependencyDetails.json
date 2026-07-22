@@ -1,0 +1,88 @@
+{
+  "title": "addDependencyDetails",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "addDependencyDetails",
+    "tokenizedDocument",
+    "text analytics",
+    "dependency",
+    "head"
+  ],
+  "summary": "Add dependency-head tags to tokenized documents.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`addDependencyDetails` analyzes host token strings and updates tokenizedDocument metadata; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::dependencies::tests",
+    "integration": null
+  },
+  "description": "`addDependencyDetails(documents)` adds dependency-head metadata to a RunMat `tokenizedDocument` compatibility object. Use `tokenDetails` to view the resulting `Head` and `Dependency` columns.",
+  "behaviors": [
+    "`documents` must be a RunMat `tokenizedDocument` object.",
+    "`addDependencyDetails` has no name-value options.",
+    "RunMat ensures sentence-number details exist before computing dependencies, so `tokenDetails` returns `SentenceNumber` alongside `Head` and `Dependency`.",
+    "`Head` stores the one-based index of the syntactic head token within the same document. Root tokens use `0`.",
+    "`Dependency` stores Universal Dependencies-style labels such as `root`, `nsubj`, `obj`, `det`, `amod`, `advmod`, `case`, `obl`, `aux`, `cc`, `mark`, `punct`, `nummod`, and `dep`.",
+    "RunMat uses deterministic English and German compatibility rules over the shared part-of-speech classifier. Existing Japanese or Korean language metadata is accepted with conservative token-class-aware fallback dependencies.",
+    "Exact MathWorks statistical dependency-parser parity, MeCab-backed Japanese/Korean tokenization, and broader language-detail model parity remain tracked as Text Analytics work."
+  ],
+  "examples": [
+    {
+      "description": "Add Dependency Details",
+      "input": "documents = tokenizedDocument(\"The dogs chase cats.\");\ndocuments = addDependencyDetails(documents);\ntdetails = tokenDetails(documents)",
+      "output": "`tdetails` includes `Head` and `Dependency` columns."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `addDependencyDetails` use a full parser model?",
+      "answer": "No. This compatibility slice uses deterministic dependency rules and records exact MathWorks parser parity as remaining Text Analytics work."
+    },
+    {
+      "question": "Does `addDependencyDetails` execute on the GPU?",
+      "answer": "No. It updates host tokenizedDocument metadata."
+    }
+  ],
+  "links": [
+    {
+      "label": "tokenDetails",
+      "url": "./tokenDetails"
+    },
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "addSentenceDetails",
+      "url": "./addSentenceDetails"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "updatedDocuments = addDependencyDetails(documents)",
+      "output": "`updatedDocuments` is a `tokenizedDocument` compatibility object."
+    },
+    "points": [
+      "`documents` must be a RunMat `tokenizedDocument` object.",
+      "No name-value options are supported for this MATLAB-compatible form.",
+      "Use `tokenDetails(updatedDocuments)` to view the resulting `Head` and `Dependency` table columns."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/dependencies.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/dependencies.rs"
+  },
+  "gpu_residency": "`addDependencyDetails` updates host tokenizedDocument metadata and has no provider kernel."
+}

@@ -1,0 +1,469 @@
+//! MATLAB-compatible `opentoline` builtin for editor navigation requests.
+
+use std::path::PathBuf;
+
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
+use runmat_filesystem as vfs;
+use runmat_macros::runtime_builtin;
+
+use crate::builtins::common::path_search::{find_file_with_extensions, GENERAL_FILE_EXTENSIONS};
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+};
+use crate::builtins::common::tensor::scalar_f64_from_value_async;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+
+const BUILTIN_NAME: &str = "opentoline";
+
+const FILE_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "filename",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "File to open in the editor.",
+};
+
+const LINE_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "line",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "One-based line number.",
+};
+
+const COLUMN_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "column",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("1"),
+    description: "One-based column number.",
+};
+
+const SELECT_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "option",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: None,
+    description: "Editor navigation option such as 'select'.",
+};
+
+const TWO_INPUTS: [BuiltinParamDescriptor; 2] = [FILE_INPUT, LINE_INPUT];
+const THREE_INPUTS: [BuiltinParamDescriptor; 3] = [FILE_INPUT, LINE_INPUT, COLUMN_INPUT];
+const FOUR_INPUTS: [BuiltinParamDescriptor; 4] =
+    [FILE_INPUT, LINE_INPUT, COLUMN_INPUT, SELECT_INPUT];
+
+const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "opentoline(filename, line)",
+        inputs: &TWO_INPUTS,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "opentoline(filename, line, column)",
+        inputs: &THREE_INPUTS,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "opentoline(filename, line, column, option)",
+        inputs: &FOUR_INPUTS,
+        outputs: &[],
+    },
+];
+
+const ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.OPENTOLINE.ARG_COUNT",
+    identifier: Some("RunMat:opentoline:ArgumentCount"),
+    when: "The call does not provide two to four input arguments.",
+    message: "opentoline: expected filename, line, optional column, and optional option",
+};
+
+const ERROR_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.OPENTOLINE.FILENAME",
+    identifier: Some("RunMat:opentoline:InvalidFilename"),
+    when: "The filename is not a string scalar or row character vector.",
+    message: "opentoline: filename must be a character vector or string scalar",
+};
+
+const ERROR_POSITION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.OPENTOLINE.POSITION",
+    identifier: Some("RunMat:opentoline:InvalidPosition"),
+    when: "The line or column argument is not a positive integer scalar.",
+    message: "opentoline: line and column must be positive integer scalars",
+};
+
+const ERROR_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.OPENTOLINE.OPTION",
+    identifier: Some("RunMat:opentoline:InvalidOption"),
+    when: "The optional editor behavior argument is unsupported.",
+    message: "opentoline: option must be 'select' when provided",
+};
+
+const ERROR_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.OPENTOLINE.NOT_FOUND",
+    identifier: Some("RunMat:opentoline:FileNotFound"),
+    when: "No file matching the supplied name can be resolved.",
+    message: "opentoline: file was not found",
+};
+
+const ERROR_OUTPUT_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.OPENTOLINE.OUTPUT_COUNT",
+    identifier: Some("RunMat:opentoline:TooManyOutputs"),
+    when: "The call requests one or more output arguments.",
+    message: "opentoline: expected no output arguments",
+};
+
+const ERRORS: [BuiltinErrorDescriptor; 6] = [
+    ERROR_ARG_COUNT,
+    ERROR_FILENAME,
+    ERROR_POSITION,
+    ERROR_OPTION,
+    ERROR_NOT_FOUND,
+    ERROR_OUTPUT_COUNT,
+];
+
+pub const OPENTOLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::opentoline")]
+pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: "opentoline",
+    op_kind: GpuOpKind::Custom("io-opentoline"),
+    supported_precisions: &[],
+    broadcast: BroadcastSemantics::None,
+    provider_hooks: &[],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::GatherImmediately,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes: "Runs on the host. Filename and scalar position gpuArray inputs are gathered before resolving the editor navigation target.",
+};
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::opentoline")]
+pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: "opentoline",
+    shape: ShapeRequirements::Any,
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    elementwise: None,
+    reduction: None,
+    emits_nan: false,
+    notes: "Editor navigation is a host-side side effect and is not eligible for fusion.",
+};
+
+#[runtime_builtin(
+    name = "opentoline",
+    category = "io/repl_fs",
+    summary = "Open a file to a requested editor line in MATLAB-compatible code.",
+    keywords = "opentoline,open,editor,file,line,column",
+    accel = "cpu",
+    sink = true,
+    suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::opentoline_type),
+    descriptor(crate::builtins::io::repl_fs::opentoline::OPENTOLINE_DESCRIPTOR),
+    builtin_path = "crate::builtins::io::repl_fs::opentoline"
+)]
+async fn opentoline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if !(2..=4).contains(&args.len()) {
+        return Err(opentoline_error(&ERROR_ARG_COUNT, ERROR_ARG_COUNT.message));
+    }
+    if requested_output_count() > 0 {
+        return Err(opentoline_error(
+            &ERROR_OUTPUT_COUNT,
+            format!(
+                "opentoline: expected no output arguments, got {}",
+                requested_output_count()
+            ),
+        ));
+    }
+
+    let filename = filename_arg(&args[0]).await?;
+    if filename.is_empty() {
+        return Err(opentoline_error(
+            &ERROR_FILENAME,
+            "opentoline: filename must not be empty",
+        ));
+    }
+    let _path = resolve_file(&filename).await?;
+    let _line = positive_integer_arg(&args[1], "line").await?;
+    let _column = match args.get(2) {
+        Some(value) => positive_integer_arg(value, "column").await?,
+        None => 1,
+    };
+    if let Some(option) = args.get(3) {
+        parse_option(option).await?;
+    }
+
+    Ok(empty_array())
+}
+
+async fn filename_arg(value: &Value) -> BuiltinResult<String> {
+    let gathered = gather_if_needed_async(value)
+        .await
+        .map_err(|err| opentoline_flow_error("opentoline", err))?;
+    match gathered {
+        Value::String(text) => Ok(text),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        _ => Err(opentoline_error(&ERROR_FILENAME, ERROR_FILENAME.message)),
+    }
+}
+
+async fn parse_option(value: &Value) -> BuiltinResult<()> {
+    let option = text_arg(value, &ERROR_OPTION).await?;
+    if option.eq_ignore_ascii_case("select") {
+        Ok(())
+    } else {
+        Err(opentoline_error(
+            &ERROR_OPTION,
+            format!("opentoline: unsupported option '{option}'"),
+        ))
+    }
+}
+
+async fn text_arg(value: &Value, error: &'static BuiltinErrorDescriptor) -> BuiltinResult<String> {
+    let gathered = gather_if_needed_async(value)
+        .await
+        .map_err(|err| opentoline_flow_error("opentoline", err))?;
+    match gathered {
+        Value::String(text) => Ok(text),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        _ => Err(opentoline_error(error, error.message)),
+    }
+}
+
+async fn positive_integer_arg(value: &Value, label: &str) -> BuiltinResult<usize> {
+    if let Some(text) = text_without_gather(value) {
+        return parse_positive_integer_text(&text, label);
+    }
+    let raw = scalar_f64_from_value_async(value)
+        .await
+        .map_err(|err| opentoline_error(&ERROR_POSITION, format!("opentoline: {err}")))?
+        .ok_or_else(|| {
+            opentoline_error(
+                &ERROR_POSITION,
+                format!("opentoline: {label} must be a numeric scalar"),
+            )
+        })?;
+    if !raw.is_finite() || raw < 1.0 || raw.fract().abs() > f64::EPSILON {
+        return Err(opentoline_error(
+            &ERROR_POSITION,
+            format!("opentoline: {label} must be a positive integer scalar"),
+        ));
+    }
+    if raw > usize::MAX as f64 {
+        return Err(opentoline_error(
+            &ERROR_POSITION,
+            format!("opentoline: {label} is too large"),
+        ));
+    }
+    Ok(raw as usize)
+}
+
+fn text_without_gather(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
+        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        _ => None,
+    }
+}
+
+fn parse_positive_integer_text(text: &str, label: &str) -> BuiltinResult<usize> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err(opentoline_error(
+            &ERROR_POSITION,
+            format!("opentoline: {label} must not be empty"),
+        ));
+    }
+    let value = trimmed.parse::<usize>().map_err(|_| {
+        opentoline_error(
+            &ERROR_POSITION,
+            format!("opentoline: {label} must be a positive integer scalar"),
+        )
+    })?;
+    if value == 0 {
+        return Err(opentoline_error(
+            &ERROR_POSITION,
+            format!("opentoline: {label} must be positive"),
+        ));
+    }
+    Ok(value)
+}
+
+async fn resolve_file(name: &str) -> BuiltinResult<PathBuf> {
+    let path = find_file_with_extensions(name, GENERAL_FILE_EXTENSIONS, BUILTIN_NAME)
+        .await
+        .map_err(|err| opentoline_error(&ERROR_NOT_FOUND, err))?
+        .ok_or_else(|| {
+            opentoline_error(
+                &ERROR_NOT_FOUND,
+                format!("opentoline: file was not found: {name}"),
+            )
+        })?;
+    Ok(vfs::canonicalize_async(&path).await.unwrap_or(path))
+}
+
+fn requested_output_count() -> usize {
+    crate::output_count::current_output_count()
+        .or_else(crate::output_context::requested_output_count)
+        .unwrap_or(0)
+}
+
+fn empty_array() -> Value {
+    Value::Tensor(Tensor::zeros(vec![0, 0]))
+}
+
+fn opentoline_error(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn opentoline_flow_error(context: &str, err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{context}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+    use tempfile::tempdir;
+
+    fn call(args: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(opentoline_builtin(args))
+    }
+
+    #[test]
+    fn opentoline_resolves_file_and_returns_empty_array() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("target.m");
+        std::fs::write(&path, "a = 1;\nb = 2;\n").expect("write file");
+
+        let result = call(vec![
+            Value::String(path.to_string_lossy().to_string()),
+            Value::Num(2.0),
+        ])
+        .expect("opentoline");
+
+        assert_eq!(result, empty_array());
+    }
+
+    #[test]
+    fn opentoline_accepts_column_and_select_option() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("target.m");
+        std::fs::write(&path, "abcdef\n").expect("write file");
+
+        let result = call(vec![
+            Value::String(path.to_string_lossy().to_string()),
+            Value::Num(1.0),
+            Value::Num(4.0),
+            Value::String("select".to_string()),
+        ])
+        .expect("opentoline");
+
+        assert_eq!(result, empty_array());
+    }
+
+    #[test]
+    fn opentoline_command_form_text_line_and_column_are_supported() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("target.m");
+        std::fs::write(&path, "abcdef\n").expect("write file");
+
+        let result = call(vec![
+            Value::String(path.to_string_lossy().to_string()),
+            Value::String("1".to_string()),
+            Value::String("3".to_string()),
+        ])
+        .expect("opentoline");
+
+        assert_eq!(result, empty_array());
+    }
+
+    #[test]
+    fn opentoline_rejects_missing_file() {
+        let err = call(vec![
+            Value::String("definitely_missing_opentoline_target.m".to_string()),
+            Value::Num(1.0),
+        ])
+        .expect_err("missing file");
+
+        assert_eq!(err.identifier(), Some("RunMat:opentoline:FileNotFound"));
+    }
+
+    #[test]
+    fn opentoline_rejects_invalid_positions_and_options() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("target.m");
+        std::fs::write(&path, "abcdef\n").expect("write file");
+        let filename = Value::String(path.to_string_lossy().to_string());
+
+        let err = call(vec![filename.clone(), Value::Num(0.0)]).expect_err("invalid line");
+        assert_eq!(err.identifier(), Some("RunMat:opentoline:InvalidPosition"));
+
+        let err = call(vec![filename.clone(), Value::Num(1.5)]).expect_err("fractional line");
+        assert_eq!(err.identifier(), Some("RunMat:opentoline:InvalidPosition"));
+
+        let err = call(vec![
+            filename,
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Value::String("reuse".to_string()),
+        ])
+        .expect_err("invalid option");
+        assert_eq!(err.identifier(), Some("RunMat:opentoline:InvalidOption"));
+    }
+
+    #[test]
+    fn opentoline_rejects_too_many_outputs() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("target.m");
+        std::fs::write(&path, "abcdef\n").expect("write file");
+        let _outputs = crate::output_count::push_output_count(Some(2));
+
+        let err = call(vec![
+            Value::String(path.to_string_lossy().to_string()),
+            Value::Num(1.0),
+        ])
+        .expect_err("too many outputs");
+
+        assert_eq!(err.identifier(), Some("RunMat:opentoline:TooManyOutputs"));
+    }
+
+    #[test]
+    fn opentoline_descriptor_covers_core_forms() {
+        let labels: Vec<&str> = OPENTOLINE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"opentoline(filename, line)"));
+        assert!(labels.contains(&"opentoline(filename, line, column)"));
+        assert!(labels.contains(&"opentoline(filename, line, column, option)"));
+    }
+}

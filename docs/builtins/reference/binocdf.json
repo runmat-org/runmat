@@ -1,0 +1,47 @@
+{
+  "title": "binocdf",
+  "category": "stats/summary",
+  "keywords": ["binocdf", "binomial", "cdf", "upper tail", "statistics"],
+  "summary": "Evaluate the binomial cumulative distribution function.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "matlab",
+    "notes": "gpuArray inputs are gathered to the host reference path."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 4, "constants": "inline" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::distributions::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`binocdf(x,n,p)` returns the binomial lower-tail probability for `x`, number of trials `n`, and success probability `p`. `binocdf(x,n,p,\"upper\")` returns the complementary upper-tail probability.",
+  "behaviors": [
+    "`x`, `n`, and `p` support scalar expansion and matching array shapes.",
+    "`x` is floored to the nearest integer count before evaluation.",
+    "`n` must be a nonnegative integer and `p` must be in `[0,1]`; invalid parameters produce `NaN` outputs.",
+    "The `\"upper\"` form uses the complementary beta expression directly instead of subtracting from one."
+  ],
+  "examples": [
+    {
+      "description": "Binomial lower and upper tail probabilities",
+      "input": "p = binocdf(55,100,0.5)\nq = binocdf(55,100,0.5,\"upper\")",
+      "output": "p = 0.8644\nq = 0.1356"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does binocdf accept array parameters?",
+      "answer": "Yes. RunMat expands scalar inputs and otherwise requires `x`, `n`, and `p` to have compatible matching shapes."
+    }
+  ],
+  "links": [
+    { "label": "binornd", "url": "./binornd" },
+    { "label": "chi2cdf", "url": "./chi2cdf" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/distributions.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/distributions.rs"
+  }
+}

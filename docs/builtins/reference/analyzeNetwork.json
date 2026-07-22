@@ -1,0 +1,26 @@
+{
+  "title": "analyzeNetwork",
+  "category": "deep_learning",
+  "keywords": ["analyzeNetwork", "deep learning", "network analysis"],
+  "summary": "Analyze network metadata without launching MATLAB's UI analyzer.",
+  "description": "`analyzeNetwork(networkOrLayers)` returns a RunMat analysis object with layer count and layer names.",
+  "behaviors": [
+    "Accepts a layer graph, layer object, cell array of layers, or object list.",
+    "Returns host metadata instead of opening an interactive analyzer UI."
+  ],
+  "examples": [
+    {
+      "description": "Analyze Layers",
+      "input": "analysis = analyzeNetwork({featureInputLayer(4), reluLayer})",
+      "output": "`analysis.NumLayers` reports the number of layers."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "analysis = analyzeNetwork(networkOrLayers)",
+      "output": "Network analysis compatibility object."
+    }
+  },
+  "gpu_residency": "Network analysis reads host metadata and has no provider kernel."
+}

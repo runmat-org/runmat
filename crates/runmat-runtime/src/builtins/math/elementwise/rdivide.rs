@@ -18,6 +18,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -595,6 +596,11 @@ fn rdivide_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if let Some(result) = symbolic_binary(&lhs, &rhs, SymbolicBinaryOp::Div) {
         return Ok(result);
     }
+    if let Some(result) = try_integer_binary(&lhs, &rhs, IntegerBinaryOp::Divide, BUILTIN_NAME)
+        .map_err(builtin_error)?
+    {
+        return Ok(result);
+    }
     if let Some(result) = scalar_divide_value(&lhs, &rhs) {
         return Ok(result);
     }
@@ -800,7 +806,8 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
     use runmat_builtins::{
-        CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+        CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor,
+        Type,
     };
 
     const EPS: f64 = 1e-12;
@@ -863,6 +870,24 @@ pub(crate) mod tests {
             Value::Num(v) => assert!((v - 3.5).abs() < EPS),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rdivide_integer_arrays_preserve_exact_uint64_values() {
+        let lhs = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 3, 0]), vec![1, 3])
+            .expect("integer tensor");
+        let rhs = Tensor::new_integer(IntegerStorage::U64(vec![2, 2, 0]), vec![1, 3])
+            .expect("integer tensor");
+        let result = rdivide_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new())
+            .expect("integer rdivide");
+        let Value::Tensor(result) = result else {
+            panic!("expected typed integer tensor");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1_u64 << 63, 2, 0]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

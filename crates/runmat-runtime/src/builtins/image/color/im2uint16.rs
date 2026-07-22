@@ -194,6 +194,11 @@ fn im2uint16_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = match tensor.dtype {
         NumericDType::U16 => tensor.data,
         NumericDType::U8 => tensor.data.iter().map(|&value| value * 257.0).collect(),
+        NumericDType::U32 => tensor
+            .data
+            .iter()
+            .map(|&value| common::clamp_round(value / (u32::MAX as f64) * 65535.0, 65535.0))
+            .collect(),
         NumericDType::F32 | NumericDType::F64 => tensor
             .data
             .iter()

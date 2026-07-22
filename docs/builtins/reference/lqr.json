@@ -1,0 +1,107 @@
+{
+  "title": "lqr",
+  "category": "control",
+  "keywords": [
+    "lqr",
+    "linear quadratic regulator",
+    "state feedback",
+    "riccati",
+    "control system",
+    "ss"
+  ],
+  "summary": "Compute linear quadratic regulator state-feedback gains.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`lqr` gathers GPU-resident matrices and solves the dense Riccati equation on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`lqr` is a control solver and is not fused."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::lqr::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`lqr(A,B,Q,R)` and `lqr(A,B,Q,R,N)` solve the continuous-time algebraic Riccati equation and return the optimal gain `K` for the feedback law `u = -K*x`. `lqr(sys,Q,R)` and `lqr(sys,Q,R,N)` use the `A` and `B` matrices from an `ss` model and choose the continuous-time or discrete-time Riccati equation from `sys.Ts`.",
+  "behaviors": [
+    "`A` must be square with one row per state.",
+    "`B` must have one row per state and one column per control input.",
+    "`Q` must be a finite real symmetric `n`-by-`n` matrix.",
+    "`R` must be a finite real symmetric positive-definite `m`-by-`m` matrix.",
+    "`N`, when supplied, must be a finite real `n`-by-`m` cross-weight matrix.",
+    "The block weighting matrix `[Q N; N' R]` must be positive semidefinite.",
+    "With one output, `lqr` returns `K`; with two outputs, it returns `K` and the Riccati solution `S`; with three outputs, it also returns the closed-loop poles of `A-B*K`.",
+    "Matrix-input forms are continuous-time. State-space object forms solve continuous-time models when `Ts = 0` and discrete-time models when `Ts > 0`."
+  ],
+  "examples": [
+    {
+      "description": "Double-integrator regulator",
+      "input": "A = [0 1; 0 0];\nB = [0; 1];\nQ = eye(2);\nR = 1;\n[K, S, e] = lqr(A, B, Q, R)",
+      "output": "K is approximately [1 1.7321], S is the stabilizing Riccati solution, and e contains stable closed-loop poles."
+    },
+    {
+      "description": "State-space object form",
+      "input": "sys = ss([0 1; 0 0], [0; 1], [1 0], 0);\nK = lqr(sys, eye(2), 1)",
+      "output": "K is approximately [1 1.7321]."
+    },
+    {
+      "description": "Discrete state-space object form",
+      "input": "sysd = ss([1 0.1; 0 1], [0.005; 0.1], [1 0], 0, 0.1);\n[K, S, e] = lqr(sysd, eye(2), 1)",
+      "output": "K is a stabilizing discrete-time feedback gain and abs(e) is less than 1."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `lqr` support a cross-weight matrix?",
+      "answer": "Yes. Pass `N` as the fifth matrix argument or fourth `ss`-form argument."
+    },
+    {
+      "question": "Does `lqr` run on the GPU?",
+      "answer": "No. It gathers numeric GPU inputs and computes the control synthesis on the host because the operation is a dense Riccati solve rather than an elementwise or provider-level array operation."
+    }
+  ],
+  "links": [
+    {
+      "label": "ss",
+      "url": "./ss"
+    },
+    {
+      "label": "eig",
+      "url": "./eig"
+    },
+    {
+      "label": "pole",
+      "url": "./pole"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/lqr.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/lqr.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "K = lqr(A, B, Q, R)\nK = lqr(A, B, Q, R, N)\n[K, S, e] = lqr(A, B, Q, R)\nK = lqr(sys, Q, R)\n[K, S, e] = lqr(sys, Q, R, N)",
+      "output": "Gain matrix, Riccati solution, and closed-loop poles."
+    },
+    "points": [
+      "At most three output arguments are supported.",
+      "`sys` must be an `ss` object."
+    ]
+  },
+  "validation": {
+    "summary": "`lqr` validates state, input, and weighting dimensions, enforces finite real symmetric weights with positive-definite `R` and positive-semidefinite `[Q N; N' R]`, solves continuous-time Riccati equations through a Hamiltonian matrix-sign method, solves discrete-time `ss` models through an iterative DARE path, and verifies Riccati residuals before materializing outputs.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/lqr.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/lqr.rs"
+    }
+  },
+  "gpu_residency": "`lqr` returns host-resident matrices and pole vectors."
+}

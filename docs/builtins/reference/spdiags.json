@@ -1,0 +1,89 @@
+{
+  "title": "spdiags",
+  "category": "array/creation",
+  "keywords": [
+    "spdiags",
+    "sparse",
+    "diagonal",
+    "banded"
+  ],
+  "summary": "Extract, create, and replace sparse matrix diagonals.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "`spdiags` returns host-resident sparse CSC matrices for construction/replacement forms and dense host matrices for extraction forms."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::sparse::tests::spdiags_extracts_diagonals_and_ids_with_padding; builtins::array::creation::sparse::tests::spdiags_constructs_and_replaces_sparse_diagonals"
+  },
+  "description": "`spdiags` extracts matrix diagonals into dense columns, constructs sparse diagonal matrices, or replaces selected diagonals in an existing matrix.",
+  "behaviors": [
+    "`Bout = spdiags(A)` extracts every nonzero diagonal of `A` into columns of a dense matrix.",
+    "`[Bout, id] = spdiags(A)` also returns the corresponding diagonal offsets in ascending order.",
+    "`Bout = spdiags(A, d)` extracts the requested diagonals listed by `d`.",
+    "`S = spdiags(Bin, d, m, n)` creates an `m x n` sparse matrix from columns of `Bin` placed on diagonals `d`.",
+    "`S = spdiags(Bin, d, A)` replaces the selected diagonals of `A` and returns sparse storage.",
+    "`Bin` must have one column for each requested diagonal. Duplicate diagonal offsets sum their contributions.",
+    "Positive diagonal offsets are padded at the top of extracted columns; negative offsets are padded at the bottom.",
+    "Sparse extraction scans RunMat CSC storage directly instead of densifying the entire sparse input.",
+    "RunMat's current sparse representation is real double CSC storage, so complex sparse diagonal construction is not yet represented."
+  ],
+  "examples": [
+    {
+      "description": "Construct a banded sparse matrix",
+      "input": "B = [10 0; 20 1; 0 2];\nS = spdiags(B, [-1 1], 3, 3);\nfull(S)",
+      "output": "ans = [0 1 0; 10 0 2; 0 20 0]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Are extraction outputs sparse?",
+      "answer": "No. MATLAB returns dense `Bout` columns, and RunMat does the same."
+    },
+    {
+      "question": "What happens when `A` is dense in the replacement form?",
+      "answer": "RunMat converts the result to sparse storage, preserving nonzero entries outside the selected diagonals and replacing the selected diagonal entries from `Bin`."
+    }
+  ],
+  "links": [
+    {
+      "label": "sparse",
+      "url": "./sparse"
+    },
+    {
+      "label": "diag",
+      "url": "./diag"
+    },
+    {
+      "label": "full",
+      "url": "./full"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "Bout = spdiags(A)\n[Bout, id] = spdiags(A)\nBout = spdiags(A, d)\nS = spdiags(Bin, d, m, n)\nS = spdiags(Bin, d, A)",
+      "output": "`Bout` is dense; `S` is sparse."
+    },
+    "points": [
+      "`d` is a vector of integer diagonal offsets.",
+      "Replacement and construction forms return sparse double matrices."
+    ]
+  },
+  "gpu_residency": "`spdiags` gathers dense GPU tensors before diagonal processing and returns host sparse or dense values."
+}

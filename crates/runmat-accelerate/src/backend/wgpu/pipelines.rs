@@ -65,8 +65,14 @@ const DIFF_SHADER_F64: &str = crate::backend::wgpu::shaders::diff::DIFF_SHADER_F
 const DIFF_SHADER_F32: &str = crate::backend::wgpu::shaders::diff::DIFF_SHADER_F32;
 const GRADIENT_SHADER_F64: &str = crate::backend::wgpu::shaders::gradient::GRADIENT_SHADER_F64;
 const GRADIENT_SHADER_F32: &str = crate::backend::wgpu::shaders::gradient::GRADIENT_SHADER_F32;
+const GRADIENT_COORDINATES_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::gradient::GRADIENT_COORDINATES_SHADER_F64;
+const GRADIENT_COORDINATES_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::gradient::GRADIENT_COORDINATES_SHADER_F32;
 const CUMSUM_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMSUM_SHADER_F64;
 const CUMSUM_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMSUM_SHADER_F32;
+const TRAPEZOID_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::TRAPEZOID_SHADER_F64;
+const TRAPEZOID_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::TRAPEZOID_SHADER_F32;
 const REPMAT_SHADER_F64: &str = crate::backend::wgpu::shaders::repmat::REPMAT_SHADER_F64;
 const REPMAT_SHADER_F32: &str = crate::backend::wgpu::shaders::repmat::REPMAT_SHADER_F32;
 const KRON_SHADER_F64: &str = crate::backend::wgpu::shaders::kron::KRON_SHADER_F64;
@@ -97,6 +103,10 @@ const QR_POWER_ITER_CHOL_SHADER: &str =
     crate::backend::wgpu::shaders::qr_power_iter::QR_POWER_ITER_CHOL_SHADER;
 const CONV1D_SHADER_F64: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F64;
 const CONV1D_SHADER_F32: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F32;
+const MOVING_WINDOW_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::moving_window::MOVING_WINDOW_SHADER_F64;
+const MOVING_WINDOW_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::moving_window::MOVING_WINDOW_SHADER_F32;
 const REDUCE_GLOBAL_SHADER_F64: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_GLOBAL_SHADER_F64;
 const REDUCE_GLOBAL_SHADER_F32: &str =
@@ -165,6 +175,8 @@ const TRIU_SHADER_F64: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F
 const TRIU_SHADER_F32: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F32;
 const IMFILTER_SHADER_F64: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F64;
 const IMFILTER_SHADER_F32: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F32;
+const INTERP1_SHADER_F64: &str = crate::backend::wgpu::shaders::interp1::INTERP1_SHADER_F64;
+const INTERP1_SHADER_F32: &str = crate::backend::wgpu::shaders::interp1::INTERP1_SHADER_F32;
 #[cfg(not(target_os = "windows"))]
 const IMAGE_NORMALIZE_SHADER_F64: &str =
     crate::backend::wgpu::shaders::image_normalize::IMAGE_NORMALIZE_SHADER_F64;
@@ -229,9 +241,12 @@ pub struct WgpuPipelines {
     pub flip: PipelineBundle,
     pub diff: PipelineBundle,
     pub gradient: PipelineBundle,
+    pub gradient_coordinates: PipelineBundle,
     pub conv1d: PipelineBundle,
     pub filter: PipelineBundle,
+    pub moving_window: PipelineBundle,
     pub cumsum: PipelineBundle,
+    pub trapezoid: PipelineBundle,
     pub cumprod: PipelineBundle,
     pub cummin: PipelineBundle,
     pub cummax: PipelineBundle,
@@ -285,6 +300,7 @@ pub struct WgpuPipelines {
     pub polyval: PipelineBundle,
     pub polyder: PipelineBundle,
     pub polyint: PipelineBundle,
+    pub interp1: PipelineBundle,
     pub diag_from_vector: PipelineBundle,
     pub diag_extract: PipelineBundle,
     pub gather_linear: PipelineBundle,
@@ -456,6 +472,22 @@ impl WgpuPipelines {
             },
         );
 
+        let moving_window = create_pipeline(
+            device,
+            "runmat-moving-window-layout",
+            "runmat-moving-window-shader",
+            "runmat-moving-window-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => MOVING_WINDOW_SHADER_F64,
+                NumericPrecision::F32 => MOVING_WINDOW_SHADER_F32,
+            },
+        );
+
         let diff = create_pipeline(
             device,
             "runmat-diff-layout",
@@ -488,6 +520,23 @@ impl WgpuPipelines {
             },
         );
 
+        let gradient_coordinates = create_pipeline(
+            device,
+            "runmat-gradient-coordinates-layout",
+            "runmat-gradient-coordinates-shader",
+            "runmat-gradient-coordinates-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+                storage_read_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => GRADIENT_COORDINATES_SHADER_F64,
+                NumericPrecision::F32 => GRADIENT_COORDINATES_SHADER_F32,
+            },
+        );
+
         let cumsum = create_pipeline(
             device,
             "runmat-cumsum-layout",
@@ -501,6 +550,23 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => CUMSUM_SHADER_F64,
                 NumericPrecision::F32 => CUMSUM_SHADER_F32,
+            },
+        );
+
+        let trapezoid = create_pipeline(
+            device,
+            "runmat-trapezoid-layout",
+            "runmat-trapezoid-shader",
+            "runmat-trapezoid-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+                storage_read_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => TRAPEZOID_SHADER_F64,
+                NumericPrecision::F32 => TRAPEZOID_SHADER_F32,
             },
         );
 
@@ -1377,6 +1443,24 @@ impl WgpuPipelines {
             },
         );
 
+        let interp1 = create_pipeline(
+            device,
+            "runmat-interp1-layout",
+            "runmat-interp1-shader",
+            "runmat-interp1-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_write_entry(3),
+                uniform_entry(4),
+            ],
+            match precision {
+                NumericPrecision::F64 => INTERP1_SHADER_F64,
+                NumericPrecision::F32 => INTERP1_SHADER_F32,
+            },
+        );
+
         let gather_linear = create_pipeline(
             device,
             "runmat-gather-linear-layout",
@@ -1506,9 +1590,12 @@ impl WgpuPipelines {
             flip,
             diff,
             gradient,
+            gradient_coordinates,
             conv1d,
             filter,
+            moving_window,
             cumsum,
+            trapezoid,
             cumprod,
             cummin,
             cummax,
@@ -1562,6 +1649,7 @@ impl WgpuPipelines {
             polyval,
             polyder,
             polyint,
+            interp1,
             diag_from_vector,
             diag_extract,
             gather_linear,

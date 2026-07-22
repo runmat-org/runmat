@@ -9,9 +9,13 @@ struct Matrix {
 
 struct DiagVecParams {
     len: u32,
-    size: u32,
+    rows: u32,
+    cols: u32,
+    _pad0: u32,
     offset: i32,
-    _pad: u32,
+    _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
 };
 
 @group(0) @binding(0) var<storage, read> Input: Vector;
@@ -32,7 +36,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let shift = u32(-params.offset);
         row = idx + shift;
     }
-    let base = row + col * params.size;
+    if row >= params.rows || col >= params.cols {
+        return;
+    }
+    let base = row + col * params.rows;
     Output.data[base] = Input.data[idx];
 }
 "#;
@@ -48,9 +55,13 @@ struct Matrix {
 
 struct DiagVecParams {
     len: u32,
-    size: u32,
+    rows: u32,
+    cols: u32,
+    _pad0: u32,
     offset: i32,
-    _pad: u32,
+    _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
 };
 
 @group(0) @binding(0) var<storage, read> Input: Vector;
@@ -71,7 +82,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let shift = u32(-params.offset);
         row = idx + shift;
     }
-    let base = row + col * params.size;
+    if row >= params.rows || col >= params.cols {
+        return;
+    }
+    let base = row + col * params.rows;
     Output.data[base] = Input.data[idx];
 }
 "#;

@@ -1,7 +1,10 @@
 use crate::indexing::plan::{build_index_plan, IndexPlan};
 use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
-use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
+use runmat_builtins::{
+    ComplexTensor, IntValue, IntegerStorage, SparseTensor, StringArray, Tensor, Value,
+};
 use runmat_runtime::RuntimeError;
+use std::collections::HashMap;
 
 fn map_slice_shape_error(err: impl std::fmt::Display) -> RuntimeError {
     crate::interpreter::errors::mex(
@@ -12,6 +15,39 @@ fn map_slice_shape_error(err: impl std::fmt::Display) -> RuntimeError {
 
 fn map_slice_acceleration_error(err: impl std::fmt::Display) -> RuntimeError {
     crate::interpreter::errors::mex("AccelerationOperationFailed", &format!("slice: {err}"))
+}
+
+fn integer_selection_value(
+    tensor: &Tensor,
+    indices: &[usize],
+    output_shape: Vec<usize>,
+) -> Result<Value, RuntimeError> {
+    let storage = tensor
+        .integer_storage()
+        .expect("integer selection requires exact integer storage");
+    macro_rules! select_integer_storage {
+        ($values:expr, $storage:ident, $int:ident) => {{
+            let selected: Vec<_> = indices.iter().map(|&index| $values[index]).collect();
+            if let [value] = selected.as_slice() {
+                Ok(Value::Int(IntValue::$int(*value)))
+            } else {
+                let tensor = Tensor::new_integer(IntegerStorage::$storage(selected), output_shape)
+                    .map_err(map_slice_shape_error)?;
+                Ok(Value::Tensor(tensor))
+            }
+        }};
+    }
+
+    match storage {
+        IntegerStorage::I8(values) => select_integer_storage!(values, I8, I8),
+        IntegerStorage::I16(values) => select_integer_storage!(values, I16, I16),
+        IntegerStorage::I32(values) => select_integer_storage!(values, I32, I32),
+        IntegerStorage::I64(values) => select_integer_storage!(values, I64, I64),
+        IntegerStorage::U8(values) => select_integer_storage!(values, U8, U8),
+        IntegerStorage::U16(values) => select_integer_storage!(values, U16, U16),
+        IntegerStorage::U32(values) => select_integer_storage!(values, U32, U32),
+        IntegerStorage::U64(values) => select_integer_storage!(values, U64, U64),
+    }
 }
 
 pub async fn read_tensor_slice_1d(
@@ -43,12 +79,17 @@ pub fn try_tensor_slice_2d_fast_path(
                 ));
             }
             let start = j0 * rows;
-            let out = tensor.data[start..start + rows].to_vec();
-            if out.len() == 1 {
-                Ok(Some(Value::Num(out[0])))
+            if tensor.integer_storage().is_some() {
+                let indices: Vec<usize> = (start..start + rows).collect();
+                integer_selection_value(tensor, &indices, vec![rows, 1]).map(Some)
             } else {
-                let tens = Tensor::new(out, vec![rows, 1]).map_err(map_slice_shape_error)?;
-                Ok(Some(Value::Tensor(tens)))
+                let out = tensor.data[start..start + rows].to_vec();
+                if out.len() == 1 {
+                    Ok(Some(Value::Num(out[0])))
+                } else {
+                    let tens = Tensor::new(out, vec![rows, 1]).map_err(map_slice_shape_error)?;
+                    Ok(Some(Value::Tensor(tens)))
+                }
             }
         }
         (SliceSelector::Scalar(i), SliceSelector::Colon) => {
@@ -59,58 +100,108 @@ pub fn try_tensor_slice_2d_fast_path(
                     "Index out of bounds",
                 ));
             }
-            let mut out: Vec<f64> = Vec::with_capacity(cols);
-            for c in 0..cols {
-                out.push(tensor.data[i0 + c * rows]);
-            }
-            if out.len() == 1 {
-                Ok(Some(Value::Num(out[0])))
+            if tensor.integer_storage().is_some() {
+                let indices: Vec<usize> = (0..cols).map(|col| i0 + col * rows).collect();
+                integer_selection_value(tensor, &indices, vec![1, cols]).map(Some)
             } else {
-                let tens = Tensor::new(out, vec![1, cols]).map_err(map_slice_shape_error)?;
-                Ok(Some(Value::Tensor(tens)))
+                let mut out: Vec<f64> = Vec::with_capacity(cols);
+                for col in 0..cols {
+                    out.push(tensor.data[i0 + col * rows]);
+                }
+                if out.len() == 1 {
+                    Ok(Some(Value::Num(out[0])))
+                } else {
+                    let tens = Tensor::new(out, vec![1, cols]).map_err(map_slice_shape_error)?;
+                    Ok(Some(Value::Tensor(tens)))
+                }
             }
         }
         (SliceSelector::Colon, SliceSelector::Indices(js)) => {
             if js.is_empty() {
-                let tens = Tensor::new(Vec::new(), vec![rows, 0]).map_err(map_slice_shape_error)?;
-                Ok(Some(Value::Tensor(tens)))
-            } else {
-                let mut out: Vec<f64> = Vec::with_capacity(rows * js.len());
-                for &j in js {
-                    let j0 = j - 1;
-                    if j0 >= cols {
-                        return Err(crate::interpreter::errors::mex(
-                            "IndexOutOfBounds",
-                            "Index out of bounds",
-                        ));
-                    }
-                    let start = j0 * rows;
-                    out.extend_from_slice(&tensor.data[start..start + rows]);
+                if tensor.integer_storage().is_some() {
+                    integer_selection_value(tensor, &[], vec![rows, 0]).map(Some)
+                } else {
+                    let tens =
+                        Tensor::new(Vec::new(), vec![rows, 0]).map_err(map_slice_shape_error)?;
+                    Ok(Some(Value::Tensor(tens)))
                 }
-                let tens = Tensor::new(out, vec![rows, js.len()]).map_err(map_slice_shape_error)?;
-                Ok(Some(Value::Tensor(tens)))
-            }
-        }
-        (SliceSelector::Indices(is), SliceSelector::Colon) => {
-            if is.is_empty() {
-                let tens = Tensor::new(Vec::new(), vec![0, cols]).map_err(map_slice_shape_error)?;
-                Ok(Some(Value::Tensor(tens)))
             } else {
-                let mut out: Vec<f64> = Vec::with_capacity(is.len() * cols);
-                for c in 0..cols {
-                    for &i in is {
-                        let i0 = i - 1;
-                        if i0 >= rows {
+                if tensor.integer_storage().is_some() {
+                    let mut indices = Vec::with_capacity(rows * js.len());
+                    for &j in js {
+                        let j0 = j - 1;
+                        if j0 >= cols {
                             return Err(crate::interpreter::errors::mex(
                                 "IndexOutOfBounds",
                                 "Index out of bounds",
                             ));
                         }
-                        out.push(tensor.data[i0 + c * rows]);
+                        let start = j0 * rows;
+                        indices.extend(start..start + rows);
                     }
+                    integer_selection_value(tensor, &indices, vec![rows, js.len()]).map(Some)
+                } else {
+                    let mut out: Vec<f64> = Vec::with_capacity(rows * js.len());
+                    for &j in js {
+                        let j0 = j - 1;
+                        if j0 >= cols {
+                            return Err(crate::interpreter::errors::mex(
+                                "IndexOutOfBounds",
+                                "Index out of bounds",
+                            ));
+                        }
+                        let start = j0 * rows;
+                        out.extend_from_slice(&tensor.data[start..start + rows]);
+                    }
+                    let tens =
+                        Tensor::new(out, vec![rows, js.len()]).map_err(map_slice_shape_error)?;
+                    Ok(Some(Value::Tensor(tens)))
                 }
-                let tens = Tensor::new(out, vec![is.len(), cols]).map_err(map_slice_shape_error)?;
-                Ok(Some(Value::Tensor(tens)))
+            }
+        }
+        (SliceSelector::Indices(is), SliceSelector::Colon) => {
+            if is.is_empty() {
+                if tensor.integer_storage().is_some() {
+                    integer_selection_value(tensor, &[], vec![0, cols]).map(Some)
+                } else {
+                    let tens =
+                        Tensor::new(Vec::new(), vec![0, cols]).map_err(map_slice_shape_error)?;
+                    Ok(Some(Value::Tensor(tens)))
+                }
+            } else {
+                if tensor.integer_storage().is_some() {
+                    let mut indices = Vec::with_capacity(is.len() * cols);
+                    for col in 0..cols {
+                        for &i in is {
+                            let i0 = i - 1;
+                            if i0 >= rows {
+                                return Err(crate::interpreter::errors::mex(
+                                    "IndexOutOfBounds",
+                                    "Index out of bounds",
+                                ));
+                            }
+                            indices.push(i0 + col * rows);
+                        }
+                    }
+                    integer_selection_value(tensor, &indices, vec![is.len(), cols]).map(Some)
+                } else {
+                    let mut out: Vec<f64> = Vec::with_capacity(is.len() * cols);
+                    for col in 0..cols {
+                        for &i in is {
+                            let i0 = i - 1;
+                            if i0 >= rows {
+                                return Err(crate::interpreter::errors::mex(
+                                    "IndexOutOfBounds",
+                                    "Index out of bounds",
+                                ));
+                            }
+                            out.push(tensor.data[i0 + col * rows]);
+                        }
+                    }
+                    let tens =
+                        Tensor::new(out, vec![is.len(), cols]).map_err(map_slice_shape_error)?;
+                    Ok(Some(Value::Tensor(tens)))
+                }
             }
         }
         _ => Ok(None),
@@ -130,20 +221,25 @@ pub async fn read_tensor_slice_nd(
         return Ok(value);
     }
     let plan = build_index_plan(&selectors, dims, &tensor.shape)?;
-    if plan.indices.is_empty() {
+    if tensor.integer_storage().is_some() {
+        let indices: Vec<usize> = plan.indices.iter().map(|&index| index as usize).collect();
+        integer_selection_value(tensor, &indices, plan.output_shape)
+    } else if plan.indices.is_empty() {
         let out_tensor =
             Tensor::new(Vec::new(), plan.output_shape).map_err(map_slice_shape_error)?;
-        return Ok(Value::Tensor(out_tensor));
-    }
-    let mut out_data: Vec<f64> = Vec::with_capacity(plan.indices.len());
-    for &lin in &plan.indices {
-        out_data.push(tensor.data[lin as usize]);
-    }
-    if out_data.len() == 1 {
-        Ok(Value::Num(out_data[0]))
-    } else {
-        let out_tensor = Tensor::new(out_data, plan.output_shape).map_err(map_slice_shape_error)?;
         Ok(Value::Tensor(out_tensor))
+    } else {
+        let mut out_data: Vec<f64> = Vec::with_capacity(plan.indices.len());
+        for &lin in &plan.indices {
+            out_data.push(tensor.data[lin as usize]);
+        }
+        if out_data.len() == 1 {
+            Ok(Value::Num(out_data[0]))
+        } else {
+            let out_tensor =
+                Tensor::new(out_data, plan.output_shape).map_err(map_slice_shape_error)?;
+            Ok(Value::Tensor(out_tensor))
+        }
     }
 }
 
@@ -151,22 +247,313 @@ pub fn read_tensor_slice_from_plan(
     tensor: &Tensor,
     plan: &IndexPlan,
 ) -> Result<Value, RuntimeError> {
-    if plan.indices.is_empty() {
+    if tensor.integer_storage().is_some() {
+        let indices: Vec<usize> = plan.indices.iter().map(|&index| index as usize).collect();
+        integer_selection_value(tensor, &indices, plan.output_shape.clone())
+    } else if plan.indices.is_empty() {
         let out_tensor =
             Tensor::new(Vec::new(), plan.output_shape.clone()).map_err(map_slice_shape_error)?;
-        return Ok(Value::Tensor(out_tensor));
-    }
-    let mut out_data: Vec<f64> = Vec::with_capacity(plan.indices.len());
-    for &lin in &plan.indices {
-        out_data.push(tensor.data[lin as usize]);
-    }
-    if out_data.len() == 1 {
-        Ok(Value::Num(out_data[0]))
-    } else {
-        let out_tensor =
-            Tensor::new(out_data, plan.output_shape.clone()).map_err(map_slice_shape_error)?;
         Ok(Value::Tensor(out_tensor))
+    } else {
+        let mut out_data: Vec<f64> = Vec::with_capacity(plan.indices.len());
+        for &lin in &plan.indices {
+            out_data.push(tensor.data[lin as usize]);
+        }
+        if out_data.len() == 1 {
+            Ok(Value::Num(out_data[0]))
+        } else {
+            let out_tensor =
+                Tensor::new(out_data, plan.output_shape.clone()).map_err(map_slice_shape_error)?;
+            Ok(Value::Tensor(out_tensor))
+        }
     }
+}
+
+fn sparse_output_shape(plan: &IndexPlan) -> Result<(usize, usize), RuntimeError> {
+    match plan.output_shape.as_slice() {
+        [rows, cols] => Ok((*rows, *cols)),
+        [len] => Ok((*len, 1)),
+        _ => Err(crate::interpreter::errors::mex(
+            "UnsupportedSparseIndexRank",
+            "Sparse indexing currently supports two-dimensional outputs",
+        )),
+    }
+}
+
+fn sparse_scalar_value(value: f64) -> Result<Value, RuntimeError> {
+    if value == 0.0 {
+        return Ok(Value::SparseTensor(SparseTensor::zeros(1, 1)));
+    }
+    let sparse =
+        SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![value]).map_err(map_slice_shape_error)?;
+    Ok(Value::SparseTensor(sparse))
+}
+
+fn checked_sparse_numel(sparse: &SparseTensor) -> Result<usize, RuntimeError> {
+    sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+        crate::interpreter::errors::mex("IndexOutOfBounds", "Sparse dimensions overflow")
+    })
+}
+
+fn linear_sparse_slice(
+    sparse: &SparseTensor,
+    selector: &SliceSelector,
+) -> Result<Value, RuntimeError> {
+    let total = checked_sparse_numel(sparse)?;
+    let base_is_row_vector = sparse.rows == 1 && sparse.cols > 1;
+    if matches!(selector, SliceSelector::Colon) {
+        let mut row_indices = Vec::with_capacity(sparse.values.len());
+        let mut values = Vec::with_capacity(sparse.values.len());
+        for col in 0..sparse.cols {
+            for entry in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
+                row_indices.push(sparse.row_indices[entry] + col * sparse.rows);
+                values.push(sparse.values[entry]);
+            }
+        }
+        let sparse = SparseTensor::new(total, 1, vec![0, values.len()], row_indices, values)
+            .map_err(map_slice_shape_error)?;
+        return Ok(Value::SparseTensor(sparse));
+    }
+    let (indices, output_shape) = match selector {
+        SliceSelector::Colon => unreachable!("colon sparse linear slices return early"),
+        SliceSelector::Scalar(index) => (vec![*index], vec![1, 1]),
+        SliceSelector::Indices(indices) => {
+            let shape = if indices.is_empty() {
+                vec![0, 1]
+            } else if indices.len() == 1 {
+                vec![1, 1]
+            } else if base_is_row_vector {
+                vec![1, indices.len()]
+            } else {
+                vec![indices.len(), 1]
+            };
+            (indices.clone(), shape)
+        }
+        SliceSelector::LinearIndices {
+            values,
+            output_shape,
+        } => (values.clone(), output_shape.clone()),
+    };
+    if indices.iter().any(|&index| index == 0 || index > total) {
+        return Err(crate::interpreter::errors::mex(
+            "IndexOutOfBounds",
+            "Index out of bounds",
+        ));
+    }
+    if indices.len() == 1 {
+        let lin = indices[0] - 1;
+        let row = lin % sparse.rows;
+        let col = lin / sparse.rows;
+        return sparse_scalar_value(sparse.get(row, col).unwrap_or(0.0));
+    }
+    let (out_rows, out_cols) = match output_shape.as_slice() {
+        [rows, cols] => (*rows, *cols),
+        [len] => (*len, 1),
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "UnsupportedSparseIndexRank",
+                "Sparse indexing currently supports two-dimensional outputs",
+            ))
+        }
+    };
+    if indices.is_empty() {
+        return Ok(Value::SparseTensor(SparseTensor::zeros(out_rows, out_cols)));
+    }
+
+    let mut col_entries: Vec<Vec<(usize, f64)>> = vec![Vec::new(); out_cols];
+    for (out_pos, &index) in indices.iter().enumerate() {
+        let base_lin = index - 1;
+        let base_row = base_lin % sparse.rows;
+        let base_col = base_lin / sparse.rows;
+        if let Some(value) = sparse.get(base_row, base_col) {
+            if value != 0.0 {
+                let out_row = out_pos % out_rows;
+                let out_col = out_pos / out_rows;
+                col_entries[out_col].push((out_row, value));
+            }
+        }
+    }
+    sparse_from_column_entries(out_rows, out_cols, col_entries)
+}
+
+fn selector_indices(selector: &SliceSelector, dim_len: usize) -> Vec<usize> {
+    match selector {
+        SliceSelector::Colon => (1..=dim_len).collect(),
+        SliceSelector::Scalar(index) => vec![*index],
+        SliceSelector::Indices(indices)
+        | SliceSelector::LinearIndices {
+            values: indices, ..
+        } => indices.clone(),
+    }
+}
+
+fn sparse_from_column_entries(
+    rows: usize,
+    cols: usize,
+    mut col_entries: Vec<Vec<(usize, f64)>>,
+) -> Result<Value, RuntimeError> {
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    let mut values = Vec::new();
+    col_ptrs.push(0);
+    for entries in col_entries.iter_mut().take(cols) {
+        entries.sort_by_key(|(row, _)| *row);
+        for &(row, value) in entries.iter() {
+            if value != 0.0 {
+                row_indices.push(row);
+                values.push(value);
+            }
+        }
+        col_ptrs.push(values.len());
+    }
+    let sparse = SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
+        .map_err(map_slice_shape_error)?;
+    Ok(Value::SparseTensor(sparse))
+}
+
+fn matrix_sparse_slice(
+    sparse: &SparseTensor,
+    selectors: &[SliceSelector],
+) -> Result<Value, RuntimeError> {
+    let row_selector = selectors.first().unwrap_or(&SliceSelector::Colon);
+    let col_selector = selectors.get(1).unwrap_or(&SliceSelector::Colon);
+    let all_rows = matches!(row_selector, SliceSelector::Colon);
+    let rows = if all_rows {
+        Vec::new()
+    } else {
+        selector_indices(row_selector, sparse.rows)
+    };
+    let cols = selector_indices(col_selector, sparse.cols);
+    if (!all_rows && rows.iter().any(|&row| row == 0 || row > sparse.rows))
+        || cols.iter().any(|&col| col == 0 || col > sparse.cols)
+    {
+        return Err(crate::interpreter::errors::mex(
+            "IndexOutOfBounds",
+            "Index out of bounds",
+        ));
+    }
+    let out_rows = if all_rows { sparse.rows } else { rows.len() };
+    let out_cols = cols.len();
+    if out_rows == 0 || out_cols == 0 {
+        return Ok(Value::SparseTensor(SparseTensor::zeros(out_rows, out_cols)));
+    }
+
+    let mut row_positions: HashMap<usize, Vec<usize>> = HashMap::new();
+    if !all_rows {
+        for (out_row, &row) in rows.iter().enumerate() {
+            row_positions.entry(row - 1).or_default().push(out_row);
+        }
+    }
+    let mut col_entries = vec![Vec::new(); out_cols];
+    for (out_col, &col) in cols.iter().enumerate() {
+        let base_col = col - 1;
+        for entry in sparse.col_ptrs[base_col]..sparse.col_ptrs[base_col + 1] {
+            let base_row = sparse.row_indices[entry];
+            let value = sparse.values[entry];
+            if all_rows {
+                col_entries[out_col].push((base_row, value));
+            } else if let Some(output_rows) = row_positions.get(&base_row) {
+                for &out_row in output_rows {
+                    col_entries[out_col].push((out_row, value));
+                }
+            }
+        }
+    }
+    if out_rows == 1 && out_cols == 1 {
+        let value = col_entries
+            .first()
+            .and_then(|entries| entries.first())
+            .map(|(_, value)| *value)
+            .unwrap_or(0.0);
+        return sparse_scalar_value(value);
+    }
+    sparse_from_column_entries(out_rows, out_cols, col_entries)
+}
+
+pub async fn read_sparse_slice(
+    sparse: &SparseTensor,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+) -> Result<Value, RuntimeError> {
+    let selectors =
+        build_slice_selectors(dims, colon_mask, end_mask, numeric, &sparse.shape()).await?;
+    match dims {
+        1 => linear_sparse_slice(
+            sparse,
+            selectors
+                .first()
+                .unwrap_or(&SliceSelector::Indices(Vec::new())),
+        ),
+        2 => matrix_sparse_slice(sparse, &selectors),
+        _ => {
+            let plan = build_index_plan(&selectors, dims, &sparse.shape())?;
+            read_sparse_slice_from_plan(sparse, &plan)
+        }
+    }
+}
+
+pub fn read_sparse_slice_from_plan(
+    sparse: &SparseTensor,
+    plan: &IndexPlan,
+) -> Result<Value, RuntimeError> {
+    if plan.indices.len() == 1 {
+        let lin = plan.indices[0] as usize;
+        if sparse.rows == 0 || lin >= sparse.rows.saturating_mul(sparse.cols) {
+            return Err(crate::interpreter::errors::mex(
+                "IndexOutOfBounds",
+                "Index out of bounds",
+            ));
+        }
+        let row = lin % sparse.rows;
+        let col = lin / sparse.rows;
+        return sparse_scalar_value(sparse.get(row, col).unwrap_or(0.0));
+    }
+
+    let (out_rows, out_cols) = sparse_output_shape(plan)?;
+    if plan.indices.is_empty() {
+        return Ok(Value::SparseTensor(SparseTensor::zeros(out_rows, out_cols)));
+    }
+
+    let total = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+        crate::interpreter::errors::mex("IndexOutOfBounds", "Sparse dimensions overflow")
+    })?;
+    let mut col_ptrs = Vec::with_capacity(out_cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    let mut values = Vec::new();
+    col_ptrs.push(0);
+    for out_col in 0..out_cols {
+        for out_row in 0..out_rows {
+            let out_lin = out_row + out_col * out_rows;
+            let Some(&base_lin) = plan.indices.get(out_lin) else {
+                return Err(crate::interpreter::errors::mex(
+                    "ShapeMismatch",
+                    "sparse slice plan output shape does not match selected indices",
+                ));
+            };
+            let base_lin = base_lin as usize;
+            if sparse.rows == 0 || base_lin >= total {
+                return Err(crate::interpreter::errors::mex(
+                    "IndexOutOfBounds",
+                    "Index out of bounds",
+                ));
+            }
+            let base_row = base_lin % sparse.rows;
+            let base_col = base_lin / sparse.rows;
+            if let Some(value) = sparse.get(base_row, base_col) {
+                if value != 0.0 {
+                    row_indices.push(out_row);
+                    values.push(value);
+                }
+            }
+        }
+        col_ptrs.push(values.len());
+    }
+
+    let out = SparseTensor::new(out_rows, out_cols, col_ptrs, row_indices, values)
+        .map_err(map_slice_shape_error)?;
+    Ok(Value::SparseTensor(out))
 }
 
 pub async fn read_complex_slice(
@@ -300,11 +687,42 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
 mod tests {
     use super::{
         gather_string_slice, map_slice_acceleration_error, read_complex_slice_from_plan,
-        read_string_slice, read_tensor_slice_from_plan,
+        read_string_slice, read_tensor_slice_from_plan, try_tensor_slice_2d_fast_path,
     };
     use crate::indexing::plan::IndexPlan;
+    use crate::indexing::selectors::SliceSelector;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
+    use runmat_builtins::{ComplexTensor, IntValue, IntegerStorage, StringArray, Tensor, Value};
+
+    #[test]
+    fn tensor_slice_plan_preserves_exact_uint64_storage() {
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX, 3, 4]), vec![2, 2])
+            .expect("tensor");
+        let plan = IndexPlan::new(vec![0, 2, 1, 3], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+        let result = read_tensor_slice_from_plan(&tensor, &plan).expect("slice");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1, 3, u64::MAX, 4]))
+        );
+    }
+
+    #[test]
+    fn tensor_slice_fast_path_returns_exact_integer_scalar() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MAX]), vec![1, 1]).expect("tensor");
+        let result = try_tensor_slice_2d_fast_path(
+            &tensor,
+            2,
+            &[SliceSelector::Colon, SliceSelector::Scalar(1)],
+        )
+        .expect("fast path")
+        .expect("fast path result");
+        assert_eq!(result, Value::Int(IntValue::I64(i64::MAX)));
+    }
 
     #[test]
     fn string_slice_linear_tensor_indices_preserve_selector_shape() {

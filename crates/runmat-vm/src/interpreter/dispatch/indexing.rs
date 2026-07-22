@@ -66,6 +66,27 @@ async fn read_scalar_like_slice(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
+    if let Value::LogicalArray(la) = base {
+        let data: Vec<f64> = la
+            .data
+            .iter()
+            .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+            .collect();
+        let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
+            .map_err(|e| map_slice_shape_error("slice", e))?;
+        let sliced = if dims == 1 {
+            idx_read_slice::read_tensor_slice_1d(&tensor, colon_mask, end_mask, numeric).await?
+        } else {
+            idx_read_slice::read_tensor_slice_nd(&tensor, dims, colon_mask, end_mask, numeric)
+                .await?
+        };
+        return match sliced {
+            Value::Tensor(t) => logical_value_from_tensor(t),
+            Value::Num(n) => Ok(Value::Bool(n != 0.0)),
+            other => Ok(other),
+        };
+    }
+
     if dims != 1 {
         return Err(crate::interpreter::errors::mex(
             "SliceNonTensor",
@@ -202,6 +223,13 @@ fn assign_scalar_struct_index(
             "Struct subscript out of bounds",
         )),
     }
+}
+
+fn sparse_assignment_unsupported() -> RuntimeError {
+    crate::interpreter::errors::mex(
+        "SparseAssignmentUnsupported",
+        "Sparse matrix assignment is not yet supported",
+    )
 }
 
 async fn resolve_cell_indices(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
@@ -673,6 +701,49 @@ impl<'a> IndexContext<'a> {
 
 fn selector_mask_has_dim(mask: u32, dim: usize) -> bool {
     dim < u32::BITS as usize && (mask & (1u32 << dim)) != 0
+}
+
+struct SparseFullRangeExprSpec<'a> {
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    range_dims: &'a [usize],
+    range_params: &'a [(f64, f64)],
+    range_start_exprs: &'a [Option<EndExpr>],
+    range_step_exprs: &'a [Option<EndExpr>],
+    range_end_exprs: &'a [EndExpr],
+}
+
+fn sparse_full_range_exprs_as_colon_mask(spec: SparseFullRangeExprSpec<'_>) -> Option<u32> {
+    if spec.range_dims.is_empty()
+        || spec.range_dims.len() != spec.range_params.len()
+        || spec.range_dims.len() != spec.range_start_exprs.len()
+        || spec.range_dims.len() != spec.range_step_exprs.len()
+        || spec.range_dims.len() != spec.range_end_exprs.len()
+    {
+        return None;
+    }
+    let mut mask = spec.colon_mask;
+    for (pos, &dim) in spec.range_dims.iter().enumerate() {
+        if dim >= spec.dims || dim >= u32::BITS as usize {
+            return None;
+        }
+        if selector_mask_has_dim(mask, dim) || selector_mask_has_dim(spec.end_mask, dim) {
+            return None;
+        }
+        let (start, step) = spec.range_params[pos];
+        if start != 1.0 || step != 1.0 {
+            return None;
+        }
+        if spec.range_start_exprs[pos].is_some() || spec.range_step_exprs[pos].is_some() {
+            return None;
+        }
+        if !matches!(spec.range_end_exprs[pos], EndExpr::End) {
+            return None;
+        }
+        mask |= 1u32 << dim;
+    }
+    Some(mask)
 }
 
 fn validate_index_context_plan(ctx: IndexContext<'_>) -> Result<(), RuntimeError> {
@@ -1233,6 +1304,7 @@ pub async fn dispatch_indexing(
                     ca, &indices, &rhs, delete,
                 )?),
                 Value::Struct(st) => stack.push(assign_scalar_struct_index(st, &indices, rhs)?),
+                Value::SparseTensor(_) => return Err(sparse_assignment_unsupported()),
                 Value::GpuTensor(h) => stack
                     .push(idx_write_linear::assign_gpu_scalar(&h, &indices, &rhs, delete).await?),
                 _ => {
@@ -1398,6 +1470,10 @@ pub async fn dispatch_indexing(
                         &numeric,
                     )
                     .await?,
+                ),
+                Value::SparseTensor(st) => stack.push(
+                    idx_read_slice::read_sparse_slice(&st, *dims, *colon_mask, *end_mask, &numeric)
+                        .await?,
                 ),
                 Value::GpuTensor(handle) => stack.push(
                     idx_read_slice::read_gpu_slice(
@@ -1618,6 +1694,7 @@ pub async fn dispatch_indexing(
                         )?,
                     );
                 }
+                Value::SparseTensor(_) => return Err(sparse_assignment_unsupported()),
                 Value::StringArray(mut sa) => {
                     if delete {
                         return Err(crate::interpreter::errors::mex(
@@ -1733,6 +1810,16 @@ pub async fn dispatch_indexing(
                         apply_end_offsets_to_numeric(
                             &numeric,
                             IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
+                            end_numeric_exprs,
+                            vars,
+                        )
+                        .await?
+                    }
+                    Value::SparseTensor(s) => {
+                        let shape = s.shape();
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &shape),
                             end_numeric_exprs,
                             vars,
                         )
@@ -1885,6 +1972,81 @@ pub async fn dispatch_indexing(
                     .await?;
                     stack.push(idx_read_slice::read_tensor_slice_from_plan(&t, &vm_plan)?);
                 }
+                Value::LogicalArray(la) => {
+                    let data: Vec<f64> = la
+                        .data
+                        .iter()
+                        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                        .collect();
+                    let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
+                        .map_err(|e| map_slice_shape_error("slice", e))?;
+                    let vm_plan = build_expr_slice_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &tensor.shape,
+                        },
+                        vars,
+                    )
+                    .await?;
+                    let sliced = idx_read_slice::read_tensor_slice_from_plan(&tensor, &vm_plan)?;
+                    stack.push(match sliced {
+                        Value::Tensor(t) => logical_value_from_tensor(t)?,
+                        Value::Num(n) => Value::Bool(n != 0.0),
+                        other => other,
+                    });
+                }
+                Value::SparseTensor(s) => {
+                    if let Some(full_range_colon_mask) =
+                        sparse_full_range_exprs_as_colon_mask(SparseFullRangeExprSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                        })
+                    {
+                        stack.push(
+                            idx_read_slice::read_sparse_slice(
+                                &s,
+                                *dims,
+                                full_range_colon_mask,
+                                *end_mask,
+                                &numeric,
+                            )
+                            .await?,
+                        );
+                        return Ok(true);
+                    }
+                    let shape = s.shape();
+                    let vm_plan = build_expr_slice_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &shape,
+                        },
+                        vars,
+                    )
+                    .await?;
+                    stack.push(idx_read_slice::read_sparse_slice_from_plan(&s, &vm_plan)?);
+                }
                 Value::StringArray(sa) => {
                     let vm_plan = build_expr_slice_plan(
                         ExprPlanSpec {
@@ -2029,6 +2191,16 @@ pub async fn dispatch_indexing(
                         )
                         .await?
                     }
+                    Value::SparseTensor(s) => {
+                        let shape = s.shape();
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &shape),
+                            end_numeric_exprs,
+                            vars,
+                        )
+                        .await?
+                    }
                     Value::StringArray(sa) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
@@ -2130,6 +2302,7 @@ pub async fn dispatch_indexing(
                     };
                     stack.push(updated);
                 }
+                Value::SparseTensor(_) => return Err(sparse_assignment_unsupported()),
                 Value::Object(obj) => {
                     if let Some(err) = missing_member_index_overload_error(
                         &Value::Object(obj.clone()),

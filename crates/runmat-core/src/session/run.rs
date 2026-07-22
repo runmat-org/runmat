@@ -164,6 +164,7 @@ impl RunMatSession {
                     .build(),
             )
         })?;
+        let _diary_state = SessionDiaryStateGuard::new(self);
         runmat_vm::set_call_stack_limit(self.callstack_limit);
         runmat_vm::set_error_namespace(&self.error_namespace);
         runmat_vm::set_dynamic_eval_options(
@@ -180,6 +181,7 @@ impl RunMatSession {
         );
         let _exec_guard = exec_span.enter();
         runmat_runtime::console::reset_thread_buffer();
+        runmat_runtime::console::record_diary_command(input);
         runmat_runtime::plotting_hooks::reset_recent_figures();
         runmat_runtime::warning_store::reset();
         runmat_builtins::set_display_format(self.format_mode);
@@ -1036,6 +1038,15 @@ impl RunMatSession {
             .unwrap_or_default();
 
         let warnings = runmat_runtime::warning_store::take_all();
+        if error.is_none() {
+            if let Some(diary_error) = runmat_runtime::console::take_diary_error() {
+                error = Some(
+                    build_runtime_error(diary_error)
+                        .with_identifier("RunMat:diary:IO")
+                        .build(),
+                );
+            }
+        }
 
         if let Some(runtime_error) = &mut error {
             self.normalize_error_namespace(runtime_error);
@@ -1357,18 +1368,34 @@ async fn source_input_text(
             let source_name = crate::diagnostic_path::display_path_for_current_cwd(&source_path);
             let source_fullpath_name = source_path.to_string_lossy().to_string();
 
-            let text = runmat_filesystem::read_to_string_async(&source_path)
-                .await
-                .map_err(|err| {
-                    RunError::Runtime(
+            let text = match runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(
+                &source_path,
+            )
+            .await
+            {
+                Ok(text) => text,
+                Err(
+                    runmat_runtime::builtins::io::repl_fs::pcode::PcodeSourceReadError::InvalidPcode(
+                        err,
+                    ),
+                ) => {
+                    return Err(RunError::Runtime(
+                        runmat_runtime::builtins::io::repl_fs::pcode::invalid_pcode_runtime_error(
+                            format!("{} ({err})", source_path.display()),
+                        ),
+                    ));
+                }
+                Err(runmat_runtime::builtins::io::repl_fs::pcode::PcodeSourceReadError::Io(err)) => {
+                    return Err(RunError::Runtime(
                         build_runtime_error(format!(
                             "failed to read source path '{}': {err}",
                             source_path.display()
                         ))
                         .with_identifier("RunMat:SourceReadFailed")
                         .build(),
-                    )
-                })?;
+                    ));
+                }
+            };
             Ok(ResolvedSourceInput {
                 display_name: source_name,
                 fullpath_name: Some(source_fullpath_name),
@@ -1401,15 +1428,27 @@ async fn resolve_path_source_input(
 
         if let Ok(metadata) = runmat_filesystem::metadata_async(&candidate).await {
             if metadata.is_file() {
-                return Ok(candidate);
+                return Ok(
+                    runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
+                        &candidate,
+                    )
+                    .await,
+                );
             }
         }
 
         if source_path.extension().is_none() {
-            let with_ext = candidate.with_extension("m");
-            if let Ok(metadata) = runmat_filesystem::metadata_async(&with_ext).await {
-                if metadata.is_file() {
-                    return Ok(with_ext);
+            for extension in ["p", "m"] {
+                let with_ext = candidate.with_extension(extension);
+                if let Ok(metadata) = runmat_filesystem::metadata_async(&with_ext).await {
+                    if metadata.is_file() {
+                        return Ok(
+                            runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
+                                &with_ext,
+                            )
+                            .await,
+                        );
+                    }
                 }
             }
         }
@@ -1426,11 +1465,12 @@ async fn resolve_path_source_input(
                 .build(),
             )
         })?;
-        Ok(if resolved.is_absolute() {
+        let resolved = if resolved.is_absolute() {
             resolved
         } else {
             cwd.join(resolved)
-        })
+        };
+        Ok(runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&resolved).await)
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -1451,15 +1491,27 @@ async fn resolve_path_source_input(
 
         if let Ok(metadata) = runmat_filesystem::metadata_async(&candidate).await {
             if metadata.is_file() {
-                return Ok(candidate);
+                return Ok(
+                    runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
+                        &candidate,
+                    )
+                    .await,
+                );
             }
         }
 
         if source_path.extension().is_none() {
-            let with_ext = candidate.with_extension("m");
-            if let Ok(metadata) = runmat_filesystem::metadata_async(&with_ext).await {
-                if metadata.is_file() {
-                    return Ok(with_ext);
+            for extension in ["p", "m"] {
+                let with_ext = candidate.with_extension(extension);
+                if let Ok(metadata) = runmat_filesystem::metadata_async(&with_ext).await {
+                    if metadata.is_file() {
+                        return Ok(
+                            runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
+                                &with_ext,
+                            )
+                            .await,
+                        );
+                    }
                 }
             }
         }
@@ -1573,6 +1625,100 @@ path = "src/main"
             PathBuf::from("src").join("main.m")
         );
         assert_eq!(resolved.text.trim(), "x = 1;");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn source_input_path_prefers_runmat_pcode_over_m_extension() {
+        let _guard = cwd_lock();
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+        let encoded = runmat_runtime::builtins::io::repl_fs::pcode::encode_pcode_source(
+            "x = 2;",
+            "src/main.m",
+            runmat_runtime::builtins::io::repl_fs::pcode::PcodeAlgorithm::R2007b,
+        );
+        fs::write(tmp.path().join("src/main.p"), encoded).unwrap();
+        let _cwd = push_cwd(tmp.path());
+
+        let resolved = futures::executor::block_on(source_input_text(SourceInput::Path(
+            "src/main".to_string(),
+        )))
+        .expect("path without extension should prefer .p over .m");
+
+        assert_eq!(
+            PathBuf::from(&resolved.display_name),
+            PathBuf::from("src").join("main.p")
+        );
+        assert_eq!(resolved.text.trim(), "x = 2;");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn source_input_path_prefers_runmat_pcode_over_explicit_m_path() {
+        let _guard = cwd_lock();
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+        let encoded = runmat_runtime::builtins::io::repl_fs::pcode::encode_pcode_source(
+            "x = 3;",
+            "src/main.m",
+            runmat_runtime::builtins::io::repl_fs::pcode::PcodeAlgorithm::R2007b,
+        );
+        fs::write(tmp.path().join("src/main.p"), encoded).unwrap();
+        let _cwd = push_cwd(tmp.path());
+
+        let resolved = futures::executor::block_on(source_input_text(SourceInput::Path(
+            "src/main.m".to_string(),
+        )))
+        .expect("explicit .m path should prefer sibling .p");
+
+        assert_eq!(
+            PathBuf::from(&resolved.display_name),
+            PathBuf::from("src").join("main.p")
+        );
+        assert_eq!(resolved.text.trim(), "x = 3;");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn source_input_manifest_entrypoint_prefers_runmat_pcode_over_m_path() {
+        let _guard = cwd_lock();
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+        let encoded = runmat_runtime::builtins::io::repl_fs::pcode::encode_pcode_source(
+            "x = 4;",
+            "src/main.m",
+            runmat_runtime::builtins::io::repl_fs::pcode::PcodeAlgorithm::R2007b,
+        );
+        fs::write(tmp.path().join("src/main.p"), encoded).unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[entrypoints.main]
+path = "src/main"
+"#,
+        )
+        .unwrap();
+        let _cwd = push_cwd(tmp.path());
+
+        let resolved =
+            futures::executor::block_on(source_input_text(SourceInput::Path("main".to_string())))
+                .expect("named entrypoint should resolve to P-code sibling");
+
+        assert_eq!(
+            PathBuf::from(&resolved.display_name),
+            PathBuf::from("src").join("main.p")
+        );
+        assert_eq!(resolved.text.trim(), "x = 4;");
     }
 
     #[test]

@@ -1,0 +1,55 @@
+{
+  "title": "keyboard",
+  "category": "introspection",
+  "keywords": ["keyboard", "debug", "breakpoint"],
+  "summary": "Compatibility no-op for MATLAB keyboard debugging stops.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side debugger control only."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": null,
+    "integration": "debugger_compat_commands_execute_through_core"
+  },
+  "description": "`keyboard` is accepted so MATLAB scripts containing manual debug stops continue to run under RunMat.",
+  "behaviors": [
+    "`keyboard` accepts no inputs and returns no outputs.",
+    "RunMat currently treats it as a deterministic no-op. It does not enter MATLAB's interactive `K>>` debug prompt.",
+    "Interactive debugger suspension is a broader runtime/REPL feature and is not implemented by this builtin."
+  ],
+  "examples": [
+    {
+      "description": "Accept a manual debug stop without halting batch execution",
+      "input": "keyboard"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does RunMat enter an interactive debugger for `keyboard`?",
+      "answer": "No. The command is accepted as a no-op until interactive debugger infrastructure exists."
+    }
+  ],
+  "links": [
+    {
+      "label": "dbstack",
+      "url": "./dbstack"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/debugging.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/debugging.rs"
+  },
+  "gpu_behavior": [
+    "`keyboard` is control-flow debugger compatibility and has no GPU/provider behavior."
+  ]
+}

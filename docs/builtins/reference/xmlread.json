@@ -1,0 +1,36 @@
+{
+  "title": "xmlread",
+  "category": "io/repl_fs",
+  "keywords": [
+    "xmlread"
+  ],
+  "summary": "Read XML text into a lightweight DOM-compatible object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::compat::tests",
+    "integration": null
+  },
+  "description": "Reads an XML file into a lightweight DOM-compatible document object with a parsed document element, attributes, child nodes, text content, and malformed-tag validation.",
+  "behaviors": [
+    "Parses XML text from the active RunMat filesystem provider and rejects malformed XML with mismatched, unterminated, or missing root tags.",
+    "Returns an org.w3c.dom.Document-compatible object with Filename, Text, DocumentElementName, and DocumentElement properties.",
+    "DocumentElement is an org.w3c.dom.Element-compatible object exposing NodeName, TagName, TextContent, Attributes, and ChildNodes properties.",
+    "This is a lightweight DOM compatibility layer; Java method dispatch is not yet a full W3C DOM implementation."
+  ],
+  "examples": [],
+  "faqs": [],
+  "links": []
+}

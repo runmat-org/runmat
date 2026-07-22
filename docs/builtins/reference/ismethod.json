@@ -1,0 +1,93 @@
+{
+  "title": "ismethod",
+  "category": "introspection",
+  "keywords": [
+    "ismethod",
+    "method",
+    "classdef",
+    "object",
+    "handle",
+    "inheritance"
+  ],
+  "summary": "Return true when an object has a public method.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Metadata-only predicate. RunMat inspects host class registry metadata for objects, class names, class refs, and gpuArray handles without gathering GPU buffers."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::ismethod::tests",
+    "integration": "crates/runmat-vm/tests/functions.rs::ismethod_script_surface_checks_registered_class_methods"
+  },
+  "description": "`ismethod(objOrClass, methodName)` returns true when `methodName` names a public method available on the runtime class of `objOrClass`. RunMat resolves inherited methods through its class registry and accepts object receivers, class-name text, class references, gpuArray handles, and method names as string scalars or row character vectors.",
+  "behaviors": [
+    "Value-class and handle-class instances are inspected by runtime class name.",
+    "Class-name string scalars and row character vectors are resolved against the same class registry metadata.",
+    "Class references are resolved by referenced class name.",
+    "gpuArray values are treated as the `gpuArray` class for metadata lookup without gathering provider buffers; they return true only when the requested public method is registered for `gpuArray`.",
+    "Inherited public methods return `logical(1)`.",
+    "Public static methods registered for the class return `logical(1)` because they are class methods visible through the class metadata.",
+    "Private and protected methods return `logical(0)` for this public predicate.",
+    "Missing class names, missing method names, empty method names, ordinary numeric data, structs, cells, and function handles return `logical(0)`.",
+    "The method-name argument must be a string scalar or row character vector; nonscalar string arrays and nontext values raise `RunMat:IsMethodNameInvalid`.",
+    "This builtin does not call user code, construct metaclass objects, or enumerate method lists."
+  ],
+  "examples": [
+    {
+      "description": "Check an object method",
+      "input": "tf = ismethod(obj, \"step\")",
+      "output": "tf = logical(1)"
+    },
+    {
+      "description": "Check a missing method",
+      "input": "tf = ismethod(obj, \"notARealMethod\")",
+      "output": "tf = logical(0)"
+    },
+    {
+      "description": "Check a method by class name",
+      "input": "tf = ismethod(\"MyClass\", \"step\")",
+      "output": "tf = logical(1)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `ismethod` call the method?",
+      "answer": "No. It only checks RunMat class metadata."
+    },
+    {
+      "question": "Does it report private methods?",
+      "answer": "No. MATLAB's `ismethod` reports nonhidden public methods, so RunMat returns false for private and protected registry entries."
+    },
+    {
+      "question": "Can I pass a class name instead of an object?",
+      "answer": "Yes. String scalars and row character vectors are interpreted as class names for metadata lookup."
+    }
+  ],
+  "links": [
+    {
+      "label": "class",
+      "url": "./class"
+    },
+    {
+      "label": "isa",
+      "url": "./isa"
+    },
+    {
+      "label": "isobject",
+      "url": "./isobject"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/ismethod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/ismethod.rs"
+  }
+}

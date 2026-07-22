@@ -1,0 +1,21 @@
+{
+  "title": "standardizeMissing",
+  "category": "missing",
+  "keywords": ["standardizeMissing", "missing", "NaN", "string", "table"],
+  "summary": "Replace user-specified missing indicators with canonical missing values.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "GPU inputs are gathered before standardization."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::missing::tests", "integration": "crates/runmat-vm/tests/missing_values.rs"},
+  "description": "`standardizeMissing(A, indicators)` converts numeric indicators to `NaN` and text indicators to `<missing>`.",
+  "behaviors": [
+    "Numeric arrays accept scalar or array indicators; `NaN` indicators match existing NaNs.",
+    "String arrays and character-array rows accept text indicators and are converted to the missing string sentinel.",
+    "Cell arrays and tables are processed recursively."
+  ],
+  "examples": [
+    {"description": "Convert sentinel values to NaN", "input": "B = standardizeMissing([-99 2 4], -99)", "output": "B = [NaN 2 4]"}
+  ],
+  "links": [{"label": "ismissing", "url": "./ismissing"}, {"label": "fillmissing", "url": "./fillmissing"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/missing/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/missing/mod.rs"}
+}

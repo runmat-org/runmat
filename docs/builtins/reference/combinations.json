@@ -1,0 +1,12 @@
+{
+  "title": "combinations",
+  "category": "array/grouping",
+  "keywords": ["combinations", "cartesian", "table", "combinatorics"],
+  "summary": "Generate all element combinations of arrays.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Combination materialization runs on the host."},
+  "tested": {"unit": "builtins::array::grouping::tests"},
+  "description": "`T = combinations(A,B,...)` returns a table whose rows contain the Cartesian product of the input vector elements.",
+  "behaviors": ["Supports numeric, logical, string, character, and cell inputs.", "Supports the `VariableNames` name-value option."],
+  "examples": [{"description": "Generate pairs", "input": "T = combinations([1 2],[\"x\" \"y\"])", "output": "T = 4x2 table"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/array/grouping.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/grouping.rs"}
+}

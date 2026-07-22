@@ -1,0 +1,30 @@
+{
+  "title": "rms",
+  "category": "math/reduction",
+  "keywords": ["rms", "root mean square", "statistics", "signal"],
+  "summary": "Compute root mean square values.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host for compatibility until provider reduction hooks exist."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::descriptive::tests", "integration": null },
+  "description": "`rms(X)` computes `sqrt(mean(abs(X).^2))` along the first non-singleton dimension. Dimension, vector-dimension, `\"all\"`, `\"includenan\"`, `\"omitnan\"`, `\"includemissing\"`, and `\"omitmissing\"` forms are supported.",
+  "behaviors": [
+    "NaNs are included by default.",
+    "`\"omitnan\"` skips NaNs in each slice; empty slices return `NaN`.",
+    "Logical and integer inputs are promoted to double precision before reduction.",
+    "Complex inputs are reduced using magnitude."
+  ],
+  "examples": [{ "description": "Root mean square of a vector", "input": "r = rms([1 2 4], \"all\")" }],
+  "faqs": [{ "question": "Is rms the same as norm divided by sqrt(n)?", "answer": "For a vector without omitted values, yes: `rms(x)` equals `norm(x)/sqrt(numel(x))`." }],
+  "links": [{ "label": "rmse", "url": "./rmse" }, { "label": "mean", "url": "./mean" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs"
+  }
+}

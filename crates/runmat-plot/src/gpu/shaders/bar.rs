@@ -12,6 +12,8 @@ struct BarParams {
     row_count: u32,
     series_index: u32,
     series_count: u32,
+    source_row_count: u32,
+    transpose_source: u32,
     group_index: u32,
     group_count: u32,
     orientation: u32,
@@ -98,9 +100,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local_offset = group_offset_start
         + per_group_width * f32(min(params.group_index, safe_group_count - 1u))
         + per_group_width * 0.5;
-    let stride = params.row_count;
-    let column_offset = params.series_index * stride;
-    let value = values[column_offset + idx];
+    let source_stride = max(params.source_row_count, 1u);
+    let value_index = if (params.transpose_source == 1u) {
+        idx * source_stride + params.series_index
+    } else {
+        params.series_index * source_stride + idx
+    };
+    let value = values[value_index];
 
     var base_pos = 0.0;
     var base_neg = 0.0;
@@ -110,7 +116,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if (col >= params.series_index) {
                 break;
             }
-            let prev = values[col * stride + idx];
+            let prev_index = if (params.transpose_source == 1u) {
+                idx * source_stride + col
+            } else {
+                col * source_stride + idx
+            };
+            let prev = values[prev_index];
             if (isFinite(prev)) {
                 if (prev >= 0.0) {
                     base_pos += prev;
@@ -165,6 +176,8 @@ struct BarParams {
     row_count: u32,
     series_index: u32,
     series_count: u32,
+    source_row_count: u32,
+    transpose_source: u32,
     group_index: u32,
     group_count: u32,
     orientation: u32,
@@ -251,9 +264,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local_offset = group_offset_start
         + per_group_width * f32(min(params.group_index, safe_group_count - 1u))
         + per_group_width * 0.5;
-    let stride = params.row_count;
-    let column_offset = params.series_index * stride;
-    let value = f32(values[column_offset + idx]);
+    let source_stride = max(params.source_row_count, 1u);
+    let value_index = if (params.transpose_source == 1u) {
+        idx * source_stride + params.series_index
+    } else {
+        params.series_index * source_stride + idx
+    };
+    let value = f32(values[value_index]);
 
     var base_pos = 0.0;
     var base_neg = 0.0;
@@ -263,7 +280,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if (col >= params.series_index) {
                 break;
             }
-            let prev = f32(values[col * stride + idx]);
+            let prev_index = if (params.transpose_source == 1u) {
+                idx * source_stride + col
+            } else {
+                col * source_stride + idx
+            };
+            let prev = f32(values[prev_index]);
             if (isFinite(prev)) {
                 if (prev >= 0.0) {
                     base_pos += prev;

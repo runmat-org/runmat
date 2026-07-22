@@ -162,7 +162,7 @@ fn rgb2gray_tensor(rgb: &Tensor) -> BuiltinResult<Tensor> {
         *out = common::unit_to_dtype(gray, rgb.dtype);
     }
     let dtype = match rgb.dtype {
-        NumericDType::U8 | NumericDType::U16 | NumericDType::F32 => rgb.dtype,
+        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 | NumericDType::F32 => rgb.dtype,
         NumericDType::F64 => NumericDType::F64,
     };
     common::tensor_with_dtype(data, vec![rows, cols], dtype, NAME)

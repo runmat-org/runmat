@@ -3,6 +3,7 @@
 pub(crate) mod blackman;
 pub mod butter;
 pub mod buttord;
+pub mod cheb2ord;
 pub(crate) mod common;
 pub(crate) mod conv;
 pub(crate) mod conv2;
@@ -16,6 +17,7 @@ pub(crate) mod gauspuls;
 pub(crate) mod hamming;
 pub(crate) mod hann;
 pub(crate) mod hilbert;
+pub(crate) mod order_selection;
 pub(crate) mod periodogram;
 pub(crate) mod pulstran;
 pub(crate) mod pwelch;

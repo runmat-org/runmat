@@ -1,7 +1,10 @@
 //! Core string builtins.
 
 pub mod char;
+pub mod compat;
 pub mod compose;
+pub mod genvarname;
+pub mod int2str;
 pub mod num2str;
 pub mod sprintf;
 pub mod str2double;
@@ -13,3 +16,4 @@ pub mod string_empty;
 pub mod strings;
 pub mod strlength;
 pub mod strncmp;
+pub mod unicode2native;

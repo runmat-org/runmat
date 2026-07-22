@@ -43,8 +43,9 @@
     "RunMat treats `plot` as a rendering sink: fusion stops at the builtin, but GPU residency is preserved on the happy path when the shared plotting device is installed."
   ],
   "options": [
-    "Style strings like `'-'`, `'--'`, `':'`, `'o'`, `'x'`, and combined forms such as `'r--o'` are accepted in MATLAB-style plot calls.",
-    "Name/value property updates are typically applied after plotting through `set(h, ...)`, where `h` is the returned line handle.",
+    "Style strings like `'-'`, `'--'`, `':'`, `'o'`, `'x'`, and combined forms such as `'r--o'` are accepted in MATLAB-style plot calls, including per-series forms such as `plot(x1,y1,'r',x2,y2,'b')`.",
+    "Name/value property updates can be supplied inline or applied after plotting through `set(h, ...)`, where `h` is the returned line handle. Inline line-spec tokens may appear before or after name/value pairs for a series.",
+    "`HandleVisibility` accepts `'on'`, `'off'`, and `'callback'`; `'off'` keeps the line visible but removes it from automatic legend entries.",
     "Display names set during or after plotting are used by `legend` when labels are not passed explicitly."
   ],
   "examples": [
@@ -62,6 +63,11 @@
       "description": "Create multiple series and drive the legend from display names",
       "input": "x = linspace(0, 2*pi, 200);\nh1 = plot(x, sin(x));\nset(h1, 'DisplayName', 'sin(x)', 'LineWidth', 2);\nhold on;\nh2 = plot(x, cos(x));\nset(h2, 'DisplayName', 'cos(x)');\nlegend;",
       "output": "% The legend uses the line DisplayName properties"
+    },
+    {
+      "description": "Use per-series LineSpec and line properties",
+      "input": "x = 1:3;\ny = [1 2 3];\nplot(x, y, 'r', x, y + 1, 'b');\nh = plot(x, y, 'LineWidth', 1.2, 'b', 'HandleVisibility', 'off');",
+      "output": "% The first call creates red and blue series; h is visible but excluded from automatic legends"
     },
     {
       "description": "Inspect and update a plotted line through handles",

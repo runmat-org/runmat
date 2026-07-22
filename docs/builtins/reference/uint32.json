@@ -1,0 +1,63 @@
+{
+  "title": "uint32",
+  "category": "math/elementwise",
+  "keywords": ["uint32", "cast", "integer", "conversion", "numeric"],
+  "summary": "Convert values to unsigned 32-bit integer class.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs gather for saturating conversion and are re-uploaded when possible."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::uint32::tests",
+    "integration": null
+  },
+  "description": "`uint32(X)` converts numeric, logical, character, symbolic-constant, and gatherable gpuArray inputs to unsigned 32-bit integer values using saturating rounded conversion.",
+  "behaviors": [
+    "Rounds fractional numeric values to the nearest integer.",
+    "Clamps negative values and `NaN` to `0`.",
+    "Clamps values larger than `intmax('uint32')` to `4294967295`.",
+    "Preserves array shape and marks tensor output as `uint32`.",
+    "Rejects complex, string, cell, struct, object, and function-handle inputs."
+  ],
+  "examples": [
+    {
+      "description": "Saturating scalar conversion",
+      "input": "uint32([-1 3.5 4294967296])",
+      "output": "ans =\n  1x3 uint32 array\n           0           4  4294967295"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `uint32` preserve array shape?",
+      "answer": "Yes. Non-scalar array inputs keep their original dimensions and are tagged with the `uint32` numeric class."
+    }
+  ],
+  "links": [
+    {
+      "label": "uint16",
+      "url": "./uint16"
+    },
+    {
+      "label": "intmax",
+      "url": "./intmax"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/uint32.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/uint32.rs"
+  },
+  "gpu_residency": "GPU inputs gather for conversion and return a host uint32 result.",
+  "gpu_behavior": [
+    "There is no provider-native uint32 storage hook yet; gpuArray inputs gather to host and return a host uint32 result."
+  ]
+}

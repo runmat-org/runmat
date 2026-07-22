@@ -1,0 +1,1213 @@
+//! Outlier detection and filling helpers.
+
+use std::cmp::Ordering;
+
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    LogicalArray, ResolveContext, Tensor, Type, Value,
+};
+use runmat_macros::runtime_builtin;
+
+use crate::builtins::common::random_args::keyword_of;
+use crate::builtins::common::tensor;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+
+const ISOUTLIER_NAME: &str = "isoutlier";
+const FILLOUTLIERS_NAME: &str = "filloutliers";
+const MAD_SCALE: f64 = 1.4826;
+
+const PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input numeric array.",
+};
+
+const PARAM_FILL: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "fillmethod",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Replacement method or constant value.",
+};
+
+const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "options",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Detection method, dimension, and name-value options.",
+};
+
+const OUTPUT_MASK: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "TF",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical mask of detected outliers.",
+};
+
+const OUTPUT_VALUE: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Array with outliers filled.",
+};
+
+const OUTPUT_LOWER: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "L",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Optional,
+    default: None,
+    description: "Lower threshold.",
+};
+
+const OUTPUT_UPPER: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "U",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Optional,
+    default: None,
+    description: "Upper threshold.",
+};
+
+const OUTPUT_CENTER: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Optional,
+    default: None,
+    description: "Center value used by the detection method.",
+};
+
+const INPUT_A: [BuiltinParamDescriptor; 1] = [PARAM_A];
+const INPUT_A_OPTIONS: [BuiltinParamDescriptor; 2] = [PARAM_A, PARAM_OPTIONS];
+const INPUT_A_FILL: [BuiltinParamDescriptor; 2] = [PARAM_A, PARAM_FILL];
+const INPUT_A_FILL_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_A, PARAM_FILL, PARAM_OPTIONS];
+const OUT_MASK: [BuiltinParamDescriptor; 1] = [OUTPUT_MASK];
+const OUT_MASK_THRESHOLDS: [BuiltinParamDescriptor; 4] =
+    [OUTPUT_MASK, OUTPUT_LOWER, OUTPUT_UPPER, OUTPUT_CENTER];
+const OUT_VALUE: [BuiltinParamDescriptor; 1] = [OUTPUT_VALUE];
+const OUT_VALUE_MASK: [BuiltinParamDescriptor; 2] = [OUTPUT_VALUE, OUTPUT_MASK];
+const OUT_VALUE_THRESHOLDS: [BuiltinParamDescriptor; 5] = [
+    OUTPUT_VALUE,
+    OUTPUT_MASK,
+    OUTPUT_LOWER,
+    OUTPUT_UPPER,
+    OUTPUT_CENTER,
+];
+
+const ISOUTLIER_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "TF = isoutlier(A)",
+        inputs: &INPUT_A,
+        outputs: &OUT_MASK,
+    },
+    BuiltinSignatureDescriptor {
+        label: "TF = isoutlier(A, method)",
+        inputs: &INPUT_A_OPTIONS,
+        outputs: &OUT_MASK,
+    },
+    BuiltinSignatureDescriptor {
+        label: "TF = isoutlier(A, ___, dim)",
+        inputs: &INPUT_A_OPTIONS,
+        outputs: &OUT_MASK,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[TF, L, U, C] = isoutlier(___)",
+        inputs: &INPUT_A_OPTIONS,
+        outputs: &OUT_MASK_THRESHOLDS,
+    },
+];
+
+const FILLOUTLIERS_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "B = filloutliers(A, fillmethod)",
+        inputs: &INPUT_A_FILL,
+        outputs: &OUT_VALUE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = filloutliers(A, fillmethod, findmethod)",
+        inputs: &INPUT_A_FILL_OPTIONS,
+        outputs: &OUT_VALUE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = filloutliers(A, ___, dim)",
+        inputs: &INPUT_A_FILL_OPTIONS,
+        outputs: &OUT_VALUE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, TF] = filloutliers(___)",
+        inputs: &INPUT_A_FILL_OPTIONS,
+        outputs: &OUT_VALUE_MASK,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, TF, L, U, C] = filloutliers(___)",
+        inputs: &INPUT_A_FILL_OPTIONS,
+        outputs: &OUT_VALUE_THRESHOLDS,
+    },
+];
+
+const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.OUTLIERS.INVALID_ARGUMENT",
+    identifier: Some("RunMat:outliers:InvalidArgument"),
+    when: "Inputs, methods, dimensions, or name-value options are malformed.",
+    message: "outlier builtin: invalid argument",
+};
+
+const ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.OUTLIERS.UNSUPPORTED",
+    identifier: Some("RunMat:outliers:Unsupported"),
+    when: "A table/timetable or advanced smoothing/interpolation form is requested.",
+    message: "outlier builtin: unsupported form",
+};
+
+const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.OUTLIERS.INTERNAL",
+    identifier: Some("RunMat:outliers:Internal"),
+    when: "Internal tensor or logical array materialization fails.",
+    message: "outlier builtin: internal error",
+};
+
+const ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.OUTLIERS.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:outliers:TooManyOutputs"),
+    when: "More outputs are requested than the builtin can return.",
+    message: "outlier builtin: too many outputs",
+};
+
+const ERRORS: [BuiltinErrorDescriptor; 4] = [
+    ERROR_INVALID_ARGUMENT,
+    ERROR_UNSUPPORTED,
+    ERROR_INTERNAL,
+    ERROR_TOO_MANY_OUTPUTS,
+];
+
+pub const ISOUTLIER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISOUTLIER_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+pub const FILLOUTLIERS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FILLOUTLIERS_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Unknown
+}
+
+fn logical_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Logical { shape: None }
+}
+
+fn outlier_error(
+    builtin: &'static str,
+    descriptor: &'static BuiltinErrorDescriptor,
+    detail: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", descriptor.message, detail.into()))
+        .with_builtin(builtin);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn invalid_argument(builtin: &'static str, detail: impl Into<String>) -> RuntimeError {
+    outlier_error(builtin, &ERROR_INVALID_ARGUMENT, detail)
+}
+
+fn unsupported(builtin: &'static str, detail: impl Into<String>) -> RuntimeError {
+    outlier_error(builtin, &ERROR_UNSUPPORTED, detail)
+}
+
+fn internal_error(builtin: &'static str, detail: impl Into<String>) -> RuntimeError {
+    outlier_error(builtin, &ERROR_INTERNAL, detail)
+}
+
+fn too_many_outputs(builtin: &'static str, max_outputs: usize) -> RuntimeError {
+    outlier_error(
+        builtin,
+        &ERROR_TOO_MANY_OUTPUTS,
+        format!("{builtin}: requested more than {max_outputs} outputs"),
+    )
+}
+
+#[derive(Clone, Debug)]
+enum DetectionMethod {
+    Median,
+    Mean,
+    Quartiles,
+    Percentiles(f64, f64),
+    MovingMedian(usize),
+    MovingMean(usize),
+}
+
+#[derive(Clone, Debug)]
+struct DetectionOptions {
+    method: DetectionMethod,
+    dim: Option<usize>,
+    threshold_factor: Option<f64>,
+    forced_mask: Option<Vec<u8>>,
+}
+
+impl Default for DetectionOptions {
+    fn default() -> Self {
+        Self {
+            method: DetectionMethod::Median,
+            dim: None,
+            threshold_factor: None,
+            forced_mask: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum FillMethod {
+    Center,
+    Clip,
+    Constant(f64),
+    Previous,
+    Next,
+    Nearest,
+    Linear,
+}
+
+#[derive(Clone, Debug)]
+struct DetectionResult {
+    mask: Vec<u8>,
+    mask_shape: Vec<usize>,
+    lower: Vec<f64>,
+    upper: Vec<f64>,
+    center: Vec<f64>,
+    lower_full: Vec<f64>,
+    upper_full: Vec<f64>,
+    center_full: Vec<f64>,
+    threshold_shape: Vec<usize>,
+}
+
+#[runtime_builtin(
+    name = "isoutlier",
+    category = "stats/summary",
+    summary = "Detect outliers in numeric arrays.",
+    keywords = "isoutlier,outlier,median,quartiles,mean,statistics",
+    accel = "cpu",
+    type_resolver(logical_type),
+    descriptor(crate::builtins::stats::summary::outliers::ISOUTLIER_DESCRIPTOR),
+    builtin_path = "crate::builtins::stats::summary::outliers"
+)]
+pub(crate) async fn isoutlier_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let tensor = value_to_tensor(ISOUTLIER_NAME, value).await?;
+    let options = parse_detection_options(ISOUTLIER_NAME, rest).await?;
+    let result = detect_outliers(&tensor, &options, ISOUTLIER_NAME)?;
+    outlier_outputs(ISOUTLIER_NAME, None, result)
+}
+
+#[runtime_builtin(
+    name = "filloutliers",
+    category = "stats/summary",
+    summary = "Fill outliers in numeric arrays.",
+    keywords = "filloutliers,outlier,fill,median,quartiles,mean,statistics",
+    accel = "cpu",
+    type_resolver(any_type),
+    descriptor(crate::builtins::stats::summary::outliers::FILLOUTLIERS_DESCRIPTOR),
+    builtin_path = "crate::builtins::stats::summary::outliers"
+)]
+pub(crate) async fn filloutliers_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let tensor = value_to_tensor(FILLOUTLIERS_NAME, value).await?;
+    let mut rest = gather_values(rest).await?;
+    if rest.is_empty() {
+        return Err(invalid_argument(
+            FILLOUTLIERS_NAME,
+            "filloutliers: fill method is required",
+        ));
+    }
+    let fill_method = parse_fill_method(&mut rest)?;
+    let options = parse_detection_options(FILLOUTLIERS_NAME, rest).await?;
+    let result = detect_outliers(&tensor, &options, FILLOUTLIERS_NAME)?;
+    let filled = fill_outlier_tensor(&tensor, &result, &options, &fill_method)?;
+    outlier_outputs(FILLOUTLIERS_NAME, Some(filled), result)
+}
+
+async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
+    let mut out = Vec::with_capacity(values.len());
+    for value in values {
+        out.push(gather_if_needed_async(&value).await?);
+    }
+    Ok(out)
+}
+
+async fn value_to_tensor(builtin: &'static str, value: Value) -> BuiltinResult<Tensor> {
+    let value = gather_if_needed_async(&value).await.map_err(|err| {
+        invalid_argument(builtin, format!("{builtin}: failed to gather input: {err}"))
+    })?;
+    tensor::value_into_tensor_for(builtin, value)
+        .map_err(|err| invalid_argument(builtin, format!("{builtin}: {err}")))
+}
+
+async fn parse_detection_options(
+    builtin: &'static str,
+    rest: Vec<Value>,
+) -> BuiltinResult<DetectionOptions> {
+    let rest = gather_values(rest).await?;
+    let mut options = DetectionOptions::default();
+    let mut idx = 0usize;
+    while idx < rest.len() {
+        let arg = &rest[idx];
+        if let Some(keyword) = keyword_of(arg) {
+            match keyword.to_ascii_lowercase().as_str() {
+                "median" => options.method = DetectionMethod::Median,
+                "mean" => options.method = DetectionMethod::Mean,
+                "quartiles" => options.method = DetectionMethod::Quartiles,
+                "percentiles" => {
+                    idx += 1;
+                    if idx >= rest.len() {
+                        return Err(invalid_argument(
+                            builtin,
+                            "percentiles requires [lower upper]",
+                        ));
+                    }
+                    let bounds = numeric_vector(builtin, &rest[idx])?;
+                    if bounds.len() != 2 {
+                        return Err(invalid_argument(
+                            builtin,
+                            "percentiles must be a two-element vector",
+                        ));
+                    }
+                    if !(0.0..=100.0).contains(&bounds[0])
+                        || !(0.0..=100.0).contains(&bounds[1])
+                        || bounds[0] >= bounds[1]
+                    {
+                        return Err(invalid_argument(
+                            builtin,
+                            "percentiles must satisfy 0 <= p1 < p2 <= 100",
+                        ));
+                    }
+                    options.method =
+                        DetectionMethod::Percentiles(bounds[0] / 100.0, bounds[1] / 100.0);
+                }
+                "movmedian" | "movmean" => {
+                    let is_median = keyword.eq_ignore_ascii_case("movmedian");
+                    idx += 1;
+                    if idx >= rest.len() {
+                        return Err(invalid_argument(builtin, "moving method requires a window"));
+                    }
+                    let window = scalar_usize(builtin, &rest[idx], "window")?;
+                    if window == 0 {
+                        return Err(invalid_argument(builtin, "window must be positive"));
+                    }
+                    options.method = if is_median {
+                        DetectionMethod::MovingMedian(window)
+                    } else {
+                        DetectionMethod::MovingMean(window)
+                    };
+                }
+                "thresholdfactor" => {
+                    idx += 1;
+                    if idx >= rest.len() {
+                        return Err(invalid_argument(
+                            builtin,
+                            "ThresholdFactor requires a numeric scalar",
+                        ));
+                    }
+                    let factor = scalar_number(&rest[idx]).ok_or_else(|| {
+                        invalid_argument(builtin, "ThresholdFactor must be a numeric scalar")
+                    })?;
+                    if !(factor.is_finite() && factor >= 0.0) {
+                        return Err(invalid_argument(
+                            builtin,
+                            "ThresholdFactor must be a finite nonnegative scalar",
+                        ));
+                    }
+                    options.threshold_factor = Some(factor);
+                }
+                "outlierlocations" if builtin == FILLOUTLIERS_NAME => {
+                    idx += 1;
+                    if idx >= rest.len() {
+                        return Err(invalid_argument(
+                            builtin,
+                            "OutlierLocations requires a logical mask value",
+                        ));
+                    }
+                    options.forced_mask = Some(logical_mask(builtin, &rest[idx])?);
+                }
+                "samplepoints" | "data variables" | "datavariables" | "outlierlocations" => {
+                    idx += 1;
+                    if idx >= rest.len() {
+                        return Err(invalid_argument(
+                            builtin,
+                            format!("{keyword} requires a value"),
+                        ));
+                    }
+                    return Err(unsupported(
+                        builtin,
+                        format!(
+                            "{keyword} is not supported for numeric-array outlier detection yet"
+                        ),
+                    ));
+                }
+                other => {
+                    return Err(invalid_argument(
+                        builtin,
+                        format!("unsupported option or method '{other}'"),
+                    ));
+                }
+            }
+        } else {
+            options.dim = Some(parse_dim(builtin, arg)?);
+        }
+        idx += 1;
+    }
+    if matches!(options.method, DetectionMethod::Percentiles(_, _))
+        && options.threshold_factor.is_some()
+    {
+        return Err(invalid_argument(
+            builtin,
+            "ThresholdFactor is not supported with the percentiles method",
+        ));
+    }
+    Ok(options)
+}
+
+fn parse_fill_method(rest: &mut Vec<Value>) -> BuiltinResult<FillMethod> {
+    let value = rest.remove(0);
+    if let Some(number) = scalar_number(&value) {
+        return Ok(FillMethod::Constant(number));
+    }
+    let Some(keyword) = keyword_of(&value) else {
+        return Err(invalid_argument(
+            FILLOUTLIERS_NAME,
+            "filloutliers: fill method must be text or numeric scalar",
+        ));
+    };
+    match keyword.to_ascii_lowercase().as_str() {
+        "center" => Ok(FillMethod::Center),
+        "clip" => Ok(FillMethod::Clip),
+        "previous" => Ok(FillMethod::Previous),
+        "next" => Ok(FillMethod::Next),
+        "nearest" => Ok(FillMethod::Nearest),
+        "linear" => Ok(FillMethod::Linear),
+        "constant" => Err(invalid_argument(
+            FILLOUTLIERS_NAME,
+            "filloutliers: use a numeric scalar fill method for constant replacement",
+        )),
+        "spline" | "pchip" | "makima" => Err(unsupported(
+            FILLOUTLIERS_NAME,
+            format!("filloutliers: interpolation method '{keyword}' is not supported yet"),
+        )),
+        other => Err(invalid_argument(
+            FILLOUTLIERS_NAME,
+            format!("filloutliers: unsupported fill method '{other}'"),
+        )),
+    }
+}
+
+fn detect_outliers(
+    input: &Tensor,
+    options: &DetectionOptions,
+    builtin: &'static str,
+) -> BuiltinResult<DetectionResult> {
+    if let Some(mask) = &options.forced_mask {
+        if mask.len() != input.data.len() {
+            return Err(invalid_argument(
+                builtin,
+                "OutlierLocations must have the same number of elements as the input",
+            ));
+        }
+    }
+    let shape = tensor::default_shape_for(&input.shape, input.data.len());
+    let dim = options.dim.unwrap_or_else(|| first_non_singleton(&shape));
+    let mut result = if dim == 0 {
+        detect_all(input, options)?
+    } else {
+        let axis = dim - 1;
+        let rank = shape.len().max(axis + 1);
+        let mut padded_shape = shape.clone();
+        padded_shape.resize(rank, 1);
+        if matches!(
+            options.method,
+            DetectionMethod::MovingMedian(_) | DetectionMethod::MovingMean(_)
+        ) {
+            detect_moving(input, &padded_shape, axis, options)?
+        } else {
+            detect_by_slice(input, &padded_shape, axis, options)?
+        }
+    };
+    if let Some(mask) = &options.forced_mask {
+        result.mask.clone_from(mask);
+    }
+    Ok(result)
+}
+
+fn detect_all(input: &Tensor, options: &DetectionOptions) -> BuiltinResult<DetectionResult> {
+    let stats = slice_stats(&input.data, &options.method, threshold_factor(options))?;
+    let mask = input
+        .data
+        .iter()
+        .map(|value| u8::from(is_outlier_value(*value, stats.lower, stats.upper)))
+        .collect();
+    Ok(DetectionResult {
+        mask,
+        mask_shape: input.shape.clone(),
+        lower: vec![stats.lower],
+        upper: vec![stats.upper],
+        center: vec![stats.center],
+        lower_full: vec![stats.lower; input.data.len()],
+        upper_full: vec![stats.upper; input.data.len()],
+        center_full: vec![stats.center; input.data.len()],
+        threshold_shape: vec![1, 1],
+    })
+}
+
+fn detect_by_slice(
+    input: &Tensor,
+    shape: &[usize],
+    axis: usize,
+    options: &DetectionOptions,
+) -> BuiltinResult<DetectionResult> {
+    let axis_len = shape[axis];
+    let pre: usize = shape[..axis].iter().product();
+    let post: usize = shape[axis + 1..].iter().product();
+    let mut threshold_shape = shape.to_vec();
+    threshold_shape[axis] = 1;
+    let threshold_len = tensor::element_count(&threshold_shape);
+    let mut mask = vec![0u8; input.data.len()];
+    let mut lower = vec![f64::NAN; threshold_len];
+    let mut upper = vec![f64::NAN; threshold_len];
+    let mut center = vec![f64::NAN; threshold_len];
+    let mut lower_full = vec![f64::NAN; input.data.len()];
+    let mut upper_full = vec![f64::NAN; input.data.len()];
+    let mut center_full = vec![f64::NAN; input.data.len()];
+    for prefix in 0..pre {
+        for suffix in 0..post {
+            let mut slice = Vec::with_capacity(axis_len);
+            let mut indices = Vec::with_capacity(axis_len);
+            for idx in 0..axis_len {
+                let linear = prefix + idx * pre + suffix * pre * axis_len;
+                slice.push(input.data[linear]);
+                indices.push(linear);
+            }
+            let stats = slice_stats(&slice, &options.method, threshold_factor(options))?;
+            let threshold_idx = prefix + suffix * pre;
+            lower[threshold_idx] = stats.lower;
+            upper[threshold_idx] = stats.upper;
+            center[threshold_idx] = stats.center;
+            for (value, linear) in slice.iter().zip(indices) {
+                mask[linear] = u8::from(is_outlier_value(*value, stats.lower, stats.upper));
+                lower_full[linear] = stats.lower;
+                upper_full[linear] = stats.upper;
+                center_full[linear] = stats.center;
+            }
+        }
+    }
+    Ok(DetectionResult {
+        mask,
+        mask_shape: input.shape.clone(),
+        lower,
+        upper,
+        center,
+        lower_full,
+        upper_full,
+        center_full,
+        threshold_shape,
+    })
+}
+
+fn detect_moving(
+    input: &Tensor,
+    shape: &[usize],
+    axis: usize,
+    options: &DetectionOptions,
+) -> BuiltinResult<DetectionResult> {
+    let axis_len = shape[axis];
+    let pre: usize = shape[..axis].iter().product();
+    let post: usize = shape[axis + 1..].iter().product();
+    let mut mask = vec![0u8; input.data.len()];
+    let mut lower = vec![f64::NAN; input.data.len()];
+    let mut upper = vec![f64::NAN; input.data.len()];
+    let mut center = vec![f64::NAN; input.data.len()];
+    for prefix in 0..pre {
+        for suffix in 0..post {
+            let mut slice = Vec::with_capacity(axis_len);
+            let mut indices = Vec::with_capacity(axis_len);
+            for idx in 0..axis_len {
+                let linear = prefix + idx * pre + suffix * pre * axis_len;
+                slice.push(input.data[linear]);
+                indices.push(linear);
+            }
+            let window = match options.method {
+                DetectionMethod::MovingMedian(window) | DetectionMethod::MovingMean(window) => {
+                    window
+                }
+                _ => unreachable!(),
+            };
+            for idx in 0..axis_len {
+                let (start, end) = centered_window(idx, axis_len, window);
+                let stats = slice_stats(
+                    &slice[start..end],
+                    &options.method,
+                    threshold_factor(options),
+                )?;
+                let linear = indices[idx];
+                lower[linear] = stats.lower;
+                upper[linear] = stats.upper;
+                center[linear] = stats.center;
+                mask[linear] = u8::from(is_outlier_value(slice[idx], stats.lower, stats.upper));
+            }
+        }
+    }
+    Ok(DetectionResult {
+        mask,
+        mask_shape: input.shape.clone(),
+        lower: lower.clone(),
+        upper: upper.clone(),
+        center: center.clone(),
+        lower_full: lower,
+        upper_full: upper,
+        center_full: center,
+        threshold_shape: shape.to_vec(),
+    })
+}
+
+fn fill_outlier_tensor(
+    input: &Tensor,
+    result: &DetectionResult,
+    options: &DetectionOptions,
+    method: &FillMethod,
+) -> BuiltinResult<Value> {
+    let mut data = input.data.clone();
+    let shape = tensor::default_shape_for(&input.shape, input.data.len());
+    let dim = options.dim.unwrap_or_else(|| first_non_singleton(&shape));
+    if dim == 0 {
+        fill_slice(
+            &mut data,
+            &(0..input.data.len()).collect::<Vec<_>>(),
+            result,
+            method,
+        );
+    } else {
+        let axis = dim - 1;
+        let rank = shape.len().max(axis + 1);
+        let mut padded_shape = shape.clone();
+        padded_shape.resize(rank, 1);
+        let axis_len = padded_shape[axis];
+        let pre: usize = padded_shape[..axis].iter().product();
+        let post: usize = padded_shape[axis + 1..].iter().product();
+        for prefix in 0..pre {
+            for suffix in 0..post {
+                let indices = (0..axis_len)
+                    .map(|idx| prefix + idx * pre + suffix * pre * axis_len)
+                    .collect::<Vec<_>>();
+                fill_slice(&mut data, &indices, result, method);
+            }
+        }
+    }
+    Tensor::new(data, input.shape.clone())
+        .map(tensor::tensor_into_value)
+        .map_err(|err| internal_error(FILLOUTLIERS_NAME, format!("filloutliers: {err}")))
+}
+
+fn fill_slice(data: &mut [f64], indices: &[usize], result: &DetectionResult, method: &FillMethod) {
+    let original = data.to_vec();
+    for (pos, linear) in indices.iter().copied().enumerate() {
+        if result.mask[linear] == 0 {
+            continue;
+        }
+        data[linear] =
+            match method {
+                FillMethod::Center => result.center_full[linear],
+                FillMethod::Clip => {
+                    original[linear].clamp(result.lower_full[linear], result.upper_full[linear])
+                }
+                FillMethod::Constant(value) => *value,
+                FillMethod::Previous => {
+                    previous_good(&original, result, indices, pos).unwrap_or(f64::NAN)
+                }
+                FillMethod::Next => next_good(&original, result, indices, pos).unwrap_or(f64::NAN),
+                FillMethod::Nearest => nearest_good(&original, result, indices, pos)
+                    .unwrap_or(result.center_full[linear]),
+                FillMethod::Linear => linear_interp(&original, result, indices, pos)
+                    .unwrap_or_else(|| {
+                        nearest_good(&original, result, indices, pos)
+                            .unwrap_or(result.center_full[linear])
+                    }),
+            };
+    }
+}
+
+fn previous_good(
+    original: &[f64],
+    result: &DetectionResult,
+    indices: &[usize],
+    pos: usize,
+) -> Option<f64> {
+    indices[..pos]
+        .iter()
+        .rev()
+        .copied()
+        .find(|idx| result.mask[*idx] == 0 && original[*idx].is_finite())
+        .map(|idx| original[idx])
+}
+
+fn next_good(
+    original: &[f64],
+    result: &DetectionResult,
+    indices: &[usize],
+    pos: usize,
+) -> Option<f64> {
+    indices[pos + 1..]
+        .iter()
+        .copied()
+        .find(|idx| result.mask[*idx] == 0 && original[*idx].is_finite())
+        .map(|idx| original[idx])
+}
+
+fn nearest_good(
+    original: &[f64],
+    result: &DetectionResult,
+    indices: &[usize],
+    pos: usize,
+) -> Option<f64> {
+    let prev = indices[..pos]
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, idx)| result.mask[**idx] == 0 && original[**idx].is_finite())
+        .map(|(p, idx)| (pos - p, original[*idx]));
+    let next = indices[pos + 1..]
+        .iter()
+        .enumerate()
+        .find(|(_, idx)| result.mask[**idx] == 0 && original[**idx].is_finite())
+        .map(|(offset, idx)| (offset + 1, original[*idx]));
+    match (prev, next) {
+        (Some((pd, _)), Some((nd, nv))) if nd < pd => Some(nv),
+        (Some((_, pv)), _) => Some(pv),
+        (_, Some((_, nv))) => Some(nv),
+        _ => None,
+    }
+}
+
+fn linear_interp(
+    original: &[f64],
+    result: &DetectionResult,
+    indices: &[usize],
+    pos: usize,
+) -> Option<f64> {
+    let prev = indices[..pos]
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, idx)| result.mask[**idx] == 0 && original[**idx].is_finite())
+        .map(|(p, idx)| (p, original[*idx]));
+    let next = indices[pos + 1..]
+        .iter()
+        .enumerate()
+        .find(|(_, idx)| result.mask[**idx] == 0 && original[**idx].is_finite())
+        .map(|(offset, idx)| (pos + 1 + offset, original[*idx]));
+    match (prev, next) {
+        (Some((p, pv)), Some((n, nv))) if n > p => {
+            let w = (pos - p) as f64 / (n - p) as f64;
+            Some(pv * (1.0 - w) + nv * w)
+        }
+        (Some((_, pv)), _) => Some(pv),
+        (_, Some((_, nv))) => Some(nv),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SliceStats {
+    lower: f64,
+    upper: f64,
+    center: f64,
+}
+
+fn slice_stats(values: &[f64], method: &DetectionMethod, factor: f64) -> BuiltinResult<SliceStats> {
+    let mut clean = values
+        .iter()
+        .copied()
+        .filter(|value| !value.is_nan())
+        .collect::<Vec<_>>();
+    if clean.is_empty() {
+        return Ok(SliceStats {
+            lower: f64::NAN,
+            upper: f64::NAN,
+            center: f64::NAN,
+        });
+    }
+    clean.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+    match method {
+        DetectionMethod::Median | DetectionMethod::MovingMedian(_) => {
+            let center = median_sorted(&clean);
+            let mut deviations = clean
+                .iter()
+                .map(|value| (value - center).abs())
+                .collect::<Vec<_>>();
+            deviations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+            let spread = MAD_SCALE * median_sorted(&deviations);
+            Ok(SliceStats {
+                lower: center - factor * spread,
+                upper: center + factor * spread,
+                center,
+            })
+        }
+        DetectionMethod::Mean | DetectionMethod::MovingMean(_) => {
+            let center = clean.iter().sum::<f64>() / clean.len() as f64;
+            let spread = sample_std(&clean, center);
+            Ok(SliceStats {
+                lower: center - factor * spread,
+                upper: center + factor * spread,
+                center,
+            })
+        }
+        DetectionMethod::Quartiles => {
+            let q1 = quantile_sorted(&clean, 0.25);
+            let q3 = quantile_sorted(&clean, 0.75);
+            let iqr = q3 - q1;
+            Ok(SliceStats {
+                lower: q1 - factor * iqr,
+                upper: q3 + factor * iqr,
+                center: median_sorted(&clean),
+            })
+        }
+        DetectionMethod::Percentiles(lo, hi) => Ok(SliceStats {
+            lower: quantile_sorted(&clean, *lo),
+            upper: quantile_sorted(&clean, *hi),
+            center: median_sorted(&clean),
+        }),
+    }
+}
+
+fn is_outlier_value(value: f64, lower: f64, upper: f64) -> bool {
+    !value.is_nan() && (value < lower || value > upper)
+}
+
+fn threshold_factor(options: &DetectionOptions) -> f64 {
+    options.threshold_factor.unwrap_or(match options.method {
+        DetectionMethod::Quartiles => 1.5,
+        DetectionMethod::Percentiles(_, _) => 1.0,
+        _ => 3.0,
+    })
+}
+
+fn centered_window(idx: usize, len: usize, window: usize) -> (usize, usize) {
+    let before = window / 2;
+    let after = window.saturating_sub(before + 1);
+    let start = idx.saturating_sub(before);
+    let end = (idx + after + 1).min(len);
+    (start, end)
+}
+
+fn median_sorted(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return f64::NAN;
+    }
+    let mid = values.len() / 2;
+    if values.len().is_multiple_of(2) {
+        (values[mid - 1] + values[mid]) / 2.0
+    } else {
+        values[mid]
+    }
+}
+
+fn quantile_sorted(values: &[f64], p: f64) -> f64 {
+    if values.is_empty() {
+        return f64::NAN;
+    }
+    if values.len() == 1 {
+        return values[0];
+    }
+    let pos = p * (values.len() - 1) as f64;
+    let lo = pos.floor() as usize;
+    let hi = pos.ceil() as usize;
+    if lo == hi {
+        values[lo]
+    } else {
+        let w = pos - lo as f64;
+        values[lo] * (1.0 - w) + values[hi] * w
+    }
+}
+
+fn sample_std(values: &[f64], mean: f64) -> f64 {
+    if values.len() < 2 {
+        return 0.0;
+    }
+    let var = values
+        .iter()
+        .map(|value| {
+            let delta = value - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        / (values.len() - 1) as f64;
+    var.sqrt()
+}
+
+fn outlier_outputs(
+    builtin: &'static str,
+    filled: Option<Value>,
+    result: DetectionResult,
+) -> BuiltinResult<Value> {
+    let max_outputs = if filled.is_some() { 5 } else { 4 };
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > max_outputs) {
+        return Err(too_many_outputs(builtin, max_outputs));
+    }
+    let mask_shape = result_shape_for_mask(&filled, &result)?;
+    let mask_value = Value::LogicalArray(
+        LogicalArray::new(result.mask, mask_shape)
+            .map_err(|err| internal_error(builtin, format!("{builtin}: {err}")))?,
+    );
+    let lower = tensor_value(result.lower, result.threshold_shape.clone(), builtin)?;
+    let upper = tensor_value(result.upper, result.threshold_shape.clone(), builtin)?;
+    let center = tensor_value(result.center, result.threshold_shape, builtin)?;
+    let outputs = if let Some(filled) = filled {
+        vec![filled, mask_value, lower, upper, center]
+    } else {
+        vec![mask_value, lower, upper, center]
+    };
+    match crate::output_count::current_output_count() {
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(out_count) => Ok(crate::output_count::output_list_with_padding(
+            out_count, outputs,
+        )),
+        None => Ok(outputs.into_iter().next().unwrap_or(Value::Num(0.0))),
+    }
+}
+
+fn result_shape_for_mask(
+    filled: &Option<Value>,
+    result: &DetectionResult,
+) -> BuiltinResult<Vec<usize>> {
+    if let Some(Value::Tensor(tensor)) = filled {
+        Ok(tensor.shape.clone())
+    } else {
+        Ok(result.mask_shape.clone())
+    }
+}
+
+fn tensor_value(data: Vec<f64>, shape: Vec<usize>, builtin: &'static str) -> BuiltinResult<Value> {
+    Tensor::new(data, shape)
+        .map(tensor::tensor_into_value)
+        .map_err(|err| internal_error(builtin, format!("{builtin}: {err}")))
+}
+
+fn first_non_singleton(shape: &[usize]) -> usize {
+    shape
+        .iter()
+        .position(|dim| *dim > 1)
+        .map(|idx| idx + 1)
+        .unwrap_or(1)
+}
+
+fn parse_dim(builtin: &'static str, value: &Value) -> BuiltinResult<usize> {
+    tensor::parse_dimension(value, builtin).map_err(|err| invalid_argument(builtin, err))
+}
+
+fn logical_mask(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<u8>> {
+    match value {
+        Value::Bool(flag) => Ok(vec![u8::from(*flag)]),
+        Value::LogicalArray(mask) => {
+            Ok(mask.data.iter().map(|flag| u8::from(*flag != 0)).collect())
+        }
+        Value::Tensor(tensor) => Ok(tensor
+            .data
+            .iter()
+            .map(|value| u8::from(*value != 0.0 && !value.is_nan()))
+            .collect()),
+        Value::Num(value) => Ok(vec![u8::from(*value != 0.0 && !value.is_nan())]),
+        Value::Int(value) => Ok(vec![u8::from(value.to_f64() != 0.0)]),
+        other => Err(invalid_argument(
+            builtin,
+            format!("OutlierLocations must be logical or numeric, got {other:?}"),
+        )),
+    }
+}
+
+fn numeric_vector(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<f64>> {
+    let tensor = tensor::value_into_tensor_for(builtin, value.clone())
+        .map_err(|err| invalid_argument(builtin, format!("{builtin}: {err}")))?;
+    Ok(tensor.data)
+}
+
+fn scalar_usize(builtin: &'static str, value: &Value, label: &str) -> BuiltinResult<usize> {
+    let number = scalar_number(value)
+        .ok_or_else(|| invalid_argument(builtin, format!("{label} must be numeric")))?;
+    if !(number.is_finite() && number >= 0.0 && number.fract() == 0.0) {
+        return Err(invalid_argument(
+            builtin,
+            format!("{label} must be a nonnegative integer"),
+        ));
+    }
+    Ok(number as usize)
+}
+
+fn scalar_number(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(value) => Some(*value),
+        Value::Int(value) => Some(value.to_f64()),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+
+    fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    #[test]
+    fn isoutlier_detects_columnwise_median_outliers() {
+        let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
+        let out = block_on(isoutlier_builtin(value, Vec::new())).unwrap();
+        let Value::LogicalArray(mask) = out else {
+            panic!("expected logical mask");
+        };
+        assert_eq!(mask.data, vec![0, 0, 1, 0, 0]);
+    }
+
+    #[test]
+    fn isoutlier_returns_threshold_outputs() {
+        let _guard = crate::output_count::push_output_count(Some(4));
+        let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
+        let out = block_on(isoutlier_builtin(value, vec![Value::from("quartiles")])).unwrap();
+        let Value::OutputList(values) = out else {
+            panic!("expected output list");
+        };
+        assert_eq!(values.len(), 4);
+        assert!(matches!(&values[0], Value::LogicalArray(mask) if mask.data[2] == 1));
+        assert!(matches!(&values[1], Value::Num(_) | Value::Tensor(_)));
+    }
+
+    #[test]
+    fn filloutliers_supports_center_and_mask_output() {
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
+        let out = block_on(filloutliers_builtin(value, vec![Value::from("center")])).unwrap();
+        let Value::OutputList(values) = out else {
+            panic!("expected output list");
+        };
+        assert!(matches!(&values[0], Value::Tensor(tensor) if tensor.data[2] == 4.0));
+        assert!(matches!(&values[1], Value::LogicalArray(mask) if mask.data[2] == 1));
+    }
+
+    #[test]
+    fn filloutliers_supports_linear_fill() {
+        let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
+        let out = block_on(filloutliers_builtin(value, vec![Value::from("linear")])).unwrap();
+        assert!(matches!(out, Value::Tensor(tensor) if (tensor.data[2] - 3.0).abs() < 1.0e-12));
+    }
+
+    #[test]
+    fn filloutliers_supports_numeric_scalar_constant_fill() {
+        let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
+        let out = block_on(filloutliers_builtin(value, vec![Value::Num(-1.0)])).unwrap();
+        assert!(matches!(out, Value::Tensor(tensor) if tensor.data[2] == -1.0));
+    }
+
+    #[test]
+    fn filloutliers_uses_per_column_centers() {
+        let value = tensor(
+            vec![1.0, 2.0, 100.0, 4.0, 10.0, 11.0, 300.0, 13.0],
+            vec![4, 2],
+        );
+        let out = block_on(filloutliers_builtin(value, vec![Value::from("center")])).unwrap();
+        assert!(
+            matches!(out, Value::Tensor(tensor) if tensor.data[2] == 3.0 && tensor.data[6] == 12.0)
+        );
+    }
+
+    #[test]
+    fn isoutlier_percentiles_work_and_reject_threshold_factor() {
+        let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
+        let out = block_on(isoutlier_builtin(
+            value.clone(),
+            vec![
+                Value::from("percentiles"),
+                tensor(vec![10.0, 90.0], vec![1, 2]),
+            ],
+        ))
+        .unwrap();
+        assert!(matches!(out, Value::LogicalArray(mask) if mask.data[0] == 1 && mask.data[2] == 1));
+        let err = block_on(isoutlier_builtin(
+            value,
+            vec![
+                Value::from("percentiles"),
+                tensor(vec![10.0, 90.0], vec![1, 2]),
+                Value::from("ThresholdFactor"),
+                Value::Num(2.0),
+            ],
+        ))
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:outliers:InvalidArgument"));
+    }
+
+    #[test]
+    fn isoutlier_marks_infinity_when_threshold_is_finite() {
+        let value = tensor(vec![1.0, 2.0, f64::INFINITY, 4.0, 5.0], vec![5, 1]);
+        let out = block_on(isoutlier_builtin(value, Vec::new())).unwrap();
+        assert!(matches!(out, Value::LogicalArray(mask) if mask.data[2] == 1));
+    }
+
+    #[test]
+    fn moving_even_window_is_backward_weighted_like_matlab() {
+        assert_eq!(super::centered_window(3, 8, 4), (1, 5));
+    }
+
+    #[test]
+    fn previous_and_next_do_not_cross_fill_endpoints() {
+        let mask = DetectionResult {
+            mask: vec![1, 0, 0],
+            mask_shape: vec![3, 1],
+            lower: vec![f64::NAN],
+            upper: vec![f64::NAN],
+            center: vec![f64::NAN],
+            lower_full: vec![f64::NAN; 3],
+            upper_full: vec![f64::NAN; 3],
+            center_full: vec![f64::NAN; 3],
+            threshold_shape: vec![1, 1],
+        };
+        let mut prev = vec![100.0, 2.0, 3.0];
+        fill_slice(&mut prev, &[0, 1, 2], &mask, &FillMethod::Previous);
+        assert!(prev[0].is_nan());
+        let mut next = vec![1.0, 2.0, 100.0];
+        let mut mask = mask;
+        mask.mask = vec![0, 0, 1];
+        fill_slice(&mut next, &[0, 1, 2], &mask, &FillMethod::Next);
+        assert!(next[2].is_nan());
+    }
+
+    #[test]
+    fn outlier_locations_drive_filloutliers_mask() {
+        let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
+        let locations =
+            Value::LogicalArray(LogicalArray::new(vec![0, 0, 1, 0, 0], vec![5, 1]).unwrap());
+        let out = block_on(filloutliers_builtin(
+            value,
+            vec![
+                Value::from("center"),
+                Value::from("OutlierLocations"),
+                locations,
+            ],
+        ))
+        .unwrap();
+        assert!(matches!(out, Value::Tensor(tensor) if tensor.data[2] == 4.0));
+    }
+
+    #[test]
+    fn too_many_outputs_error() {
+        let _guard = crate::output_count::push_output_count(Some(5));
+        let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
+        let err = block_on(isoutlier_builtin(value, Vec::new())).unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:outliers:TooManyOutputs"));
+    }
+}

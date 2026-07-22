@@ -1,0 +1,104 @@
+{
+  "title": "lassoglm",
+  "category": "stats/ml",
+  "keywords": [
+    "lassoglm",
+    "lasso",
+    "elastic net",
+    "generalized linear model",
+    "glm",
+    "binomial",
+    "poisson",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Fit lasso or elastic-net regularized generalized linear models.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. The regularized GLM solver runs on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::lassoglm::tests",
+    "integration": "runmat-vm stats_ml::lassoglm_surface_executes_from_scripts"
+  },
+  "description": "`lassoglm(X,Y,distr)` fits a regularized generalized linear model for predictor matrix `X`, response `Y`, and distribution `distr`. Columns of `B` correspond to ascending `Lambda` values, and `[B,FitInfo] = lassoglm(...)` returns MATLAB-compatible fit metadata.",
+  "behaviors": [
+    "`X` must be a finite real numeric matrix with observations in rows and predictors in columns.",
+    "`distr` supports `\"normal\"`/`\"gaussian\"`, `\"binomial\"`, and `\"poisson\"`. Normal and poisson responses are numeric vectors. Binomial responses may be a probability/logical vector or an `N`-by-2 successes/trials count matrix.",
+    "`Lambda` accepts a nonnegative scalar or vector. RunMat sorts Lambda values in ascending order for output, matching MATLAB's `FitInfo.Lambda` convention.",
+    "When `Lambda` is omitted, RunMat computes a geometric regularization path using `NumLambda` and `LambdaRatio` from an all-zero coefficient model.",
+    "`Alpha` supports lasso and elastic-net fits for values in `(0,1]`. `Alpha=1` is lasso; smaller positive values mix in the ridge penalty.",
+    "`Standardize` and `Intercept` follow MATLAB's model form. `Weights` accepts a nonnegative observation-weight vector with positive total weight, and `Offset` accepts one finite offset per observation.",
+    "`RelTol`, `MaxIter`, and statset-style `Options` control solver convergence. `Options.MaxIter`, `Options.TolX`, and `Options.TolFun` are honored; enabled parallel options are rejected because RunMat's solver is CPU-local.",
+    "`CV` supports `\"resubstitution\"` and positive integer K-fold cross-validation. K-fold fits add `SE`, `LambdaMinDeviance`, `Lambda1SE`, `IndexMinDeviance`, and `Index1SE` fields to `FitInfo`.",
+    "`BinomialSize` supports scalar or per-observation trial counts for binomial probability responses. `Link` is accepted only for canonical supported links (`identity`, `logit`, or `log` according to distribution), `EstDisp` currently accepts `\"off\"`, and unsupported values are rejected instead of silently changing the model."
+  ],
+  "examples": [
+    {
+      "description": "Fit a binomial logistic model",
+      "input": "X = [0; 1; 2; 3; 4; 5];\ny = [0; 0; 0; 1; 1; 1];\n[B,FitInfo] = lassoglm(X, y, \"binomial\", \"Lambda\", [0 0.1])",
+      "output": "B has one row and two columns. FitInfo contains Intercept, Lambda, Deviance, DF, and Iterations."
+    },
+    {
+      "description": "Fit a poisson model with statset options",
+      "input": "opts = statset(\"lassoglm\", \"MaxIter\", 400);\n[B,FitInfo] = lassoglm(X, counts, \"poisson\", \"Options\", opts)",
+      "output": "The solver uses the supplied maximum iteration count and canonical log link."
+    },
+    {
+      "description": "Use K-fold cross-validation",
+      "input": "[B,FitInfo] = lassoglm(X, y, \"normal\", \"CV\", 5);\ncoef = B(:,FitInfo.IndexMinDeviance)",
+      "output": "FitInfo includes cross-validation deviance, SE, and Lambda selection fields."
+    },
+    {
+      "description": "Use grouped binomial counts",
+      "input": "Y = [8 10; 3 10; 1 8];\nB = lassoglm(X, Y, \"binomial\", \"Weights\", [1; 2; 1])",
+      "output": "The first column is successes and the second column is trials."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Where is the intercept stored?",
+      "answer": "The coefficient matrix `B` contains only predictor coefficients. Intercepts are returned in `FitInfo.Intercept`, one value per Lambda."
+    },
+    {
+      "question": "Which links are implemented?",
+      "answer": "RunMat uses canonical links for supported distributions: identity for normal, logit for binomial, and log for poisson. Other `Link` values are rejected because returning a canonical-link fit for a noncanonical request would be misleading."
+    },
+    {
+      "question": "How are Lambda values ordered?",
+      "answer": "RunMat returns Lambda values in ascending order in `FitInfo.Lambda`, and the columns of `B` use the same order."
+    },
+    {
+      "question": "Does cross-validation match MATLAB's random partitions exactly?",
+      "answer": "No. RunMat currently uses deterministic round-robin K-fold partitions. The returned fields and selection semantics are MATLAB-compatible, but fold assignment is deterministic."
+    }
+  ],
+  "links": [
+    {
+      "label": "lasso",
+      "url": "./lasso"
+    },
+    {
+      "label": "mnrfit",
+      "url": "./mnrfit"
+    },
+    {
+      "label": "statset",
+      "url": "./statset"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/lassoglm.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/lassoglm.rs"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "title": "test",
+  "category": "stats/ml",
+  "keywords": [
+    "test",
+    "cvpartition",
+    "cross validation",
+    "mask",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Return test-set masks from a cvpartition object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["logical"],
+    "broadcasting": "none",
+    "notes": "Operates on host-side cvpartition metadata and returns logical arrays."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::cvpartition::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`test(c)` returns a logical test mask for single-test-set partitions. `test(c,i)` returns masks for selected K-fold, leaveout, or custom test sets.",
+  "behaviors": [
+    "`test(c)` works for holdout, resubstitution, and custom partitions with one test-set column.",
+    "`test(c,i)` accepts a one-based numeric scalar or vector of test-set indices.",
+    "`test(c,'all')` returns one logical mask column per test set.",
+    "For resubstitution partitions, `test(c)` is all true because every observation is used for both training and testing."
+  ],
+  "examples": [
+    {
+      "description": "Get the test mask for one fold",
+      "input": "c = cvpartition(6, 'KFold', 3);\nidx = test(c, 2)",
+      "output": "`idx` is a 6-by-1 logical vector."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I retrieve all test masks?",
+      "answer": "Use `test(c,'all')`; columns correspond to test-set indices."
+    }
+  ],
+  "links": [
+    {
+      "label": "cvpartition",
+      "url": "./cvpartition"
+    },
+    {
+      "label": "training",
+      "url": "./training"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/cvpartition.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/cvpartition.rs"
+  }
+}

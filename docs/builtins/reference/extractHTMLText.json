@@ -1,0 +1,110 @@
+{
+  "title": "extractHTMLText",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "extractHTMLText",
+    "HTML",
+    "text analytics",
+    "parse",
+    "htmlTree"
+  ],
+  "summary": "Extract visible text from HTML code or htmlTree objects.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`extractHTMLText` parses host-resident text and does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::html::tests",
+    "integration": null
+  },
+  "description": "`extractHTMLText` extracts visible text from HTML code or from an `htmlTree` object. It supports the documented `ExtractionMethod` option values `\"tree\"`, `\"article\"`, and `\"all-text\"`.",
+  "behaviors": [
+    "`extractHTMLText(code)` accepts string scalars, character vectors, string arrays, multi-row character arrays, and cell arrays of character vectors.",
+    "`extractHTMLText(tree)` accepts scalar RunMat `htmlTree` objects created by `htmlTree`.",
+    "`extractHTMLText(___, 'ExtractionMethod', method)` accepts `tree`, `article`, or `all-text`.",
+    "String arrays, multi-row character arrays, and cell arrays return string arrays with the input shape.",
+    "Script, style, noscript, template, and head content is excluded from extracted text.",
+    "Common HTML entities and numeric character references are decoded.",
+    "`tree` and `article` currently use the same paragraph/block extraction heuristic. RunMat does not yet implement MathWorks' exact article scoring algorithm.",
+    "`all-text` extracts normalized body text outside skipped elements. Whitespace is normalized for MATLAB-friendly string output."
+  ],
+  "examples": [
+    {
+      "description": "Extract Text From HTML",
+      "input": "code = \"<html><body><h1>THE SONNETS</h1><p>by William Shakespeare</p></body></html>\";\nstr = extractHTMLText(code)",
+      "output": "str = \"THE SONNETS\\n\\nby William Shakespeare\""
+    },
+    {
+      "description": "Use all-text Extraction",
+      "input": "code = \"<body><style>.x{}</style><p>visible</p><script>hidden()</script><span>tail</span></body>\";\nstr = extractHTMLText(code, \"ExtractionMethod\", \"all-text\")",
+      "output": "str = \"visible tail\""
+    },
+    {
+      "description": "Extract From htmlTree",
+      "input": "tree = htmlTree(\"<article><h2>Title</h2><p>Body &amp; tail</p></article>\");\nstr = extractHTMLText(tree)",
+      "output": "str = \"Title\\n\\nBody & tail\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Are `tree` and `article` exact MATLAB article extraction modes?",
+      "answer": "No. Both modes currently use RunMat's paragraph/block extraction heuristic. Exact article scoring remains part of the broader Text Analytics compatibility work."
+    },
+    {
+      "question": "Does `extractHTMLText` support arrays?",
+      "answer": "Yes. Text arrays and cells produce string arrays with the same shape. Cells containing `htmlTree` objects are also supported."
+    },
+    {
+      "question": "Does `extractHTMLText` execute on the GPU?",
+      "answer": "No. HTML extraction is host text processing and has no `runmat-accelerate` provider path."
+    }
+  ],
+  "links": [
+    {
+      "label": "htmlTree",
+      "url": "./htmlTree"
+    },
+    {
+      "label": "findElement",
+      "url": "./findElement"
+    },
+    {
+      "label": "getAttribute",
+      "url": "./getAttribute"
+    },
+    {
+      "label": "erasePunctuation",
+      "url": "./erasePunctuation"
+    },
+    {
+      "label": "stopWords",
+      "url": "./stopWords"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "str = extractHTMLText(code)\nstr = extractHTMLText(tree)\nstr = extractHTMLText(___, 'ExtractionMethod', method)",
+      "output": "`str` is a string scalar or string array."
+    },
+    "points": [
+      "`method` must be `\"tree\"`, `\"article\"`, or `\"all-text\"`.",
+      "The option name is case-insensitive and must be `ExtractionMethod`."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/html.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/html.rs"
+  },
+  "gpu_residency": "`extractHTMLText` parses host-resident text and has no provider kernel."
+}

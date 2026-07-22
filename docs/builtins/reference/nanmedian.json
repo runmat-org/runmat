@@ -1,0 +1,15 @@
+{
+  "title": "nanmedian",
+  "category": "missing",
+  "keywords": ["nanmedian", "median", "omitnan"],
+  "summary": "Compute medians while ignoring NaN values.",
+  "gpu_support": {"elementwise": false, "reduction": true, "precisions": ["f32", "f64"], "broadcasting": "matlab", "notes": "Delegates to `median(..., 'omitnan')`."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::missing::tests"},
+  "description": "`nanmedian(A, ...)` is a compatibility alias for `median(A, ..., 'omitnan')`.",
+  "behaviors": ["Dimension, vector-dimension, and `\"all\"` options supported by `median` are forwarded."],
+  "examples": [{"description": "Ignore NaN values", "input": "m = nanmedian([1 NaN 5], 'all')", "output": "m = 3"}],
+  "links": [{"label": "median", "url": "./median"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/missing/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/missing/mod.rs"}
+}

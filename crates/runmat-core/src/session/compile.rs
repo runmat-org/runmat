@@ -428,10 +428,16 @@ async fn discover_companion_from_composition_graph_async(
                 .project_root
                 .join(&source.source_root)
                 .join(&source.relative_path);
+            let file_path =
+                runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&file_path)
+                    .await;
             if source_paths_equivalent(&file_path, primary_source_path) {
                 continue;
             }
-            let Ok(contents) = runmat_filesystem::read_to_string_async(&file_path).await else {
+            let Ok(contents) =
+                runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(&file_path)
+                    .await
+            else {
                 continue;
             };
             if !contents.contains("classdef") && !contents.contains("function") {
@@ -457,12 +463,16 @@ async fn discover_companion_from_composition_graph_async(
                 HashMap::new()
             };
             if is_class_source {
-                if let Some(qualified) = source.class_definition_qualified_name() {
+                if let Some(qualified) = source_index_qualified_class_name(source) {
                     qualify_companion_classdefs(&mut body, qualified);
+                } else if let Some(qualified) = package_class_name_from_path(&file_path, cwd) {
+                    qualify_companion_classdefs(&mut body, &qualified);
                 }
             } else if private_owner_scope.is_none() {
-                if let Some(qualified) = source.function_qualified_name() {
+                if let Some(qualified) = source_index_qualified_function_name(source) {
                     qualify_companion_functions(&mut body, qualified);
+                } else if let Some(qualified) = package_class_name_from_path(&file_path, cwd) {
+                    qualify_companion_functions(&mut body, &qualified);
                 }
             }
             out.extend_body(

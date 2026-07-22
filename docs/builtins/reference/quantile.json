@@ -1,0 +1,25 @@
+{
+  "title": "quantile",
+  "category": "stats/summary",
+  "keywords": ["quantile", "percentile", "statistics", "order"],
+  "summary": "Compute sample quantiles.",
+  "gpu_support": { "elementwise": false, "reduction": false, "precisions": ["f64"], "broadcasting": "none", "notes": "GPU inputs are gathered to host." },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::order_stats::tests", "integration": null },
+  "description": "`quantile(X,p)` computes sample quantiles along the first nonsingleton dimension using linear interpolation.",
+  "behaviors": [
+    "`p` must contain probabilities in `[0,1]`.",
+    "`quantile(X,p,dim)` operates along a selected dimension.",
+    "NaNs are omitted by default in each slice.",
+    "`\"omitnan\"` omits NaNs in each slice; `\"includenan\"` returns NaN for slices containing NaN.",
+    "`\"Method\",\"linear\"` and `\"Method\",\"exact\"` use in-memory linear interpolation; `\"approximate\"` is rejected because tall arrays are not supported here."
+  ],
+  "examples": [{ "description": "Quartiles", "input": "q = quantile([1 2 4 8], [0.25 0.5 0.75])" }],
+  "faqs": [{ "question": "How is prctile different?", "answer": "`prctile(X,p)` is equivalent to `quantile(X,p/100)` for supported forms." }],
+  "links": [{ "label": "prctile", "url": "./prctile" }, { "label": "median", "url": "./median" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/order_stats.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/order_stats.rs"
+  }
+}

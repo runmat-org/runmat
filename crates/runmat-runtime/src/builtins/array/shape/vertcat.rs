@@ -308,7 +308,9 @@ pub(crate) mod tests {
         block_on(super::vertcat_builtin(args))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor};
+    use runmat_builtins::{
+        CellArray, CharArray, ComplexTensor, IntegerStorage, LogicalArray, StringArray, Tensor,
+    };
 
     #[test]
     fn vertcat_type_combines_shapes() {
@@ -374,6 +376,24 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn vertcat_preserves_leftmost_integer_class() {
+        let top = Tensor::new_integer(IntegerStorage::I8(vec![12]), vec![1, 1]).expect("top");
+        let result = vertcat_builtin(vec![
+            Value::Tensor(top),
+            Value::Int(IntValue::U64(u64::MAX)),
+        ])
+        .expect("vertcat");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I8(vec![12, i8::MAX]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

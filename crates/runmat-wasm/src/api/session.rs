@@ -808,6 +808,7 @@ struct ExecuteRequestPayload {
     compatibility: Option<String>,
     host_policy: Option<ExecuteHostPolicyPayload>,
     requested_outputs: Option<u32>,
+    retain_figures: Option<bool>,
 }
 
 #[wasm_bindgen]
@@ -832,6 +833,7 @@ impl RunMatWasm {
             .into_iter()
             .map(|handle| handle.as_u32())
             .collect();
+        let retain_figures = request_payload.retain_figures.unwrap_or(false);
         runtime_reset_hold_state_for_run();
 
         let telemetry_run = {
@@ -910,9 +912,11 @@ impl RunMatWasm {
         *self.session.borrow_mut() = session;
         let payload = match exec_response.result {
             Ok(outcome) => {
-                if !outcome.diagnostics.iter().any(|diagnostic| {
-                    diagnostic.severity == runmat_core::abi::DiagnosticSeverity::Error
-                }) {
+                if !retain_figures
+                    && !outcome.diagnostics.iter().any(|diagnostic| {
+                        diagnostic.severity == runmat_core::abi::DiagnosticSeverity::Error
+                    })
+                {
                     let touched: std::collections::HashSet<u32> =
                         outcome.figures_touched.iter().copied().collect();
                     for handle in figures_before {

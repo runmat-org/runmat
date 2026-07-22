@@ -141,10 +141,12 @@ fn figure_handle_arg(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>
     if let Ok(handle) = resolve_plot_handle(value, "gca") {
         return match handle {
             PlotHandle::Figure(handle) => Ok(Some(handle)),
-            PlotHandle::Axes(_, _)
+            PlotHandle::Root
+            | PlotHandle::Axes(_, _)
+            | PlotHandle::Ruler(_, _, _)
             | PlotHandle::Text(_, _, _)
             | PlotHandle::Legend(_, _)
-            | PlotHandle::PlotChild(_) => Err(plotting_error(
+            | PlotHandle::PlotChild(_, _) => Err(plotting_error(
                 "gca",
                 "gca: expected a figure handle, got a non-figure graphics handle",
             )),

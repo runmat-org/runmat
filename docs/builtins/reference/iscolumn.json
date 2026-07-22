@@ -1,0 +1,54 @@
+{
+  "title": "iscolumn",
+  "category": "array/introspection",
+  "keywords": ["iscolumn", "column vector", "shape", "metadata"],
+  "summary": "Return true when an array has exactly one column.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Reads shape metadata; gathers only when a GPU handle lacks shape metadata."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::introspection::iscolumn::tests",
+    "integration": null
+  },
+  "description": "`iscolumn(A)` returns true when the second MATLAB-visible dimension of `A` is one.",
+  "behaviors": [
+    "Scalars and N-by-1 arrays return true.",
+    "1-by-N arrays with N other than one return false.",
+    "The predicate uses the same dimension metadata as `size`."
+  ],
+  "examples": [
+    {
+      "description": "Testing row and column vectors",
+      "input": "iscolumn([1 2 3])\niscolumn([1; 2; 3])",
+      "output": "ans = logical(0)\nans = logical(1)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is a scalar a column?",
+      "answer": "Yes. A scalar is 1-by-1."
+    }
+  ],
+  "links": [
+    { "label": "isrow", "url": "./isrow" },
+    { "label": "isvector", "url": "./isvector" },
+    { "label": "size", "url": "./size" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/introspection/iscolumn.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/introspection/iscolumn.rs"
+  },
+  "gpu_residency": "The result is a host logical scalar.",
+  "gpu_behavior": ["No GPU kernels are launched."]
+}

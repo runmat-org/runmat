@@ -438,11 +438,58 @@ fn cumsum_host(
     direction: CumsumDirection,
     nan_mode: CumsumNanMode,
 ) -> BuiltinResult<Value> {
+    match value {
+        Value::Int(value) => {
+            let storage =
+                crate::builtins::math::reduction::integer_native::storage_from_scalar(&value);
+            return crate::builtins::math::reduction::integer_native::cumulative(
+                &storage,
+                &[1, 1],
+                dim.unwrap_or(1),
+                integer_direction(direction),
+                crate::builtins::math::reduction::integer_native::CumulativeOperation::Sum,
+            )
+            .map_err(|error| cumsum_internal_error(&error));
+        }
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
+            return crate::builtins::math::reduction::integer_native::cumulative(
+                tensor.integer_storage().expect("checked integer storage"),
+                &tensor.shape,
+                target_dim,
+                integer_direction(direction),
+                crate::builtins::math::reduction::integer_native::CumulativeOperation::Sum,
+            )
+            .map_err(|error| cumsum_internal_error(&error));
+        }
+        other => cumsum_host_floating(other, dim, direction, nan_mode),
+    }
+}
+
+fn cumsum_host_floating(
+    value: Value,
+    dim: Option<usize>,
+    direction: CumsumDirection,
+    nan_mode: CumsumNanMode,
+) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("cumsum", value)
         .map_err(|err| cumsum_error_with_detail(&CUMSUM_ERROR_INVALID_INPUT, err))?;
     let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
     let result = cumsum_tensor(&tensor, target_dim, direction, nan_mode)?;
     Ok(tensor::tensor_into_value(result))
+}
+
+fn integer_direction(
+    direction: CumsumDirection,
+) -> crate::builtins::math::reduction::integer_native::CumulativeDirection {
+    match direction {
+        CumsumDirection::Forward => {
+            crate::builtins::math::reduction::integer_native::CumulativeDirection::Forward
+        }
+        CumsumDirection::Reverse => {
+            crate::builtins::math::reduction::integer_native::CumulativeDirection::Reverse
+        }
+    }
 }
 
 async fn cumsum_gpu(
@@ -814,6 +861,68 @@ pub(crate) mod tests {
     fn cumsum_scalar_num() {
         let result = cumsum_builtin(Value::Num(7.0), Vec::new()).expect("cumsum scalar");
         assert_eq!(result, Value::Num(7.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cumsum_native_integer_preserves_storage_for_dimensions_and_reverse() {
+        let input = BuiltinsTensor::new_integer(
+            runmat_builtins::IntegerStorage::U8(vec![250, 10, 2, 3]),
+            vec![2, 2],
+        )
+        .expect("input");
+        assert_eq!(
+            cumsum_builtin(Value::Tensor(input.clone()), Vec::new()).expect("default cumsum"),
+            Value::Tensor(
+                BuiltinsTensor::new_integer(
+                    runmat_builtins::IntegerStorage::U8(vec![250, 255, 2, 5]),
+                    vec![2, 2],
+                )
+                .expect("default output"),
+            )
+        );
+        assert_eq!(
+            cumsum_builtin(
+                Value::Tensor(input),
+                vec![
+                    Value::Num(2.0),
+                    Value::from("reverse"),
+                    Value::from("omitnan")
+                ],
+            )
+            .expect("reverse cumsum"),
+            Value::Tensor(
+                BuiltinsTensor::new_integer(
+                    runmat_builtins::IntegerStorage::U8(vec![252, 13, 2, 3]),
+                    vec![2, 2],
+                )
+                .expect("reverse output"),
+            )
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cumsum_native_integer_scalar_and_empty_retains_class() {
+        assert_eq!(
+            cumsum_builtin(Value::Int(IntValue::I64(i64::MIN)), Vec::new()).expect("scalar"),
+            Value::Int(IntValue::I64(i64::MIN))
+        );
+        let empty = BuiltinsTensor::new_integer(
+            runmat_builtins::IntegerStorage::U32(Vec::new()),
+            vec![0, 1],
+        )
+        .expect("empty input");
+        assert_eq!(
+            cumsum_builtin(Value::Tensor(empty), Vec::new()).expect("empty cumsum"),
+            Value::Tensor(
+                BuiltinsTensor::new_integer(
+                    runmat_builtins::IntegerStorage::U32(Vec::new()),
+                    vec![0, 1]
+                )
+                .expect("empty output"),
+            )
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

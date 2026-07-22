@@ -969,8 +969,10 @@ struct Params {
 
 const PI: f64 = 3.141592653589793;
 const SQRT_TWO_PI: f64 = 2.5066282746310002;
+const LN_SQRT_TWO_PI: f64 = 0.9189385332046727;
 const LANCZOS_G: f64 = 7.0;
 const EPSILON: f64 = 1.0e-12;
+const SMALL_REFLECTION_CUTOFF: f64 = 1.0e-305;
 const FACTORIAL_MAX: u32 = 170u;
 const FACTORIAL_INT_TOL: f64 = 1.0e-10;
 fn expm1_precise(a: f64) -> f64 {
@@ -1014,6 +1016,21 @@ fn lanczos_gamma(z: f64) -> f64 {
     sum = sum + 0.00000015056327351493116 / (z_minus_one + 8.0);
     let t = z_minus_one + (LANCZOS_G + 0.5);
     return SQRT_TWO_PI * pow(t, z_minus_one + 0.5) * exp(-t) * sum;
+}
+
+fn lanczos_gammaln(z: f64) -> f64 {
+    let z_minus_one = z - 1.0;
+    var sum = 0.99999999999980993;
+    sum = sum + 676.5203681218851 / (z_minus_one + 1.0);
+    sum = sum + -1259.1392167224028 / (z_minus_one + 2.0);
+    sum = sum + 771.3234287776531 / (z_minus_one + 3.0);
+    sum = sum + -176.6150291621406 / (z_minus_one + 4.0);
+    sum = sum + 12.507343278686905 / (z_minus_one + 5.0);
+    sum = sum + -0.13857109526572012 / (z_minus_one + 6.0);
+    sum = sum + 0.000009984369578019572 / (z_minus_one + 7.0);
+    sum = sum + 0.00000015056327351493116 / (z_minus_one + 8.0);
+    let t = z_minus_one + (LANCZOS_G + 0.5);
+    return LN_SQRT_TWO_PI + (z_minus_one + 0.5) * log(t) - t + log(sum);
 }
 
 fn is_non_positive_integer(x: f64) -> bool {
@@ -1073,6 +1090,25 @@ fn gamma_real(a: f64) -> f64 {
         return PI / (sin_term * gamma_one_minus);
     }
     return lanczos_gamma(a);
+}
+
+fn gammaln_real(a: f64) -> f64 {
+    if (is_nan64(a)) {
+        return a;
+    }
+    if (a == 0.0 || a == pos_inf_f64()) {
+        return pos_inf_f64();
+    }
+    if (a < 0.0) {
+        return nan_f64();
+    }
+    if (a < SMALL_REFLECTION_CUTOFF) {
+        return -log(a);
+    }
+    if (a < 0.5) {
+        return log(PI) - log(sin(PI * a)) - lanczos_gammaln(1.0 - a);
+    }
+    return lanczos_gammaln(a);
 }
 
 fn factorial_real(a: f64) -> f64 {
@@ -1143,6 +1179,149 @@ fn heaviside_real(a: f64) -> f64 {
     return 0.5;
 }
 
+fn erf_real(a: f64) -> f64 {
+    if (is_nan64(a)) {
+        return a;
+    }
+    if (is_inf64(a)) {
+        if (a > 0.0) {
+            return 1.0;
+        }
+        return -1.0;
+    }
+    if (a == 0.0) {
+        return a;
+    }
+    var sign = 1.0;
+    var x = a;
+    if (a < 0.0) {
+        sign = -1.0;
+        x = -a;
+    }
+    if (x >= 6.0) {
+        return sign;
+    }
+    let x2 = x * x;
+    if (x < 3.5) {
+        var sum = x;
+        var term = x;
+        var n: u32 = 1u;
+        loop {
+            if (n >= 120u) {
+                break;
+            }
+            term = term * (-x2 / f64(n));
+            let add = term / f64((2u * n) + 1u);
+            sum = sum + add;
+            if (abs(add) <= 1.0e-16 * max(1.0, abs(sum))) {
+                break;
+            }
+            n = n + 1u;
+        }
+        return sign * 1.1283791670955126 * sum;
+    }
+    var asym_sum = 1.0;
+    var asym_term = 1.0;
+    var previous = 1.0e300;
+    var k: u32 = 1u;
+    loop {
+        if (k >= 60u) {
+            break;
+        }
+        asym_term = asym_term * (-(f64((2u * k) - 1u)) / (2.0 * x2));
+        if (abs(asym_term) > previous) {
+            break;
+        }
+        asym_sum = asym_sum + asym_term;
+        previous = abs(asym_term);
+        if (abs(asym_term) <= 1.0e-16 * abs(asym_sum)) {
+            break;
+        }
+        k = k + 1u;
+    }
+    let erfc_tail = exp(-x2) * asym_sum / (x * 1.772453850905516);
+    return sign * (1.0 - erfc_tail);
+}
+
+fn erfc_positive_tail_real(a: f64) -> f64 {
+    if (a < 3.5) {
+        return 1.0 - erf_real(a);
+    }
+    let x2 = a * a;
+    var asym_sum = 1.0;
+    var asym_term = 1.0;
+    var previous = 1.0e300;
+    var k: u32 = 1u;
+    loop {
+        if (k >= 60u) {
+            break;
+        }
+        asym_term = asym_term * (-(f64((2u * k) - 1u)) / (2.0 * x2));
+        if (abs(asym_term) > previous) {
+            break;
+        }
+        asym_sum = asym_sum + asym_term;
+        previous = abs(asym_term);
+        if (abs(asym_term) <= 1.0e-16 * abs(asym_sum)) {
+            break;
+        }
+        k = k + 1u;
+    }
+    return exp(-x2) * asym_sum / (a * 1.772453850905516);
+}
+
+fn erfcinv_positive_tail_real(target: f64) -> f64 {
+    var lo = 0.0;
+    var hi = 1.0;
+    loop {
+        if (hi >= 32.0 || erfc_positive_tail_real(hi) <= target) {
+            break;
+        }
+        lo = hi;
+        hi = hi * 2.0;
+    }
+    if (erfc_positive_tail_real(hi) > target) {
+        return hi;
+    }
+
+    var step: u32 = 0u;
+    loop {
+        if (step >= 110u) {
+            break;
+        }
+        let mid = 0.5 * (lo + hi);
+        if (erfc_positive_tail_real(mid) > target) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        step = step + 1u;
+    }
+    return 0.5 * (lo + hi);
+}
+
+fn erfcinv_real(a: f64) -> f64 {
+    if (is_nan64(a)) {
+        return a;
+    }
+    if (a < 0.0 || a > 2.0) {
+        return f64(0.0) / f64(0.0);
+    }
+    if (a == 0.0) {
+        return f64(1.0) / f64(0.0);
+    }
+    if (a == 2.0) {
+        return -f64(1.0) / f64(0.0);
+    }
+    if (a == 1.0) {
+        return 0.0;
+    }
+    if (a > 1.0) {
+        return -erfcinv_positive_tail_real(2.0 - a);
+    }
+    return erfcinv_positive_tail_real(a);
+}
+
 fn apply(a: f64) -> f64 {
     switch params.op {
         case 0u: { return sin(a); }
@@ -1203,6 +1382,18 @@ fn apply(a: f64) -> f64 {
         }
         case 33u: { return sinc_real(a); }
         case 34u: { return heaviside_real(a); }
+        case 35u: { return erf_real(a); }
+        case 36u: { return gammaln_real(a); }
+        case 37u: {
+            if (is_nan64(a) || is_inf64(a)) {
+                return a;
+            }
+            if (a >= 0.0) {
+                return floor(a + 0.5);
+            }
+            return ceil(a - 0.5);
+        }
+        case 38u: { return erfcinv_real(a); }
         default: { return a; }
     }
 }
@@ -1235,8 +1426,10 @@ struct Params {
 
 const PI: f32 = 3.1415927;
 const SQRT_TWO_PI: f32 = 2.5066283;
+const LN_SQRT_TWO_PI: f32 = 0.9189385;
 const LANCZOS_G: f32 = 7.0;
 const EPSILON: f32 = 1.0e-5;
+const SMALL_REFLECTION_CUTOFF: f32 = 1.0e-30;
 const FACTORIAL_MAX_F32: u32 = 170u;
 const FACTORIAL_INT_TOL_F32: f32 = 1.0e-4;
 fn expm1_precise(a: f32) -> f32 {
@@ -1280,6 +1473,21 @@ fn lanczos_gamma(z: f32) -> f32 {
     sum = sum + 0.00000015056327 / (z_minus_one + 8.0);
     let t = z_minus_one + (LANCZOS_G + 0.5);
     return SQRT_TWO_PI * pow(t, z_minus_one + 0.5) * exp(-t) * sum;
+}
+
+fn lanczos_gammaln(z: f32) -> f32 {
+    let z_minus_one = z - 1.0;
+    var sum: f32 = 0.99999994;
+    sum = sum + 676.5204 / (z_minus_one + 1.0);
+    sum = sum + -1259.1393 / (z_minus_one + 2.0);
+    sum = sum + 771.3234 / (z_minus_one + 3.0);
+    sum = sum + -176.61502 / (z_minus_one + 4.0);
+    sum = sum + 12.507343 / (z_minus_one + 5.0);
+    sum = sum + -0.1385711 / (z_minus_one + 6.0);
+    sum = sum + 0.00000998437 / (z_minus_one + 7.0);
+    sum = sum + 0.00000015056327 / (z_minus_one + 8.0);
+    let t = z_minus_one + (LANCZOS_G + 0.5);
+    return LN_SQRT_TWO_PI + (z_minus_one + 0.5) * log(t) - t + log(sum);
 }
 
 fn is_non_positive_integer(x: f32) -> bool {
@@ -1339,6 +1547,25 @@ fn gamma_real(a: f32) -> f32 {
         return PI / (sin_term * gamma_one_minus);
     }
     return lanczos_gamma(a);
+}
+
+fn gammaln_real(a: f32) -> f32 {
+    if (is_nan32(a)) {
+        return a;
+    }
+    if (a == 0.0 || a == pos_inf_f32()) {
+        return pos_inf_f32();
+    }
+    if (a < 0.0) {
+        return nan_f32();
+    }
+    if (a < SMALL_REFLECTION_CUTOFF) {
+        return -log(a);
+    }
+    if (a < 0.5) {
+        return log(PI) - log(sin(PI * a)) - lanczos_gammaln(1.0 - a);
+    }
+    return lanczos_gammaln(a);
 }
 
 fn factorial_real(a: f32) -> f32 {
@@ -1409,6 +1636,149 @@ fn heaviside_real(a: f32) -> f32 {
     return 0.5;
 }
 
+fn erf_real(a: f32) -> f32 {
+    if (is_nan32(a)) {
+        return a;
+    }
+    if (is_inf32(a)) {
+        if (a > 0.0) {
+            return 1.0;
+        }
+        return -1.0;
+    }
+    if (a == 0.0) {
+        return a;
+    }
+    var sign: f32 = 1.0;
+    var x = a;
+    if (a < 0.0) {
+        sign = -1.0;
+        x = -a;
+    }
+    if (x >= 6.0) {
+        return sign;
+    }
+    let x2 = x * x;
+    if (x < 3.5) {
+        var sum = x;
+        var term = x;
+        var n: u32 = 1u;
+        loop {
+            if (n >= 50u) {
+                break;
+            }
+            term = term * (-x2 / f32(n));
+            let add = term / f32((2u * n) + 1u);
+            sum = sum + add;
+            if (abs(add) <= 1.0e-6 * max(1.0, abs(sum))) {
+                break;
+            }
+            n = n + 1u;
+        }
+        return sign * 1.1283792 * sum;
+    }
+    var asym_sum = 1.0;
+    var asym_term = 1.0;
+    var previous = 1.0e30;
+    var k: u32 = 1u;
+    loop {
+        if (k >= 30u) {
+            break;
+        }
+        asym_term = asym_term * (-(f32((2u * k) - 1u)) / (2.0 * x2));
+        if (abs(asym_term) > previous) {
+            break;
+        }
+        asym_sum = asym_sum + asym_term;
+        previous = abs(asym_term);
+        if (abs(asym_term) <= 1.0e-6 * abs(asym_sum)) {
+            break;
+        }
+        k = k + 1u;
+    }
+    let erfc_tail = exp(-x2) * asym_sum / (x * 1.7724539);
+    return sign * (1.0 - erfc_tail);
+}
+
+fn erfc_positive_tail_real(a: f32) -> f32 {
+    if (a < 3.5) {
+        return 1.0 - erf_real(a);
+    }
+    let x2 = a * a;
+    var asym_sum = 1.0;
+    var asym_term = 1.0;
+    var previous = 1.0e30;
+    var k: u32 = 1u;
+    loop {
+        if (k >= 30u) {
+            break;
+        }
+        asym_term = asym_term * (-(f32((2u * k) - 1u)) / (2.0 * x2));
+        if (abs(asym_term) > previous) {
+            break;
+        }
+        asym_sum = asym_sum + asym_term;
+        previous = abs(asym_term);
+        if (abs(asym_term) <= 1.0e-6 * abs(asym_sum)) {
+            break;
+        }
+        k = k + 1u;
+    }
+    return exp(-x2) * asym_sum / (a * 1.7724539);
+}
+
+fn erfcinv_positive_tail_real(target: f32) -> f32 {
+    var lo = 0.0;
+    var hi = 1.0;
+    loop {
+        if (hi >= 32.0 || erfc_positive_tail_real(hi) <= target) {
+            break;
+        }
+        lo = hi;
+        hi = hi * 2.0;
+    }
+    if (erfc_positive_tail_real(hi) > target) {
+        return hi;
+    }
+
+    var step: u32 = 0u;
+    loop {
+        if (step >= 60u) {
+            break;
+        }
+        let mid = 0.5 * (lo + hi);
+        if (erfc_positive_tail_real(mid) > target) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        step = step + 1u;
+    }
+    return 0.5 * (lo + hi);
+}
+
+fn erfcinv_real(a: f32) -> f32 {
+    if (is_nan32(a)) {
+        return a;
+    }
+    if (a < 0.0 || a > 2.0) {
+        return f32(0.0) / f32(0.0);
+    }
+    if (a == 0.0) {
+        return f32(1.0) / f32(0.0);
+    }
+    if (a == 2.0) {
+        return -f32(1.0) / f32(0.0);
+    }
+    if (a == 1.0) {
+        return 0.0;
+    }
+    if (a > 1.0) {
+        return -erfcinv_positive_tail_real(2.0 - a);
+    }
+    return erfcinv_positive_tail_real(a);
+}
+
 fn apply(a: f32) -> f32 {
     switch params.op {
         case 0u: { return sin(a); }
@@ -1469,6 +1839,18 @@ fn apply(a: f32) -> f32 {
         }
         case 33u: { return sinc_real(a); }
         case 34u: { return heaviside_real(a); }
+        case 35u: { return erf_real(a); }
+        case 36u: { return gammaln_real(a); }
+        case 37u: {
+            if (is_nan32(a) || is_inf32(a)) {
+                return a;
+            }
+            if (a >= 0.0) {
+                return floor(a + 0.5);
+            }
+            return ceil(a - 0.5);
+        }
+        case 38u: { return erfcinv_real(a); }
         default: { return a; }
     }
 }
@@ -1583,3 +1965,105 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     Out.data[idx] = result;
 }
 "#;
+
+pub(crate) fn round_digits_shader(precision: NumericPrecision, significant: bool) -> String {
+    let ty = match precision {
+        NumericPrecision::F64 => "f64",
+        NumericPrecision::F32 => "f32",
+    };
+    let max_finite = match precision {
+        NumericPrecision::F64 => "1.7976931348623157e308",
+        NumericPrecision::F32 => "3.4028234663852886e38",
+    };
+    let inv_ln10 = match precision {
+        NumericPrecision::F64 => "0.4342944819032518",
+        NumericPrecision::F32 => "0.4342944819",
+    };
+    let apply_body = if significant {
+        format!(
+            r#"
+fn apply_round(a: {ty}) -> {ty} {{
+    if !is_finite_value(a) {{
+        return a;
+    }}
+    if a == {ty}(0.0) {{
+        return {ty}(0.0);
+    }}
+    let order = floor(log(abs(a)) * {ty}({inv_ln10}));
+    let scale_power = params.digits - 1 - i32(order);
+    let scale = pow({ty}(10.0), {ty}(scale_power));
+    if !is_finite_value(scale) || scale == {ty}(0.0) {{
+        return a;
+    }}
+    return round_half_away(a * scale) / scale;
+}}
+"#
+        )
+    } else {
+        format!(
+            r#"
+fn apply_round(a: {ty}) -> {ty} {{
+    if !is_finite_value(a) {{
+        return a;
+    }}
+    if params.digits == 0 {{
+        return round_half_away(a);
+    }}
+    let factor = pow({ty}(10.0), {ty}(params.digits));
+    if !is_finite_value(factor) || factor == {ty}(0.0) {{
+        return a;
+    }}
+    return round_half_away(a * factor) / factor;
+}}
+"#
+        )
+    };
+
+    format!(
+        r#"
+struct Tensor {{
+    data: array<{ty}>,
+}};
+
+struct Params {{
+    len: u32,
+    offset: u32,
+    total: u32,
+    digits: i32,
+}};
+
+@group(0) @binding(0) var<storage, read> A: Tensor;
+@group(0) @binding(1) var<storage, read_write> Out: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+fn is_finite_value(a: {ty}) -> bool {{
+    return (a == a) && (abs(a) < {ty}({max_finite}));
+}}
+
+fn round_half_away(a: {ty}) -> {ty} {{
+    if !is_finite_value(a) {{
+        return a;
+    }}
+    if a >= {ty}(0.0) {{
+        return floor(a + {ty}(0.5));
+    }}
+    return ceil(a - {ty}(0.5));
+}}
+
+{apply_body}
+
+@compute @workgroup_size(512)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let local = gid.x;
+    if local >= params.len {{
+        return;
+    }}
+    let idx = params.offset + local;
+    if idx >= params.total {{
+        return;
+    }}
+    Out.data[idx] = apply_round(A.data[idx]);
+}}
+"#
+    )
+}

@@ -1,0 +1,87 @@
+{
+  "title": "histc",
+  "category": "stats/hist",
+  "keywords": [
+    "histc",
+    "histogram",
+    "legacy histogram",
+    "bin counts",
+    "bin indices"
+  ],
+  "summary": "Count values in legacy MATLAB histogram bins.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "gpuArray inputs are gathered to the host. histc is a legacy histogram reduction and returns host count/index arrays."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": true,
+    "max_inputs": 2,
+    "constants": "bin ranges",
+    "notes": "histc materializes histogram counts and terminates fusion chains."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::hist::histc::tests",
+    "integration": null
+  },
+  "description": "`histc(x, binranges)` counts values in legacy MATLAB histogram bins. Each bin includes its left endpoint and excludes its right endpoint, while the final bin counts values exactly equal to the last bin range value.",
+  "behaviors": [
+    "Vector inputs return counts with the same orientation as vector `binranges`.",
+    "Matrix inputs operate down columns by default; `histc(x, binranges, dim)` operates along the requested dimension.",
+    "`[bincounts, ind] = histc(...)` returns one-based bin indices with the same shape as `x`; values outside the ranges or equal to `NaN` receive index zero.",
+    "Empty `binranges` return empty count and index arrays.",
+    "`histc` supports at most two requested outputs.",
+    "`binranges` must be monotonically nondecreasing and must not contain `NaN`; repeated edges are allowed.",
+    "Complex inputs and complex bin ranges use their real parts, matching MATLAB's legacy behavior.",
+    "Matrix `binranges` are interpreted column-by-column when the number of columns matches the number of operated slices."
+  ],
+  "examples": [
+    {
+      "description": "Count ages in legacy bins",
+      "input": "ages = [3 12 24 15 5 74 23 54 31 23 64 75];\nbinranges = [0 10 25 50 75];\n[bincounts, ind] = histc(ages, binranges)",
+      "output": "bincounts = [2 5 1 3 1]\nind = [1 2 2 2 1 4 2 4 3 2 4 5]"
+    },
+    {
+      "description": "Operate along rows",
+      "input": "x = [0 1 2; 2 3 4];\nbincounts = histc(x, [0 2 4], 2)",
+      "output": "bincounts = [1 1 1; 0 1 1]"
+    },
+    {
+      "description": "Values outside the ranges",
+      "input": "[bincounts, ind] = histc([-1 NaN 0.5 2 3], [0 1 2])",
+      "output": "bincounts = [1 0 1]\nind = [0 0 1 3 0]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Should new code use histc?",
+      "answer": "No. MATLAB marks `histc` as not recommended; use `histcounts` for new code. RunMat supports `histc` for backwards compatibility with existing scripts."
+    },
+    {
+      "question": "How does histc differ from histcounts?",
+      "answer": "`histc` uses legacy bin ranges and includes a final equality-only bin at the last range value. `histcounts` returns modern edge-based bins and supports normalization and bin-selection options."
+    },
+    {
+      "question": "Does histc include out-of-range values?",
+      "answer": "No. Values below the first range, above the last range, or equal to `NaN` do not contribute to counts and receive bin index zero."
+    }
+  ],
+  "links": [
+    {
+      "label": "histcounts",
+      "url": "./histcounts"
+    },
+    {
+      "label": "histogram",
+      "url": "./histogram"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/hist/histc.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/hist/histc.rs"
+  }
+}

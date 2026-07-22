@@ -746,6 +746,7 @@ impl ErrorBar {
 
 fn include_segment(index: usize, style: LineStyle) -> bool {
     match style {
+        LineStyle::None => false,
         LineStyle::Solid => true,
         LineStyle::Dashed => (index % 4) < 2,
         LineStyle::Dotted => index.is_multiple_of(4),

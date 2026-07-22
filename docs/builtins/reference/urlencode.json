@@ -1,0 +1,35 @@
+{
+  "title": "urlencode",
+  "category": "io/http",
+  "keywords": [
+    "urlencode"
+  ],
+  "summary": "Percent-encode text for use in URLs.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::http::compat::tests",
+    "integration": null
+  },
+  "description": "Percent-encode text for use in URLs.",
+  "behaviors": [
+    "Accepts MATLAB text inputs such as string scalars and character row vectors for path, name, or URL arguments where applicable.",
+    "Runs on the host using the active RunMat filesystem, environment, or HTTP abstraction as appropriate.",
+    "Reports MATLAB-style runtime errors for unsupported argument shapes or unavailable host capabilities."
+  ],
+  "examples": [],
+  "faqs": [],
+  "links": []
+}

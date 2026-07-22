@@ -1,4 +1,5 @@
 //! MATLAB-compatible `erase` builtin with GPU-aware semantics for RunMat.
+use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -12,6 +13,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::core::compat::pattern_regex;
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
@@ -168,21 +170,43 @@ async fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
 }
 
 struct PatternList {
-    entries: Vec<String>,
+    entries: Vec<PatternEntry>,
+}
+
+enum PatternEntry {
+    Literal(String),
+    Regex(Regex),
 }
 
 impl PatternList {
     fn from_value(value: &Value) -> BuiltinResult<Self> {
         let entries = match value {
-            Value::String(text) => vec![text.clone()],
-            Value::StringArray(array) => array.data.clone(),
+            Value::Object(_) => vec![PatternEntry::Regex(
+                Regex::new(&pattern_regex(value, BUILTIN_NAME).map_err(|err| {
+                    erase_error_with_message(err.message().to_string(), &ERASE_ERROR_PATTERN_TYPE)
+                })?)
+                .map_err(|err| {
+                    erase_error_with_message(err.to_string(), &ERASE_ERROR_PATTERN_TYPE)
+                })?,
+            )],
+            Value::String(text) => vec![PatternEntry::Literal(text.clone())],
+            Value::StringArray(array) => array
+                .data
+                .iter()
+                .cloned()
+                .map(PatternEntry::Literal)
+                .collect(),
             Value::CharArray(array) => {
                 if array.rows == 0 {
                     Vec::new()
                 } else {
                     let mut list = Vec::with_capacity(array.rows);
                     for row in 0..array.rows {
-                        list.push(char_row_to_string_slice(&array.data, array.cols, row));
+                        list.push(PatternEntry::Literal(char_row_to_string_slice(
+                            &array.data,
+                            array.cols,
+                            row,
+                        )));
                     }
                     list
                 }
@@ -191,13 +215,17 @@ impl PatternList {
                 let mut list = Vec::with_capacity(cell.data.len());
                 for handle in &cell.data {
                     match &handle {
-                        Value::String(text) => list.push(text.clone()),
+                        Value::String(text) => list.push(PatternEntry::Literal(text.clone())),
                         Value::StringArray(sa) if sa.data.len() == 1 => {
-                            list.push(sa.data[0].clone());
+                            list.push(PatternEntry::Literal(sa.data[0].clone()));
                         }
-                        Value::CharArray(ca) if ca.rows == 0 => list.push(String::new()),
+                        Value::CharArray(ca) if ca.rows == 0 => {
+                            list.push(PatternEntry::Literal(String::new()));
+                        }
                         Value::CharArray(ca) if ca.rows == 1 => {
-                            list.push(char_row_to_string_slice(&ca.data, ca.cols, 0));
+                            list.push(PatternEntry::Literal(char_row_to_string_slice(
+                                &ca.data, ca.cols, 0,
+                            )));
                         }
                         Value::CharArray(_) => return Err(erase_error(&ERASE_ERROR_CELL_ELEMENT)),
                         _ => return Err(erase_error(&ERASE_ERROR_CELL_ELEMENT)),
@@ -216,13 +244,20 @@ impl PatternList {
         }
         let mut current = input.to_string();
         for pattern in &self.entries {
-            if pattern.is_empty() {
-                continue;
+            match pattern {
+                PatternEntry::Literal(pattern) => {
+                    if pattern.is_empty() {
+                        continue;
+                    }
+                    current = current.replace(pattern, "");
+                }
+                PatternEntry::Regex(pattern) => {
+                    current = pattern.replace_all(&current, "").to_string();
+                }
             }
             if current.is_empty() {
                 break;
             }
-            current = current.replace(pattern, "");
         }
         current
     }
@@ -547,6 +582,13 @@ pub(crate) mod tests {
     fn erase_errors_on_invalid_pattern_type() {
         let err = erase_builtin(Value::String("abc".into()), Value::Num(1.0)).unwrap_err();
         assert_eq!(err.to_string(), ERASE_ERROR_PATTERN_TYPE.message);
+    }
+
+    #[test]
+    fn erase_accepts_pattern_object() {
+        let pattern = crate::builtins::strings::core::compat::pattern_object(r"\d+");
+        let result = erase_builtin(Value::String("run42mat".into()), pattern).expect("erase");
+        assert_eq!(result, Value::String("runmat".into()));
     }
 
     #[test]

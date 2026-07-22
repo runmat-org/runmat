@@ -9,12 +9,16 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use super::colormap_arrays::parse_rgb_colormap_tensor;
 use super::op_common::cmd_parsing::{as_lower_str, parse_on_off};
 use super::state::{
-    clear_current_axes, set_axis_equal, set_axis_equal_and_limits, set_axis_limits,
-    set_box_enabled, set_colorbar_enabled, set_colormap, set_grid_and_minor_grid_enabled,
-    set_surface_shading, set_z_limits, toggle_box, toggle_colorbar, toggle_grid, toggle_minor_grid,
+    axes_metadata_snapshot, clear_current_axes, current_axes_state, current_figure_handle,
+    set_axis_equal, set_axis_equal_and_limits, set_axis_limits, set_box_enabled,
+    set_colorbar_enabled, set_colormap, set_colormap_with_length, set_grid_and_minor_grid_enabled,
+    set_hidden_line_removal_for_axes, set_surface_shading, set_z_limits, toggle_box,
+    toggle_colorbar, toggle_grid, toggle_minor_grid,
 };
+use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::type_resolvers::bool_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -194,15 +198,29 @@ const COLORMAP_INPUTS_NAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescripto
     default: None,
     description: "Colormap name.",
 }];
-const COLORMAP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "ok = colormap(name)",
-    inputs: &COLORMAP_INPUTS_NAME,
-    outputs: &COLORMAP_OUTPUT_OK,
+const COLORMAP_INPUTS_RGB: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "map",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "m-by-3 RGB colormap array with values in [0, 1].",
 }];
+const COLORMAP_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "ok = colormap(name)",
+        inputs: &COLORMAP_INPUTS_NAME,
+        outputs: &COLORMAP_OUTPUT_OK,
+    },
+    BuiltinSignatureDescriptor {
+        label: "ok = colormap(map)",
+        inputs: &COLORMAP_INPUTS_RGB,
+        outputs: &COLORMAP_OUTPUT_OK,
+    },
+];
 const COLORMAP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.COLORMAP.INVALID_ARGUMENT",
     identifier: Some("RunMat:colormap:InvalidArgument"),
-    when: "Colormap name is missing, non-string, or unknown.",
+    when: "Colormap input is missing, unknown, or not a valid m-by-3 RGB array.",
     message: "colormap: invalid argument",
 };
 const COLORMAP_ERRORS: [BuiltinErrorDescriptor; 1] = [COLORMAP_ERROR_INVALID_ARGUMENT];
@@ -245,6 +263,81 @@ pub const SHADING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &SHADING_ERRORS,
 };
+
+const HIDDEN_OUTPUT_ENABLED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "enabled",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Hidden-line-removal state after command execution.",
+}];
+const HIDDEN_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const HIDDEN_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "mode",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"toggle\""),
+    description: "Hidden-line-removal mode token ('on'|'off').",
+}];
+const HIDDEN_INPUTS_AX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ax",
+    ty: BuiltinParamType::AxesHandle,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Target axes handle.",
+}];
+const HIDDEN_INPUTS_AX_MODE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "mode",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"toggle\""),
+        description: "Hidden-line-removal mode token ('on'|'off').",
+    },
+];
+const HIDDEN_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "enabled = hidden()",
+        inputs: &HIDDEN_INPUTS_NONE,
+        outputs: &HIDDEN_OUTPUT_ENABLED,
+    },
+    BuiltinSignatureDescriptor {
+        label: "enabled = hidden(mode)",
+        inputs: &HIDDEN_INPUTS_MODE,
+        outputs: &HIDDEN_OUTPUT_ENABLED,
+    },
+    BuiltinSignatureDescriptor {
+        label: "enabled = hidden(ax)",
+        inputs: &HIDDEN_INPUTS_AX,
+        outputs: &HIDDEN_OUTPUT_ENABLED,
+    },
+    BuiltinSignatureDescriptor {
+        label: "enabled = hidden(ax, mode)",
+        inputs: &HIDDEN_INPUTS_AX_MODE,
+        outputs: &HIDDEN_OUTPUT_ENABLED,
+    },
+];
+const HIDDEN_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HIDDEN.INVALID_ARGUMENT",
+    identifier: Some("RunMat:hidden:InvalidArgument"),
+    when: "Hidden-line-removal mode or axes target is unsupported.",
+    message: "hidden: invalid argument",
+};
+const HIDDEN_ERRORS: [BuiltinErrorDescriptor; 1] = [HIDDEN_ERROR_INVALID_ARGUMENT];
+pub const HIDDEN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &HIDDEN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &HIDDEN_ERRORS,
+};
+type HiddenAxesTarget = Option<(super::state::FigureHandle, usize)>;
 
 const COLORBAR_OUTPUT_ENABLED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "enabled",
@@ -528,33 +621,41 @@ pub fn cla_builtin(_args: Vec<Value>) -> crate::BuiltinResult<bool> {
     builtin_path = "crate::builtins::plotting::cmds"
 )]
 pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
-    let Some(arg) = args.first() else {
+    let [arg] = args.as_slice() else {
         return Err(cmd_error_with_message(
             "colormap",
             COLORMAP_ERROR_INVALID_ARGUMENT.message,
             &COLORMAP_ERROR_INVALID_ARGUMENT,
         ));
     };
-    let Some(name) = as_lower_str(arg) else {
-        return Err(cmd_error_with_message(
-            "colormap",
-            COLORMAP_ERROR_INVALID_ARGUMENT.message,
-            &COLORMAP_ERROR_INVALID_ARGUMENT,
-        ));
+
+    if let Some(name) = as_lower_str(arg) {
+        let Some(cmap) = runmat_plot::plots::surface::ColorMap::from_name(&name) else {
+            let other = name.trim();
+            return Err(cmd_error_with_message(
+                "colormap",
+                format!(
+                    "{}: unknown colormap '{other}'",
+                    COLORMAP_ERROR_INVALID_ARGUMENT.message
+                ),
+                &COLORMAP_ERROR_INVALID_ARGUMENT,
+            ));
+        };
+        set_colormap(cmap);
+        return Ok(true);
+    }
+
+    if let Value::Tensor(tensor) = arg {
+        let (cmap, len) = parse_rgb_colormap_tensor(tensor, "colormap")?;
+        set_colormap_with_length(cmap, len);
+        return Ok(true);
     };
-    let Some(cmap) = runmat_plot::plots::surface::ColorMap::from_name(&name) else {
-        let other = name.trim();
-        return Err(cmd_error_with_message(
-            "colormap",
-            format!(
-                "{}: unknown colormap '{other}'",
-                COLORMAP_ERROR_INVALID_ARGUMENT.message
-            ),
-            &COLORMAP_ERROR_INVALID_ARGUMENT,
-        ));
-    };
-    set_colormap(cmap);
-    Ok(true)
+
+    Err(cmd_error_with_message(
+        "colormap",
+        COLORMAP_ERROR_INVALID_ARGUMENT.message,
+        &COLORMAP_ERROR_INVALID_ARGUMENT,
+    ))
 }
 
 #[runtime_builtin(
@@ -602,6 +703,74 @@ pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
 }
 
 #[runtime_builtin(
+    name = "hidden",
+    category = "plotting",
+    summary = "Set axes hidden-line-removal state.",
+    keywords = "hidden,hiddenline,plotting,surface,mesh",
+    suppress_auto_output = true,
+    type_resolver(bool_type),
+    descriptor(crate::builtins::plotting::cmds::HIDDEN_DESCRIPTOR),
+    builtin_path = "crate::builtins::plotting::cmds"
+)]
+pub fn hidden_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
+    let (target, rest) = parse_hidden_target(args)?;
+    let (handle, axes_index) = target.unwrap_or_else(|| {
+        let axes = current_axes_state();
+        (current_figure_handle(), axes.active_index)
+    });
+    let requested = parse_on_off("hidden", rest.first()).map_err(|err| {
+        cmd_error_with_message(
+            "hidden",
+            format!(
+                "{}: {}",
+                HIDDEN_ERROR_INVALID_ARGUMENT.message,
+                err.message()
+            ),
+            &HIDDEN_ERROR_INVALID_ARGUMENT,
+        )
+    })?;
+    if rest.len() > 1 {
+        return Err(cmd_error_with_message(
+            "hidden",
+            "hidden: expected at most one mode argument after optional axes handle",
+            &HIDDEN_ERROR_INVALID_ARGUMENT,
+        ));
+    }
+    let current = axes_metadata_snapshot(handle, axes_index)
+        .map_err(|err| {
+            cmd_error_with_message(
+                "hidden",
+                format!("{}: {err}", HIDDEN_ERROR_INVALID_ARGUMENT.message),
+                &HIDDEN_ERROR_INVALID_ARGUMENT,
+            )
+        })?
+        .hidden_line_removal;
+    let enabled = requested.unwrap_or(!current);
+    set_hidden_line_removal_for_axes(handle, axes_index, enabled).map_err(|err| {
+        cmd_error_with_message(
+            "hidden",
+            format!("{}: {err}", HIDDEN_ERROR_INVALID_ARGUMENT.message),
+            &HIDDEN_ERROR_INVALID_ARGUMENT,
+        )
+    })?;
+    Ok(enabled)
+}
+
+fn parse_hidden_target(args: Vec<Value>) -> crate::BuiltinResult<(HiddenAxesTarget, Vec<Value>)> {
+    let mut iter = args.into_iter();
+    let Some(first) = iter.next() else {
+        return Ok((None, Vec::new()));
+    };
+    if let Ok(PlotHandle::Axes(handle, axes_index)) = resolve_plot_handle(&first, "hidden") {
+        return Ok((Some((handle, axes_index)), iter.collect()));
+    }
+    let mut rest = Vec::with_capacity(iter.size_hint().0 + 1);
+    rest.push(first);
+    rest.extend(iter);
+    Ok((None, rest))
+}
+
+#[runtime_builtin(
     name = "colorbar",
     category = "plotting",
     summary = "Show, hide, or toggle colorbars.",
@@ -638,8 +807,11 @@ pub fn colorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
 mod tests {
     use super::*;
     use crate::builtins::plotting::get::get_builtin;
+    use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
-    use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
+    use crate::builtins::plotting::{
+        clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
+    };
     use runmat_builtins::{NumericDType, Tensor};
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -665,6 +837,7 @@ mod tests {
             cols: 6,
             shape: vec![1, 6],
             data: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            integer_data: None,
             dtype: NumericDType::F64,
         })])
         .unwrap();
@@ -694,6 +867,7 @@ mod tests {
             cols: 4,
             shape: vec![1, 4],
             data: vec![0.0, 10.0, -2.0, 2.0],
+            integer_data: None,
             dtype: NumericDType::F64,
         })])
         .unwrap();
@@ -769,6 +943,142 @@ mod tests {
     }
 
     #[test]
+    fn hidden_toggles_and_sets_current_axes_hidden_line_removal() {
+        let _guard = setup();
+        let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
+
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("HiddenLineRemoval".into())]).unwrap(),
+            Value::String("on".into())
+        );
+        assert!(!hidden_builtin(vec![]).unwrap());
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("HiddenLineRemoval".into())]).unwrap(),
+            Value::String("off".into())
+        );
+        assert!(hidden_builtin(vec![Value::String("on".into())]).unwrap());
+        assert_eq!(
+            get_builtin(vec![ax, Value::String("HiddenLineRemoval".into())]).unwrap(),
+            Value::String("on".into())
+        );
+    }
+
+    #[test]
+    fn hidden_accepts_axes_target_without_selecting_current_axes() {
+        let _guard = setup();
+        let ax1 = crate::builtins::plotting::subplot::subplot_builtin(
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(1.0),
+        )
+        .unwrap();
+        let ax2 = crate::builtins::plotting::subplot::subplot_builtin(
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(2.0),
+        )
+        .unwrap();
+
+        hidden_builtin(vec![Value::Num(ax1), Value::String("off".into())]).unwrap();
+
+        assert_eq!(
+            get_builtin(vec![
+                Value::Num(ax1),
+                Value::String("HiddenLineRemoval".into())
+            ])
+            .unwrap(),
+            Value::String("off".into())
+        );
+        assert_eq!(
+            get_builtin(vec![
+                Value::Num(ax2),
+                Value::String("HiddenLineRemoval".into())
+            ])
+            .unwrap(),
+            Value::String("on".into())
+        );
+    }
+
+    #[test]
+    fn hidden_line_removal_property_set_get_and_rejects_invalid_values() {
+        let _guard = setup();
+        let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
+
+        set_builtin(vec![
+            ax.clone(),
+            Value::String("HiddenLineRemoval".into()),
+            Value::String("off".into()),
+        ])
+        .unwrap();
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("HiddenLineRemoval".into())]).unwrap(),
+            Value::String("off".into())
+        );
+
+        let err = set_builtin(vec![
+            ax,
+            Value::String("HiddenLineRemoval".into()),
+            Value::String("maybe".into()),
+        ])
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:set:InvalidArgument"));
+    }
+
+    #[test]
+    fn hidden_rejects_extra_arguments() {
+        let _guard = setup();
+        let err = hidden_builtin(vec![
+            Value::String("on".into()),
+            Value::String("off".into()),
+        ])
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:hidden:InvalidArgument"));
+    }
+
+    #[test]
+    fn colormap_accepts_rgb_matrix_lookup_tables() {
+        let _guard = setup();
+        colormap_builtin(vec![Value::Tensor(Tensor {
+            rows: 2,
+            cols: 3,
+            shape: vec![2, 3],
+            data: vec![0.2, 0.8, 0.4, 0.1, 0.6, 0.0],
+            integer_data: None,
+            dtype: NumericDType::F64,
+        })])
+        .unwrap();
+
+        let figure = clone_figure(current_figure_handle()).expect("current figure");
+        let meta = figure
+            .axes_metadata(figure.active_axes_index)
+            .expect("axes");
+        let runmat_plot::plots::surface::ColorMap::Listed(colors) = &meta.colormap else {
+            panic!("expected listed colormap");
+        };
+        assert_eq!(colors.as_ref(), &[[0.2, 0.4, 0.6], [0.8, 0.1, 0.0]]);
+    }
+
+    #[test]
+    fn colormap_preserves_generated_parula_rows_as_listed_matrix() {
+        let _guard = setup();
+        let generated = crate::builtins::plotting::colormap_arrays::colormap_tensor(
+            runmat_plot::plots::surface::ColorMap::Parula,
+            8,
+        );
+
+        colormap_builtin(vec![Value::Tensor(generated)]).unwrap();
+
+        let figure = clone_figure(current_figure_handle()).expect("current figure");
+        let meta = figure
+            .axes_metadata(figure.active_axes_index)
+            .expect("axes");
+        let runmat_plot::plots::surface::ColorMap::Listed(colors) = &meta.colormap else {
+            panic!("expected listed colormap");
+        };
+        assert_eq!(colors.len(), 8);
+    }
+
+    #[test]
     fn command_descriptors_cover_core_forms() {
         let grid_labels: Vec<&str> = GRID_DESCRIPTOR
             .signatures
@@ -808,6 +1118,7 @@ mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(colormap_labels.contains(&"ok = colormap(name)"));
+        assert!(colormap_labels.contains(&"ok = colormap(map)"));
 
         let shading_labels: Vec<&str> = SHADING_DESCRIPTOR
             .signatures
@@ -815,6 +1126,16 @@ mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(shading_labels.contains(&"ok = shading(mode)"));
+
+        let hidden_labels: Vec<&str> = HIDDEN_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(hidden_labels.contains(&"enabled = hidden()"));
+        assert!(hidden_labels.contains(&"enabled = hidden(mode)"));
+        assert!(hidden_labels.contains(&"enabled = hidden(ax)"));
+        assert!(hidden_labels.contains(&"enabled = hidden(ax, mode)"));
 
         let colorbar_labels: Vec<&str> = COLORBAR_DESCRIPTOR
             .signatures

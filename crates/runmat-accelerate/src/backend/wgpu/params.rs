@@ -13,14 +13,48 @@ pub struct LenOpParams {
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct LinearGatherParams {
     pub count: u32,
-    pub _pad: [u32; 3],
+    pub lane_factor: u32,
+    pub _pad: [u32; 2],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct LinearScatterParams {
     pub count: u32,
-    pub _pad: [u32; 3],
+    pub lane_factor: u32,
+    pub _pad: [u32; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct Interp1ParamsF64 {
+    pub sample_len: u32,
+    pub query_len: u32,
+    pub series_count: u32,
+    pub output_len: u32,
+    pub method: u32,
+    pub extrapolation: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub extrapolation_value: f64,
+    pub _pad2: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct Interp1ParamsF32 {
+    pub sample_len: u32,
+    pub query_len: u32,
+    pub series_count: u32,
+    pub output_len: u32,
+    pub method: u32,
+    pub extrapolation: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub extrapolation_value: f32,
+    pub _pad2: f32,
+    pub _pad3: f32,
+    pub _pad4: f32,
 }
 
 #[repr(C)]
@@ -60,6 +94,25 @@ pub struct Conv1dParams {
     pub start_offset: u32,
 }
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct MovingWindowParamsF64 {
+    pub meta0: PackedU32,
+    pub meta1: PackedU32,
+    pub meta2: PackedU32,
+    pub fill_value: f64,
+    pub _pad1: f64,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct MovingWindowParamsF32 {
+    pub meta0: PackedU32,
+    pub meta1: PackedU32,
+    pub meta2: PackedU32,
+    pub meta3: PackedF32,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct FusionParams {
@@ -67,6 +120,15 @@ pub struct FusionParams {
     pub offset: u32,
     pub _pad1: u32,
     pub _pad2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RoundDigitsParams {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub digits: i32,
 }
 
 #[repr(C, align(16))]
@@ -391,7 +453,7 @@ pub struct FilterParams {
     pub dim_idx: u32,
     pub rank: u32,
     pub state_rank: u32,
-    pub _pad: u32,
+    pub lane_factor: u32,
     pub signal_shape: [AlignedU32; FILTER_MAX_RANK],
     pub state_shape: [AlignedU32; FILTER_MAX_RANK],
 }
@@ -723,6 +785,36 @@ pub struct CumsumParams {
     pub _pad1: u32,
 }
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct TrapezoidParamsF64 {
+    pub segment_len: u32,
+    pub segments: u32,
+    pub stride_before: u32,
+    pub block: u32,
+    pub total_len: u32,
+    pub output_len: u32,
+    pub spacing_kind: u32,
+    pub mode: u32,
+    pub lane_factor: u32,
+    pub _pad_u32_0: u32,
+    pub _pad_u32_1: u32,
+    pub _pad_u32_2: u32,
+    pub spacing_scalar: f64,
+    pub _pad0: f64,
+    pub _pad1: f64,
+    pub _pad2: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct TrapezoidParamsF32 {
+    pub meta0: PackedU32,
+    pub meta1: PackedU32,
+    pub meta2: PackedU32,
+    pub scalar: PackedF32,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct CumprodParams {
@@ -815,9 +907,13 @@ pub struct FspecialParamsF32 {
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct DiagFromVectorParams {
     pub len: u32,
-    pub size: u32,
+    pub rows: u32,
+    pub cols: u32,
+    pub _pad0: u32,
     pub offset: i32,
-    pub _pad: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+    pub _pad3: u32,
 }
 
 #[repr(C)]

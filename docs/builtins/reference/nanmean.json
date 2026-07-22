@@ -1,0 +1,15 @@
+{
+  "title": "nanmean",
+  "category": "missing",
+  "keywords": ["nanmean", "mean", "omitnan"],
+  "summary": "Compute means while ignoring NaN values.",
+  "gpu_support": {"elementwise": false, "reduction": true, "precisions": ["f32", "f64"], "broadcasting": "matlab", "notes": "Delegates to `mean(..., 'omitnan')`, preserving mean's GPU fallback behavior."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::missing::tests", "integration": "crates/runmat-vm/tests/missing_values.rs"},
+  "description": "`nanmean(A, ...)` is a compatibility alias for `mean(A, ..., 'omitnan')`.",
+  "behaviors": ["All dimension, vector-dimension, `\"all\"`, `\"native\"`, and `\"like\"` options supported by `mean` are forwarded."],
+  "examples": [{"description": "Ignore NaN values", "input": "m = nanmean([1 NaN 3], 'all')", "output": "m = 2"}],
+  "links": [{"label": "mean", "url": "./mean"}, {"label": "fillmissing", "url": "./fillmissing"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/missing/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/missing/mod.rs"}
+}

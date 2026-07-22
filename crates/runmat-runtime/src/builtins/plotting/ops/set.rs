@@ -100,6 +100,19 @@ pub fn set_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
             "expected a plotting handle followed by property/value pairs",
         ));
     }
+    if let Some(()) = super::zoom::set_zoom_object_properties(&args[0], &args[1..], BUILTIN_NAME)? {
+        return Ok("ok".to_string());
+    }
+    if let Some(()) = super::pan::set_pan_object_properties(&args[0], &args[1..], BUILTIN_NAME)? {
+        return Ok("ok".to_string());
+    }
+    if let Some(()) = super::datacursormode::set_data_cursor_object_properties(
+        &args[0],
+        &args[1..],
+        BUILTIN_NAME,
+    )? {
+        return Ok("ok".to_string());
+    }
     let handle = resolve_plot_handle(&args[0], BUILTIN_NAME).map_err(map_set_error)?;
     set_properties(handle, &args[1..], BUILTIN_NAME).map_err(map_set_error)?;
     Ok("ok".to_string())
@@ -282,6 +295,7 @@ mod tests {
                 cols: 2,
                 shape: vec![1, 2],
                 data: vec![2.0, 8.0],
+                integer_data: None,
                 dtype: runmat_builtins::NumericDType::F64,
             }),
             Value::String("Colorbar".into()),
@@ -458,6 +472,7 @@ mod tests {
                 cols: 1,
                 shape: vec![2],
                 data: vec![1.0, 2.0],
+                integer_data: None,
                 dtype: runmat_builtins::NumericDType::F64,
             },
         )])

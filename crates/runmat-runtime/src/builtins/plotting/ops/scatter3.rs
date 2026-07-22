@@ -764,7 +764,7 @@ fn resolve_scatter3_style(
     match &args.color {
         PointColorArg::ScalarValues(value) => {
             let scalars = convert_scalar_color_values(value, point_count, context)?;
-            let (colors, limits) = map_scalar_values_to_colors(&scalars, style.colormap);
+            let (colors, limits) = map_scalar_values_to_colors(&scalars, style.colormap.clone());
             style.color_values = Some(scalars);
             style.per_point_colors = Some(colors);
             style.color_limits = Some(limits);
@@ -804,7 +804,12 @@ fn resolve_scatter3_style(
         )));
     }
 
-    if args.style.appearance.line_style != LineStyle::Solid && args.style.line_style_explicit {
+    if args.style.line_style_explicit
+        && !matches!(
+            args.style.appearance.line_style,
+            LineStyle::Solid | LineStyle::None
+        )
+    {
         style.requires_cpu = true;
     }
     if args.style.line_style_order.is_some() {
@@ -1110,6 +1115,7 @@ pub(crate) mod tests {
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,
@@ -1153,6 +1159,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         let rest = vec![Value::Tensor(Tensor {
             data: vec![1.0, 2.0],
+            integer_data: None,
             shape: vec![2],
             rows: 2,
             cols: 1,
@@ -1194,6 +1201,7 @@ pub(crate) mod tests {
             Value::Num(49.0),
             Value::Tensor(Tensor {
                 data: vec![0.9, 0.2, 0.2],
+                integer_data: None,
                 shape: vec![1, 3],
                 rows: 1,
                 cols: 3,

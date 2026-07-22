@@ -394,6 +394,7 @@ fn compile_marker_shader(
 
 fn line_style_code(style: LineStyle) -> u32 {
     match style {
+        LineStyle::None => 4,
         LineStyle::Solid => 0,
         LineStyle::Dashed => 1,
         LineStyle::Dotted => 2,

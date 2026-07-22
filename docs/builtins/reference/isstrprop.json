@@ -1,0 +1,83 @@
+{
+  "title": "isstrprop",
+  "category": "strings/core",
+  "keywords": [
+    "isstrprop",
+    "strings",
+    "core",
+    "matlab",
+    "compatibility"
+  ],
+  "summary": "Classify characters in text by character property.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "not applicable",
+    "notes": "Not eligible for fusion; this builtin materializes host text or logical results."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::compat::tests",
+    "integration": null
+  },
+  "description": "tf = isstrprop(text, category) - Classify characters in text by character property.",
+  "signatures": [
+    {
+      "label": "tf = isstrprop(text, category)",
+      "inputs": [
+        {
+          "name": "text",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Input text."
+        },
+        {
+          "name": "arg",
+          "ty": "Any",
+          "arity": "Variadic",
+          "default": null,
+          "description": "Additional arguments."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "tf",
+          "ty": "LogicalArray",
+          "arity": "Required",
+          "default": null,
+          "description": "Logical result."
+        }
+      ]
+    }
+  ],
+  "behaviors": [
+    "Classify characters in text by character property."
+  ],
+  "examples": [
+    "isstrprop(\"A1\", \"alpha\") returns [true false]."
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/compat.rs"
+  }
+}

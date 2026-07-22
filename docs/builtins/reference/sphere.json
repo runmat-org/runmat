@@ -1,0 +1,102 @@
+{
+  "title": "sphere",
+  "category": "plotting",
+  "keywords": [
+    "sphere",
+    "unit sphere",
+    "3-D surface",
+    "surface coordinates",
+    "matlab sphere"
+  ],
+  "summary": "Generate or plot unit-sphere coordinate grids with MATLAB-compatible `sphere` syntax.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`sphere` generates dense host coordinate tensors. Statement-form plotting renders a 3-D surface mesh through RunMat's plotting pipeline."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::sphere::tests",
+    "integration": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`sphere` creates X, Y, and Z coordinate matrices for a unit sphere. With no outputs it renders the sphere in the current axes; with explicit outputs it returns coordinate grids sized `(n+1)`-by-`(n+1)`, where `n` is the number of faces per dimension and defaults to 20.",
+  "behaviors": [
+    "`sphere` and `sphere(n)` in statement form plot a unit sphere in the current axes.",
+    "`X = sphere(n)` returns the X-coordinate grid.",
+    "`[X, Y] = sphere(n)` returns the X and Y coordinate grids.",
+    "`[X, Y, Z] = sphere(n)` returns all coordinate grids for use with `surf`, `mesh`, or other 3-D plotting functions.",
+    "The default grid uses `n = 20`, producing 21-by-21 coordinate tensors.",
+    "`n` must be a finite non-negative integer scalar. `sphere(0)` returns a single unit-sphere point."
+  ],
+  "examples": [
+    {
+      "description": "Plot the default unit sphere",
+      "input": "sphere;\naxis equal;\nview(45, 25);"
+    },
+    {
+      "description": "Return coordinate grids and plot them manually",
+      "input": "[X, Y, Z] = sphere(40);\nsurf(X, Y, Z);\naxis equal;\nshading interp;\ncolormap('parula');"
+    },
+    {
+      "description": "Use sphere coordinates in another expression",
+      "input": "[X, Y, Z] = sphere(30);\nR = sqrt(X.^2 + Y.^2 + Z.^2);\nmax(abs(R(:) - 1))"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What size are the outputs?",
+      "answer": "`sphere(n)` returns coordinate tensors with size `(n+1)`-by-`(n+1)`. The default `sphere` uses `n = 20`, so the default output size is 21-by-21."
+    },
+    {
+      "question": "How do I get the coordinates without plotting?",
+      "answer": "Request outputs explicitly, for example `[X, Y, Z] = sphere(50)`. Statement-form calls with no outputs render directly into the current axes."
+    },
+    {
+      "question": "Does sphere return GPU tensors?",
+      "answer": "No. `sphere` constructs host coordinate tensors. Use `gpuArray` on the outputs if a subsequent numeric pipeline needs GPU residency."
+    }
+  ],
+  "links": [
+    {
+      "label": "surf",
+      "url": "./surf"
+    },
+    {
+      "label": "mesh",
+      "url": "./mesh"
+    },
+    {
+      "label": "axis",
+      "url": "./axis"
+    },
+    {
+      "label": "view",
+      "url": "./view"
+    },
+    {
+      "label": "shading",
+      "url": "./shading"
+    },
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/sphere.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/sphere.rs"
+  },
+  "gpu_residency": "`sphere` returns host tensors. Statement-form rendering builds a host-side 3-D mesh and follows the normal plotting fallback behavior.",
+  "gpu_behavior": [
+    "Coordinate generation is CPU-side and deterministic.",
+    "The coordinate outputs can be passed to `surf(X, Y, Z)`, which supports full parametric coordinate matrices for this workflow."
+  ]
+}

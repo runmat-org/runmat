@@ -1,7 +1,11 @@
 use super::*;
 use runmat_accelerate_api::{
-    ProviderBitModulationRequest, ProviderEnvelopeRequest, ProviderEnvelopeResult,
-    ProviderHilbertRequest, ProviderModulationRequest,
+    ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBitModulationRequest,
+    ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult,
+    ProviderCovarianceToCorrelationResult, ProviderCrossentropyRequest, ProviderCrossentropyResult,
+    ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderHilbertRequest,
+    ProviderInterp1Request, ProviderModulationRequest, ProviderMovingWindowRequest,
+    ProviderNdgridRequest, ProviderNdgridResult, ProviderTrapezoidSpacing,
 };
 
 impl AccelProvider for WgpuProvider {
@@ -44,6 +48,14 @@ impl AccelProvider for WgpuProvider {
         self.zeros_exec(shape)
     }
 
+    fn zeros_with_storage(
+        &self,
+        shape: &[usize],
+        storage: GpuTensorStorage,
+    ) -> Result<GpuTensorHandle> {
+        self.zeros_with_storage_exec(shape, storage)
+    }
+
     fn zeros_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.zeros_exec(&prototype.shape)
     }
@@ -69,6 +81,31 @@ impl AccelProvider for WgpuProvider {
 
     fn meshgrid(&self, axes: &[MeshgridAxisView<'_>]) -> Result<ProviderMeshgridResult> {
         self.meshgrid_exec(axes)
+    }
+
+    fn ndgrid(&self, request: &ProviderNdgridRequest<'_>) -> Result<ProviderNdgridResult> {
+        self.ndgrid_exec(request)
+    }
+
+    fn black_scholes_price(
+        &self,
+        request: &ProviderBlackScholesPriceRequest<'_>,
+    ) -> Result<ProviderBlackScholesPriceResult> {
+        self.black_scholes_price_exec(request)
+    }
+
+    fn adam_update(
+        &self,
+        request: &ProviderAdamUpdateRequest<'_>,
+    ) -> Result<ProviderAdamUpdateResult> {
+        self.adam_update_exec(request)
+    }
+
+    fn crossentropy_terms(
+        &self,
+        request: &ProviderCrossentropyRequest<'_>,
+    ) -> Result<ProviderCrossentropyResult> {
+        self.crossentropy_terms_exec(request)
     }
 
     fn linspace(&self, start: f64, stop: f64, count: usize) -> Result<GpuTensorHandle> {
@@ -212,6 +249,16 @@ impl AccelProvider for WgpuProvider {
 
     fn diag_from_vector(&self, vector: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
         self.diag_from_vector_exec(vector, offset)
+    }
+
+    fn diag_from_vector_sized(
+        &self,
+        vector: &GpuTensorHandle,
+        offset: isize,
+        rows: usize,
+        cols: usize,
+    ) -> Result<GpuTensorHandle> {
+        self.diag_from_vector_sized_exec(vector, offset, rows, cols)
     }
 
     fn diag_extract(&self, matrix: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
@@ -473,6 +520,30 @@ impl AccelProvider for WgpuProvider {
         )
     }
 
+    fn unary_gammaln<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Gammaln, a) },
+        )
+    }
+
+    fn unary_erf<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Erf, a) },
+        )
+    }
+
+    fn unary_erfcinv<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Erfcinv, a) },
+        )
+    }
+
     fn unary_factorial<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
@@ -578,6 +649,24 @@ impl AccelProvider for WgpuProvider {
         Box::pin(
             async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Floor, a) },
         )
+    }
+
+    fn unary_round<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Round, a) },
+        )
+    }
+
+    fn round_digits<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        digits: i32,
+        significant: bool,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.round_digits_exec(a, digits, significant) })
     }
 
     fn unary_fix<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
@@ -787,6 +876,12 @@ impl AccelProvider for WgpuProvider {
     ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
         Box::pin(async move { self.iir_filter_exec(b, a, x, options).await })
     }
+    fn moving_window<'a>(
+        &'a self,
+        request: &'a ProviderMovingWindowRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.moving_window_exec(request) })
+    }
     fn uniform_spectral_estimate<'a>(
         &'a self,
         request: &'a ProviderSpectralRequest<'a>,
@@ -832,6 +927,15 @@ impl AccelProvider for WgpuProvider {
         self.gradient_exec(handle, dim, spacing)
     }
 
+    fn gradient_dim_with_coordinates(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        coordinates: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        self.gradient_exec_with_coordinates(handle, dim, coordinates)
+    }
+
     fn cumsum_scan(
         &self,
         input: &GpuTensorHandle,
@@ -840,6 +944,24 @@ impl AccelProvider for WgpuProvider {
         nan_mode: ProviderNanMode,
     ) -> Result<GpuTensorHandle> {
         self.cumsum_exec(input, dim, direction, nan_mode)
+    }
+
+    fn trapz_dim(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> Result<GpuTensorHandle> {
+        self.trapz_exec(input, dim, spacing)
+    }
+
+    fn cumtrapz_dim(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> Result<GpuTensorHandle> {
+        self.cumtrapz_exec(input, dim, spacing)
     }
 
     fn cumprod_scan(
@@ -1052,6 +1174,14 @@ impl AccelProvider for WgpuProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.corrcoef_exec(matrix, options).await })
     }
+
+    fn covariance_to_correlation(
+        &self,
+        matrix: &GpuTensorHandle,
+    ) -> Result<ProviderCovarianceToCorrelationResult> {
+        self.covariance_to_correlation_exec(matrix)
+    }
+
     fn linsolve<'a>(
         &'a self,
         lhs: &'a GpuTensorHandle,
@@ -1090,6 +1220,13 @@ impl AccelProvider for WgpuProvider {
         order: ProviderNormOrder,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.norm_exec(tensor, order).await })
+    }
+
+    fn interp1<'a>(
+        &'a self,
+        request: &'a ProviderInterp1Request<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.interp1_exec(request).await })
     }
 
     fn rank<'a>(

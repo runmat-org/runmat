@@ -1,0 +1,48 @@
+{
+  "title": "missing",
+  "category": "missing",
+  "keywords": ["missing", "string", "missing values"],
+  "summary": "Create missing string scalars or arrays.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the host. GPU size arguments are gathered before allocation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::missing::tests",
+    "integration": "crates/runmat-vm/tests/missing_values.rs"
+  },
+  "description": "`missing` creates string arrays filled with RunMat's canonical MATLAB missing string sentinel, `<missing>`.",
+  "behaviors": [
+    "`missing` returns a 1-by-1 missing string scalar.",
+    "`missing(n)` returns an n-by-n missing string array.",
+    "`missing(m, n, ...)` and `missing(sz)` accept nonnegative integer size arguments.",
+    "The result uses `StringArray` storage and displays each element as `<missing>`."
+  ],
+  "examples": [
+    {
+      "description": "Create missing strings",
+      "input": "S = missing(1, 3)",
+      "output": "S = 1x3 string array\n  <missing>  <missing>  <missing>"
+    }
+  ],
+  "links": [
+    {"label": "ismissing", "url": "./ismissing"},
+    {"label": "strings", "url": "./strings"},
+    {"label": "fillmissing", "url": "./fillmissing"},
+    {"label": "rmmissing", "url": "./rmmissing"}
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/missing/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/missing/mod.rs"
+  }
+}

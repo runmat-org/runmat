@@ -105,9 +105,10 @@
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/plot3.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/plot3.rs"
   },
-  "gpu_residency": "`plot3` preserves GPU residency when the 3-D line pipeline can consume exported coordinate buffers directly. Fallback rendering gathers once while preserving the same handle and axes semantics.",
+  "gpu_residency": "`plot3` preserves GPU residency for multi-point GPU coordinate inputs when the 3-D line pipeline can consume exported buffers directly. Single-point GPU inputs gather once because they render through the scatter-style point fallback rather than the line-segment packer.",
   "gpu_behavior": [
     "The dedicated 3-D line pipeline is separate from 2-D `plot`, which keeps camera-aware rendering and bounds handling explicit.",
-    "Subview state, labels, and line object behavior remain identical across GPU and host fallback paths."
+    "Subview state, labels, and line object behavior remain identical across GPU and host fallback paths.",
+    "Plot replay/export can read back preserved GPU source buffers from the line object when host coordinate vectors were not materialized at construction time."
   ]
 }

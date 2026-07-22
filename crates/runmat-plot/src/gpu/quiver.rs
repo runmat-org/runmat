@@ -260,4 +260,49 @@ mod tests {
         .expect("quiver pack should succeed");
         assert_eq!(packed.vertex_count, 12);
     }
+
+    #[test]
+    fn gpu_packer_accepts_meshgrid_vector_axes() {
+        let Some((device, queue)) = maybe_device() else {
+            return;
+        };
+        let x = [1.0f32, 2.0f32];
+        let y = [1.0f32, 2.0f32, 3.0f32];
+        let u = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("quiver-meshgrid-test-u"),
+                contents: bytemuck::cast_slice(&[0.5f32; 6]),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        let v = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("quiver-meshgrid-test-v"),
+                contents: bytemuck::cast_slice(&[0.25f32; 6]),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        let packed = pack_vertices(
+            &device,
+            &queue,
+            &QuiverGpuInputs {
+                x_data: AxisData::F32(&x),
+                y_data: AxisData::F32(&y),
+                u_buffer: u,
+                v_buffer: v,
+                count: 6,
+                rows: 3,
+                cols: 2,
+                xy_mode: 1,
+                scalar: ScalarType::F32,
+            },
+            &QuiverGpuParams {
+                color: Vec4::ONE,
+                scale: 1.0,
+                head_size: 0.2,
+            },
+        )
+        .expect("quiver meshgrid-vector pack should succeed");
+        assert_eq!(packed.vertex_count, 36);
+    }
 }

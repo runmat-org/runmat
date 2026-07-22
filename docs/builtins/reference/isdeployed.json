@@ -1,0 +1,51 @@
+{
+  "title": "isdeployed",
+  "category": "introspection",
+  "keywords": ["isdeployed", "deployment", "runtime"],
+  "summary": "Return false because RunMat is not MATLAB Compiler deployed code.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host metadata query."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::runtime_compat::tests",
+    "integration": null
+  },
+  "description": "`isdeployed` returns a logical scalar indicating whether code is running as a MATLAB Compiler deployed application. RunMat always returns false.",
+  "behaviors": [
+    "The builtin accepts no input arguments.",
+    "The result is always false in RunMat."
+  ],
+  "examples": [
+    {
+      "description": "Checking deployment status",
+      "input": "isdeployed",
+      "output": "ans = logical(0)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can RunMat run MATLAB Compiler deployed code?",
+      "answer": "No. This predicate exists so compatibility branches can execute deterministically."
+    }
+  ],
+  "links": [
+    { "label": "version", "url": "./version" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/runtime_compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/runtime_compat.rs"
+  },
+  "gpu_residency": "The result is a host logical scalar.",
+  "gpu_behavior": ["No GPU kernels are launched."]
+}

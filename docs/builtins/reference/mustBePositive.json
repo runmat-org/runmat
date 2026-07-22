@@ -1,0 +1,55 @@
+{
+  "title": "mustBePositive",
+  "category": "argument-validation",
+  "keywords": [
+    "mustBePositive",
+    "argument validation",
+    "arguments block",
+    "MATLAB compatibility"
+  ],
+  "summary": "Validate that numeric values are positive.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Validators run on host values and metadata; they throw on validation failure."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "crates/runmat-runtime/src/builtins/common/validation.rs table-style pass/fail tests",
+    "integration": "Representative callable and arguments-block coverage in crates/runmat-vm/tests/functions.rs; not every validator has a dedicated VM case."
+  },
+  "description": "`mustBePositive` is available as a callable MATLAB argument validator. It returns no user-facing value when validation passes and throws a structured RunMat error when validation fails. Validators with literal/static payloads are also encoded in MATLAB `arguments` blocks; dynamic validator payload expressions should call the validator directly until runtime-evaluated arguments-block payloads are implemented.",
+  "behaviors": [
+    "Callable validator forms enforce exact supported arity, throw on validation failure, and suppress automatic output on success.",
+    "Arguments-block validation uses the same shared runtime predicates for validators that RunMat can encode statically.",
+    "Numeric validators check every element without materializing a cloned numeric array, including sparse stored values and implicit sparse zeros where relevant.",
+    "Text validators accept string scalars/arrays, character row vectors, and compatible cell arrays of text where MATLAB commonly permits them."
+  ],
+  "examples": [
+    {
+      "description": "Using the validator as a normal callable guard",
+      "input": "mustBePositive(A)",
+      "output": "No output when validation passes; an error is thrown when validation fails."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does this validator work in an `arguments` block?",
+      "answer": "Yes for literal/static validator payloads that RunMat can encode at compile time. Dynamic validator payload expressions should use the callable form for now."
+    }
+  ],
+  "links": [
+    {
+      "label": "`arguments` blocks",
+      "url": "../language/arguments"
+    }
+  ]
+}

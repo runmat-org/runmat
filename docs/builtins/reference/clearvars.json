@@ -34,6 +34,7 @@
     "Multiple names can be supplied as separate inputs or command-form tokens, for example `clearvars x y z`.",
     "`clearvars -except x y` removes all active workspace variables except `x` and `y`.",
     "`clearvars a b c -except b` removes only selected variables `a` and `c`, preserves selected exclusion `b`, and leaves variables outside the selected clear set untouched.",
+    "Active `onCleanup` objects are invoked before removed workspace bindings are deleted; excluded cleanup objects remain active.",
     "Function-call forms accept variable names as string scalars, row character vectors, or string arrays.",
     "Clearing a name that does not exist is a no-op.",
     "`clearvars` is a sink builtin and does not produce a meaningful output value."

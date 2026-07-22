@@ -1,0 +1,79 @@
+{
+  "title": "lscov",
+  "category": "stats/ml",
+  "keywords": [
+    "lscov",
+    "least squares",
+    "weighted least squares",
+    "generalized least squares",
+    "statistics"
+  ],
+  "summary": "Solve linear least-squares systems with observation covariance weighting.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU-resident numeric inputs are gathered to host. Provider-native dense least-squares acceleration is deferred to the eval-loop GPU fast-path audit."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::lscov::tests",
+    "integration": null
+  },
+  "description": "`lscov(A,B)` solves the linear least-squares system `A*x = B`. `lscov(A,B,V)` treats `V` as an observation covariance matrix, or as a vector of observation weights. `lscov(A,B,V,alg)` accepts `\"chol\"` and `\"orth\"` algorithm selectors.",
+  "behaviors": [
+    "`A` must be a nonempty 2-D numeric design matrix. `B` must be a vector with one value per row of `A`, or a matrix with the same number of rows as `A`.",
+    "The primary output has shape `size(A,2) x size(B,2)` for matrix right-hand sides, and `size(A,2) x 1` for vector right-hand sides.",
+    "`V` may be omitted, empty, a scalar weight, a weight vector with one value per observation, or a dense square covariance matrix matching the observation count. Weights must be finite and nonnegative with at least one positive value.",
+    "The default `\"chol\"` algorithm uses Cholesky transformation for positive-definite covariance matrices when possible. Singular positive semidefinite covariance matrices fall back to the SVD-backed `\"orth\"` transformation.",
+    "Requested outputs follow MATLAB's `[x,stdx,mse,S]` form. `stdx` matches the coefficient shape, `mse` is a `1 x size(B,2)` row, and `S` is available only when `B` is a vector.",
+    "Real and complex dense `A`/`B` are supported. Sparse inputs and provider-native GPU solves are not implemented in this slice."
+  ],
+  "examples": [
+    {
+      "description": "Fit an unweighted line",
+      "input": "A = [ones(3,1) (0:2)']; B = [1;3;5]; [x,stdx,mse,S] = lscov(A,B)",
+      "output": "x is approximately [1; 2] and mse is 0."
+    },
+    {
+      "description": "Use observation weights",
+      "input": "A = [ones(3,1) (0:2)']; B = [1;2;10]; w = [1;1;100]; x = lscov(A,B,w)",
+      "output": "The high-weight third observation has more influence on x."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `lscov` add an intercept automatically?",
+      "answer": "No. Include a column of ones in `A` when the model should include an intercept."
+    },
+    {
+      "question": "Does `lscov` run on the GPU?",
+      "answer": "No. The current implementation gathers GPU inputs and runs the dense weighted least-squares solve on the host."
+    }
+  ],
+  "links": [
+    {
+      "label": "regress",
+      "url": "./regress"
+    },
+    {
+      "label": "mldivide",
+      "url": "./mldivide"
+    },
+    {
+      "label": "pinv",
+      "url": "./pinv"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/lscov.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/lscov.rs"
+  }
+}

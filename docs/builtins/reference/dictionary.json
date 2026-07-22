@@ -1,0 +1,15 @@
+{
+  "title": "dictionary",
+  "category": "table",
+  "keywords": ["dictionary", "map", "keys", "values", "containers.Map"],
+  "summary": "Create a key-value dictionary object.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Dictionary objects are host metadata containers."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
+  "description": "`dictionary(keys, values)` creates a dictionary object with cell-backed `Keys` and `Values` properties. Alternating key/value pairs are also accepted.",
+  "behaviors": ["Keys and values must have the same number of elements.", "String, numeric, logical, char, and cell collections are expanded into element lists."],
+  "examples": [{"description": "Create a dictionary", "input": "D = dictionary([\"a\" \"b\"], [1 2])", "output": "D = dictionary object"}],
+  "links": [{"label": "containers.Map", "url": "./containers.Map"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

@@ -1,5 +1,7 @@
 //! Shared MAT-file format helpers.
 
+use runmat_builtins::IntegerStorage;
+
 /// MAT-file data types used in Level 5 files.
 pub const MI_INT8: u32 = 1;
 pub const MI_UINT8: u32 = 2;
@@ -107,6 +109,9 @@ pub enum MatData {
     Numeric {
         real: Vec<f64>,
         imag: Option<Vec<f64>>,
+    },
+    Integer {
+        storage: IntegerStorage,
     },
     Logical {
         data: Vec<u8>,

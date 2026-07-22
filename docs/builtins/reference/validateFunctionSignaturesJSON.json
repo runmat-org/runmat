@@ -1,0 +1,54 @@
+{
+  "title": "validateFunctionSignaturesJSON",
+  "category": "argument-validation",
+  "keywords": [
+    "validateFunctionSignaturesJSON",
+    "argument validation",
+    "arguments block",
+    "MATLAB compatibility"
+  ],
+  "summary": "Validate that a MATLAB function-signature metadata payload is syntactically valid JSON.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Validators run on host values and metadata; they throw on validation failure."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "crates/runmat-runtime/src/builtins/common/validation.rs validates valid and invalid JSON payloads",
+    "integration": "Registered as a callable compatibility builtin; not an arguments-block validator."
+  },
+  "description": "`validateFunctionSignaturesJSON(S)` accepts RunMat text values containing JSON and throws if any payload is not syntactically valid JSON. It does not yet implement full MATLAB signature-schema semantic validation.",
+  "behaviors": [
+    "Accepts string scalars/arrays, character row vectors, and compatible cell arrays of text.",
+    "Parses each text payload as JSON and throws a structured RunMat error on syntax errors.",
+    "Returns no user-facing value when validation passes and suppresses automatic output."
+  ],
+  "examples": [
+    {
+      "description": "Validate JSON syntax for signature metadata",
+      "input": "validateFunctionSignaturesJSON(\"{\\\"functions\\\":[]}\")",
+      "output": "No output when the JSON payload parses successfully."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does this validate the full MATLAB signature schema?",
+      "answer": "No. RunMat currently validates JSON syntax for compatibility; full signature-schema semantic validation is not implemented."
+    }
+  ],
+  "links": [
+    {
+      "label": "`arguments` blocks",
+      "url": "../language/arguments"
+    }
+  ]
+}

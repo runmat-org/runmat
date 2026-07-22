@@ -24,7 +24,7 @@ struct Params {
     dim_idx: u32,
     rank: u32,
     state_rank: u32,
-    _pad: u32,
+    lane_factor: u32,
     signal_shape: PackedArray,
     state_shape: PackedArray,
 };
@@ -158,8 +158,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if idx >= params.signal_len {
                 break;
             }
-            let x_n = Signal.data[idx];
-            Output.data[idx] = gain * x_n;
+            let raw_idx = idx * params.lane_factor;
+            var lane: u32 = 0u;
+            loop {
+                if lane >= params.lane_factor {
+                    break;
+                }
+                let x_n = Signal.data[raw_idx + lane];
+                Output.data[raw_idx + lane] = gain * x_n;
+                lane = lane + 1u;
+            }
             step = step + 1u;
         }
         if final_len > 0u {
@@ -180,7 +188,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     _ = compute_before_coords(channel, &before_coords);
     let after_len = compute_after_coords(channel, &after_coords);
 
-    let state_base = channel * state_len;
+    let state_base = channel * state_len * params.lane_factor;
 
     if params.zi_present != 0u && zi_len > 0u {
         var s: u32 = 0u;
@@ -189,12 +197,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 break;
             }
             let offset = state_linear_index(s, &before_coords, &after_coords, after_len);
-            var value: f64 = 0.0;
-            if offset < zi_len {
-                value = Zi.data[offset];
-            }
-            if state_base + s < states_len {
-                States.data[state_base + s] = value;
+            let raw_offset = offset * params.lane_factor;
+            let raw_state = state_base + s * params.lane_factor;
+            var lane: u32 = 0u;
+            loop {
+                if lane >= params.lane_factor {
+                    break;
+                }
+                var value: f64 = 0.0;
+                if raw_offset + lane < zi_len {
+                    value = Zi.data[raw_offset + lane];
+                }
+                if raw_state + lane < states_len {
+                    States.data[raw_state + lane] = value;
+                }
+                lane = lane + 1u;
             }
             s = s + 1u;
         }
@@ -204,8 +221,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if s >= state_len {
                 break;
             }
-            if state_base + s < states_len {
-                States.data[state_base + s] = 0.0;
+            let raw_state = state_base + s * params.lane_factor;
+            var lane: u32 = 0u;
+            loop {
+                if lane >= params.lane_factor {
+                    break;
+                }
+                if raw_state + lane < states_len {
+                    States.data[raw_state + lane] = 0.0;
+                }
+                lane = lane + 1u;
             }
             s = s + 1u;
         }
@@ -224,27 +249,37 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if idx >= params.signal_len {
             break;
         }
-        let x_n = Signal.data[idx];
-        var y = b0 * x_n;
-        if state_base < states_len {
-            y = y + States.data[state_base];
-        }
-        Output.data[idx] = y;
-
-        var i: u32 = 1u;
+        let raw_idx = idx * params.lane_factor;
+        var lane: u32 = 0u;
         loop {
-            if i >= order {
+            if lane >= params.lane_factor {
                 break;
             }
-            var next_state: f64 = 0.0;
-            if i < state_len && state_base + i < states_len {
-                next_state = States.data[state_base + i];
+            let x_n = Signal.data[raw_idx + lane];
+            var y = b0 * x_n;
+            if state_base + lane < states_len {
+                y = y + States.data[state_base + lane];
             }
-            let new_state = Num.data[i] * x_n + next_state - Den.data[i] * y;
-            if state_base + i - 1u < states_len {
-                States.data[state_base + i - 1u] = new_state;
+            Output.data[raw_idx + lane] = y;
+
+            var i: u32 = 1u;
+            loop {
+                if i >= order {
+                    break;
+                }
+                let state_i = state_base + i * params.lane_factor + lane;
+                var next_state: f64 = 0.0;
+                if i < state_len && state_i < states_len {
+                    next_state = States.data[state_i];
+                }
+                let new_state = Num.data[i] * x_n + next_state - Den.data[i] * y;
+                let prev_state = state_base + (i - 1u) * params.lane_factor + lane;
+                if prev_state < states_len {
+                    States.data[prev_state] = new_state;
+                }
+                i = i + 1u;
             }
-            i = i + 1u;
+            lane = lane + 1u;
         }
 
         step = step + 1u;
@@ -257,8 +292,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 break;
             }
             let offset = state_linear_index(s, &before_coords, &after_coords, after_len);
-            if offset < final_len && state_base + s < states_len {
-                FinalState.data[offset] = States.data[state_base + s];
+            let raw_offset = offset * params.lane_factor;
+            let raw_state = state_base + s * params.lane_factor;
+            var lane: u32 = 0u;
+            loop {
+                if lane >= params.lane_factor {
+                    break;
+                }
+                if raw_offset + lane < final_len && raw_state + lane < states_len {
+                    FinalState.data[raw_offset + lane] = States.data[raw_state + lane];
+                }
+                lane = lane + 1u;
             }
             s = s + 1u;
         }
@@ -292,7 +336,7 @@ struct Params {
     dim_idx: u32,
     rank: u32,
     state_rank: u32,
-    _pad: u32,
+    lane_factor: u32,
     signal_shape: PackedArray,
     state_shape: PackedArray,
 };
@@ -426,8 +470,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if idx >= params.signal_len {
                 break;
             }
-            let x_n = Signal.data[idx];
-            Output.data[idx] = gain * x_n;
+            let raw_idx = idx * params.lane_factor;
+            var lane: u32 = 0u;
+            loop {
+                if lane >= params.lane_factor {
+                    break;
+                }
+                let x_n = Signal.data[raw_idx + lane];
+                Output.data[raw_idx + lane] = gain * x_n;
+                lane = lane + 1u;
+            }
             step = step + 1u;
         }
         if final_len > 0u {
@@ -448,7 +500,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     _ = compute_before_coords(channel, &before_coords);
     let after_len = compute_after_coords(channel, &after_coords);
 
-    let state_base = channel * state_len;
+    let state_base = channel * state_len * params.lane_factor;
 
     if params.zi_present != 0u && zi_len > 0u {
         var s: u32 = 0u;
@@ -457,12 +509,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 break;
             }
             let offset = state_linear_index(s, &before_coords, &after_coords, after_len);
-            var value: f32 = 0.0;
-            if offset < zi_len {
-                value = Zi.data[offset];
-            }
-            if state_base + s < states_len {
-                States.data[state_base + s] = value;
+            let raw_offset = offset * params.lane_factor;
+            let raw_state = state_base + s * params.lane_factor;
+            var lane: u32 = 0u;
+            loop {
+                if lane >= params.lane_factor {
+                    break;
+                }
+                var value: f32 = 0.0;
+                if raw_offset + lane < zi_len {
+                    value = Zi.data[raw_offset + lane];
+                }
+                if raw_state + lane < states_len {
+                    States.data[raw_state + lane] = value;
+                }
+                lane = lane + 1u;
             }
             s = s + 1u;
         }
@@ -472,8 +533,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if s >= state_len {
                 break;
             }
-            if state_base + s < states_len {
-                States.data[state_base + s] = 0.0;
+            let raw_state = state_base + s * params.lane_factor;
+            var lane: u32 = 0u;
+            loop {
+                if lane >= params.lane_factor {
+                    break;
+                }
+                if raw_state + lane < states_len {
+                    States.data[raw_state + lane] = 0.0;
+                }
+                lane = lane + 1u;
             }
             s = s + 1u;
         }
@@ -492,27 +561,37 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if idx >= params.signal_len {
             break;
         }
-        let x_n = Signal.data[idx];
-        var y = b0 * x_n;
-        if state_base < states_len {
-            y = y + States.data[state_base];
-        }
-        Output.data[idx] = y;
-
-        var i: u32 = 1u;
+        let raw_idx = idx * params.lane_factor;
+        var lane: u32 = 0u;
         loop {
-            if i >= order {
+            if lane >= params.lane_factor {
                 break;
             }
-            var next_state: f32 = 0.0;
-            if i < state_len && state_base + i < states_len {
-                next_state = States.data[state_base + i];
+            let x_n = Signal.data[raw_idx + lane];
+            var y = b0 * x_n;
+            if state_base + lane < states_len {
+                y = y + States.data[state_base + lane];
             }
-            let new_state = Num.data[i] * x_n + next_state - Den.data[i] * y;
-            if state_base + i - 1u < states_len {
-                States.data[state_base + i - 1u] = new_state;
+            Output.data[raw_idx + lane] = y;
+
+            var i: u32 = 1u;
+            loop {
+                if i >= order {
+                    break;
+                }
+                let state_i = state_base + i * params.lane_factor + lane;
+                var next_state: f32 = 0.0;
+                if i < state_len && state_i < states_len {
+                    next_state = States.data[state_i];
+                }
+                let new_state = Num.data[i] * x_n + next_state - Den.data[i] * y;
+                let prev_state = state_base + (i - 1u) * params.lane_factor + lane;
+                if prev_state < states_len {
+                    States.data[prev_state] = new_state;
+                }
+                i = i + 1u;
             }
-            i = i + 1u;
+            lane = lane + 1u;
         }
 
         step = step + 1u;
@@ -525,8 +604,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 break;
             }
             let offset = state_linear_index(s, &before_coords, &after_coords, after_len);
-            if offset < final_len && state_base + s < states_len {
-                FinalState.data[offset] = States.data[state_base + s];
+            let raw_offset = offset * params.lane_factor;
+            let raw_state = state_base + s * params.lane_factor;
+            var lane: u32 = 0u;
+            loop {
+                if lane >= params.lane_factor {
+                    break;
+                }
+                if raw_offset + lane < final_len && raw_state + lane < states_len {
+                    FinalState.data[raw_offset + lane] = States.data[raw_state + lane];
+                }
+                lane = lane + 1u;
             }
             s = s + 1u;
         }

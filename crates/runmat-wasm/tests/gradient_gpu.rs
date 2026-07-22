@@ -145,3 +145,45 @@ async fn gradient_gpu_row_vector_matches_expected_output_without_webgpu() {
         gpu_status.error
     );
 }
+
+#[wasm_bindgen_test(async)]
+async fn gpuarray_rot90_remains_gpuarray_without_webgpu() {
+    let runtime = init_runmat(init_options(false))
+        .await
+        .expect("initialize wasm runtime");
+
+    let gpu_status: GpuStatusPayload =
+        serde_wasm_bindgen::from_value(runtime.gpu_status().expect("gpu status"))
+            .expect("deserialize gpu status");
+    assert!(
+        !gpu_status.active,
+        "expected CPU fallback test to disable GPU"
+    );
+
+    let payload: ExecPayload = serde_wasm_bindgen::from_value(
+        runtime
+            .execute_request_js(execute_request(
+                "G = gpuArray(reshape(1:9, [3 3]));\nH = rot90(G, -1);\nout = isgpuarray(H)",
+            ))
+            .await
+            .expect("execute gpuArray rot90 script"),
+    )
+    .expect("deserialize execution payload");
+
+    if let Some(err) = payload.error {
+        panic!(
+            "gpuArray rot90 wasm CPU-fallback execution failed: {} (gpu requested={}, active={}, gpu error={:?})",
+            err.message, gpu_status.requested, gpu_status.active, gpu_status.error
+        );
+    }
+
+    let value_text = payload.value_text.unwrap_or_default();
+    assert!(
+        value_text.contains("1"),
+        "expected isgpuarray(rot90(gpuArray(...))) to be true, got {:?} (gpu requested={}, active={}, gpu error={:?})",
+        value_text,
+        gpu_status.requested,
+        gpu_status.active,
+        gpu_status.error
+    );
+}

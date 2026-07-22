@@ -428,6 +428,7 @@ fn dtype_default_limits(dtype: NumericDType) -> (f64, f64) {
     match dtype {
         NumericDType::U8 => (0.0, 255.0),
         NumericDType::U16 => (0.0, 65535.0),
+        NumericDType::U32 => (0.0, u32::MAX as f64),
         NumericDType::F32 | NumericDType::F64 => (0.0, 1.0),
     }
 }
@@ -472,6 +473,7 @@ fn build_truecolor_image_surface(
     let scale = match tensor.dtype {
         NumericDType::U8 => 1.0f32 / 255.0,
         NumericDType::U16 => 1.0f32 / 65535.0,
+        NumericDType::U32 => 1.0f32 / (u32::MAX as f32),
         NumericDType::F32 | NumericDType::F64 => 1.0,
     };
     let mut grid = vec![vec![glam::Vec4::ZERO; image_rows]; image_cols];
@@ -828,6 +830,7 @@ mod tests {
         let _guard = reset();
         let tensor = Tensor {
             data: vec![0.0, 128.0, 200.0, 255.0],
+            integer_data: None,
             shape: vec![2, 2],
             rows: 2,
             cols: 2,
@@ -855,6 +858,7 @@ mod tests {
         let _guard = reset();
         let tensor = Tensor {
             data: vec![0.0, 1000.0, 40000.0, 65535.0],
+            integer_data: None,
             shape: vec![2, 2],
             rows: 2,
             cols: 2,
@@ -886,6 +890,7 @@ mod tests {
         let _guard = reset();
         let tensor = Tensor {
             data: vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
+            integer_data: None,
             shape: vec![2, 2, 3],
             rows: 2,
             cols: 2,

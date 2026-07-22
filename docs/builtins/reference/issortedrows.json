@@ -1,0 +1,13 @@
+{
+  "title": "issortedrows",
+  "category": "array/sorting_sets",
+  "keywords": ["issortedrows", "sortrows", "rows", "table"],
+  "summary": "Determine whether matrix or table rows are sorted.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Delegates to `sortrows` ordering semantics."},
+  "tested": {"unit": "builtins::array::sorting_sets::issortedrows::tests"},
+  "description": "`issortedrows(A)` returns true when `A` is already in the row order produced by `sortrows(A)`.",
+  "behaviors": ["Supports the same row ordering arguments as `sortrows`, including column and direction arguments for supported inputs."],
+  "examples": [{"description": "Check sorted rows", "input": "tf = issortedrows([1 2; 2 3])", "output": "tf = true"}],
+  "links": [{"label": "sortrows", "url": "./sortrows"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/array/sorting_sets/issortedrows.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/issortedrows.rs"}
+}

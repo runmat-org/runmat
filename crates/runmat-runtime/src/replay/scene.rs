@@ -199,7 +199,7 @@ async fn hydrate_plot_field_async(plot: &mut Value, field: &str) -> Result<(), R
     } else {
         data_ref.shape.as_slice()
     };
-    let hydrated = shape_values_to_json(&payload.values, target_shape)?;
+    let hydrated = shape_values_to_json(&payload.values.to_f64_vec(), target_shape)?;
     obj.insert(field.to_string(), hydrated);
     Ok(())
 }
@@ -266,12 +266,12 @@ async fn read_scene_array_payload_async(
                             ),
                         )
                     })?;
-                values.extend(payload.values);
+                values.extend(payload.values.to_f64_vec());
             }
             Ok(crate::data::DataArrayPayload {
                 dtype: data_ref.dtype.clone().unwrap_or_else(|| "f64".to_string()),
                 shape: vec![values.len()],
-                values,
+                values: crate::data::DataArrayValues::F64(values),
             })
         }
     }
@@ -618,7 +618,7 @@ mod tests {
             let payload = crate::data::DataArrayPayload {
                 dtype: "f64".to_string(),
                 shape: vec![values.len()],
-                values: values.clone(),
+                values: crate::data::DataArrayValues::F64(values.clone()),
             };
             let chunk = vec![std::cmp::max(1usize, values.len())];
             let (payload_path, chunk_index_path) = futures::executor::block_on(

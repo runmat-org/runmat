@@ -1,0 +1,54 @@
+{
+  "title": "version",
+  "category": "introspection",
+  "keywords": ["version", "release", "environment", "compatibility"],
+  "summary": "Return RunMat version and MATLAB-compatibility release metadata.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host metadata query."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::runtime_compat::tests",
+    "integration": null
+  },
+  "description": "`version` returns the RunMat crate version. `version('-release')` returns RunMat's advertised MATLAB compatibility release string.",
+  "behaviors": [
+    "No arguments returns the RunMat package version.",
+    "`'-release'` returns `R2023b` for compatibility branching.",
+    "`'-description'` returns a human-readable RunMat description.",
+    "`'-java'` returns an empty string because RunMat does not embed MATLAB's Java runtime."
+  ],
+  "examples": [
+    {
+      "description": "Querying the compatibility release",
+      "input": "version('-release')",
+      "output": "ans = 'R2023b'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is this MATLAB's exact version?",
+      "answer": "No. It reports RunMat's runtime version plus a MATLAB compatibility release for common branching code."
+    }
+  ],
+  "links": [
+    { "label": "verLessThan", "url": "./verLessThan" },
+    { "label": "isdeployed", "url": "./isdeployed" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/runtime_compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/runtime_compat.rs"
+  },
+  "gpu_residency": "The result is host-resident text.",
+  "gpu_behavior": ["No GPU kernels are launched."]
+}

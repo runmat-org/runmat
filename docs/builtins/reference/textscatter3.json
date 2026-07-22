@@ -1,0 +1,98 @@
+{
+  "title": "textscatter3",
+  "category": "plotting",
+  "keywords": [
+    "textscatter3",
+    "3-D text scatter",
+    "text analytics",
+    "word embedding plot",
+    "3-D text plot",
+    "matlab textscatter3"
+  ],
+  "summary": "Create a 3-D text scatter chart from x/y/z coordinates and text labels.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`textscatter3` is a chart/annotation rendering sink. Coordinates are materialized on the host so text annotations can be created; marker rendering reuses the existing scatter3 plot path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::textscatter::tests",
+    "vm": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`textscatter3(x,y,z,str)` creates a 3-D text scatter chart with labels from `str` at matching x/y/z coordinates. `textscatter3(xyz,str)` accepts an N-by-3 coordinate matrix. The returned handle is a `textscatter` chart object with data and display properties.",
+  "behaviors": [
+    "`x`, `y`, `z`, and `str` must have equal element counts.",
+    "`xyz` must be an N-by-3 matrix whose first, second, and third columns provide x, y, and z coordinates.",
+    "`str` can be a string scalar, string array, character row, character matrix, or cell array of text scalars.",
+    "The axes-target form `textscatter3(ax,...)` renders into the supplied axes handle.",
+    "`ZData` is populated from the z coordinates and can be queried with `get`.",
+    "`TextDensityPercentage`, `MaxTextLength`, `MarkerColor`, `MarkerSize`, `ColorData`, `Colors`, and `Visible` follow the same semantics as `textscatter`.",
+    "`get` supports `Type`, `Parent`, `Children`, `TextData`, `XData`, `YData`, `ZData`, `TextDensityPercentage`, `MaxTextLength`, `MarkerColor`, `MarkerSize`, `ColorData`, `Colors`, `Visible`, `DisplayName`, and `Tag`.",
+    "`set` supports `TextData`, `XData`, `YData`, `ZData`, `TextDensityPercentage`, `MaxTextLength`, `MarkerColor`, `MarkerSize`, `ColorData`, `Colors`, `Visible`, `Color`, `FontSize`, `FontWeight`, `FontAngle`, and `Interpreter`.",
+    "Categorical `ColorData`, datasource properties, callbacks, app data, and interactive data-tip template objects are not implemented yet and raise explicit unsupported-property errors."
+  ],
+  "examples": [
+    {
+      "description": "Create a 3-D text scatter chart",
+      "input": "x = [1 2 3];\ny = [4 5 6];\nz = [7 8 9];\nwords = [\"one\" \"two\" \"three\"];\nts = textscatter3(x, y, z, words);"
+    },
+    {
+      "description": "Use an N-by-3 coordinate matrix",
+      "input": "xyz = [1 4 7; 2 5 8; 3 6 9];\ntextscatter3(xyz, [\"one\" \"two\" \"three\"]);"
+    },
+    {
+      "description": "Read z coordinates from the chart",
+      "input": "ts = textscatter3([1 2], [3 4], [5 6], [\"a\" \"b\"]);\nget(ts, 'ZData')",
+      "output": "ans =\n     5     6"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does textscatter3 return a different object type than textscatter?",
+      "answer": "The MATLAB chart type is `textscatter` for both 2-D and 3-D forms. RunMat follows that convention and distinguishes the 3-D form by storing nonempty `ZData`."
+    },
+    {
+      "question": "How are 3-D markers handled?",
+      "answer": "When markers are enabled, RunMat creates an internal scatter3 marker plot using the same coordinates and resolved marker colors."
+    },
+    {
+      "question": "Can textscatter3 preserve gpuArray residency?",
+      "answer": "Not currently. Text annotations require host coordinate and label materialization. Marker rendering reuses the existing scatter3 plot path once the chart has been constructed."
+    }
+  ],
+  "links": [
+    {
+      "label": "textscatter",
+      "url": "./textscatter"
+    },
+    {
+      "label": "scatter3",
+      "url": "./scatter3"
+    },
+    {
+      "label": "text",
+      "url": "./text"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/textscatter.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/textscatter.rs"
+  }
+}

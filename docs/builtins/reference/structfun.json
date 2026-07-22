@@ -1,0 +1,84 @@
+{
+  "title": "structfun",
+  "category": "structs/core",
+  "keywords": ["structfun", "struct", "fields", "functional", "uniformoutput"],
+  "summary": "Apply a function to each field of a scalar struct.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "structfun executes on the host. GPU-resident field values are gathered by the shared cellfun callback engine before callback invocation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::structs::core::structfun::tests",
+    "integration": null
+  },
+  "description": "`structfun(func, S)` applies `func` to each field value of scalar struct `S`. By default callback results must be scalar-uniform and are packed into a column array in field order.",
+  "behaviors": [
+    "The second input must be a scalar struct. Struct arrays are rejected rather than flattened implicitly.",
+    "Callback execution uses RunMat's `feval` path, so function handles, semantic closures, requested output count, `UniformOutput`, `ErrorHandler`, and GPU gather behavior follow ordinary callback invocation semantics.",
+    "With `\"UniformOutput\", true` (default), every callback result must be scalar numeric, logical, or complex; results are packed into an N-by-1 array where N is the number of fields.",
+    "With `\"UniformOutput\", false`, callback outputs may have mixed types or sizes and are returned as a scalar struct preserving the input field names.",
+    "When multiple outputs are requested, each callback must return that many outputs; `structfun` collects each output independently.",
+    "`\"ErrorHandler\", handler` receives an error struct followed by the field value that triggered the failure."
+  ],
+  "examples": [
+    {
+      "description": "Compute the length of each struct field",
+      "input": "S = struct('a', 1:3, 'b', 10:11);\nA = structfun(@length, S)",
+      "output": "A =\n     3\n     2"
+    },
+    {
+      "description": "Collect mixed callback outputs in a struct",
+      "input": "S = struct('name', 'runmat', 'flag', true);\nC = structfun(@class, S, 'UniformOutput', false)",
+      "output": "C =\n  struct with fields:\n    name: 'char'\n    flag: 'logical'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `structfun` modify the input struct?",
+      "answer": "No. It reads the field values, invokes the callback, and returns a new array or cell array."
+    },
+    {
+      "question": "Can `structfun` return strings or structs?",
+      "answer": "Yes, when `\"UniformOutput\"` is `false`. The result is a scalar struct with the same field names as the input. Uniform output mode accepts only scalar numeric, logical, or complex callback results."
+    },
+    {
+      "question": "Are GPU field values supported?",
+      "answer": "Yes. GPU-resident field values are gathered before callback invocation; outputs are host-resident today."
+    },
+    {
+      "question": "Can `structfun` collect multiple callback outputs?",
+      "answer": "Yes. When callers request multiple outputs, RunMat requests the same number from every callback invocation and returns one collected output per callback output."
+    }
+  ],
+  "links": [
+    {
+      "label": "struct",
+      "url": "./struct"
+    },
+    {
+      "label": "fieldnames",
+      "url": "./fieldnames"
+    },
+    {
+      "label": "cellfun",
+      "url": "./cellfun"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/structs/core/structfun.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/structs/core/structfun.rs"
+  },
+  "gpu_behavior": [
+    "`structfun` is a host operation. GPU-resident field values are gathered before the callback runs and outputs are host-resident today."
+  ]
+}

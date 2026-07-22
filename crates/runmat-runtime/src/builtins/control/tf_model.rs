@@ -1143,6 +1143,7 @@ fn invalid_argument_identifier(builtin: &str) -> &'static str {
         "zero" => "RunMat:zero:InvalidArgument",
         "damp" => "RunMat:damp:InvalidModel",
         "rlocus" => "RunMat:rlocus:InvalidArgument",
+        "pzmap" => "RunMat:pzmap:InvalidArgument",
         "isstable" => "RunMat:isstable:InvalidArgument",
         _ => "RunMat:tf:InvalidArgument",
     }
@@ -1157,6 +1158,7 @@ fn invalid_coefficients_identifier(builtin: &str) -> &'static str {
         "zero" => "RunMat:zero:InvalidModel",
         "damp" => "RunMat:damp:InvalidModel",
         "rlocus" => "RunMat:rlocus:InvalidModel",
+        "pzmap" => "RunMat:pzmap:InvalidModel",
         "isstable" => "RunMat:isstable:InvalidModel",
         _ => "RunMat:tf:InvalidCoefficients",
     }
@@ -1171,6 +1173,7 @@ fn invalid_sample_time_identifier(builtin: &str) -> &'static str {
         "zero" => "RunMat:zero:InvalidModel",
         "damp" => "RunMat:damp:InvalidModel",
         "rlocus" => "RunMat:rlocus:InvalidModel",
+        "pzmap" => "RunMat:pzmap:InvalidModel",
         "isstable" => "RunMat:isstable:InvalidModel",
         _ => "RunMat:tf:InvalidSampleTime",
     }
@@ -1185,6 +1188,7 @@ fn invalid_model_identifier(builtin: &str) -> &'static str {
         "zero" => "RunMat:zero:InvalidModel",
         "damp" => "RunMat:damp:InvalidModel",
         "rlocus" => "RunMat:rlocus:InvalidModel",
+        "pzmap" => "RunMat:pzmap:InvalidModel",
         "isstable" => "RunMat:isstable:InvalidModel",
         _ => "RunMat:tf:InvalidModel",
     }
@@ -1199,6 +1203,7 @@ fn unsupported_model_identifier(builtin: &str) -> &'static str {
         "zero" => "RunMat:zero:UnsupportedModel",
         "damp" => "RunMat:damp:UnsupportedModel",
         "rlocus" => "RunMat:rlocus:UnsupportedModel",
+        "pzmap" => "RunMat:pzmap:UnsupportedModel",
         "isstable" => "RunMat:isstable:UnsupportedModel",
         _ => "RunMat:tf:UnsupportedModel",
     }
@@ -1213,6 +1218,7 @@ fn internal_identifier(builtin: &str) -> &'static str {
         "zero" => "RunMat:zero:Internal",
         "damp" => "RunMat:damp:Internal",
         "rlocus" => "RunMat:rlocus:Internal",
+        "pzmap" => "RunMat:pzmap:Internal",
         "isstable" => "RunMat:isstable:Internal",
         _ => "RunMat:tf:Internal",
     }

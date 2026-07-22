@@ -1,0 +1,51 @@
+{
+  "title": "parquetinfo",
+  "category": "io/tabular",
+  "keywords": ["parquetinfo", "parquet", "schema", "row groups", "metadata"],
+  "summary": "Inspect Parquet file schema and row-group metadata.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Metadata inspection is host file I/O and does not create GPU-resident arrays."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::table::tests::parquetinfo_reports_schema_and_row_groups",
+    "integration": null
+  },
+  "description": "`parquetinfo(filename)` reads Parquet file metadata and returns a scalar struct containing filename, file size, row count, row-group count, variable count, variable names, variable physical types, writer version, creator string, row-group metadata, compression labels, and encoding labels.",
+  "behaviors": [
+    "The file footer and schema are parsed with the same Arrow-backed Parquet reader used by `parquetread`.",
+    "Row groups are reported as a struct with `RowGroup1`, `RowGroup2`, and so on, each containing row count, total byte size, and column count.",
+    "Compression and encoding labels are reported from the first row group when row groups are present."
+  ],
+  "examples": [
+    {
+      "description": "Inspect Parquet metadata",
+      "input": "info = parquetinfo(\"measurements.parquet\")",
+      "output": "info = struct"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does parquetinfo decode the whole file?",
+      "answer": "No. It reads the Parquet metadata footer and schema, not the full data payload."
+    }
+  ],
+  "links": [
+    {"label": "parquetread", "url": "./parquetread"},
+    {"label": "parquetDatastore", "url": "./parquetDatastore"}
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/table/import/parquet.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/import/parquet.rs"
+  }
+}

@@ -38,7 +38,7 @@
     "`load(filename, 'A', 'B')` restricts the operation to the listed variable names. String scalars, char vectors, string arrays, or cell arrays of character vectors are accepted.",
     "`load(filename, '-regexp', '^foo', 'bar$')` selects variables whose names match any of the supplied regular expressions.",
     "Repeated names are deduplicated so that the last occurrence wins, mirroring MATLAB's behavior.",
-    "Unsupported data classes trigger descriptive errors. RunMat supports Level-5 double and complex numeric arrays, supported scalar integer classes, single/uint8/uint16 tensors, logical arrays, character arrays, string arrays (stored as cell-of-char data), scalar structs, real sparse matrices, and cells whose elements are composed of the supported types.",
+    "Unsupported data classes trigger descriptive errors. RunMat supports Level-5 double and complex numeric arrays, supported scalar integer classes, single/uint8/uint16 tensors, logical arrays, character arrays, string arrays (stored as cell-of-char data), scalar structs, real sparse matrices, RunMat object envelopes, and cells whose elements are composed of the supported types.",
     "Little-endian, big-endian, and compressed (`miCOMPRESSED`) Level-5 MAT-files are supported. MATLAB v7.3 MAT-files are HDF5-backed and currently report an explicit unsupported-version error."
   ],
   "examples": [
@@ -78,7 +78,11 @@
     },
     {
       "question": "How are structures handled?",
-      "answer": "Structure scalars are reconstructed as `struct` values whose fields match the MAT-file content. Nested scalar structs, cells, logical arrays, sparse matrices, and numeric data are supported. Struct arrays report an explicit unsupported-data error until RunMat has a first-class struct-array value."
+      "answer": "Structure scalars are reconstructed as `struct` values whose fields match the MAT-file content. Nested scalar structs, cells, logical arrays, sparse matrices, object envelopes, and numeric data are supported. Struct arrays report an explicit unsupported-data error until RunMat has a first-class struct-array value."
+    },
+    {
+      "question": "Does `load` call `loadobj` for saved objects?",
+      "answer": "Yes for objects saved by RunMat. The MAT-file contains an internal object envelope; `load` restores nested payloads and dispatches registered static `Class.loadobj` methods when available."
     },
     {
       "question": "Will `load` overwrite existing variables?",
@@ -113,6 +117,10 @@
     {
       "label": "fileread",
       "url": "./fileread"
+    },
+    {
+      "label": "loadobj",
+      "url": "./loadobj"
     }
   ],
   "source": {

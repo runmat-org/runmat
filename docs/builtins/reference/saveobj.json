@@ -1,0 +1,87 @@
+{
+  "title": "saveobj",
+  "category": "oop/serialization",
+  "keywords": [
+    "saveobj",
+    "loadobj",
+    "object serialization",
+    "mat",
+    "classdef"
+  ],
+  "summary": "Return the MAT-file serialization payload for an object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Object serialization is host-side metadata and property traversal. GPU-resident property values are gathered later by MAT-file encoding when needed."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::object_serialization::tests",
+    "integration": "crates/runmat-vm/tests/functions.rs::object_saveobj_loadobj_script_surface"
+  },
+  "description": "`saveobj(a)` returns the payload that `save` should write for object `a`. If the object's class registers a `saveobj` method, RunMat dispatches to that method. Otherwise RunMat returns a scalar struct containing the object's stored public runtime properties.",
+  "behaviors": [
+    "The public signature is `b = saveobj(a)`.",
+    "Object and handle-object inputs dispatch to a registered `Class.saveobj` method when one is available.",
+    "When no registered overload exists, RunMat serializes the object's stored property map as a scalar struct.",
+    "Nested objects inside structs or cells are serialized recursively before MAT-file encoding.",
+    "`save` automatically applies this object serialization path before writing MAT-file variables.",
+    "Recursion is bounded and reports `RunMat:ObjectSerialization:RecursionLimit` for cyclic or excessively nested object graphs.",
+    "Non-object inputs to direct `saveobj` raise `RunMat:ObjectSerialization:InvalidArgument`."
+  ],
+  "examples": [
+    {
+      "description": "Return a default property payload",
+      "input": "obj = new_object('Point');\npayload = saveobj(obj)"
+    },
+    {
+      "description": "Save an object through MAT-file serialization",
+      "input": "obj = new_object('Point');\nsave('object_state.mat', 'obj')"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `save` call `saveobj` automatically?",
+      "answer": "Yes. Before MAT-file encoding, RunMat walks selected values and applies registered `saveobj` methods for object and handle-object values."
+    },
+    {
+      "question": "What is saved when no class-specific method exists?",
+      "answer": "RunMat writes the current runtime property map in an internal object envelope so `load` can reconstruct an object with the same class name and stored properties."
+    },
+    {
+      "question": "Are handle identities preserved?",
+      "answer": "No. Current support serializes the referenced object's properties. It does not preserve handle identity, listener state, or aliasing relationships across save/load."
+    }
+  ],
+  "links": [
+    {
+      "label": "loadobj",
+      "url": "./loadobj"
+    },
+    {
+      "label": "save",
+      "url": "./save"
+    },
+    {
+      "label": "load",
+      "url": "./load"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/object_serialization.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/object_serialization.rs"
+  },
+  "gpu_residency": "`saveobj` itself is host-side object metadata work. If a serialized payload contains GPU-resident numeric properties, `save` gathers those values when it converts the payload to MAT-file arrays.",
+  "gpu_behavior": [
+    "`saveobj` does not launch provider kernels.",
+    "`save` remains the residency sink for any GPU values that appear inside the serialized payload."
+  ]
+}

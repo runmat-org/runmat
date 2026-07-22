@@ -1,0 +1,66 @@
+{
+  "title": "nanmax",
+  "category": "stats/summary",
+  "keywords": ["nanmax", "max", "maximum", "omitnan", "statistics"],
+  "summary": "Return maximum values while omitting NaNs.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "none",
+    "notes": "`nanmax` delegates to the host-compatible `max(..., 'omitnan')` path. GPU inputs are gathered because `max` disables provider reductions when omit-NaN behavior is required."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::max::tests",
+    "integration": "crates/runmat-vm/tests/basics.rs"
+  },
+  "description": "`nanmax` is a compatibility form for maximum reductions and pairwise comparisons that ignore `NaN` values. It maps to `max` with `\"omitnan\"` semantics.",
+  "behaviors": [
+    "`nanmax(X)` reduces along the first non-singleton dimension and skips `NaN` values in each slice.",
+    "`nanmax(X, [], dim)` and `nanmax(X, [], vecdim)` reduce along the specified dimension or dimension vector.",
+    "`nanmax(X, [], 'all')` collapses every element into a scalar; `nanmax(X, [], 'linear')` also returns linear indices when two outputs are requested.",
+    "`nanmax(..., 'ComparisonMethod', method)` supports the same real and complex comparison modes as `max` while still omitting NaNs.",
+    "`nanmax(A, B)` performs elementwise maximum with MATLAB implicit expansion and chooses the non-NaN side when exactly one operand is `NaN`.",
+    "If every value considered for a result is `NaN`, the returned value is `NaN`.",
+    "Two-output calls return one-based indices or origins using the same conventions as `max`."
+  ],
+  "examples": [
+    {
+      "description": "Column-wise maxima ignoring NaNs",
+      "input": "A = [NaN 4 2; 3 NaN NaN];\nM = nanmax(A)",
+      "output": "M = [3 4 2]"
+    },
+    {
+      "description": "Pairwise maximum ignoring NaNs",
+      "input": "P = nanmax([NaN 2 NaN], [3 NaN NaN])",
+      "output": "P = [3 2 NaN]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Should new code use `nanmax` or `max(..., 'omitnan')`?",
+      "answer": "Use `max(..., 'omitnan')` for new MATLAB-style code. `nanmax` is provided for compatibility with existing codebases."
+    },
+    {
+      "question": "Does `nanmax` support pairwise array inputs?",
+      "answer": "Yes. `nanmax(A, B)` uses the same implicit expansion and origin-index behavior as `max(A, B)`, while omitting NaNs."
+    }
+  ],
+  "links": [
+    { "label": "max", "url": "./max" },
+    { "label": "min", "url": "./min" },
+    { "label": "mean", "url": "./mean" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/max.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/max.rs"
+  },
+  "gpu_residency": "`nanmax` gathers GPU inputs to host memory when omit-NaN semantics are required, then returns the MATLAB-compatible host result."
+}

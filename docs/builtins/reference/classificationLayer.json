@@ -1,0 +1,23 @@
+{
+  "title": "classificationLayer",
+  "category": "deep_learning",
+  "keywords": ["classificationLayer", "deep learning", "classification"],
+  "summary": "Create a classification output layer compatibility object.",
+  "description": "`classificationLayer` creates metadata for classification-output network definitions.",
+  "behaviors": ["`Classes` defaults to `auto`; common name-value options are preserved as properties."],
+  "examples": [
+    {
+      "description": "Create Classification Output",
+      "input": "layer = classificationLayer('Name', 'classoutput')",
+      "output": "Classification output layer compatibility object."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "layer = classificationLayer\nlayer = classificationLayer(Name, Value)",
+      "output": "Layer compatibility object."
+    }
+  },
+  "gpu_residency": "Layer construction is host metadata work and has no provider kernel."
+}

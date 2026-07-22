@@ -1,0 +1,16 @@
+{
+  "title": "digraph",
+  "category": "graph",
+  "keywords": ["digraph", "directed graph", "nodes", "edges", "network"],
+  "summary": "Create a directed graph object.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`digraph` creates a directed graph compatibility object with `Nodes` and `Edges` tables. It supports edge-list construction with numeric or named nodes, optional weights, optional node names, and dense adjacency matrices.",
+  "signatures": [
+    {"label": "G = digraph(s, t)", "description": "Create a directed graph from source and target node vectors."},
+    {"label": "G = digraph(A)", "description": "Create a directed graph from a square dense adjacency matrix where `A(i,j)` is edge `i -> j`."}
+  ],
+  "notes": ["Direction is preserved by `successors`, `predecessors`, `indegree`, `outdegree`, `shortestpath`, `distances`, `bfsearch`, `dfsearch`, and `toposort`."],
+  "gpu_residency": "No. Directed graph construction and traversal are host metadata/control-flow operations.",
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

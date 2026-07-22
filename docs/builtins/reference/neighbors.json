@@ -1,0 +1,11 @@
+{
+  "title": "neighbors",
+  "category": "graph",
+  "keywords": ["neighbors", "graph", "nodes"],
+  "summary": "Return neighboring nodes.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`neighbors(G,node)` returns adjacent nodes. Named graphs return a string array; unnamed graphs return one-based numeric node ids.",
+  "signatures": [{"label": "N = neighbors(G, node)", "description": "Return neighbors of `node`."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

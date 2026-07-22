@@ -245,7 +245,7 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         &c_input,
         &x_axis,
         &y_axis,
-        style.colormap,
+        style.colormap.clone(),
         color_limits,
     )
     .await
@@ -255,7 +255,7 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     if color_limits.is_some() {
         surface = surface.with_color_limits(color_limits);
     }
-    surface.colormap = style.colormap;
+    surface.colormap = style.colormap.clone();
     let mut surface = Some(surface);
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
@@ -342,6 +342,7 @@ mod tests {
         let _ = futures::executor::block_on(imagesc_builtin(vec![
             Value::Tensor(Tensor {
                 data: vec![10.0, 20.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -349,6 +350,7 @@ mod tests {
             }),
             Value::Tensor(Tensor {
                 data: vec![1.0, 2.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -374,6 +376,7 @@ mod tests {
         let _ = futures::executor::block_on(imagesc_builtin(vec![
             Value::Tensor(Tensor {
                 data: vec![10.0, 20.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -381,6 +384,7 @@ mod tests {
             }),
             Value::Tensor(Tensor {
                 data: vec![1.0, 5.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,

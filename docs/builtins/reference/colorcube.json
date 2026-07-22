@@ -1,0 +1,51 @@
+{
+  "title": "colorcube",
+  "category": "plotting",
+  "keywords": [
+    "colorcube",
+    "colormap",
+    "rgb colormap",
+    "matlab colormap"
+  ],
+  "summary": "Return the colorcube colormap as an m-by-3 RGB array.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::colormap_arrays"
+  },
+  "description": "`colorcube` returns a colorcube palette as an m-by-3 numeric RGB array with values in [0, 1]. With no argument, it uses the current colormap length, or 256 when no figure colormap length is active.",
+  "behaviors": [
+    "`colorcube()` returns an m-by-3 RGB matrix.",
+    "`colorcube(m)` returns exactly `m` rows, where `m` must be a nonnegative integer.",
+    "The result can be passed directly to `colormap`."
+  ],
+  "examples": [
+    {
+      "description": "Apply a colorcube colormap",
+      "input": "surf(peaks(40));\ncolormap(colorcube(64));\ncolorbar;"
+    },
+    {
+      "description": "Generate a colorcube matrix",
+      "input": "c = colorcube(32);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What size is `colorcube()`?",
+      "answer": "It returns the active colormap length when one exists, otherwise 256 rows by 3 columns."
+    }
+  ],
+  "links": [
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "colorbar",
+      "url": "./colorbar"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/colormap_arrays.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/colormap_arrays.rs"
+  }
+}

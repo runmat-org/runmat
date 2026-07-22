@@ -1,0 +1,36 @@
+{
+  "title": "memmapfile",
+  "category": "io/repl_fs",
+  "keywords": [
+    "memmapfile"
+  ],
+  "summary": "Map file bytes into a MATLAB-compatible memmapfile object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::compat::tests",
+    "integration": null
+  },
+  "description": "Maps file bytes into a MATLAB-compatible memmapfile object with typed Format, Offset, Repeat, Writable metadata, and Data fields.",
+  "behaviors": [
+    "Supports scalar Format type names such as uint8, uint16, uint32, single, and double.",
+    "Supports MATLAB-style Format cells such as {type, shape, field}; named formats return Data as a struct field.",
+    "Offset and Repeat are honored for typed reads. Offset beyond end of file is rejected.",
+    "The current implementation materializes mapped data into host memory; Writable is recorded but write-through mapping is not implemented yet."
+  ],
+  "examples": [],
+  "faqs": [],
+  "links": []
+}

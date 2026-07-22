@@ -1,0 +1,122 @@
+{
+  "title": "line",
+  "category": "plotting",
+  "keywords": [
+    "line",
+    "line object",
+    "graphics line",
+    "2-D plotting",
+    "3-D plotting",
+    "matlab line",
+    "runmat plotting"
+  ],
+  "summary": "Create low-level 2-D or 3-D line graphics objects in MATLAB and RunMat.",
+  "hero_image": null,
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`line` is a rendering sink. Simple GPU-resident 2-D vector inputs can be consumed by the shared plotting device; property reads can materialize source buffers when MATLAB-compatible `XData` and `YData` are requested."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::line::tests",
+    "integration": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`line` creates line graphics objects directly without clearing the current axes. It supports positional `X,Y` and `X,Y,Z` data, property constructors with `XData`, `YData`, and `ZData`, axes targeting, matrix column expansion, style strings, and common line name/value properties.",
+  "behaviors": [
+    "`line(X,Y)` creates a 2-D line object from vector data and returns its graphics handle.",
+    "`line(X,Y,Z)` creates a 3-D line object and returns a line handle with `XData`, `YData`, and `ZData` properties.",
+    "Matrix `X` and `Y` inputs with matching size create one line per column and return a row vector of handles. A vector paired with a matrix is reused for each matrix column when its length matches the matrix height.",
+    "`line('XData',x,'YData',y,...)` supports low-level graphics construction, including `Parent` for explicit axes targeting.",
+    "`line` appends to the target axes regardless of the current `hold` mode, matching MATLAB's low-level graphics-object behavior.",
+    "Returned handles work with `get` and `set` for line data, color, line style, line width, marker, display name, and visibility properties."
+  ],
+  "options": [
+    "`XData`, `YData`, and `ZData` provide constructor data in name/value form.",
+    "`Parent` accepts an axes handle and routes construction to that axes.",
+    "Style strings such as `'r--o'`, `':'`, and `'k'` are accepted after positional data.",
+    "Common line properties include `Color`, `LineWidth`, `LineStyle`, `Marker`, `MarkerSize`, `MarkerFaceColor`, `MarkerEdgeColor`, `DisplayName`, and `Visible`."
+  ],
+  "examples": [
+    {
+      "description": "Create a low-level 2-D line object",
+      "input": "x = 0:0.1:1;\ny = x.^2;\nh = line(x, y, 'Color', 'r', 'LineWidth', 2);",
+      "output": "% h is a numeric line handle"
+    },
+    {
+      "description": "Construct a line from graphics data properties",
+      "input": "h = line('XData', [1 2 3], 'YData', [4 5 6], 'DisplayName', 'samples');\nget(h, 'Type')",
+      "output": "ans =\n    'line'"
+    },
+    {
+      "description": "Create one line per matrix column",
+      "input": "x = [1 1; 2 2; 3 3];\ny = [1 3; 2 2; 3 1];\nh = line(x, y);",
+      "output": "% h is a 1-by-2 row vector of line handles"
+    },
+    {
+      "description": "Create a 3-D line object",
+      "input": "t = linspace(0, 2*pi, 100);\nh = line(cos(t), sin(t), t, 'LineStyle', '--');",
+      "output": "% h is a line handle with XData, YData, and ZData"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is line different from plot?",
+      "answer": "`plot` is a high-level charting command and clears the active axes unless `hold on` is enabled. `line` is a low-level graphics-object constructor, so it appends line objects to the target axes without requiring `hold on`."
+    },
+    {
+      "question": "Can I update line data after creating the object?",
+      "answer": "Yes. Use `set(h, 'XData', x, 'YData', y)` for 2-D lines or also set `ZData` for 3-D lines. RunMat updates the stored geometry and invalidates cached render data."
+    },
+    {
+      "question": "What does line return for matrix inputs?",
+      "answer": "Each matrix column becomes one line object. The return value is a row vector of graphics handles in column order."
+    }
+  ],
+  "links": [
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "plot3",
+      "url": "./plot3"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "hold",
+      "url": "./hold"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/line.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/line.rs"
+  },
+  "gpu_residency": "`line` preserves GPU residency for simple 2-D vector inputs when the shared plotting context can consume exported GPU buffers directly. Matrix expansion, 3-D construction, and property-only forms gather to host data before registering the graphics object. GPU-backed handles still support `get(h,'XData')` and `get(h,'YData')` by reading back source buffers when those properties are requested.",
+  "gpu_behavior": [
+    "On the 2-D vector happy path, RunMat reuses exported plot input buffers and emits renderer-ready line geometry without a full host round-trip.",
+    "Reading data properties from a GPU-backed line can materialize source buffers; replacing `XData` or `YData` with `set` converts the object to host-backed line data while preserving handle semantics."
+  ]
+}

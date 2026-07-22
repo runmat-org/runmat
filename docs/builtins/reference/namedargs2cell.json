@@ -1,0 +1,42 @@
+{
+  "title": "namedargs2cell",
+  "category": "argument-validation",
+  "keywords": [
+    "namedargs2cell",
+    "name-value arguments",
+    "MATLAB compatibility"
+  ],
+  "summary": "Convert a scalar name-value struct into an alternating name/value cell row.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host metadata/text helper."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::common::validation::tests",
+    "integration": "crates/runmat-vm/tests/functions.rs::argument_validation_helpers_are_callable_builtins"
+  },
+  "description": "`namedargs2cell(S)` preserves scalar struct field order and returns `{name1, value1, name2, value2, ...}` for name-value forwarding patterns.",
+  "behaviors": [
+    "Returns a normal value and does not mutate inputs.",
+    "Accepts MATLAB text/struct representations supported by RunMat."
+  ],
+  "examples": [
+    {
+      "description": "Basic use",
+      "input": "namedargs2cell(x)",
+      "output": "Result depends on input value."
+    }
+  ],
+  "faqs": [],
+  "links": []
+}

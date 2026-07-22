@@ -1,0 +1,72 @@
+{
+  "title": "waitbar",
+  "category": "plotting",
+  "keywords": [
+    "waitbar",
+    "progress",
+    "figure",
+    "ui"
+  ],
+  "summary": "Create or update a waitbar progress figure.",
+  "status": "done",
+  "version_added": "0.5.3",
+  "tests": {
+    "unit": "builtins::plotting::waitbar::tests"
+  },
+  "description": "`waitbar` creates a lightweight progress figure or updates an existing waitbar handle. RunMat stores progress and message state on the figure so scripts can keep MATLAB-style progress workflows without requiring a native modal UI.",
+  "syntax": [
+    "h = waitbar(x)",
+    "h = waitbar(x, msg)",
+    "h = waitbar(x, h)",
+    "h = waitbar(x, h, msg)",
+    "h = waitbar(x, h, msg, Name, Value, ...)"
+  ],
+  "arguments": [
+    {
+      "name": "x",
+      "type": "numeric scalar",
+      "description": "Progress fraction. Finite values are clamped into `[0, 1]`."
+    },
+    {
+      "name": "h",
+      "type": "figure handle",
+      "description": "Existing waitbar figure to update."
+    },
+    {
+      "name": "msg",
+      "type": "text scalar, string array, or cell array of text",
+      "description": "Progress message stored on the waitbar figure. Arrays are stored as newline-separated message lines."
+    }
+  ],
+  "examples": [
+    {
+      "description": "Create and update a waitbar",
+      "input": "h = waitbar(0.25, 'Loading');\nwaitbar(0.75, h, 'Almost done');",
+      "output": "% h remains the waitbar figure handle"
+    }
+  ],
+  "notes": [
+    "New waitbars are regular RunMat figures with `NumberTitle` set off and `Name` set to `Waitbar` unless overridden with property pairs.",
+    "`get(h, 'WaitbarProgress')`, `get(h, 'WaitbarMessage')`, and `get(h, 'Tag')` expose the stored progress state.",
+    "`waitbar(x)` updates the current waitbar when one exists; otherwise it creates a new waitbar figure.",
+    "`Tag` is a normal figure property for waitbars; new waitbars default to MATLAB's `TMWWaitbar` tag unless a `Tag` property is supplied.",
+    "`CreateCancelBtn`, `Units`, and `WindowStyle` are accepted as compatibility no-ops because RunMat does not execute native UI callback code or native modal window behavior from waitbar creation."
+  ],
+  "gpu_residency": "`waitbar` manages UI metadata only. It does not gather, copy, or mutate GPU-resident arrays.",
+  "related": [
+    {
+      "label": "figure",
+      "url": "./figure"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    }
+  ],
+  "implemented_in": [
+    {
+      "label": "crates/runmat-runtime/src/builtins/plotting/ops/waitbar.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/waitbar.rs"
+    }
+  ]
+}

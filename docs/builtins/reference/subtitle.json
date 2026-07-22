@@ -1,0 +1,100 @@
+{
+  "title": "subtitle",
+  "category": "plotting",
+  "keywords": [
+    "subtitle",
+    "axes subtitle",
+    "plot subtitle",
+    "label",
+    "matlab subtitle"
+  ],
+  "summary": "Set subtitle text for the current axes or a specified axes handle with MATLAB-compatible `subtitle` forms.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::subtitle::tests"
+  },
+  "description": "`subtitle` attaches secondary title text to individual axes and returns a text handle for property updates. It follows MATLAB-compatible axes-scoped behavior and is separate from figure-level title helpers such as `sgtitle` and `suptitle`.",
+  "behaviors": [
+    "The returned value is a text handle that can be inspected or updated through `get` and `set`.",
+    "With no explicit target, `subtitle` attaches text to the current axes as returned by `gca`.",
+    "Passing an axes handle as the first argument targets that specific axes, which is useful in subplot layouts.",
+    "String scalars, char arrays, string arrays, and cell arrays are all accepted. String arrays and cell arrays produce multiline subtitles, with elements joined by newlines.",
+    "Text styling properties such as `FontSize`, `FontWeight`, `FontAngle`, `Color`, `Interpreter`, and `Visible` use the shared plotting text-property system.",
+    "`get(ax, 'Subtitle')` returns the subtitle text handle for that axes. `get(h, 'String')` returns the subtitle text for the subtitle handle."
+  ],
+  "examples": [
+    {
+      "description": "Add a title and subtitle to the current axes",
+      "input": "plot(0:0.1:2*pi, sin(0:0.1:2*pi));\ntitle('Sine Wave');\nsubtitle('One period sampled every 0.1 radians');",
+      "output": "% title and subtitle are rendered above the axes"
+    },
+    {
+      "description": "Style the subtitle and inspect its handle",
+      "input": "plot(1:10, rand(1, 10));\nh = subtitle('Trial A', 'FontSize', 12, 'FontWeight', 'bold');\nget(h, 'Type')",
+      "output": "ans =\n    'text'"
+    },
+    {
+      "description": "Set independent subtitles on subplot panels",
+      "input": "ax1 = subplot(1, 2, 1);\nplot(ax1, 1:5, 1:5);\nax2 = subplot(1, 2, 2);\nplot(ax2, 1:5, (1:5).^2);\nsubtitle(ax1, 'Linear response');\nsubtitle(ax2, 'Quadratic response');",
+      "output": "% Subtitles are attached to their respective axes"
+    },
+    {
+      "description": "Create a multiline subtitle from a cell array",
+      "input": "plot(1:5, [2 4 1 3 5]);\nsubtitle({'Experiment 7', 'Filtered signal'});",
+      "output": "% Both cell elements appear as separate subtitle lines"
+    },
+    {
+      "description": "Update a subtitle after plotting using set",
+      "input": "plot(1:10, rand(1, 10));\nh = subtitle('Draft');\nset(h, 'String', 'Final Subtitle', 'Color', 'r');",
+      "output": "% The axes subtitle is updated in place"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `subtitle` different from `title`?",
+      "answer": "`title` sets the primary axes title. `subtitle` sets a second text line associated with the same axes and is rendered below the primary title when both are present."
+    },
+    {
+      "question": "Can I target a specific subplot?",
+      "answer": "Yes. Pass the axes handle returned by `subplot` or `gca` as the first argument.\n\n```matlab\nax = subplot(2, 1, 1);\nsubtitle(ax, 'Top panel details');\n```"
+    },
+    {
+      "question": "Can I update the subtitle after creating it?",
+      "answer": "Yes. `subtitle` returns a text handle, so you can update it with `set`.\n\n```matlab\nh = subtitle('Initial');\nset(h, 'String', 'Updated', 'FontSize', 12);\n```"
+    }
+  ],
+  "links": [
+    {
+      "label": "title",
+      "url": "./title"
+    },
+    {
+      "label": "sgtitle",
+      "url": "./sgtitle"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/subtitle.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/subtitle.rs"
+  }
+}

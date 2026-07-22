@@ -1,0 +1,114 @@
+{
+  "title": "icdf",
+  "category": "stats/summary",
+  "keywords": [
+    "icdf",
+    "inverse cdf",
+    "normal",
+    "student t",
+    "weibull",
+    "binomial",
+    "chi-square",
+    "gamma",
+    "exponential",
+    "poisson",
+    "uniform",
+    "lognormal",
+    "beta",
+    "f",
+    "statistics"
+  ],
+  "summary": "Evaluate inverse cumulative distribution functions by distribution name or fitted distribution object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "scalar and compatible array parameters",
+    "notes": "GPU inputs are gathered to host. Distribution inversion currently runs on CPU for numerical compatibility."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::distributions::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`icdf(name,p,...)` evaluates inverse cumulative distribution functions for supported named distributions. `icdf(pd,p)` evaluates quantiles for a `ProbabilityDistribution` object returned by `fitdist`.",
+  "behaviors": [
+    "Supported distribution names include `\"Normal\"`, `\"t\"`, `\"Weibull\"`, `\"Chi-square\"`, `\"Binomial\"`, `\"Gamma\"`, `\"Exponential\"`, `\"Poisson\"`, `\"Uniform\"`, `\"Lognormal\"`, `\"Beta\"`, and `\"F\"`.",
+    "Common aliases are accepted after case-insensitive normalization and removal of punctuation or spaces, including `\"norm\"`, `\"gaussian\"`, `\"student t\"`, `\"wbl\"`, `\"chi2\"`, `\"bino\"`, `\"gam\"`, `\"exp\"`, `\"poiss\"`, `\"unif\"`, `\"logn\"`, and `\"fdist\"`.",
+    "`icdf(\"Normal\",p)` uses mean `0` and standard deviation `1`; `icdf(\"Normal\",p,mu,sigma)` uses supplied normal parameters.",
+    "`icdf(\"t\",p,nu)` returns Student's t quantiles for degrees of freedom `nu`.",
+    "`icdf(\"Weibull\",p)` uses scale `1` and shape `1`; `icdf(\"Weibull\",p,a,b)` uses supplied Weibull scale and shape.",
+    "`icdf(\"Chi-square\",p,nu)` inverts the chi-square CDF with degrees of freedom `nu`.",
+    "`icdf(\"Binomial\",p,n,prob)` returns the smallest integer outcome whose binomial CDF is at least `p`.",
+    "`icdf(\"Gamma\",p,shape,scale)`, `icdf(\"Exponential\",p,mu)`, `icdf(\"Poisson\",p,lambda)`, `icdf(\"Beta\",p,a,b)`, and `icdf(\"F\",p,v1,v2)` require the shown distribution parameters.",
+    "`icdf(\"Uniform\",p)` uses bounds `[0,1]`; `icdf(\"Uniform\",p,a,b)` uses supplied lower and upper bounds.",
+    "`icdf(\"Lognormal\",p)` uses mean `0` and standard deviation `1` for the underlying normal distribution; `icdf(\"Lognormal\",p,mu)` and `icdf(\"Lognormal\",p,mu,sigma)` use supplied lognormal parameters.",
+    "`icdf(pd,p)` supports fitted normal, exponential, lognormal, gamma, Weibull, and Poisson distribution objects returned by `fitdist`.",
+    "Scalar and compatible array inputs broadcast to a common output shape. Invalid probabilities or distribution parameters produce `NaN` elements.",
+    "Continuous distributions return endpoint values at `p = 0` and `Inf` where the upper tail is unbounded at `p = 1`; bounded distributions return their finite endpoints. The Poisson inverse returns `Inf` at `p = 1`."
+  ],
+  "examples": [
+    {
+      "description": "Normal median with parameters",
+      "input": "x = icdf(\"Normal\", 0.5, 10, 2)",
+      "output": "x = 10"
+    },
+    {
+      "description": "Discrete binomial quantile",
+      "input": "k = icdf(\"Binomial\", 0.75, 10, 0.5)",
+      "output": "k = 6"
+    },
+    {
+      "description": "Uniform quantile with bounds",
+      "input": "x = icdf(\"Uniform\", 0.25, 10, 20)",
+      "output": "x = 12.5"
+    },
+    {
+      "description": "Fitted distribution median",
+      "input": "pd = fitdist([1;2;3], \"Normal\"); x = icdf(pd, 0.5)",
+      "output": "x = 2"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is icdf related to distribution-specific inverse functions?",
+      "answer": "`icdf(\"Normal\",p,mu,sigma)` dispatches to the same numerical path as `norminv(p,mu,sigma)`, `icdf(\"t\",p,nu)` to `tinv`, and `icdf(\"Weibull\",p,a,b)` to `wblinv`. Other supported distribution names use matching runtime CDF or inverse helper implementations."
+    }
+  ],
+  "links": [
+    {
+      "label": "norminv",
+      "url": "./norminv"
+    },
+    {
+      "label": "tinv",
+      "url": "./tinv"
+    },
+    {
+      "label": "wblinv",
+      "url": "./wblinv"
+    },
+    {
+      "label": "fitdist",
+      "url": "./fitdist"
+    },
+    {
+      "label": "binocdf",
+      "url": "./binocdf"
+    },
+    {
+      "label": "chi2cdf",
+      "url": "./chi2cdf"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/distributions.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/distributions.rs"
+  }
+}

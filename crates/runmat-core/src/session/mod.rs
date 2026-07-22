@@ -107,6 +107,8 @@ pub struct RunMatSession {
     dynamic_eval_enabled: bool,
     /// Persisted numeric display format for this session (survives across executions).
     format_mode: runmat_builtins::FormatMode,
+    /// Persisted diary logging state for this session (survives across executions).
+    diary_state: runmat_runtime::console::DiaryStateSnapshot,
     /// Preloaded companion statements discovered asynchronously by the request path.
     pending_companion_source_discovery: Option<compile::CompanionSourceDiscovery>,
 }
@@ -168,6 +170,36 @@ impl Drop for ActiveExecutionGuard {
             if let Some(flag) = self.flag.as_mut() {
                 *flag = false;
             }
+        }
+    }
+}
+
+struct SessionDiaryStateGuard {
+    session_state: *mut runmat_runtime::console::DiaryStateSnapshot,
+    previous_state: Option<runmat_runtime::console::DiaryStateSnapshot>,
+}
+
+impl SessionDiaryStateGuard {
+    fn new(session: &mut RunMatSession) -> Self {
+        let previous_state =
+            runmat_runtime::console::replace_diary_state(session.diary_state.clone());
+        Self {
+            session_state: &mut session.diary_state,
+            previous_state: Some(previous_state),
+        }
+    }
+}
+
+impl Drop for SessionDiaryStateGuard {
+    fn drop(&mut self) {
+        let current_state = runmat_runtime::console::diary_state_snapshot();
+        unsafe {
+            if let Some(session_state) = self.session_state.as_mut() {
+                *session_state = current_state;
+            }
+        }
+        if let Some(previous_state) = self.previous_state.take() {
+            runmat_runtime::console::replace_diary_state(previous_state);
         }
     }
 }

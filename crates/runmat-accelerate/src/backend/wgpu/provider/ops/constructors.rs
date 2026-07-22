@@ -1,5 +1,18 @@
 use super::*;
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct NdgridParams {
+    total: u32,
+    axis_len: u32,
+    stride: u32,
+    offset: u32,
+    chunk: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
 impl WgpuProvider {
     pub(crate) fn eye_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let normalized = normalize_eye_shape(shape);
@@ -187,16 +200,31 @@ impl WgpuProvider {
     }
 
     pub(crate) fn zeros_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
+        self.zeros_with_storage_exec(shape, GpuTensorStorage::Real)
+    }
+
+    pub(crate) fn zeros_with_storage_exec(
+        &self,
+        shape: &[usize],
+        storage: GpuTensorStorage,
+    ) -> Result<GpuTensorHandle> {
         let len: usize = shape.iter().copied().product();
-        let buffer = self.create_storage_buffer_checked(len, "zeros")?;
+        let lane_factor = match storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
+        let raw_len = len
+            .checked_mul(lane_factor)
+            .ok_or_else(|| anyhow!("zeros_with_storage: tensor size exceeds GPU limits"))?;
+        let buffer = self.create_storage_buffer_checked(raw_len, "zeros")?;
         // Explicitly zero-initialize the storage buffer; pooled buffers may contain old data
-        let size_bytes = (len.max(1) as u64) * (self.element_size as u64);
+        let size_bytes = (raw_len.max(1) as u64) * (self.element_size as u64);
         if size_bytes > 0 {
             // Write zeros across the entire buffer
             let zero_bytes = vec![0u8; size_bytes as usize];
             self.queue.write_buffer(buffer.as_ref(), 0, &zero_bytes);
         }
-        Ok(self.register_existing_buffer(buffer, shape.to_vec(), len))
+        Ok(self.register_existing_buffer_with_storage(buffer, shape.to_vec(), raw_len, storage))
     }
 
     pub(crate) fn meshgrid_exec(
@@ -281,6 +309,191 @@ impl WgpuProvider {
 
         Ok(ProviderMeshgridResult { outputs })
     }
+
+    pub(crate) fn ndgrid_exec(
+        &self,
+        request: &ProviderNdgridRequest<'_>,
+    ) -> Result<ProviderNdgridResult> {
+        ensure!(request.output_count > 0, "ndgrid: missing outputs");
+        ensure!(
+            request.output_count <= request.axes.len(),
+            "ndgrid: too many outputs for axes"
+        );
+        ensure!(!request.output_shape.is_empty(), "ndgrid: missing shape");
+
+        let total_len = product_checked(request.output_shape)
+            .ok_or_else(|| anyhow!("ndgrid: tensor size exceeds GPU limits"))?;
+        ensure!(
+            total_len <= u32::MAX as usize,
+            "ndgrid: tensor length exceeds GPU dispatch limits"
+        );
+        let total_u32 = total_len as u32;
+        let strides = column_major_strides_checked(request.output_shape)?;
+        let entries = {
+            let guard = self.buffers.lock().expect("buffer mutex poisoned");
+            let mut entries = Vec::with_capacity(request.output_count);
+            for (dim, axis) in request.axes.iter().take(request.output_count).enumerate() {
+                ensure!(
+                    axis.handle.device_id == self.runtime_device_id,
+                    "ndgrid: axis belongs to a different device"
+                );
+                let entry = guard
+                    .get(&axis.handle.buffer_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("ndgrid: unknown buffer {}", axis.handle.buffer_id))?;
+                ensure!(
+                    entry.storage != GpuTensorStorage::ComplexInterleaved,
+                    "ndgrid: complex axes are not supported"
+                );
+                let expected = request.output_shape.get(dim).copied().unwrap_or(1);
+                ensure!(
+                    entry.len == expected,
+                    "ndgrid: axis {} length {} does not match output extent {}",
+                    dim + 1,
+                    entry.len,
+                    expected
+                );
+                ensure!(
+                    entry.len <= u32::MAX as usize && strides[dim] <= u32::MAX as usize,
+                    "ndgrid: axis dimensions exceed GPU dispatch limits"
+                );
+                entries.push(entry);
+            }
+            entries
+        };
+
+        let shader = ndgrid_shader(self.precision);
+        let shader_module = self
+            .device_ref()
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("runmat-ndgrid-shader"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
+            });
+        let bind_layout =
+            self.device_ref()
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("runmat-ndgrid-layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+        let pipeline_layout =
+            self.device_ref()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("runmat-ndgrid-pipeline-layout"),
+                    bind_group_layouts: &[&bind_layout],
+                    push_constant_ranges: &[],
+                });
+        let pipeline = self.device_ref().create_compute_pipeline(
+            &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                label: Some("runmat-ndgrid-pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader_module,
+                entry_point: "main",
+            },
+        );
+
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let mut outputs = Vec::with_capacity(request.output_count);
+        for dim in 0..request.output_count {
+            let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-ndgrid-out")?;
+            if total_len > 0 {
+                let mut offset = 0usize;
+                while offset < total_len {
+                    let chunk_len = (total_len - offset).min(chunk_capacity);
+                    let params = NdgridParams {
+                        total: total_u32,
+                        axis_len: entries[dim].len as u32,
+                        stride: strides[dim] as u32,
+                        offset: offset as u32,
+                        chunk: chunk_len as u32,
+                        _pad0: 0,
+                        _pad1: 0,
+                        _pad2: 0,
+                    };
+                    let params_buffer =
+                        self.device_ref()
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-ndgrid-params"),
+                                contents: bytes_of(&params),
+                                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                            });
+                    let bind_group =
+                        self.device_ref()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-ndgrid-bind"),
+                                layout: &bind_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: entries[dim].buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: out_buffer.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: params_buffer.as_entire_binding(),
+                                    },
+                                ],
+                            });
+                    let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                        chunk_len as u32,
+                        crate::backend::wgpu::config::WORKGROUP_SIZE,
+                    );
+                    crate::backend::wgpu::dispatch::creation::run(
+                        self.device_ref(),
+                        self.queue_ref(),
+                        &pipeline,
+                        &bind_group,
+                        workgroups,
+                        "runmat-ndgrid-encoder",
+                        "runmat-ndgrid-pass",
+                    );
+                    offset += chunk_len;
+                }
+            }
+            outputs.push(self.register_existing_buffer(
+                out_buffer,
+                request.output_shape.to_vec(),
+                total_len,
+            ));
+        }
+
+        Ok(ProviderNdgridResult { outputs })
+    }
+
     pub(crate) fn fspecial_exec(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
         let spec =
             runtime_fspecial_spec_from_request(&request.filter).map_err(|err| anyhow!(err))?;
@@ -698,18 +911,37 @@ impl WgpuProvider {
         );
 
         let len = entry.len;
-        if len == 0 {
-            return Err(anyhow!("diag: empty vector fallback"));
-        }
-        let (size, total) = diag_matrix_size_checked(len, offset)?;
+        let (size, _) = diag_matrix_size_checked(len, offset)?;
+        self.diag_from_vector_sized_exec(vector, offset, size, size)
+    }
+
+    pub(crate) fn diag_from_vector_sized_exec(
+        &self,
+        vector: &GpuTensorHandle,
+        offset: isize,
+        out_rows: usize,
+        out_cols: usize,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(vector)?;
+        diag_ensure_shape(&entry.shape)?;
+        let (rows, cols) = diag_rows_cols(&entry.shape);
+        ensure!(
+            diag_is_vector_like(rows, cols, entry.shape.len()),
+            "diag: input must be a vector"
+        );
+
+        let len = entry.len;
         ensure!(
             len <= u32::MAX as usize,
             "diag: vector is too large for GPU dispatch"
         );
         ensure!(
-            size <= u32::MAX as usize,
+            out_rows <= u32::MAX as usize && out_cols <= u32::MAX as usize,
             "diag: result dimension exceeds GPU dispatch limits"
         );
+        let total = out_rows
+            .checked_mul(out_cols)
+            .ok_or_else(|| anyhow!("diag: result size exceeds GPU dispatch limits"))?;
         ensure!(
             total <= u32::MAX as usize,
             "diag: result size exceeds GPU dispatch limits"
@@ -718,6 +950,9 @@ impl WgpuProvider {
             .map_err(|_| anyhow!("diag: offset magnitude exceeds GPU limits"))?;
 
         let out_buffer = self.create_storage_buffer(total, "runmat-diag-vec-out");
+        if len == 0 || total == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, vec![out_rows, out_cols], total));
+        }
         {
             let mut enc =
                 self.device_ref()
@@ -735,9 +970,13 @@ impl WgpuProvider {
 
         let params = crate::backend::wgpu::params::DiagFromVectorParams {
             len: len as u32,
-            size: size as u32,
+            rows: out_rows as u32,
+            cols: out_cols as u32,
+            _pad0: 0,
             offset: offset_i32,
-            _pad: 0,
+            _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,
         };
         let params_buffer = self.uniform_buffer(&params, "runmat-diag-vec-params");
         let bind_group = self
@@ -773,7 +1012,7 @@ impl WgpuProvider {
             "runmat-diag-vec-pass",
         );
 
-        Ok(self.register_existing_buffer(out_buffer, vec![size, size], total))
+        Ok(self.register_existing_buffer(out_buffer, vec![out_rows, out_cols], total))
     }
     pub(crate) fn diag_extract_exec(
         &self,
@@ -789,7 +1028,8 @@ impl WgpuProvider {
         );
         let diag_len = diag_length(rows, cols, offset);
         if diag_len == 0 {
-            return Err(anyhow!("diag: empty diagonal fallback"));
+            let out_buffer = self.create_storage_buffer(0, "runmat-diag-extract-empty");
+            return Ok(self.register_existing_buffer(out_buffer, vec![0, 1], 0));
         }
         ensure!(
             diag_len <= u32::MAX as usize,
@@ -860,4 +1100,153 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, vec![diag_len, 1], diag_len))
     }
+}
+
+fn ndgrid_shader(precision: NumericPrecision) -> String {
+    let scalar = precision.as_str();
+    let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
+    format!(
+        r#"
+struct Tensor {{
+  data: array<{scalar}>,
+}};
+
+struct Params {{
+  total: u32,
+  axis_len: u32,
+  stride: u32,
+  offset: u32,
+  chunk: u32,
+  pad0: u32,
+  pad1: u32,
+  pad2: u32,
+}};
+
+@group(0) @binding(0) var<storage, read> axis: Tensor;
+@group(0) @binding(1) var<storage, read_write> out: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size({workgroup})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+  if (gid.x >= params.chunk) {{
+    return;
+  }}
+  let linear = gid.x + params.offset;
+  if (linear >= params.total) {{
+    return;
+  }}
+  let coord = (linear / params.stride) % params.axis_len;
+  out.data[linear] = axis.data[coord];
+}}
+"#
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_accelerate_api::{
+        AccelProvider, HostTensorView, ProviderNdgridAxis, ProviderNdgridRequest,
+    };
+
+    fn register_wgpu_provider_for_test(
+    ) -> Option<&'static crate::backend::wgpu::provider::WgpuProvider> {
+        match crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) {
+            Ok(provider) => Some(provider),
+            Err(err) if err.to_string() == "wgpu: no compatible adapter found" => None,
+            Err(err) => panic!("register wgpu provider failed: {err:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_diag_vector_sized_and_extract_match_column_major_cpu() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let vector = [3.0, 5.0, 7.0];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &vector,
+                shape: &[3, 1],
+            })
+            .expect("upload vector");
+        let placed = provider
+            .diag_from_vector_sized(&handle, -1, 5, 3)
+            .expect("diag from vector");
+        let placed_host = provider.download(&placed).await.expect("download placed");
+        assert_eq!(placed_host.shape, vec![5, 3]);
+        assert_eq!(
+            placed_host.data,
+            vec![0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0, 0.0]
+        );
+
+        let extracted = provider.diag_extract(&placed, -1).expect("diag extract");
+        let extracted_host = provider
+            .download(&extracted)
+            .await
+            .expect("download extracted");
+        assert_eq!(extracted_host.shape, vec![3, 1]);
+        assert_eq!(extracted_host.data, vector.to_vec());
+
+        let empty = provider.diag_extract(&placed, 10).expect("empty extract");
+        let empty_host = provider.download(&empty).await.expect("download empty");
+        assert_eq!(empty_host.shape, vec![0, 1]);
+        assert!(empty_host.data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn wgpu_ndgrid_resident_axes_match_column_major_cpu() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let x = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[2, 1],
+            })
+            .expect("upload x");
+        let y = provider
+            .upload(&HostTensorView {
+                data: &[10.0, 20.0, 30.0],
+                shape: &[3, 1],
+            })
+            .expect("upload y");
+        let axes = [
+            ProviderNdgridAxis { handle: &x },
+            ProviderNdgridAxis { handle: &y },
+        ];
+        let result = provider
+            .ndgrid(&ProviderNdgridRequest {
+                axes: &axes,
+                output_shape: &[2, 3],
+                output_count: 2,
+            })
+            .expect("ndgrid");
+        assert_eq!(result.outputs.len(), 2);
+        let gx = provider
+            .download(&result.outputs[0])
+            .await
+            .expect("download gx");
+        let gy = provider
+            .download(&result.outputs[1])
+            .await
+            .expect("download gy");
+        assert_eq!(gx.shape, vec![2, 3]);
+        assert_eq!(gy.shape, vec![2, 3]);
+        assert_eq!(gx.data, vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0]);
+        assert_eq!(gy.data, vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]);
+    }
+}
+
+fn column_major_strides_checked(shape: &[usize]) -> Result<Vec<usize>> {
+    let mut strides = Vec::with_capacity(shape.len());
+    let mut stride = 1usize;
+    for &extent in shape {
+        strides.push(stride);
+        stride = stride
+            .checked_mul(extent)
+            .ok_or_else(|| anyhow!("ndgrid: stride exceeds GPU limits"))?;
+    }
+    Ok(strides)
 }

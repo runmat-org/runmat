@@ -9,7 +9,7 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, NumericDType, StructValue, Value,
+    CharArray, IntValue, IntegerStorage, NumericDType, StructValue, Value,
 };
 use runmat_filesystem::{metadata_async, write_async};
 use runmat_macros::runtime_builtin;
@@ -24,6 +24,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::introspection::object_serialization::prepare_value_for_mat_save;
 use crate::workspace;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -341,6 +342,7 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     let mut mat_vars = Vec::with_capacity(unique_entries.len());
     for (name, value) in unique_entries {
+        let value = prepare_value_for_mat_save(value).await?;
         mat_vars.push(MatVar {
             name,
             array: convert_value(value).await?,
@@ -740,9 +742,8 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 Ok(MatArray {
                     class,
                     dims: vec![1, 1],
-                    data: MatData::Numeric {
-                        real: vec![i.to_f64()],
-                        imag: None,
+                    data: MatData::Integer {
+                        storage: integer_storage_from_scalar(i),
                     },
                 })
             }
@@ -754,8 +755,14 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 },
             }),
             Value::Tensor(t) => {
-                let class = tensor_dtype_mat_class(t.dtype);
-                let data = if class == MatClass::Double {
+                let class = if let Some(storage) = t.integer_storage() {
+                    integer_storage_mat_class(storage)
+                } else {
+                    tensor_dtype_mat_class(t.dtype)
+                };
+                let data = if let Some(storage) = t.integer_data {
+                    MatData::Integer { storage }
+                } else if class == MatClass::Double {
                     MatData::Double {
                         real: t.data,
                         imag: None,
@@ -921,12 +928,39 @@ fn int_value_mat_class(value: &IntValue) -> MatClass {
     }
 }
 
+fn integer_storage_from_scalar(value: IntValue) -> IntegerStorage {
+    match value {
+        IntValue::I8(value) => IntegerStorage::I8(vec![value]),
+        IntValue::I16(value) => IntegerStorage::I16(vec![value]),
+        IntValue::I32(value) => IntegerStorage::I32(vec![value]),
+        IntValue::I64(value) => IntegerStorage::I64(vec![value]),
+        IntValue::U8(value) => IntegerStorage::U8(vec![value]),
+        IntValue::U16(value) => IntegerStorage::U16(vec![value]),
+        IntValue::U32(value) => IntegerStorage::U32(vec![value]),
+        IntValue::U64(value) => IntegerStorage::U64(vec![value]),
+    }
+}
+
+fn integer_storage_mat_class(storage: &IntegerStorage) -> MatClass {
+    match storage {
+        IntegerStorage::I8(_) => MatClass::Int8,
+        IntegerStorage::I16(_) => MatClass::Int16,
+        IntegerStorage::I32(_) => MatClass::Int32,
+        IntegerStorage::I64(_) => MatClass::Int64,
+        IntegerStorage::U8(_) => MatClass::UInt8,
+        IntegerStorage::U16(_) => MatClass::UInt16,
+        IntegerStorage::U32(_) => MatClass::UInt32,
+        IntegerStorage::U64(_) => MatClass::UInt64,
+    }
+}
+
 fn tensor_dtype_mat_class(dtype: NumericDType) -> MatClass {
     match dtype {
         NumericDType::F64 => MatClass::Double,
         NumericDType::F32 => MatClass::Single,
         NumericDType::U8 => MatClass::UInt8,
         NumericDType::U16 => MatClass::UInt16,
+        NumericDType::U32 => MatClass::UInt32,
     }
 }
 
@@ -944,9 +978,10 @@ async fn write_mat_file(path: &Path, vars: &[MatVar]) -> BuiltinResult<()> {
 pub async fn encode_workspace_to_mat_bytes(entries: &[(String, Value)]) -> BuiltinResult<Vec<u8>> {
     let mut mat_vars = Vec::with_capacity(entries.len());
     for (name, value) in entries {
+        let value = prepare_value_for_mat_save(value.clone()).await?;
         mat_vars.push(MatVar {
             name: name.clone(),
-            array: convert_value(value.clone()).await?,
+            array: convert_value(value).await?,
         });
     }
     write_mat_bytes(&mat_vars)
@@ -1006,6 +1041,7 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
             }
             (f0, 0u32)
         }
+        MatData::Integer { .. } => (array.class.class_code(), 0u32),
         MatData::Logical { .. } => ((array.class.class_code()) | FLAG_LOGICAL, 0u32),
         MatData::Sparse { values, .. } => (array.class.class_code(), values.len() as u32),
         _ => (array.class.class_code(), 0u32),
@@ -1047,6 +1083,10 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
                 let (imag_type, imag_bytes) = encode_numeric_payload(array.class, imag)?;
                 write_subelement(&mut buf, imag_type, &imag_bytes);
             }
+        }
+        MatData::Integer { storage } => {
+            let (data_type, bytes) = encode_integer_payload(storage);
+            write_subelement(&mut buf, data_type, &bytes);
         }
         MatData::Logical { data } => {
             write_subelement(&mut buf, MI_UINT8, data);
@@ -1115,6 +1155,29 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
     }
 
     Ok(buf)
+}
+
+fn encode_integer_payload(storage: &IntegerStorage) -> (u32, Vec<u8>) {
+    macro_rules! encode {
+        ($values:expr, $data_type:expr) => {{
+            let mut bytes = Vec::with_capacity(std::mem::size_of_val($values.as_slice()));
+            for value in $values {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            ($data_type, bytes)
+        }};
+    }
+
+    match storage {
+        IntegerStorage::I8(values) => (MI_INT8, values.iter().map(|value| *value as u8).collect()),
+        IntegerStorage::U8(values) => (MI_UINT8, values.clone()),
+        IntegerStorage::I16(values) => encode!(values, MI_INT16),
+        IntegerStorage::U16(values) => encode!(values, MI_UINT16),
+        IntegerStorage::I32(values) => encode!(values, MI_INT32),
+        IntegerStorage::U32(values) => encode!(values, MI_UINT32),
+        IntegerStorage::I64(values) => encode!(values, MI_INT64),
+        IntegerStorage::U64(values) => encode!(values, MI_UINT64),
+    }
 }
 
 fn encode_numeric_payload(class: MatClass, values: &[f64]) -> BuiltinResult<(u32, Vec<u8>)> {

@@ -1,0 +1,51 @@
+{
+  "title": "yticks",
+  "category": "plotting",
+  "keywords": [
+    "yticks",
+    "y-axis ticks",
+    "axes",
+    "plot styling"
+  ],
+  "summary": "Query or set Y-axis tick values.",
+  "description": "`yticks` returns or updates the tick mark locations for the Y axis of the current or specified axes.",
+  "behaviors": [
+    "`yticks()` returns the current Y-axis tick values as a row vector.",
+    "`yticks(ticks)` sets manual Y-axis tick values. `ticks` must be an increasing numeric vector; `[]` removes Y-axis tick marks.",
+    "`yticks('auto')` returns the Y tick mode to automatic tick generation. `yticks('manual')` freezes the current tick values.",
+    "`yticks('mode')` returns `'auto'` or `'manual'`.",
+    "`yticks(ax, ...)` applies the same forms to the specified axes handle.",
+    "`get(ax, 'YTick')`, `set(ax, 'YTick', ticks)`, `get(ax, 'YTickMode')`, and `set(ax, 'YTickMode', mode)` share the same axes metadata."
+  ],
+  "examples": [
+    {
+      "description": "Set nonuniform Y-axis ticks",
+      "input": "plot(-5:5, (-5:5).^2);\nyticks([0 2 4 9 16 25]);",
+      "output": "% Shows tick marks at the requested Y coordinates"
+    },
+    {
+      "description": "Remove Y-axis tick marks",
+      "input": "plot(1:10);\nyticks([]);",
+      "output": "% Hides Y-axis tick marks"
+    }
+  ],
+  "gpu_residency": "`yticks` only reads and writes axes metadata. It does not gather GPU-resident plot data; automatic ticks are generated from the axes display bounds, including explicit limits and cached plotted-data bounds.",
+  "links": [
+    {
+      "label": "xticks",
+      "url": "./xticks"
+    },
+    {
+      "label": "ylim",
+      "url": "./ylim"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ]
+}

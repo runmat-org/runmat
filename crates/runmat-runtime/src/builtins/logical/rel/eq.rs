@@ -15,6 +15,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::logical::rel::integer_comparison::{
+    try_integer_comparison, IntegerComparisonError, IntegerComparisonOp,
+};
 use crate::builtins::logical::type_resolvers::logical_binary_type;
 use crate::builtins::math::symbolic::{symbolic_expr_to_value, value_to_symbolic_scalar};
 use crate::{build_runtime_error, RuntimeError};
@@ -177,7 +180,24 @@ async fn eq_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         ));
     }
 
+    if let Some(result) = crate::builtins::table::categorical_compare(
+        &lhs,
+        &rhs,
+        crate::builtins::table::CategoricalComparison::Eq,
+    ) {
+        return result;
+    }
+
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
+
+    if let Some(result) = try_integer_comparison(&lhs, &rhs, IntegerComparisonOp::Eq).map_err(
+        |error| match error {
+            IntegerComparisonError::SizeMismatch => eq_error(&EQ_ERROR_SIZE_MISMATCH),
+            IntegerComparisonError::Internal => eq_error(&EQ_ERROR_INVALID_INPUT),
+        },
+    )? {
+        return Ok(result);
+    }
 
     if let Some(result) = scalar_eq_value(&lhs, &rhs) {
         return result;

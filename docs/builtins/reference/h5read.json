@@ -1,0 +1,25 @@
+{
+  "title": "h5read",
+  "category": "io/hdf5",
+  "keywords": ["h5read", "hdf5", "dataset", "file", "io"],
+  "summary": "Read dense numeric, logical, or string datasets from an HDF5 file.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "HDF5 parsing is host file I/O. GPU-resident arguments are gathered before native HDF5 access."
+  },
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::io::hdf5::tests", "integration": null},
+  "description": "`h5read(filename, dataset)` reads a dataset from a native HDF5 file. `h5read(filename, dataset, start, count)` and `h5read(filename, dataset, start, count, stride)` read one-based hyperslab selections.",
+  "behaviors": [
+    "Dense floating-point, integer, logical, and variable-length string datasets are mapped to RunMat numeric, logical, and string values.",
+    "Dataset dimensions are preserved while converting HDF5 row-major raw storage to RunMat column-major arrays.",
+    "Compound, reference, enum, fixed-array, and nested variable-length HDF5 types raise deterministic unsupported-type errors."
+  ],
+  "examples": [{"description": "Read a dataset", "input": "A = h5read('measurements.h5', '/group/A');"}],
+  "links": [{"label": "h5write", "url": "./h5write"}, {"label": "h5info", "url": "./h5info"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/io/hdf5.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5.rs"}
+}

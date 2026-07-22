@@ -2,6 +2,40 @@
 
 _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
+## [v0.5.6](https://github.com/runmat-org/runmat/compare/v0.5.5...v0.5.6) - June 2026
+
+_June 28, 2026_
+
+### Desktop
+
+#### Added
+- Add a Command Window (REPL) for interactive RunMat execution, with terminal-style editing, command history, multiline input, selection/copy, LSP-backed syntax highlighting, persisted session transcripts, runtime variables, and figure integration
+- Add richer default sandbox content from file-backed fixtures, including a CAD STEP file, vibration dataset, 2D and 3D examples, signal filtering, flow-field, thermal diffusion, and a markdown welcome document
+- Add Mermaid diagram rendering and editing support in markdown documents alongside existing math and code rendering
+
+#### Changed
+- Improve runtime panel behavior so script and REPL runs keep variables, figures, and selected sessions aligned without unnecessary figure-output placeholder flicker
+- Improve plot, terminal, variable-table, and inspector layouts across narrow panels, resized workspaces, Safari, and Tauri
+- Load default sandbox files from a dedicated fixture directory instead of inlining them in code
+
+#### Fixed
+- Fix Monaco semantic-token timing so files receive highlighting on initial load
+- Fix REPL workspace probes so inspecting variables after a script run does not clear or hide existing figures
+- Fix markdown editor Mermaid blocks so diagrams render consistently with the markdown renderer
+
+### Runtime
+
+#### Changed
+- Preserve comments in detailed lexer and LSP token streams while filtering them from parser-facing tokenization, enabling comment-aware semantic highlighting without changing parser behavior
+- Suppress final-expression output for command-form calls so commands such as `clc` do not emit `ans`
+- Improve MIR read-before-assignment analysis through lowered temporary statements so diagnostics better reflect real initialization state
+
+#### Fixed
+- Fix `contour`, `contourf`, and `contour3` validation for MATLAB-style vector and meshgrid coordinate inputs
+- Fix CPU rendering and export of textured and image-mode surfaces so heatmap-like plots render through textured quads with correct colormap data
+
+---
+
 ## [v0.5.5](https://github.com/runmat-org/runmat/compare/v0.5.3...v0.5.5) - June 2026
 
 _June 26, 2026_
@@ -12,6 +46,8 @@ _June 26, 2026_
 - Add broader MATLAB compatibility across I/O, signal processing, optimization, symbolic math, plotting, control systems, and array construction, including `xlsread`, `writecell`, `textscan`, `importdata`, `uiputfile`, `unzip`, `imwrite`, `audioread`, `audioinfo`, `pwelch`, `periodogram`, `spectrogram`, `freqz`, `filtfilt`, `fir1`, `buttord`, `envelope`, `zplane`, `pskmod`, `lsqcurvefit`, `fminunc`, `quad`, `digits`, `vpa`, `int`, `nan`, `inf`, `zero`, `damp`, and `polarplot`
 - Add MAT-file save/load coverage, including append workflows, and expand spreadsheet/text import/export paths through provider-backed filesystems
 - Add resident GPU execution paths for complex math, signal, communication, modulation, Hilbert, gradient, reshape, meshgrid, polynomial integration, gamma, sinc, sign, and trigonometric workflows
+- Add generalized eigenvalue support through `eig(A, B)`
+- Added geometry loading, meshing, and FEA solver support (early alpha). See [PR #399](https://github.com/runmat-org/runmat/pull/399) and [FEA docs](/docs/fea) for details. We will share more details as this work matures.
 
 #### Changed
 - Expand GPU acceleration plumbing with dedicated WGPU shader modules for signal and communications workloads, complex tensor residency, and shared provider APIs
@@ -20,9 +56,24 @@ _June 26, 2026_
 
 #### Fixed
 - Fix GC safety by replacing dereference-oriented pointer APIs with opaque handles, explicit root guards, guarded borrow access, thread-local rooting, and Miri-backed soundness coverage
-- Fix WebAssembly and release publishing issues around OCCT feature wiring, generated builtin registries, TypeScript package builds, headless compatibility checks, and nested crate publishing
 - Fix Windows CI and runtime compatibility issues involving path handling, OpenBLAS/LAPACK linking, CWD behavior, file dialog tests, and release build tooling
 - Fix GPU/runtime regressions in image normalization, lazy-transpose reshape, WGPU complex trigonometry overflow handling, communications modulation fallback, constellation portability, envelope input layout, and complex unary metadata handling
+- Fix `clear` inside active VM execution frames so hidden loop slots are preserved and browser/desktop workers do not trap or close response channels
+- Fix interactive `input()` evaluation on native by removing nested executor blocking from the input hook path
+- Fix MAT-file load robustness for compressed Level-5 payloads, endian variants, broader numeric storage classes, UTF char encodings, sparse matrices, and clearer unsupported-format diagnostics
+
+### Agent
+
+#### Added
+- Added “Fix with RunMat Agent” to execution errors for easy agent-assisted fixes
+
+#### Changed
+- Improve browser Agent transport so turn submission, approvals, and resumes are scheduled work instead of long-running worker RPCs, allowing progress views and parallel/new Agent sessions to respond promptly
+- Gate FEA/geometry Agent tools and model-visible guidance behind the same product feature flags as the desktop UI
+
+#### Fixed
+- Fix Agent prompt stickiness so only the active/current running turn is treated as sticky context
+- Fix usage-cap and insufficient-credit flows so desktop shows upgrade interruptions instead of generic failures
 
 ### Development
 

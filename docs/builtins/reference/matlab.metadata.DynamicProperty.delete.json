@@ -1,0 +1,76 @@
+{
+  "title": "matlab.metadata.DynamicProperty.delete",
+  "category": "introspection",
+  "keywords": [
+    "delete",
+    "dynamicprops",
+    "dynamic property",
+    "matlab.metadata.DynamicProperty"
+  ],
+  "summary": "Remove a dynamic property through its metadata handle.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side object metadata mutation. GPU provider kernels do not participate."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::dynamicprops::tests",
+    "integration": "crates/runmat-vm/tests/functions.rs::dynamicprops_class_supports_addprop_dot_access_and_delete"
+  },
+  "description": "`delete(prop)` removes the per-instance dynamic property represented by a `matlab.metadata.DynamicProperty` handle and invalidates that metadata handle.",
+  "behaviors": [
+    "The input must be a valid `matlab.metadata.DynamicProperty` handle returned by `addprop` or `findprop`.",
+    "Deleting the metadata handle removes the target object's dynamic property value and metadata.",
+    "All metadata handle aliases for the same dynamic property observe the deleted state because RunMat reuses a canonical metadata object for `findprop` aliases.",
+    "After deletion, reading or writing the removed dynamic property through dot syntax, `getfield`, or `setfield` fails like an undefined property."
+  ],
+  "examples": [
+    {
+      "description": "Remove a dynamic property",
+      "input": "classdef Sensor < dynamicprops\nend\ns = new_object('Sensor');\np = addprop(s, 'gain');\ns.gain = 7;\ndelete(p);",
+      "output": "The dynamic property `gain` is removed from `s`."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is this the same as filesystem `delete`?",
+      "answer": "No. This qualified method is the dynamic-property metadata method invoked when `delete` receives a `matlab.metadata.DynamicProperty` handle. Filesystem deletion is documented by the general `delete` builtin."
+    },
+    {
+      "question": "Does deleting the metadata handle delete the owner object?",
+      "answer": "No. It removes only the dynamic property from the owner object and invalidates the metadata handle."
+    }
+  ],
+  "links": [
+    {
+      "label": "addprop",
+      "url": "./addprop"
+    },
+    {
+      "label": "findprop",
+      "url": "./findprop"
+    },
+    {
+      "label": "delete",
+      "url": "./delete"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/dynamicprops.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/dynamicprops.rs"
+  },
+  "gpu_residency": "`matlab.metadata.DynamicProperty.delete` mutates host-side object metadata. GPU-resident values previously stored in the removed property are released through ordinary object-property ownership.",
+  "limitations": [
+    "Full MATLAB dynamic-property listener behavior for observable get/set events is not implemented.",
+    "Full dynamic-property persistence across external MATLAB MAT-file representations is not implemented."
+  ]
+}

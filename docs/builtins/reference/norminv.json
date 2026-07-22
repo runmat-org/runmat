@@ -1,0 +1,29 @@
+{
+  "title": "norminv",
+  "category": "stats/summary",
+  "keywords": ["norminv", "normal", "gaussian", "inverse", "cdf", "statistics"],
+  "summary": "Evaluate the inverse normal cumulative distribution function.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "elementwise",
+    "notes": "GPU inputs are gathered to host for compatibility until a provider hook exists."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::distributions::tests", "integration": null },
+  "description": "`norminv(p)` returns the standard normal quantile. `norminv(p,mu)` and `norminv(p,mu,sigma)` return the quantile for a normal distribution with mean `mu` and standard deviation `sigma`.",
+  "behaviors": [
+    "`p`, `mu`, and `sigma` may be scalars or matching-size numeric arrays.",
+    "`p` outside `[0,1]` or nonpositive `sigma` produces `NaN` elementwise.",
+    "`p = 0` and `p = 1` return infinite tails."
+  ],
+  "examples": [{ "description": "Median of the standard normal", "input": "x = norminv(0.5)" }],
+  "faqs": [{ "question": "How is norminv related to erfcinv?", "answer": "RunMat computes the normal inverse using the same inverse-complementary-error-function path as `erfcinv`." }],
+  "links": [{ "label": "normcdf", "url": "./normcdf" }, { "label": "erfcinv", "url": "./erfcinv" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/distributions.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/distributions.rs"
+  }
+}

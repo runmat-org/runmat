@@ -1,0 +1,15 @@
+{
+  "title": "timetable",
+  "category": "table",
+  "keywords": ["timetable", "RowTimes", "table", "time series"],
+  "summary": "Create a timetable from row times and variables.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Timetables are host containers."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 3, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
+  "description": "`timetable(rowTimes, variables..., 'VariableNames', names)` creates a timetable object using the existing table storage model plus `RowTimes` metadata.",
+  "behaviors": ["Variables must have the same number of rows as row times.", "If row times are omitted, sequential numeric row times are generated.", "Table indexing methods are shared with table objects."],
+  "examples": [{"description": "Create a timetable", "input": "TT = timetable([1;2], [10;20], 'VariableNames', {'X'})", "output": "TT = timetable object"}],
+  "links": [{"label": "table2timetable", "url": "./table2timetable"}, {"label": "istimetable", "url": "./istimetable"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

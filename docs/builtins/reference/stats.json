@@ -1,0 +1,69 @@
+{
+  "title": "stats",
+  "category": "introspection",
+  "keywords": [
+    "stats",
+    "memoize",
+    "MemoizedFunction",
+    "cache statistics"
+  ],
+  "summary": "Return cache entries and hit/miss counters for a MemoizedFunction object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side cache inspection only."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::memoize",
+    "integration": "stats reports cache inputs, outputs, nargout, hits, and misses"
+  },
+  "description": "`S = stats(memoizedFcn)` returns a structure whose `Cache` field describes the current cache contents and counters for a `MemoizedFunction` object.",
+  "behaviors": [
+    "`S.Cache.Inputs` is a cell row vector whose entries are cell arrays of cached input arguments.",
+    "`S.Cache.Nargout` is a numeric row vector containing the requested output count for each cache entry.",
+    "`S.Cache.Outputs` is a cell row vector whose entries are cell arrays of cached outputs.",
+    "`S.Cache.HitCount` is a numeric row vector with per-entry hit counts.",
+    "`S.Cache.TotalHits` and `S.Cache.TotalMisses` report aggregate counters.",
+    "If `CacheSize` has been reduced, stats trims old entries before reporting the cache."
+  ],
+  "examples": [
+    {
+      "description": "Inspect memoized-function cache state",
+      "input": "f = memoize(@sqrt);\nf(9);\nf(9);\nS = stats(f)",
+      "output": "% S.Cache.TotalHits is 1 and S.Cache.TotalMisses is 1."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `stats` change cache counters?",
+      "answer": "No. It only reports existing cache state, except that it enforces the current `CacheSize` by trimming old entries if necessary."
+    }
+  ],
+  "links": [
+    {
+      "label": "memoize",
+      "url": "./memoize"
+    },
+    {
+      "label": "clearCache",
+      "url": "./clearCache"
+    },
+    {
+      "label": "clearAllMemoizedCaches",
+      "url": "./clearAllMemoizedCaches"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/memoize.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/memoize.rs"
+  }
+}

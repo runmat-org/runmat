@@ -1,0 +1,76 @@
+{
+  "title": "namelengthmax",
+  "category": "introspection",
+  "keywords": [
+    "namelengthmax",
+    "identifier",
+    "variable name",
+    "field name",
+    "MATLAB compatibility"
+  ],
+  "summary": "Return the maximum MATLAB identifier length.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host language constant; no GPU kernels or provider dispatch are involved."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::identifiers::tests",
+    "integration": null
+  },
+  "description": "`namelengthmax` returns the maximum number of characters allowed in MATLAB identifiers. RunMat reports `2048`, matching current MATLAB behavior.",
+  "behaviors": [
+    "Accepts no input arguments and returns a double scalar.",
+    "The shared identifier validator uses the same value for `isvarname`, `genvarname`, struct field-name validation, and argument-validation helpers.",
+    "Identifiers longer than `namelengthmax` are rejected by `isvarname` and repaired or truncated by compatibility helpers that generate names."
+  ],
+  "examples": [
+    {
+      "description": "Read the identifier length limit",
+      "input": "l = namelengthmax",
+      "output": "l = 2048"
+    },
+    {
+      "description": "Use the limit when validating generated names",
+      "input": "name = repmat('a', 1, namelengthmax);\ntf = isvarname(name)",
+      "output": "tf = logical(1)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why is the value 2048 rather than 63?",
+      "answer": "Older MATLAB releases used 63. Current MATLAB releases report 2048, and RunMat follows the current compatibility surface."
+    },
+    {
+      "question": "Does this run on the GPU?",
+      "answer": "No. This is a language metadata constant and always returns a host scalar."
+    }
+  ],
+  "links": [
+    {
+      "label": "isvarname",
+      "url": "./isvarname"
+    },
+    {
+      "label": "iskeyword",
+      "url": "./iskeyword"
+    },
+    {
+      "label": "genvarname",
+      "url": "./genvarname"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/identifiers.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/identifiers.rs"
+  }
+}

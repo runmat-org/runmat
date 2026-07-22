@@ -1,0 +1,15 @@
+{
+  "title": "timerange",
+  "category": "table",
+  "keywords": ["timerange", "timetable", "row times", "selector"],
+  "summary": "Create a timetable row-time range selector object.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Selector metadata is host-only."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 3, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
+  "description": "`timerange(startTime, endTime)` returns a row-time selector with `Start`, `End`, and `Inclusivity` properties.",
+  "behaviors": ["The optional third argument sets inclusivity and defaults to `\"closed\"`.", "The selector can be used as a timetable row subscript."],
+  "examples": [{"description": "Select a closed range", "input": "TT(timerange(1, 3), :)", "output": "Rows whose row times are between 1 and 3"}],
+  "links": [{"label": "timetable", "url": "./timetable"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

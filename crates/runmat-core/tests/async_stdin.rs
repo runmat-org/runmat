@@ -112,6 +112,62 @@ fn multiple_inputs_call_handler_in_order() -> Result<()> {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn input_handler_failure_is_runtime_interaction_error_across_repeated_runs() -> Result<()> {
+    let _test_guard = test_mutex()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let _guard = InteractiveGuard::new();
+    let mut session = RunMatSession::with_options(false, false)?;
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let prompts_clone = Arc::clone(&prompts);
+    session.install_async_input_handler(move |request: InputRequest| {
+        let prompts_clone = Arc::clone(&prompts_clone);
+        async move {
+            prompts_clone.lock().unwrap().push(request.prompt.clone());
+            Err("input is not available in this host".to_string())
+        }
+    });
+
+    for attempt in 0..3 {
+        let result = runmat_core::execute_text_request_for_testing(
+            &mut session,
+            "value = input('value: ');",
+        );
+        match result {
+            Err(RunError::Runtime(err)) => assert_eq!(
+                err.identifier(),
+                Some("RunMat:input:InteractionFailed"),
+                "attempt {attempt} should fail through input interaction handling"
+            ),
+            Err(other) => panic!("attempt {attempt} returned non-runtime error: {other:?}"),
+            Ok(exec) => {
+                let err = exec
+                    .error
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("attempt {attempt} unexpectedly succeeded"));
+                assert_eq!(
+                    err.identifier(),
+                    Some("RunMat:input:InteractionFailed"),
+                    "attempt {attempt} should fail through input interaction handling"
+                );
+                assert_eq!(
+                    exec.stdin_events.len(),
+                    1,
+                    "attempt {attempt} should record one failed stdin event"
+                );
+            }
+        }
+    }
+
+    assert_eq!(
+        prompts.lock().unwrap().as_slice(),
+        &["value: ", "value: ", "value: "]
+    );
+    Ok(())
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn char_literal_round_trips() -> Result<()> {
     let _test_guard = test_mutex()
         .lock()

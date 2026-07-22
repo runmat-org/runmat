@@ -1,0 +1,14 @@
+{
+  "title": "readstruct",
+  "category": "io/repl_fs",
+  "keywords": ["readstruct", "xml", "struct", "file"],
+  "summary": "Read XML data into a scalar structure.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Host file I/O; GPU-resident inputs are gathered before execution."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": null, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::io::repl_fs::compat::tests", "integration": null},
+  "description": "`readstruct(filename)` reads XML from the active RunMat filesystem provider and returns a scalar struct projection of the root element.",
+  "behaviors": ["Supports XML input with elements, text nodes, attributes, repeated sibling elements, comments/prolog skipping, entity unescaping, and malformed-tag validation through the shared XML parser.", "Supports common name-value options `FileType` with value `xml`, `AttributeSuffix`, and `TextNodeName`.", "Attributes are imported as fields named `<attribute><AttributeSuffix>`, text on non-leaf elements is stored under `TextNodeName`, and repeated element names are represented as cell columns because RunMat does not yet expose MATLAB struct arrays in this layer.", "HDF5, Parquet, JSON, and full schema-aware import behavior are outside this XML compatibility slice."],
+  "examples": [{"description": "Read XML to struct", "input": "s = readstruct('config.xml')", "output": "s = struct"}],
+  "links": [{"label": "xmlread", "url": "./xmlread"}, {"label": "xmlwrite", "url": "./xmlwrite"}]
+}

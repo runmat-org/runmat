@@ -1,0 +1,26 @@
+{
+  "title": "layerNormalizationLayer",
+  "category": "deep_learning",
+  "keywords": ["layerNormalizationLayer", "deep learning", "normalization"],
+  "summary": "Create a layer normalization layer compatibility object.",
+  "description": "`layerNormalizationLayer` creates metadata for layer-normalization layers.",
+  "behaviors": [
+    "`Epsilon` defaults to `1e-5`.",
+    "Name-value options such as learn-rate factors and initializers are preserved as properties."
+  ],
+  "examples": [
+    {
+      "description": "Create Layer Normalization",
+      "input": "layer = layerNormalizationLayer('Name', 'ln')",
+      "output": "Layer normalization compatibility object."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "layer = layerNormalizationLayer\nlayer = layerNormalizationLayer(Name, Value)",
+      "output": "Layer compatibility object."
+    }
+  },
+  "gpu_residency": "Layer construction is host metadata work and has no provider kernel."
+}

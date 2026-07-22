@@ -1,0 +1,85 @@
+{
+  "title": "fitclinear",
+  "category": "stats/ml",
+  "keywords": [
+    "fitclinear",
+    "classification linear",
+    "svm",
+    "logistic regression",
+    "machine learning",
+    "statistics"
+  ],
+  "summary": "Fit a binary linear classification model.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Linear classification fitting runs on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::classification_linear::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`fitclinear` fits a binary linear classifier from a predictor matrix or table and returns a `ClassificationLinear` object usable with `predict`.",
+  "behaviors": [
+    "`fitclinear(X,Y)` fits a binary SVM-style linear classifier with observations in rows of `X` and labels in `Y`.",
+    "Table input supports `fitclinear(Tbl,ResponseVarName)`, `fitclinear(Tbl,formula)`, and `fitclinear(Tbl,Y)`. Formula support covers additive predictor lists such as `Y ~ A + B`.",
+    "`Learner` supports `svm` and `logistic`. Logistic models use logistic-loss training and return posterior-style scores by default; SVM models return raw signed-margin scores.",
+    "`Regularization` supports `ridge` and `lasso`. `Lambda` accepts a nonnegative scalar or vector, producing one coefficient column per Lambda value.",
+    "`ObservationsIn` supports `rows` and `columns` for numeric matrices. Table input requires row observations.",
+    "`Y` can contain numeric, logical, string, char, or cell-string labels. The predicted label output preserves the label family.",
+    "Name-value options `ClassNames`, `PredictorNames`, `ResponseName`, `Weights`, `Prior`, `FitBias`, `Beta`, `Bias`, `Solver`, `IterationLimit`, `PassLimit`, and `ScoreTransform` are accepted.",
+    "Rows containing `NaN` in predictors or response, or zero weights, are omitted before fitting; `Inf` values and negative weights are rejected.",
+    "Cross-validation, cost matrices, leaveout/holdout partitions, and hyperparameter optimization are not implemented yet and raise explicit errors instead of silently producing partial models.",
+    "The returned object exposes `Beta`, `Bias`, `Lambda`, `Learner`, `Regularization`, `Solver`, `ScoreTransform`, `ResponseName`, `PredictorNames`, `ClassNames`, `Prior`, `NumObservations`, `NumPredictors`, and `ModelParameters` properties. `[Mdl,FitInfo]` returns training diagnostics including `Lambda`, `Objective`, `NumIterations`, `NumPasses`, and `GradientNorm`."
+  ],
+  "examples": [
+    {
+      "description": "Fit and predict a logistic linear classifier",
+      "input": "X = [0; 1; 2; 3];\nY = [0; 0; 1; 1];\n[Mdl,FitInfo] = fitclinear(X, Y, 'Learner', 'logistic', 'Lambda', 0);\n[label,score] = predict(Mdl, [0.2; 2.8])",
+      "output": "label is [0; 1], and score contains one probability column per class."
+    },
+    {
+      "description": "Use column-oriented observations",
+      "input": "Mdl = fitclinear([0 1 2 3], Y, 'ObservationsIn', 'columns');\nlabel = predict(Mdl, [0.2 2.8], 'ObservationsIn', 'columns')",
+      "output": "The predictor matrix is transposed internally so columns are observations."
+    },
+    {
+      "description": "Fit a table-input classifier",
+      "input": "T = table(A, B, Y, 'VariableNames', {'A','B','Y'});\nMdl = fitclinear(T, 'Y ~ A + B', 'Learner', 'svm')",
+      "output": "Mdl uses A and B as numeric predictors and Y as the binary response."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `fitclinear` support multiclass classification?",
+      "answer": "No. MATLAB's `fitclinear` is binary; RunMat requires exactly two observed classes and raises an explicit error otherwise."
+    },
+    {
+      "question": "What does `predict` return for `ClassificationLinear`?",
+      "answer": "`predict(Mdl,Xnew)` returns predicted class labels. `[label,score] = predict(Mdl,Xnew)` also returns raw class scores for SVM models or posterior-style probabilities for logistic models."
+    }
+  ],
+  "links": [
+    {
+      "label": "predict",
+      "url": "./predict"
+    },
+    {
+      "label": "fitctree",
+      "url": "./fitctree"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/classification_linear.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_linear.rs"
+  }
+}

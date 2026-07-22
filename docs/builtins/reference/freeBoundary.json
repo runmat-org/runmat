@@ -1,0 +1,53 @@
+{
+  "title": "freeBoundary",
+  "category": "geometry/triangulation",
+  "keywords": [
+    "freeBoundary",
+    "DelaunayTri",
+    "triangulation",
+    "boundary",
+    "mesh"
+  ],
+  "summary": "Return boundary edges for a DelaunayTri triangulation.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`freeBoundary` operates on DelaunayTri object topology on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::geometry::triangulation::tests",
+    "integration": null
+  },
+  "description": "`freeBoundary(dt)` returns an M-by-2 one-based edge list for edges used by only one triangle in a 2-D `DelaunayTri` object.",
+  "behaviors": [
+    "Accepts `DelaunayTri` objects from the legacy constructor.",
+    "Returns one-based vertex indices sorted deterministically by edge.",
+    "Returns a 0-by-2 tensor for empty triangulations."
+  ],
+  "examples": [
+    {
+      "description": "Find outer edges",
+      "input": "dt = DelaunayTri([0 0; 1 0; 0 1]);\ne = freeBoundary(dt);"
+    }
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "DelaunayTri",
+      "url": "./DelaunayTri"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/geometry/triangulation.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/geometry/triangulation.rs"
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "title": "fsurf",
+  "category": "plotting",
+  "keywords": [
+    "fsurf",
+    "function surface",
+    "parametric surface",
+    "surface plot",
+    "matlab fsurf"
+  ],
+  "summary": "Plot scalar or parametric function surfaces.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-surf-surface.webp",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`fsurf` samples arbitrary function handles on the host, then uses RunMat's existing surface renderer. There is no provider kernel because MATLAB callbacks are not GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::fsurf::tests",
+    "integration": "runmat-vm --test plotting::fsurf_dispatches_function_handle_surface_through_vm"
+  },
+  "description": "`fsurf` evaluates function handles over a rectangular two-variable domain and renders the sampled values as a 3-D surface. It supports ordinary `z = f(x,y)` surfaces and parametric surfaces supplied as `x = fx(u,v)`, `y = fy(u,v)`, and `z = fz(u,v)`.",
+  "behaviors": [
+    "`fsurf(f)` samples `f(x,y)` on the default `[-5 5 -5 5]` domain.",
+    "`fsurf(f, [xmin xmax ymin ymax])` uses an explicit rectangular domain; a two-element vector applies the same limits to both axes.",
+    "`fsurf(fx, fy, fz)` samples a parametric surface over the default parameter domain.",
+    "`fsurf(ax, ___)` renders into the requested axes and returns a function-surface graphics handle.",
+    "Function-handle outputs must be scalar real numeric values at every sampled point; non-finite explicit surface samples are preserved as surface discontinuities."
+  ],
+  "options": [
+    "`'MeshDensity'` controls the number of samples along each domain dimension. RunMat accepts integer values from 2 through 400.",
+    "Surface style name/value pairs such as `'DisplayName'`, `'FaceAlpha'`, `'FaceColor'`, `'EdgeColor'`, `'Shading'`, `'Lighting'`, `'Visible'`, and `'Colormap'` use the same parsing path as `surf`."
+  ],
+  "examples": [
+    {
+      "description": "Plot a function surface over the default domain",
+      "input": "fsurf(@(x,y) sin(x) + cos(y));"
+    },
+    {
+      "description": "Set the domain and mesh density",
+      "input": "h = fsurf(@(x,y) x.^2 - y.^2, [-2 2 -1 1], 'MeshDensity', 75, 'DisplayName', 'saddle');"
+    },
+    {
+      "description": "Plot a parametric surface",
+      "input": "fx = @(u,v) cos(u).*sin(v);\nfy = @(u,v) sin(u).*sin(v);\nfz = @(u,v) cos(v);\nfsurf(fx, fy, fz, [0 2*pi 0 pi]);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `fsurf` evaluate the function handle on the GPU?",
+      "answer": "No. MATLAB function handles can contain arbitrary user code, so RunMat samples them on the host and then hands the sampled surface to the plotting renderer."
+    },
+    {
+      "question": "What happens if the function returns a vector?",
+      "answer": "RunMat raises `RunMat:fsurf:EvaluationFailed`; each sampled point must produce one scalar numeric value."
+    }
+  ],
+  "links": [
+    {
+      "label": "surf",
+      "url": "./surf"
+    },
+    {
+      "label": "mesh",
+      "url": "./mesh"
+    },
+    {
+      "label": "view",
+      "url": "./view"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/fsurf.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/fsurf.rs"
+  },
+  "gpu_residency": "`fsurf` is a callback-sampling builtin. It creates a new sampled surface and does not preserve input residency, because the inputs are MATLAB function handles rather than numeric provider buffers.",
+  "gpu_behavior": [
+    "Callback sampling runs on the host.",
+    "The resulting surface uses the existing `runmat-plot` surface rendering path."
+  ]
+}

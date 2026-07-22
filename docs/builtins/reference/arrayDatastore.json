@@ -1,0 +1,15 @@
+{
+  "title": "arrayDatastore",
+  "category": "io/tabular",
+  "keywords": ["arrayDatastore", "datastore", "array", "table"],
+  "summary": "Create an array datastore descriptor object.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Datastore descriptors are host metadata."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
+  "description": "`arrayDatastore(A)` creates a descriptor object with `Data` and `ReadSize` properties.",
+  "behaviors": ["The constructor preserves the input data and `ReadSize` metadata for code that passes datastore descriptors around.", "Iterator-style operations such as `read`, `hasdata`, and `reset` require the generic datastore dispatch layer and are not provided by this constructor builtin."],
+  "examples": [{"description": "Create datastore", "input": "ds = arrayDatastore([1;2])", "output": "ds = arrayDatastore object"}],
+  "links": [{"label": "parquetDatastore", "url": "./parquetDatastore"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

@@ -1,5 +1,6 @@
 //! MATLAB-compatible `struct` builtin.
 
+use crate::builtins::common::identifiers::is_valid_varname;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -199,18 +200,11 @@ const STRUCT_ERROR_FIELD_NAME_EMPTY: BuiltinErrorDescriptor = BuiltinErrorDescri
 const STRUCT_ERROR_FIELD_NAME_START_CHAR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.STRUCT.FIELD_NAME_START_CHAR",
     identifier: Some("RunMat:struct:FieldNameStartChar"),
-    when: "Field name does not start with a letter or underscore.",
-    message: "struct: field names must begin with a letter or underscore",
+    when: "Field name is not a valid MATLAB identifier.",
+    message: "struct: field names must be valid MATLAB identifiers",
 };
 
-const STRUCT_ERROR_FIELD_NAME_INVALID_CHAR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.FIELD_NAME_INVALID_CHAR",
-    identifier: Some("RunMat:struct:FieldNameInvalidChar"),
-    when: "Field name includes unsupported characters.",
-    message: "struct: invalid character in field name",
-};
-
-const STRUCT_ERRORS: [BuiltinErrorDescriptor; 14] = [
+const STRUCT_ERRORS: [BuiltinErrorDescriptor; 13] = [
     STRUCT_ERROR_INVALID_SINGLE_INPUT,
     STRUCT_ERROR_NAME_VALUE_PAIRS,
     STRUCT_ERROR_CELL_SIZE_MISMATCH,
@@ -224,7 +218,6 @@ const STRUCT_ERRORS: [BuiltinErrorDescriptor; 14] = [
     STRUCT_ERROR_FIELD_NAME_CHAR_VECTOR,
     STRUCT_ERROR_FIELD_NAME_EMPTY,
     STRUCT_ERROR_FIELD_NAME_START_CHAR,
-    STRUCT_ERROR_FIELD_NAME_INVALID_CHAR,
 ];
 
 pub const STRUCT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -451,11 +444,8 @@ fn validate_field_name(name: &str) -> BuiltinResult<()> {
     if name.is_empty() {
         return Err(struct_error(&STRUCT_ERROR_FIELD_NAME_EMPTY));
     }
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return Err(struct_error(&STRUCT_ERROR_FIELD_NAME_EMPTY));
-    };
-    if !is_first_char_valid(first) {
+
+    if !is_valid_varname(name) {
         return Err(struct_error_with_message(
             format!(
                 "{} (got '{name}')",
@@ -464,29 +454,13 @@ fn validate_field_name(name: &str) -> BuiltinResult<()> {
             &STRUCT_ERROR_FIELD_NAME_START_CHAR,
         ));
     }
-    if let Some(bad) = chars.find(|c| !is_subsequent_char_valid(*c)) {
-        return Err(struct_error_with_message(
-            format!(
-                "{} ('{bad}' in '{name}')",
-                STRUCT_ERROR_FIELD_NAME_INVALID_CHAR.message
-            ),
-            &STRUCT_ERROR_FIELD_NAME_INVALID_CHAR,
-        ));
-    }
     Ok(())
-}
-
-fn is_first_char_valid(c: char) -> bool {
-    c == '_' || c.is_ascii_alphabetic()
-}
-
-fn is_subsequent_char_valid(c: char) -> bool {
-    c == '_' || c.is_ascii_alphanumeric()
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX;
     use runmat_accelerate_api::GpuTensorHandle;
     use runmat_builtins::{CellArray, IntValue, StringArray, StructValue, Tensor};
 
@@ -644,7 +618,38 @@ pub(crate) mod tests {
         let err = error_message(
             run_struct(vec![Value::from("1bad"), Value::Int(IntValue::I32(1))]).unwrap_err(),
         );
-        assert!(err.contains("begin with a letter or underscore"));
+        assert!(err.contains("valid MATLAB identifiers"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn struct_field_names_follow_shared_identifier_rules() {
+        let max_len = "a".repeat(MATLAB_NAME_LENGTH_MAX);
+        let Value::Struct(s) = run_struct(vec![
+            Value::from(max_len.clone()),
+            Value::Int(IntValue::I32(1)),
+        ])
+        .expect("max length field name") else {
+            panic!("expected struct value");
+        };
+        assert!(s.fields.contains_key(&max_len));
+
+        for bad in [
+            "_hidden".to_string(),
+            "for".to_string(),
+            "a".repeat(MATLAB_NAME_LENGTH_MAX + 1),
+        ] {
+            let err =
+                error_message(run_struct(vec![Value::from(bad), Value::Num(1.0)]).unwrap_err());
+            assert!(err.contains("valid MATLAB identifiers"));
+        }
+
+        let Value::Struct(s) =
+            run_struct(vec![Value::from("éclair"), Value::Num(1.0)]).expect("unicode field name")
+        else {
+            panic!("expected struct value");
+        };
+        assert!(s.fields.contains_key("éclair"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

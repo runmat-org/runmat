@@ -1,0 +1,91 @@
+{
+  "title": "zoom",
+  "category": "plotting",
+  "keywords": [
+    "zoom",
+    "axes zoom",
+    "figure zoom",
+    "interactive plotting"
+  ],
+  "summary": "Control zoom mode and programmatic axes zooming for figures and axes.",
+  "status": "done",
+  "version_added": "0.5.3",
+  "tests": {
+    "unit": "builtins::plotting::zoom::tests"
+  },
+  "description": "`zoom` toggles figure zoom mode, applies positive numeric zoom factors to axes limits, records and restores zoom baselines, and returns a MATLAB-compatible zoom handle object for `get`/`set` workflows.",
+  "syntax": [
+    "zoom",
+    "zoom(option)",
+    "zoom(factor)",
+    "zoom(fig, option)",
+    "zoom(ax, option)",
+    "zoom(ax, factor)",
+    "z = zoom",
+    "z = zoom(fig)"
+  ],
+  "arguments": [
+    {
+      "name": "option",
+      "type": "'on' | 'off' | 'toggle' | 'xon' | 'yon' | 'reset' | 'out'",
+      "description": "Zoom command. `xon` and `yon` constrain zooming to one axis, `reset` records the current limits as the baseline, and `out` restores that baseline."
+    },
+    {
+      "name": "factor",
+      "type": "positive numeric scalar",
+      "description": "Zoom factor applied around the current axes center. Values greater than 1 zoom in; values between 0 and 1 zoom out."
+    },
+    {
+      "name": "fig",
+      "type": "figure handle",
+      "description": "Target figure handle."
+    },
+    {
+      "name": "ax",
+      "type": "axes handle",
+      "description": "Target axes handle. Explicit axes updates do not change the current axes selection."
+    }
+  ],
+  "examples": [
+    {
+      "description": "Zoom in around the current axes center",
+      "input": "plot(1:10, rand(1, 10));\nzoom(2);",
+      "output": "% Current axes limits shrink by a factor of 2"
+    },
+    {
+      "description": "Use the zoom object with get and set",
+      "input": "z = zoom;\nset(z, 'Enable', 'on', 'Motion', 'horizontal');\nget(z, 'Motion')",
+      "output": "ans = 'horizontal'"
+    }
+  ],
+  "notes": [
+    "Statement-form `zoom()` toggles zoom mode. Output-form `z = zoom()` returns a zoom handle object.",
+    "In output context, `z = zoom(fig)` returns the zoom object for `fig`; in statement context, `zoom(factor)` applies a numeric zoom factor.",
+    "The zoom object supports live `get`/`set` for `Enable`, `Motion`, `Direction`, `RightClickAction`, `UseLegacyExplorationModes`, and callback/context-menu placeholder properties."
+  ],
+  "gpu_residency": "`zoom` mutates plotting metadata only. Numeric zoom factors update stored axes limits directly and do not gather or copy GPU-resident plot data.",
+  "related": [
+    {
+      "label": "xlim",
+      "url": "./xlim"
+    },
+    {
+      "label": "ylim",
+      "url": "./ylim"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "implemented_in": [
+    {
+      "label": "crates/runmat-runtime/src/builtins/plotting/ops/zoom.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/zoom.rs"
+    }
+  ]
+}

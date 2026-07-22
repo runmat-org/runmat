@@ -1,0 +1,12 @@
+{
+  "title": "accumarray",
+  "category": "array/grouping",
+  "keywords": ["accumarray", "accumulate", "grouping", "sparse"],
+  "summary": "Accumulate values into an array by subscript groups.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Grouped accumulation runs on the host."},
+  "tested": {"unit": "builtins::array::grouping::tests"},
+  "description": "`accumarray(subs,data)` groups entries of `data` by one-based subscripts in `subs` and sums each group into the corresponding output element.",
+  "behaviors": ["Supports vector, matrix, and cell-vector subscripts.", "Supports scalar expansion of numeric/logical data, explicit output sizes, common callbacks such as `@mean`, general function-handle callbacks, fill values, and 2-D sparse numeric output."],
+  "examples": [{"description": "Sum by group", "input": "B = accumarray([1;1;2],[10;20;5])", "output": "B = [30; 5]"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/array/grouping.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/grouping.rs"}
+}
