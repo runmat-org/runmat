@@ -814,6 +814,24 @@ fn evaluate_logical(array: LogicalArray, args: &ParsedDiagArgs) -> BuiltinResult
 }
 
 fn evaluate_complex(tensor: ComplexTensor, args: &ParsedDiagArgs) -> BuiltinResult<Value> {
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        let zero = storage
+            .real
+            .zeros_like(1)
+            .value_at(0)
+            .expect("one typed integer zero");
+        let (_, shape) = evaluate_column_major_diag(&tensor.data, &tensor.shape, args, (0.0, 0.0))?;
+        let storage = storage
+            .reorder(|values| {
+                evaluate_column_major_diag(values, &tensor.shape, args, zero.clone())
+                    .map(|(values, _)| values)
+                    .map_err(|e| e.to_string())
+            })
+            .map_err(|e| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {e}")))?;
+        return ComplexTensor::new_integer(storage, shape)
+            .map(Value::ComplexTensor)
+            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")));
+    }
     let (data, shape) = evaluate_column_major_diag(&tensor.data, &tensor.shape, args, (0.0, 0.0))?;
     ComplexTensor::new(data, shape)
         .map(Value::ComplexTensor)
@@ -865,7 +883,7 @@ fn evaluate_char(array: CharArray, args: &ParsedDiagArgs) -> BuiltinResult<Value
     Ok(Value::CharArray(out))
 }
 
-fn evaluate_column_major_diag<T: Copy>(
+fn evaluate_column_major_diag<T: Clone>(
     data: &[T],
     shape: &[usize],
     args: &ParsedDiagArgs,
@@ -934,8 +952,8 @@ fn vector_output_dims(len: usize, args: &ParsedDiagArgs) -> BuiltinResult<(usize
     Ok((size, size))
 }
 
-fn vector_copy<T: Copy>(data: &[T], len: usize) -> Vec<T> {
-    data.iter().copied().take(len).collect()
+fn vector_copy<T: Clone>(data: &[T], len: usize) -> Vec<T> {
+    data.iter().take(len).cloned().collect()
 }
 
 fn matrix_dims(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
@@ -950,7 +968,7 @@ fn matrix_dims(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
     Ok((rows, cols))
 }
 
-fn allocate_out<T: Copy>(rows: usize, cols: usize, value: T) -> BuiltinResult<Vec<T>> {
+fn allocate_out<T: Clone>(rows: usize, cols: usize, value: T) -> BuiltinResult<Vec<T>> {
     let count = rows.checked_mul(cols).ok_or_else(|| {
         diag_error(
             MESSAGE_ID_INVALID_INPUT,
@@ -960,7 +978,7 @@ fn allocate_out<T: Copy>(rows: usize, cols: usize, value: T) -> BuiltinResult<Ve
     Ok(vec![value; count])
 }
 
-fn diag_matrix_from_vector_col_major<T: Copy>(
+fn diag_matrix_from_vector_col_major<T: Clone>(
     data: &[T],
     len: usize,
     offset: isize,
@@ -986,12 +1004,12 @@ fn diag_matrix_from_vector_col_major<T: Copy>(
     for idx in 0..max_len {
         let row = start_row + idx;
         let col = start_col + idx;
-        out[row + col * rows] = data[idx];
+        out[row + col * rows] = data[idx].clone();
     }
     Ok(out)
 }
 
-fn diag_matrix_from_vector_row_major<T: Copy>(
+fn diag_matrix_from_vector_row_major<T: Clone>(
     data: &[T],
     len: usize,
     offset: isize,
@@ -1017,12 +1035,12 @@ fn diag_matrix_from_vector_row_major<T: Copy>(
     for idx in 0..max_len {
         let row = start_row + idx;
         let col = start_col + idx;
-        out[row * cols + col] = data[idx];
+        out[row * cols + col] = data[idx].clone();
     }
     Ok(out)
 }
 
-fn diag_vector_from_matrix_col_major<T: Copy>(
+fn diag_vector_from_matrix_col_major<T: Clone>(
     data: &[T],
     rows: usize,
     cols: usize,
@@ -1042,7 +1060,7 @@ fn diag_vector_from_matrix_col_major<T: Copy>(
     for idx in 0..max_len {
         let row = start_row + idx;
         let col = start_col + idx;
-        out.push(data[row + col * rows]);
+        out.push(data[row + col * rows].clone());
     }
     out
 }

@@ -319,6 +319,23 @@ fn tril_complex_tensor(
     mut tensor: ComplexTensor,
     offset: isize,
 ) -> crate::BuiltinResult<ComplexTensor> {
+    if let Some(storage) = tensor.integer_data.take() {
+        let zero = storage
+            .real
+            .zeros_like(1)
+            .value_at(0)
+            .expect("one typed integer zero");
+        let storage = storage
+            .reorder(|values| {
+                let mut values = values.to_vec();
+                apply_tril_inplace(&mut values, &tensor.shape, offset, zero.clone())
+                    .map_err(|e| e.to_string())?;
+                Ok(values)
+            })
+            .map_err(|e| tril_error_with_message(format!("tril: {e}"), &TRIL_ERROR_INTERNAL))?;
+        return ComplexTensor::new_integer(storage, tensor.shape)
+            .map_err(|e| tril_error_with_message(format!("tril: {e}"), &TRIL_ERROR_INTERNAL));
+    }
     apply_tril_inplace(&mut tensor.data, &tensor.shape, offset, (0.0, 0.0))?;
     Ok(tensor)
 }
