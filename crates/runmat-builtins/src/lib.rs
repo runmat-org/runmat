@@ -340,6 +340,42 @@ impl IntegerStorage {
         }
     }
 
+    /// Returns exact values in storage order.
+    pub fn exact_values(&self) -> Vec<IntValue> {
+        (0..self.len())
+            .map(|index| {
+                self.value_at(index)
+                    .expect("integer storage index is valid")
+            })
+            .collect()
+    }
+
+    /// Rebuilds this homogeneous storage class from exact values.
+    pub fn from_exact_values_like(&self, values: Vec<IntValue>) -> Result<Self, String> {
+        macro_rules! rebuild {
+            ($variant:ident, $value_variant:ident) => {{
+                let mut output = Vec::with_capacity(values.len());
+                for value in values {
+                    let IntValue::$value_variant(value) = value else {
+                        return Err("integer storage class mismatch".into());
+                    };
+                    output.push(value);
+                }
+                Ok(Self::$variant(output))
+            }};
+        }
+        match self {
+            Self::I8(_) => rebuild!(I8, I8),
+            Self::I16(_) => rebuild!(I16, I16),
+            Self::I32(_) => rebuild!(I32, I32),
+            Self::I64(_) => rebuild!(I64, I64),
+            Self::U8(_) => rebuild!(U8, U8),
+            Self::U16(_) => rebuild!(U16, U16),
+            Self::U32(_) => rebuild!(U32, U32),
+            Self::U64(_) => rebuild!(U64, U64),
+        }
+    }
+
     /// Allocates zeros while preserving this integer class.
     pub fn zeros_like(&self, len: usize) -> Self {
         match self {
@@ -585,6 +621,20 @@ impl IntegerComplexStorage {
         let real = self.real.value_at(index)?;
         let imag = self.imag.value_at(index)?;
         Some(!real.is_zero() || !imag.is_zero())
+    }
+
+    /// Applies the same structural reorder independently to both exact components.
+    pub fn reorder(
+        &self,
+        reorder: impl Fn(&[IntValue]) -> Result<Vec<IntValue>, String>,
+    ) -> Result<Self, String> {
+        let real = self
+            .real
+            .from_exact_values_like(reorder(&self.real.exact_values())?)?;
+        let imag = self
+            .imag
+            .from_exact_values_like(reorder(&self.imag.exact_values())?)?;
+        Self::new(real, imag)
     }
 }
 

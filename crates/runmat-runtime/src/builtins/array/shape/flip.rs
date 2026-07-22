@@ -457,6 +457,18 @@ pub(crate) fn flip_tensor_with(
     if tensor.data.is_empty() || dims.is_empty() {
         return Ok(tensor);
     }
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        let storage = storage
+            .from_exact_values_like(flip_generic(
+                &storage.exact_values(),
+                &tensor.shape,
+                dims,
+                builtin,
+            )?)
+            .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
+        return Tensor::new_integer(storage, tensor.shape.clone())
+            .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")));
+    }
     let data = flip_generic(&tensor.data, &tensor.shape, dims, builtin)?;
     Tensor::new(data, tensor.shape.clone())
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
@@ -476,6 +488,15 @@ pub(crate) fn flip_complex_tensor_with(
 ) -> crate::BuiltinResult<ComplexTensor> {
     if tensor.data.is_empty() || dims.is_empty() {
         return Ok(tensor);
+    }
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        let storage = storage
+            .reorder(|values| {
+                flip_generic(values, &tensor.shape, dims, builtin).map_err(|e| e.to_string())
+            })
+            .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
+        return ComplexTensor::new_integer(storage, tensor.shape.clone())
+            .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")));
     }
     let data = flip_generic(&tensor.data, &tensor.shape, dims, builtin)?;
     ComplexTensor::new(data, tensor.shape.clone())

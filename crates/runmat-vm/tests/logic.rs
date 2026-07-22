@@ -409,7 +409,7 @@ fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispat
 #[test]
 fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatch() {
     let vars = execute_source(
-        "a = complex(uint64(reshape([9223372036854775808 18446744073709551615 3 4], 2, 2)), uint64(reshape([7 8 9 10], 2, 2))); p = permute(a, [2 1]); q = ipermute(p, [2 1]); r = repmat(a, 2, 2); s = squeeze(reshape(a, 1, 2, 2, 1)); qr = real(q); rr = real(r); sr = real(s);",
+        "a = complex(uint64(reshape([9223372036854775808 18446744073709551615 3 4], 2, 2)), uint64(reshape([7 8 9 10], 2, 2))); p = permute(a, [2 1]); q = ipermute(p, [2 1]); r = repmat(a, 2, 2); s = squeeze(reshape(a, 1, 2, 2, 1)); f = flip(a); qr = real(q); rr = real(r); sr = real(s);",
     )
     .expect("typed complex integer shape transforms should execute");
 
@@ -458,6 +458,15 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
                         &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 3, 4]),
                         &IntegerStorage::U64(vec![7, 8, 9, 10]),
                     ))
+    ));
+    assert!(matches!(
+        &vars[5],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                == Some((
+                    &IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_808, 4, 3]),
+                    &IntegerStorage::U64(vec![8, 7, 10, 9]),
+                ))
     ));
 }
 
