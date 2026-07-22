@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, StringArray, Tensor, Type, Value,
+    IntValue, IntegerStorage, LogicalArray, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -712,6 +712,42 @@ fn matlab_value_from_f64(data: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Val
     }
 }
 
+fn matlab_value_from_integer(storage: IntegerStorage, shape: Vec<usize>) -> BuiltinResult<Value> {
+    let shape = shape_or_scalar(shape);
+    if storage.len() == 1 {
+        return Ok(Value::Int(integer_storage_scalar(&storage, 0)));
+    }
+    Tensor::new_integer(storage, shape)
+        .map(Value::Tensor)
+        .map_err(|msg| hdf5_error(H5READ_NAME, &ERR_IO, msg))
+}
+
+fn integer_storage_from_scalar(value: IntValue) -> IntegerStorage {
+    match value {
+        IntValue::I8(value) => IntegerStorage::I8(vec![value]),
+        IntValue::I16(value) => IntegerStorage::I16(vec![value]),
+        IntValue::I32(value) => IntegerStorage::I32(vec![value]),
+        IntValue::I64(value) => IntegerStorage::I64(vec![value]),
+        IntValue::U8(value) => IntegerStorage::U8(vec![value]),
+        IntValue::U16(value) => IntegerStorage::U16(vec![value]),
+        IntValue::U32(value) => IntegerStorage::U32(vec![value]),
+        IntValue::U64(value) => IntegerStorage::U64(vec![value]),
+    }
+}
+
+fn integer_storage_scalar(storage: &IntegerStorage, index: usize) -> IntValue {
+    match storage {
+        IntegerStorage::I8(values) => IntValue::I8(values[index]),
+        IntegerStorage::I16(values) => IntValue::I16(values[index]),
+        IntegerStorage::I32(values) => IntValue::I32(values[index]),
+        IntegerStorage::I64(values) => IntValue::I64(values[index]),
+        IntegerStorage::U8(values) => IntValue::U8(values[index]),
+        IntegerStorage::U16(values) => IntValue::U16(values[index]),
+        IntegerStorage::U32(values) => IntValue::U32(values[index]),
+        IntegerStorage::U64(values) => IntValue::U64(values[index]),
+    }
+}
+
 fn matlab_value_from_bool(data: Vec<bool>, shape: Vec<usize>) -> BuiltinResult<Value> {
     let bits: Vec<u8> = data.into_iter().map(u8::from).collect();
     let shape = shape_or_scalar(shape);
@@ -1063,6 +1099,9 @@ mod imp {
                     )
                 })?;
             }
+            WritableData::Integer { storage, shape } => {
+                create_integer_dataset(builtin, &file, &dataset_path, storage, &shape)?;
+            }
             WritableData::Logical { data, shape } => {
                 let row_major = col_major_to_row_major(&data, &shape);
                 let ds = file
@@ -1130,6 +1169,10 @@ mod imp {
                     )
                 })
             }
+            WritableData::Integer { storage, shape } => {
+                validate_full_write_shape(builtin, &shape, &ds.shape())?;
+                write_existing_integer_dataset(builtin, ds, dataset_path, storage, &shape)
+            }
             WritableData::Logical { data, shape } => {
                 validate_full_write_shape(builtin, &shape, &ds.shape())?;
                 let row_major = col_major_to_row_major(&data, &shape);
@@ -1183,6 +1226,10 @@ mod imp {
                 validate_write_selection_shape(builtin, &shape, &selection.count)?;
                 let row_major = col_major_to_row_major(&data, &shape);
                 write_hyperslab::<f64>(builtin, &ds, &selection, row_major)
+            }
+            WritableData::Integer { storage, shape } => {
+                validate_write_selection_shape(builtin, &shape, &selection.count)?;
+                write_integer_hyperslab(builtin, &ds, &selection, storage, &shape)
             }
             WritableData::Logical { data, shape } => {
                 validate_write_selection_shape(builtin, &shape, &selection.count)?;
@@ -1286,6 +1333,10 @@ mod imp {
             data: Vec<f64>,
             shape: Vec<usize>,
         },
+        Integer {
+            storage: IntegerStorage,
+            shape: Vec<usize>,
+        },
         Logical {
             data: Vec<bool>,
             shape: Vec<usize>,
@@ -1303,14 +1354,20 @@ mod imp {
                     data: vec![v],
                     shape: vec![1, 1],
                 }),
-                Value::Int(v) => Ok(Self::Numeric {
-                    data: vec![v.to_f64()],
+                Value::Int(v) => Ok(Self::Integer {
+                    storage: integer_storage_from_scalar(v),
                     shape: vec![1, 1],
                 }),
-                Value::Tensor(t) => Ok(Self::Numeric {
-                    data: t.data,
-                    shape: t.shape,
-                }),
+                Value::Tensor(t) => match t.integer_data {
+                    Some(storage) => Ok(Self::Integer {
+                        storage,
+                        shape: t.shape,
+                    }),
+                    None => Ok(Self::Numeric {
+                        data: t.data,
+                        shape: t.shape,
+                    }),
+                },
                 Value::Bool(v) => Ok(Self::Logical {
                     data: vec![v],
                     shape: vec![1, 1],
@@ -1367,28 +1424,28 @@ mod imp {
                 matlab_value_from_f64(row_major_to_col_major(&raw, &out_shape), out_shape)
             }
             TypeDescriptor::Integer(IntSize::U1) => {
-                read_numeric_dataset::<i8, _>(builtin, ds, &shape, selection, |v| v as f64)
+                read_integer_dataset::<i8, _>(builtin, ds, &shape, selection, IntegerStorage::I8)
             }
             TypeDescriptor::Integer(IntSize::U2) => {
-                read_numeric_dataset::<i16, _>(builtin, ds, &shape, selection, |v| v as f64)
+                read_integer_dataset::<i16, _>(builtin, ds, &shape, selection, IntegerStorage::I16)
             }
             TypeDescriptor::Integer(IntSize::U4) => {
-                read_numeric_dataset::<i32, _>(builtin, ds, &shape, selection, |v| v as f64)
+                read_integer_dataset::<i32, _>(builtin, ds, &shape, selection, IntegerStorage::I32)
             }
             TypeDescriptor::Integer(IntSize::U8) => {
-                read_numeric_dataset::<i64, _>(builtin, ds, &shape, selection, |v| v as f64)
+                read_integer_dataset::<i64, _>(builtin, ds, &shape, selection, IntegerStorage::I64)
             }
             TypeDescriptor::Unsigned(IntSize::U1) => {
-                read_numeric_dataset::<u8, _>(builtin, ds, &shape, selection, |v| v as f64)
+                read_integer_dataset::<u8, _>(builtin, ds, &shape, selection, IntegerStorage::U8)
             }
             TypeDescriptor::Unsigned(IntSize::U2) => {
-                read_numeric_dataset::<u16, _>(builtin, ds, &shape, selection, |v| v as f64)
+                read_integer_dataset::<u16, _>(builtin, ds, &shape, selection, IntegerStorage::U16)
             }
             TypeDescriptor::Unsigned(IntSize::U4) => {
-                read_numeric_dataset::<u32, _>(builtin, ds, &shape, selection, |v| v as f64)
+                read_integer_dataset::<u32, _>(builtin, ds, &shape, selection, IntegerStorage::U32)
             }
             TypeDescriptor::Unsigned(IntSize::U8) => {
-                read_numeric_dataset::<u64, _>(builtin, ds, &shape, selection, |v| v as f64)
+                read_integer_dataset::<u64, _>(builtin, ds, &shape, selection, IntegerStorage::U64)
             }
             TypeDescriptor::Boolean => {
                 let (raw, out_shape) = read_raw_or_slice::<bool>(builtin, ds, &shape, selection)?;
@@ -1419,7 +1476,7 @@ mod imp {
         }
     }
 
-    fn read_numeric_dataset<T, F>(
+    fn read_integer_dataset<T, F>(
         builtin: &'static str,
         ds: &Dataset,
         shape: &[usize],
@@ -1428,11 +1485,10 @@ mod imp {
     ) -> BuiltinResult<Value>
     where
         T: hdf5::H5Type + Copy,
-        F: Fn(T) -> f64,
+        F: Fn(Vec<T>) -> IntegerStorage,
     {
         let (raw, out_shape) = read_raw_or_slice::<T>(builtin, ds, shape, selection)?;
-        let raw: Vec<f64> = raw.into_iter().map(convert).collect();
-        matlab_value_from_f64(row_major_to_col_major(&raw, &out_shape), out_shape)
+        matlab_value_from_integer(convert(row_major_to_col_major(&raw, &out_shape)), out_shape)
     }
 
     fn read_raw_or_slice<T>(
@@ -1466,6 +1522,118 @@ mod imp {
                 )
             })?;
             Ok((raw, shape.to_vec()))
+        }
+    }
+
+    fn create_integer_dataset(
+        builtin: &'static str,
+        file: &File,
+        dataset_path: &str,
+        storage: IntegerStorage,
+        shape: &[usize],
+    ) -> BuiltinResult<()> {
+        macro_rules! create {
+            ($values:expr, $ty:ty) => {
+                create_typed_dataset::<$ty>(builtin, file, dataset_path, $values, shape)
+            };
+        }
+        match storage {
+            IntegerStorage::I8(values) => create!(values, i8),
+            IntegerStorage::I16(values) => create!(values, i16),
+            IntegerStorage::I32(values) => create!(values, i32),
+            IntegerStorage::I64(values) => create!(values, i64),
+            IntegerStorage::U8(values) => create!(values, u8),
+            IntegerStorage::U16(values) => create!(values, u16),
+            IntegerStorage::U32(values) => create!(values, u32),
+            IntegerStorage::U64(values) => create!(values, u64),
+        }
+    }
+
+    fn create_typed_dataset<T>(
+        builtin: &'static str,
+        file: &File,
+        dataset_path: &str,
+        data: Vec<T>,
+        shape: &[usize],
+    ) -> BuiltinResult<()>
+    where
+        T: hdf5::H5Type + Clone,
+    {
+        let row_major = col_major_to_row_major(&data, shape);
+        let ds = file
+            .new_dataset::<T>()
+            .shape(shape)
+            .create_intermediate_group(true)
+            .create(dataset_path)
+            .map_err(|err| {
+                io_error(
+                    builtin,
+                    format!("{builtin}: unable to create dataset {dataset_path}"),
+                    err,
+                )
+            })?;
+        ds.write_raw(&row_major).map_err(|err| {
+            io_error(
+                builtin,
+                format!("{builtin}: unable to write dataset {dataset_path}"),
+                err,
+            )
+        })
+    }
+
+    fn write_existing_integer_dataset(
+        builtin: &'static str,
+        ds: &Dataset,
+        dataset_path: &str,
+        storage: IntegerStorage,
+        shape: &[usize],
+    ) -> BuiltinResult<()> {
+        macro_rules! write {
+            ($values:expr) => {{
+                let row_major = col_major_to_row_major(&$values, shape);
+                ds.write_raw(&row_major).map_err(|err| {
+                    io_error(
+                        builtin,
+                        format!("{builtin}: unable to write existing dataset {dataset_path}"),
+                        err,
+                    )
+                })
+            }};
+        }
+        match storage {
+            IntegerStorage::I8(values) => write!(values),
+            IntegerStorage::I16(values) => write!(values),
+            IntegerStorage::I32(values) => write!(values),
+            IntegerStorage::I64(values) => write!(values),
+            IntegerStorage::U8(values) => write!(values),
+            IntegerStorage::U16(values) => write!(values),
+            IntegerStorage::U32(values) => write!(values),
+            IntegerStorage::U64(values) => write!(values),
+        }
+    }
+
+    fn write_integer_hyperslab(
+        builtin: &'static str,
+        ds: &Dataset,
+        selection: &MatlabSelection,
+        storage: IntegerStorage,
+        shape: &[usize],
+    ) -> BuiltinResult<()> {
+        macro_rules! write {
+            ($values:expr, $ty:ty) => {{
+                let row_major = col_major_to_row_major(&$values, shape);
+                write_hyperslab::<$ty>(builtin, ds, selection, row_major)
+            }};
+        }
+        match storage {
+            IntegerStorage::I8(values) => write!(values, i8),
+            IntegerStorage::I16(values) => write!(values, i16),
+            IntegerStorage::I32(values) => write!(values, i32),
+            IntegerStorage::I64(values) => write!(values, i64),
+            IntegerStorage::U8(values) => write!(values, u8),
+            IntegerStorage::U16(values) => write!(values, u16),
+            IntegerStorage::U32(values) => write!(values, u32),
+            IntegerStorage::U64(values) => write!(values, u64),
         }
     }
 
@@ -1576,6 +1744,9 @@ mod imp {
                     )
                 })?;
             }
+            WritableData::Integer { storage, shape } => {
+                write_integer_attribute(builtin, location, name, storage, &shape)?;
+            }
             WritableData::Logical { data, shape } => {
                 let row_major = col_major_to_row_major(&data, &shape);
                 let attr = location
@@ -1621,6 +1792,48 @@ mod imp {
             }
         }
         Ok(())
+    }
+
+    fn write_integer_attribute(
+        builtin: &'static str,
+        location: &Location,
+        name: &str,
+        storage: IntegerStorage,
+        shape: &[usize],
+    ) -> BuiltinResult<()> {
+        macro_rules! write {
+            ($values:expr, $ty:ty) => {{
+                let row_major = col_major_to_row_major(&$values, shape);
+                let attr = location
+                    .new_attr::<$ty>()
+                    .shape(shape)
+                    .create(name)
+                    .map_err(|err| {
+                        io_error(
+                            builtin,
+                            format!("{builtin}: unable to create attribute {name}"),
+                            err,
+                        )
+                    })?;
+                attr.write_raw(&row_major).map_err(|err| {
+                    io_error(
+                        builtin,
+                        format!("{builtin}: unable to write attribute {name}"),
+                        err,
+                    )
+                })
+            }};
+        }
+        match storage {
+            IntegerStorage::I8(values) => write!(values, i8),
+            IntegerStorage::I16(values) => write!(values, i16),
+            IntegerStorage::I32(values) => write!(values, i32),
+            IntegerStorage::I64(values) => write!(values, i64),
+            IntegerStorage::U8(values) => write!(values, u8),
+            IntegerStorage::U16(values) => write!(values, u16),
+            IntegerStorage::U32(values) => write!(values, u32),
+            IntegerStorage::U64(values) => write!(values, u64),
+        }
     }
 
     fn open_file_read(builtin: &'static str, path: &Path) -> BuiltinResult<File> {
@@ -1923,6 +2136,14 @@ mod imp {
 
     fn matlab_class_for_type(dtype: &TypeDescriptor) -> String {
         match dtype {
+            TypeDescriptor::Integer(IntSize::U1) => "int8",
+            TypeDescriptor::Integer(IntSize::U2) => "int16",
+            TypeDescriptor::Integer(IntSize::U4) => "int32",
+            TypeDescriptor::Integer(IntSize::U8) => "int64",
+            TypeDescriptor::Unsigned(IntSize::U1) => "uint8",
+            TypeDescriptor::Unsigned(IntSize::U2) => "uint16",
+            TypeDescriptor::Unsigned(IntSize::U4) => "uint32",
+            TypeDescriptor::Unsigned(IntSize::U8) => "uint64",
             TypeDescriptor::Boolean => "logical",
             TypeDescriptor::VarLenUnicode | TypeDescriptor::VarLenAscii => "string",
             TypeDescriptor::FixedUnicode(_) | TypeDescriptor::FixedAscii(_) => "char",
@@ -1949,6 +2170,7 @@ mod imp {
 #[cfg(not(target_arch = "wasm32"))]
 mod tests {
     use futures::executor::block_on;
+    use runmat_builtins::{IntValue, IntegerStorage};
     use tempfile::tempdir;
 
     use super::*;
@@ -1981,6 +2203,124 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn hdf5_round_trips_all_integer_classes_without_f64_conversion() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("integer_classes.h5");
+        let cases = [
+            ("i8", IntegerStorage::I8(vec![i8::MIN, -1, 0, i8::MAX])),
+            ("i16", IntegerStorage::I16(vec![i16::MIN, -1, 0, i16::MAX])),
+            ("i32", IntegerStorage::I32(vec![i32::MIN, -1, 0, i32::MAX])),
+            ("i64", IntegerStorage::I64(vec![i64::MIN, -1, 0, i64::MAX])),
+            ("u8", IntegerStorage::U8(vec![0, 1, 127, u8::MAX])),
+            ("u16", IntegerStorage::U16(vec![0, 1, 32_768, u16::MAX])),
+            ("u32", IntegerStorage::U32(vec![0, 1, 1 << 31, u32::MAX])),
+            (
+                "u64",
+                IntegerStorage::U64(vec![0, 1, 1_u64 << 63, u64::MAX]),
+            ),
+        ];
+
+        for (name, storage) in cases {
+            let tensor = Tensor::new_integer(storage.clone(), vec![2, 2]).expect("integer tensor");
+            block_on(h5write_builtin(
+                Value::String(path.display().to_string()),
+                Value::String(format!("/{name}")),
+                Value::Tensor(tensor),
+                Vec::new(),
+            ))
+            .expect("write integer dataset");
+
+            let out = block_on(h5read_builtin(
+                Value::String(path.display().to_string()),
+                Value::String(format!("/{name}")),
+                Vec::new(),
+            ))
+            .expect("read integer dataset");
+            assert!(
+                matches!(out, Value::Tensor(tensor) if tensor.integer_storage() == Some(&storage))
+            );
+
+            let file = hdf5::File::open(&path).expect("open hdf5 file");
+            let dtype = file
+                .dataset(format!("/{name}").as_str())
+                .expect("dataset")
+                .dtype()
+                .and_then(|dtype| dtype.to_descriptor())
+                .expect("type descriptor");
+            assert_eq!(type_name(&dtype), storage.class_name());
+        }
+    }
+
+    #[test]
+    fn hdf5_integer_scalar_selection_and_attribute_preserve_native_types() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("integer_paths.h5");
+
+        block_on(h5write_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/scalar".to_string()),
+            Value::Int(IntValue::U64(u64::MAX)),
+            Vec::new(),
+        ))
+        .expect("write scalar");
+        let scalar = block_on(h5read_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/scalar".to_string()),
+            Vec::new(),
+        ))
+        .expect("read scalar");
+        assert_eq!(scalar, Value::Int(IntValue::U64(u64::MAX)));
+
+        let initial = Tensor::new_integer(IntegerStorage::I64(vec![1, 2, 3, 4]), vec![2, 2])
+            .expect("initial tensor");
+        block_on(h5write_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/selected".to_string()),
+            Value::Tensor(initial),
+            Vec::new(),
+        ))
+        .expect("write selected dataset");
+        let patch = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1])
+            .expect("patch tensor");
+        block_on(h5write_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/selected".to_string()),
+            Value::Tensor(patch),
+            vec![
+                Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+                Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap()),
+            ],
+        ))
+        .expect("write integer selection");
+        let selected = block_on(h5read_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/selected".to_string()),
+            Vec::new(),
+        ))
+        .expect("read selected dataset");
+        assert!(matches!(selected, Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::I64(vec![i64::MIN, i64::MAX, 3, 4]))));
+
+        block_on(h5writeatt_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/selected".to_string()),
+            Value::String("limits".to_string()),
+            Value::Int(IntValue::U32(u32::MAX)),
+        ))
+        .expect("write integer attribute");
+        let file = hdf5::File::open(&path).expect("open hdf5 file");
+        let dtype = file
+            .dataset("/selected")
+            .expect("dataset")
+            .attr("limits")
+            .expect("attribute")
+            .dtype()
+            .and_then(|dtype| dtype.to_descriptor())
+            .expect("type descriptor");
+        assert_eq!(type_name(&dtype), "uint32");
     }
 
     #[test]
