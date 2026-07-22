@@ -472,6 +472,35 @@ fn typed_complex_integer_meshgrid_preserves_exact_components() {
 }
 
 #[test]
+fn typed_complex_integer_perms_preserves_exact_components() {
+    let vars = execute_source(
+        "z = complex(uint64([18446744073709551615 9223372036854775808 7]), uint64([5 6 7])); out = perms(z); real_out = real(out); imag_out = imag(out);",
+    )
+    .expect("perms should preserve typed complex integer storage");
+
+    assert!(matches!(
+        &vars[2],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![6, 3]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![
+                        7, 7, 1_u64 << 63, 1_u64 << 63, u64::MAX, u64::MAX,
+                        1_u64 << 63, u64::MAX, 7, u64::MAX, 7, 1_u64 << 63,
+                        u64::MAX, 1_u64 << 63, u64::MAX, 7, 1_u64 << 63, 7,
+                    ]))
+    ));
+    assert!(matches!(
+        &vars[3],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![6, 3]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![
+                        7, 7, 6, 6, 5, 5, 6, 5, 7, 5, 7, 6, 5, 6, 5, 7, 6, 7,
+                    ]))
+    ));
+}
+
+#[test]
 fn typed_complex_integer_numerical_integration_is_rejected_before_f64_coercion() {
     for operation in [
         "gradient(z)",

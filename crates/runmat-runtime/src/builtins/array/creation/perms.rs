@@ -187,6 +187,16 @@ fn perms_tensor(tensor: Tensor) -> BuiltinResult<Value> {
 fn perms_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let elements = vector_len(&tensor.shape)?;
     let rows = checked_output_rows(elements)?;
+    if let Some(storage) = tensor.integer_data {
+        let storage = storage
+            .reorder(|values| {
+                permuted_columns(values, rows, elements).map_err(|error| error.to_string())
+            })
+            .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")))?;
+        return ComplexTensor::new_integer(storage, vec![rows, elements])
+            .map(Value::ComplexTensor)
+            .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")));
+    }
     let data = permuted_columns(&tensor.data, rows, elements)?;
     ComplexTensor::new(data, vec![rows, elements])
         .map(Value::ComplexTensor)
