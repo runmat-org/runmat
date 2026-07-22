@@ -1,5 +1,7 @@
 use crate::indexing::integer_assignment::{self, IntegerAssignmentValue};
-use crate::indexing::write_slice::deleted_vector_shape;
+use crate::indexing::write_slice::{
+    delete_integer_complex_storage_positions, deleted_vector_shape,
+};
 use crate::interpreter::errors::mex;
 use runmat_builtins::{ComplexTensor, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
 use runmat_runtime::RuntimeError;
@@ -217,12 +219,6 @@ fn tensor_to_complex(t: Tensor) -> ComplexTensor {
 }
 
 fn delete_complex_linear(mut t: ComplexTensor, idx: usize) -> Result<Value, RuntimeError> {
-    if t.integer_data.is_some() {
-        return Err(mex(
-            "UnsupportedTypedComplexInteger",
-            "typed complex integer deletion is not implemented",
-        ));
-    }
     let total = t.rows * t.cols;
     if idx == 0 || idx > total {
         return Err(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -232,6 +228,13 @@ fn delete_complex_linear(mut t: ComplexTensor, idx: usize) -> Result<Value, Runt
             "UnsupportedDeletion",
             "Linear deletion is only supported for vectors",
         ));
+    }
+    if let Some(storage) = t.integer_data.take() {
+        let storage = delete_integer_complex_storage_positions(storage, &[idx - 1]);
+        let shape = deleted_vector_shape(t.rows, t.cols, storage.len());
+        return ComplexTensor::new_integer(storage, shape)
+            .map(Value::ComplexTensor)
+            .map_err(map_assignment_shape_error);
     }
     t.data.remove(idx - 1);
     if t.data.is_empty() {
@@ -597,7 +600,7 @@ pub async fn assign_complex_scalar(
     rhs: &Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
-    if t.integer_data.is_some() {
+    if !delete && t.integer_data.is_some() {
         return Err(mex(
             "UnsupportedTypedComplexInteger",
             "typed complex integer assignment is not implemented",

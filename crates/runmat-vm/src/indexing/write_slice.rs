@@ -1,7 +1,9 @@
 use crate::indexing::integer_assignment::{self, IntegerAssignmentValue};
 use crate::indexing::plan::IndexPlan;
 use crate::interpreter::errors::mex;
-use runmat_builtins::{ComplexTensor, IntegerStorage, SparseTensor, StringArray, Tensor, Value};
+use runmat_builtins::{
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, SparseTensor, StringArray, Tensor, Value,
+};
 use runmat_runtime::RuntimeError;
 
 fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
@@ -50,6 +52,43 @@ fn sorted_unique_positions_desc(
     positions.dedup();
     positions.reverse();
     Ok(positions)
+}
+
+fn delete_integer_storage_positions(
+    storage: IntegerStorage,
+    positions: &[usize],
+) -> IntegerStorage {
+    macro_rules! delete_positions {
+        ($values:expr, $variant:ident) => {{
+            let mut values = $values;
+            for &position in positions {
+                values.remove(position);
+            }
+            IntegerStorage::$variant(values)
+        }};
+    }
+
+    match storage {
+        IntegerStorage::I8(values) => delete_positions!(values, I8),
+        IntegerStorage::I16(values) => delete_positions!(values, I16),
+        IntegerStorage::I32(values) => delete_positions!(values, I32),
+        IntegerStorage::I64(values) => delete_positions!(values, I64),
+        IntegerStorage::U8(values) => delete_positions!(values, U8),
+        IntegerStorage::U16(values) => delete_positions!(values, U16),
+        IntegerStorage::U32(values) => delete_positions!(values, U32),
+        IntegerStorage::U64(values) => delete_positions!(values, U64),
+    }
+}
+
+pub(crate) fn delete_integer_complex_storage_positions(
+    storage: IntegerComplexStorage,
+    positions: &[usize],
+) -> IntegerComplexStorage {
+    IntegerComplexStorage::new(
+        delete_integer_storage_positions(storage.real, positions),
+        delete_integer_storage_positions(storage.imag, positions),
+    )
+    .expect("paired integer complex storage must retain matching classes and lengths")
 }
 
 fn scalar_integer_value(value: &Value) -> Result<IntegerAssignmentValue, RuntimeError> {
@@ -777,12 +816,6 @@ pub fn delete_complex_with_plan(
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
-    if t.integer_data.is_some() {
-        return Err(mex(
-            "UnsupportedTypedComplexInteger",
-            "typed complex integer deletion is not implemented",
-        ));
-    }
     if !is_empty_delete_rhs(rhs) {
         return Err(mex(
             "DeletionRequiresEmptyRhs",
@@ -799,6 +832,13 @@ pub fn delete_complex_with_plan(
         ));
     }
     let positions = sorted_unique_positions_desc(plan, t.data.len())?;
+    if let Some(storage) = t.integer_data.take() {
+        let storage = delete_integer_complex_storage_positions(storage, &positions);
+        let shape = deleted_vector_shape(t.rows, t.cols, storage.len());
+        return ComplexTensor::new_integer(storage, shape)
+            .map(Value::ComplexTensor)
+            .map_err(|error| map_slice_shape_error("complex slice deletion", error));
+    }
     for pos in positions {
         t.data.remove(pos);
     }

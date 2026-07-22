@@ -263,6 +263,35 @@ fn conj_preserves_typed_complex_storage_through_vm_dispatch() {
 }
 
 #[test]
+fn typed_complex_integer_deletion_preserves_paired_exact_storage_through_vm_dispatch() {
+    let vars = execute_source(
+        "a = complex(uint64([9223372036854775808 2 18446744073709551615]), uint64([7 8 9])); a(2) = []; b = complex(int16([1 2 3 4]), int16([-1 -2 -3 -4])); b([4 2]) = [];",
+    )
+    .expect("typed complex integer deletion should execute");
+
+    assert!(matches!(
+        &vars[0],
+        Value::ComplexTensor(tensor)
+            if tensor.shape == vec![1, 2]
+                && tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                    == Some((
+                        &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                        &IntegerStorage::U64(vec![7, 9]),
+                    ))
+    ));
+    assert!(matches!(
+        &vars[1],
+        Value::ComplexTensor(tensor)
+            if tensor.shape == vec![1, 2]
+                && tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                    == Some((
+                        &IntegerStorage::I16(vec![1, 3]),
+                        &IntegerStorage::I16(vec![-1, -3]),
+                    ))
+    ));
+}
+
+#[test]
 fn issparse_reports_sparse_storage_through_vm_dispatch() {
     let vars = execute_source(
         "s = sparse([1 2], [1 2], [10 20], 2, 2); a = issparse(s); b = issparse([10 0; 0 20]); c = issparse(42);",
