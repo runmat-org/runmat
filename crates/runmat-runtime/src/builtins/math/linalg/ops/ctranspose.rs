@@ -12,6 +12,8 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::elementwise::conj::conjugate_integer_imaginary_storage;
+use crate::builtins::math::linalg::ops::transpose::transpose_integer_storage;
 use crate::builtins::math::linalg::ops::transpose_real_sparse_tensor;
 use crate::builtins::math::linalg::type_resolvers::transpose_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -20,7 +22,8 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, StringArray, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -204,6 +207,9 @@ fn ctranspose_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn ctranspose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
+    if ct.integer_data.is_some() {
+        return ctranspose_typed_complex_integer_tensor(ct).map(Value::ComplexTensor);
+    }
     let rank = ct.shape.len();
     if rank == 0 {
         return ctranspose_complex_tensor_value(ct);
@@ -219,6 +225,44 @@ fn ctranspose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         let permuted = permute_complex_tensor(NAME, ct, &order)?;
         ctranspose_complex_tensor_value(permuted)
     }
+}
+
+fn ctranspose_typed_complex_integer_tensor(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {
+    let rank = ct.shape.len();
+    let (storage, shape) = if rank == 0 {
+        (
+            ct.integer_data
+                .expect("typed complex tensor must retain exact storage"),
+            ct.shape,
+        )
+    } else if rank <= 2 {
+        let storage = ct
+            .integer_data
+            .expect("typed complex tensor must retain exact storage");
+        (
+            IntegerComplexStorage::new(
+                transpose_integer_storage(storage.real, ct.rows, ct.cols),
+                transpose_integer_storage(storage.imag, ct.rows, ct.cols),
+            )
+            .map_err(|e| internal_error(format!("{NAME}: {e}")))?,
+            vec![ct.cols, ct.rows],
+        )
+    } else {
+        let order = ctranspose_order(rank);
+        let permuted = permute_complex_tensor(NAME, ct, &order)?;
+        (
+            permuted
+                .integer_data
+                .expect("typed complex permutation must retain exact storage"),
+            permuted.shape,
+        )
+    };
+    IntegerComplexStorage::new(
+        storage.real,
+        conjugate_integer_imaginary_storage(storage.imag),
+    )
+    .and_then(|storage| ComplexTensor::new_integer(storage, shape))
+    .map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 fn ctranspose_complex_tensor_preserve_complex(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {

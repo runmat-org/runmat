@@ -20,7 +20,8 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray,
+    StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -211,11 +212,48 @@ fn transpose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {
         return Ok(ct);
     }
     if rank <= 2 {
+        if let Some(storage) = ct.integer_data {
+            let real = transpose_integer_storage(storage.real, ct.rows, ct.cols);
+            let imag = transpose_integer_storage(storage.imag, ct.rows, ct.cols);
+            return IntegerComplexStorage::new(real, imag)
+                .and_then(|storage| ComplexTensor::new_integer(storage, vec![ct.cols, ct.rows]))
+                .map_err(|e| internal_error(format!("{NAME}: {e}")));
+        }
         ComplexTensor::new(transpose_complex_matrix(&ct), vec![ct.cols, ct.rows])
             .map_err(|e| internal_error(format!("{NAME}: {e}")))
     } else {
         let order = transpose_order(rank);
         permute_complex_tensor(NAME, ct, &order)
+    }
+}
+
+pub(crate) fn transpose_integer_storage(
+    storage: IntegerStorage,
+    rows: usize,
+    cols: usize,
+) -> IntegerStorage {
+    fn transpose_values<T: Copy>(values: Vec<T>, rows: usize, cols: usize) -> Vec<T> {
+        if values.is_empty() {
+            return values;
+        }
+        let mut output = values.clone();
+        for row in 0..rows {
+            for col in 0..cols {
+                output[col + row * cols] = values[row + col * rows];
+            }
+        }
+        output
+    }
+
+    match storage {
+        IntegerStorage::I8(values) => IntegerStorage::I8(transpose_values(values, rows, cols)),
+        IntegerStorage::I16(values) => IntegerStorage::I16(transpose_values(values, rows, cols)),
+        IntegerStorage::I32(values) => IntegerStorage::I32(transpose_values(values, rows, cols)),
+        IntegerStorage::I64(values) => IntegerStorage::I64(transpose_values(values, rows, cols)),
+        IntegerStorage::U8(values) => IntegerStorage::U8(transpose_values(values, rows, cols)),
+        IntegerStorage::U16(values) => IntegerStorage::U16(transpose_values(values, rows, cols)),
+        IntegerStorage::U32(values) => IntegerStorage::U32(transpose_values(values, rows, cols)),
+        IntegerStorage::U64(values) => IntegerStorage::U64(transpose_values(values, rows, cols)),
     }
 }
 

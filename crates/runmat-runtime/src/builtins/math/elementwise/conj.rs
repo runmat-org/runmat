@@ -187,7 +187,7 @@ fn conj_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     }
 }
 
-fn conjugate_integer_imaginary_storage(storage: IntegerStorage) -> IntegerStorage {
+pub(crate) fn conjugate_integer_imaginary_storage(storage: IntegerStorage) -> IntegerStorage {
     match storage {
         IntegerStorage::I8(values) => {
             IntegerStorage::I8(values.into_iter().map(i8::saturating_neg).collect())
