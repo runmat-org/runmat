@@ -392,9 +392,9 @@ pub async fn assign_tensor_scalar(
     }
 }
 
-/// Assigns one sparse matrix element, or deletes one vector element, without
-/// densifying its CSC representation. Structural resizing and selector
-/// assignment deliberately remain in the slice-assignment implementation.
+/// Assigns one sparse matrix element, growing scalar-indexed vectors and
+/// matrices without densifying its CSC representation. Selector assignment
+/// deliberately remains in the slice-assignment implementation.
 pub async fn assign_sparse_scalar(
     sparse: SparseTensor,
     indices: &[usize],
@@ -453,22 +453,47 @@ pub async fn assign_sparse_scalar(
         .map_err(map_assignment_shape_error)?;
         return Ok(Value::SparseTensor(updated));
     }
-    let (row, col) = match indices {
+    let (sparse, row, col) = match indices {
         [index] => {
             let total = sparse
                 .rows
                 .checked_mul(sparse.cols)
                 .ok_or_else(|| mex("IndexOutOfBounds", "Index out of bounds"))?;
-            if *index == 0 || *index > total {
+            if *index == 0 {
                 return Err(mex("IndexOutOfBounds", "Index out of bounds"));
             }
-            ((*index - 1) % sparse.rows, (*index - 1) / sparse.rows)
+            if *index > total {
+                let expanded = if sparse.rows == 1 || (sparse.rows == 0 && sparse.cols == 0) {
+                    sparse.with_expanded_shape(1, *index)
+                } else if sparse.cols == 1 {
+                    sparse.with_expanded_shape(*index, 1)
+                } else {
+                    return Err(mex(
+                        "IndexOutOfBounds",
+                        "Linear sparse growth is only supported for vectors",
+                    ));
+                }
+                .map_err(map_assignment_shape_error)?;
+                if expanded.rows == 1 {
+                    (expanded, 0, *index - 1)
+                } else {
+                    (expanded, *index - 1, 0)
+                }
+            } else {
+                let rows = sparse.rows;
+                (sparse, (*index - 1) % rows, (*index - 1) / rows)
+            }
         }
         [row, column] => {
-            if *row == 0 || *row > sparse.rows || *column == 0 || *column > sparse.cols {
+            if *row == 0 || *column == 0 {
                 return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
             }
-            (*row - 1, *column - 1)
+            let rows = sparse.rows.max(*row);
+            let cols = sparse.cols.max(*column);
+            let expanded = sparse
+                .with_expanded_shape(rows, cols)
+                .map_err(map_assignment_shape_error)?;
+            (expanded, *row - 1, *column - 1)
         }
         _ => {
             return Err(mex(

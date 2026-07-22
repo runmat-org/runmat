@@ -3,7 +3,7 @@ mod test_helpers;
 
 use test_helpers::execute_source;
 
-use runmat_builtins::{IntegerStorage, Value};
+use runmat_builtins::{IntValue, IntegerStorage, Value};
 
 fn logical_truth(value: &Value) -> bool {
     match value {
@@ -268,6 +268,34 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
         Value::SparseTensor(sparse)
             if sparse.shape() == vec![0, 0]
                 && sparse.integer_storage() == Some(&IntegerStorage::U64(vec![]))
+    ));
+
+    let grown = execute_source(
+        "s = sparse(uint64([1 0])); s(1,4) = uint64(9223372036854775808); a = full(s); s(3,6) = uint64(7); b = full(s); z = sparse(uint64([])); z(5) = uint64(9); c = full(z); q = sparse([1]); q(1,4) = 0; d = full(q);",
+    )
+    .expect("execute sparse scalar growth");
+    assert!(matches!(
+        &grown[1],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![1, 4]
+                && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![1, 0, 0, 9_223_372_036_854_775_808]))
+    ));
+    assert!(matches!(
+        &grown[2],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![3, 6]
+                && tensor.integer_storage().is_some()
+                && tensor.integer_storage().and_then(|storage| storage.value_at(17)) == Some(IntValue::U64(7))
+    ));
+    assert!(matches!(
+        &grown[4],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![1, 5]
+                && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![0, 0, 0, 0, 9]))
+    ));
+    assert!(matches!(
+        &grown[6],
+        Value::Tensor(tensor) if tensor.shape == vec![1, 4] && tensor.data == vec![1.0, 0.0, 0.0, 0.0]
     ));
 
     let invalid_slice_err =

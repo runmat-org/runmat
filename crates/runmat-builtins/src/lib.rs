@@ -1151,6 +1151,38 @@ impl SparseTensor {
         self.with_updated_integer_linear_values(&[(index, value)])
     }
 
+    /// Expands sparse dimensions without materializing implicit zero entries.
+    pub fn with_expanded_shape(&self, rows: usize, cols: usize) -> Result<Self, String> {
+        if rows < self.rows || cols < self.cols {
+            return Err(format!(
+                "SparseTensor cannot shrink shape ({}, {}) to ({rows}, {cols})",
+                self.rows, self.cols
+            ));
+        }
+        let mut col_ptrs = self.col_ptrs.clone();
+        col_ptrs.resize(
+            cols.checked_add(1)
+                .ok_or_else(|| "SparseTensor expanded column count overflow".to_string())?,
+            self.nnz(),
+        );
+        if let Some(storage) = self.integer_storage() {
+            return Self::new_integer(
+                rows,
+                cols,
+                col_ptrs,
+                self.row_indices.clone(),
+                storage.clone(),
+            );
+        }
+        Self::new(
+            rows,
+            cols,
+            col_ptrs,
+            self.row_indices.clone(),
+            self.values.clone(),
+        )
+    }
+
     fn checked_assignment_linear_index(&self, row: usize, col: usize) -> Result<usize, String> {
         if row >= self.rows || col >= self.cols {
             return Err(format!(
@@ -1388,6 +1420,24 @@ mod sparse_tensor_tests {
 
         assert!(sparse.with_deleted_rows(&[1, 1]).is_err());
         assert!(sparse.with_deleted_columns(&[3]).is_err());
+    }
+
+    #[test]
+    fn sparse_expansion_preserves_csc_and_integer_storage() {
+        let sparse = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![1, 0],
+            IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_808]),
+        )
+        .expect("sparse");
+        let expanded = sparse.with_expanded_shape(4, 4).expect("expand");
+        assert_eq!(expanded.shape(), vec![4, 4]);
+        assert_eq!(expanded.col_ptrs, vec![0, 1, 2, 2, 2]);
+        assert_eq!(expanded.row_indices, vec![1, 0]);
+        assert_eq!(expanded.integer_storage(), sparse.integer_storage());
+        assert!(expanded.with_expanded_shape(1, 4).is_err());
     }
 
     #[test]
