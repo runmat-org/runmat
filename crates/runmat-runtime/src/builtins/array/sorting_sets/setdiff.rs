@@ -269,6 +269,8 @@ pub async fn evaluate(
     b: Value,
     rest: &[Value],
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, "setdiff")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&b, "setdiff")?;
     let opts = parse_options(rest)?;
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {

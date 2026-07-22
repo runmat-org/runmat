@@ -362,6 +362,8 @@ pub async fn evaluate(
     b: Value,
     rest: &[Value],
 ) -> crate::BuiltinResult<SetxorEvaluation> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, "setxor")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&b, "setxor")?;
     let opts = parse_options(rest)?;
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {

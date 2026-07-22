@@ -301,6 +301,8 @@ async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
 
 /// Evaluate the `union` builtin once and expose all outputs.
 pub async fn evaluate(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<UnionEvaluation> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, "union")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&b, "union")?;
     let opts = parse_options(rest)?;
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {

@@ -297,6 +297,7 @@ async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
 
 /// Evaluate `unique` once and expose all outputs to the caller.
 pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<UniqueEvaluation> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "unique")?;
     let opts = parse_options(rest)?;
     match value {
         Value::GpuTensor(handle) => unique_gpu(handle, &opts).await,
