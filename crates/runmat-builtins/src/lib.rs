@@ -501,9 +501,19 @@ type SparseCscParts<T> = (Vec<usize>, Vec<usize>, Vec<T>);
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComplexTensor {
     pub data: Vec<(f64, f64)>,
+    pub integer_data: Option<IntegerComplexStorage>,
     pub shape: Vec<usize>,
     pub rows: usize,
     pub cols: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IntegerComplexStorage { pub real: IntegerStorage, pub imag: IntegerStorage }
+impl IntegerComplexStorage {
+    pub fn new(real: IntegerStorage, imag: IntegerStorage) -> Result<Self, String> {
+        if real.class_name() != imag.class_name() || real.len() != imag.len() { return Err("complex integer components must have matching class and length".into()); }
+        Ok(Self { real, imag })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1476,10 +1486,19 @@ impl ComplexTensor {
         };
         Ok(ComplexTensor {
             data,
+            integer_data: None,
             shape,
             rows,
             cols,
         })
+    }
+    pub fn new_integer(storage: IntegerComplexStorage, shape: Vec<usize>) -> Result<Self, String> {
+        let expected: usize = shape.iter().product();
+        if storage.real.len() != expected { return Err("complex integer storage length does not match shape".into()); }
+        let data = storage.real.to_f64_vec().into_iter().zip(storage.imag.to_f64_vec()).collect();
+        let mut tensor = Self::new(data, shape)?;
+        tensor.integer_data = Some(storage);
+        Ok(tensor)
     }
     pub fn new_2d(data: Vec<(f64, f64)>, rows: usize, cols: usize) -> Result<Self, String> {
         Self::new(data, vec![rows, cols])
@@ -1495,6 +1514,7 @@ impl ComplexTensor {
         };
         ComplexTensor {
             data: vec![(0.0, 0.0); size],
+            integer_data: None,
             shape,
             rows,
             cols,
