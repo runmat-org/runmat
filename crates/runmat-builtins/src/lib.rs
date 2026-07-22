@@ -932,6 +932,18 @@ impl SparseTensor {
         }
     }
 
+    /// Creates an all-zero sparse matrix retaining an exact integer class.
+    pub fn zeros_with_integer_storage(rows: usize, cols: usize, storage: &IntegerStorage) -> Self {
+        Self {
+            rows,
+            cols,
+            col_ptrs: vec![0; cols.saturating_add(1)],
+            row_indices: Vec::new(),
+            values: Vec::new(),
+            integer_data: Some(storage.zeros_like(0)),
+        }
+    }
+
     pub fn nnz(&self) -> usize {
         self.integer_data
             .as_ref()

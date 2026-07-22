@@ -86,6 +86,74 @@ fn zeros_like_sparse_proto_preserves_sparse_storage() {
 }
 
 #[test]
+fn zeros_like_typed_sparse_proto_preserves_integer_class() {
+    let cases = vec![
+        IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+        IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+        IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+        IntegerStorage::U8(vec![1, u8::MAX]),
+        IntegerStorage::U16(vec![1, u16::MAX]),
+        IntegerStorage::U32(vec![1, u32::MAX]),
+        IntegerStorage::U64(vec![1, u64::MAX]),
+    ];
+
+    for storage in cases {
+        let proto = SparseTensor::new_integer(2, 2, vec![0, 1, 2], vec![0, 1], storage.clone())
+            .expect("typed sparse prototype");
+        let result = runmat_runtime::call_builtin(
+            "zeros",
+            &[
+                Value::Num(3.0),
+                Value::Num(4.0),
+                Value::String("like".into()),
+                Value::SparseTensor(proto),
+            ],
+        )
+        .expect("zeros like typed sparse prototype");
+
+        match result {
+            Value::SparseTensor(sparse) => {
+                assert_eq!(sparse.shape(), vec![3, 4]);
+                assert_eq!(sparse.nnz(), 0);
+                assert_eq!(sparse.col_ptrs, vec![0, 0, 0, 0, 0]);
+                assert!(sparse.row_indices.is_empty());
+                assert!(sparse.values.is_empty());
+                assert_eq!(
+                    sparse.integer_storage(),
+                    Some(&storage.zeros_like(0)),
+                    "class {}",
+                    storage.class_name()
+                );
+            }
+            other => panic!("expected sparse result, got {other:?}"),
+        }
+    }
+
+    let proto = SparseTensor::new_integer(
+        2,
+        5,
+        vec![0, 1, 2, 2, 2, 2],
+        vec![0, 1],
+        IntegerStorage::U64(vec![1, u64::MAX]),
+    )
+    .expect("uint64 sparse prototype");
+    let result = runmat_runtime::call_builtin(
+        "zeros",
+        &[Value::String("like".into()), Value::SparseTensor(proto)],
+    )
+    .expect("zeros like typed sparse prototype shape");
+    match result {
+        Value::SparseTensor(sparse) => {
+            assert_eq!(sparse.shape(), vec![2, 5]);
+            assert_eq!(sparse.col_ptrs, vec![0, 0, 0, 0, 0, 0]);
+            assert_eq!(sparse.integer_storage(), Some(&IntegerStorage::U64(vec![])));
+        }
+        other => panic!("expected sparse result, got {other:?}"),
+    }
+}
+
+#[test]
 fn sparse_full_and_nonzeros_preserve_exact_integer_storage() {
     let cases = vec![
         IntegerStorage::I8(vec![0, i8::MIN, i8::MAX, 0]),

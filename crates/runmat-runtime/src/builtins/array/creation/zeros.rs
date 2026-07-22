@@ -553,7 +553,7 @@ async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
             Ok(Value::ComplexTensor(tensor))
         }
         Value::GpuTensor(handle) => zeros_like_gpu(handle, shape).await,
-        Value::SparseTensor(_) => zeros_sparse(shape),
+        Value::SparseTensor(sparse) => zeros_sparse_like(sparse, shape),
         Value::Tensor(t) => match t.dtype {
             NumericDType::F32 => zeros_single(shape),
             NumericDType::F64 => zeros_double(shape),
@@ -569,9 +569,12 @@ async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
     }
 }
 
-fn zeros_sparse(shape: &[usize]) -> crate::BuiltinResult<Value> {
+fn zeros_sparse_like(proto: &SparseTensor, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match shape {
-        [rows, cols] => Ok(Value::SparseTensor(SparseTensor::zeros(*rows, *cols))),
+        [rows, cols] => Ok(Value::SparseTensor(match proto.integer_storage() {
+            Some(storage) => SparseTensor::zeros_with_integer_storage(*rows, *cols, storage),
+            None => SparseTensor::zeros(*rows, *cols),
+        })),
         other => Err(builtin_error(format!(
             "zeros: sparse 'like' output must be 2-D, got {} dimensions",
             other.len()
