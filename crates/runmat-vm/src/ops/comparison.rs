@@ -8,6 +8,18 @@ fn rel_binary_use_builtin(a: &Value, b: &Value) -> bool {
     !matches!(a, Value::Num(_) | Value::Int(_)) || !matches!(b, Value::Num(_) | Value::Int(_))
 }
 
+fn reject_typed_complex_integer_comparison(a: &Value, b: &Value) -> Result<(), RuntimeError> {
+    if matches!(a, Value::ComplexTensor(tensor) if tensor.integer_data.is_some())
+        || matches!(b, Value::ComplexTensor(tensor) if tensor.integer_data.is_some())
+    {
+        return Err(crate::interpreter::errors::mex(
+            "ComplexIntegerComparison",
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
+    Ok(())
+}
+
 pub struct RelationInvertedSpec {
     pub name: &'static str,
     pub inverse_name: &'static str,
@@ -194,6 +206,7 @@ where
     LTFut: Future<Output = Result<bool, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    reject_typed_complex_integer_comparison(&a, &b)?;
     let push_logical =
         |data: Vec<u8>, shape: Vec<usize>, stack: &mut Vec<Value>| -> Result<(), RuntimeError> {
             if data.len() == 1 && is_scalar_shape(&shape) {
@@ -412,6 +425,7 @@ where
     LTFut: Future<Output = Result<bool, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    reject_typed_complex_integer_comparison(&a, &b)?;
     match (&a, &b) {
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), "ne", b.clone()).await {

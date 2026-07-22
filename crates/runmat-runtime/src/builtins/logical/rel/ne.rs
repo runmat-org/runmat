@@ -139,6 +139,15 @@ fn ne_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     builtin_path = "crate::builtins::logical::rel::ne"
 )]
 async fn ne_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&lhs)
+        || crate::builtins::common::validation::is_typed_complex_integer(&rhs)
+    {
+        return Err(build_runtime_error(
+            "ne: operations involving complex numbers with integer types are not supported",
+        )
+        .with_builtin(BUILTIN_NAME)
+        .build());
+    }
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(result) = try_ne_gpu(a, b).await {
             return result;
