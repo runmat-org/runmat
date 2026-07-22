@@ -212,6 +212,12 @@ async fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         return Ok(value);
     }
 
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        return Err(diff_invalid_input(
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
+
     match value {
         Value::Tensor(tensor) => {
             diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)

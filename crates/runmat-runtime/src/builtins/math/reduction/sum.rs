@@ -353,6 +353,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::reduction::sum"
 )]
 pub(crate) async fn sum_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        return Err(sum_invalid_input(
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
     let input_meta = InputMeta::from_value(&value);
     let parsed = parse_arguments(&rest).await?;
     if matches!(parsed.output, OutputTemplate::Native) {

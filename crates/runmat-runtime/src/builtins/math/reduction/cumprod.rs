@@ -333,6 +333,12 @@ enum CumprodNanMode {
     builtin_path = "crate::builtins::math::reduction::cumprod"
 )]
 async fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        return Err(cumprod_error_with_detail(
+            &CUMPROD_ERROR_INVALID_INPUT,
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
     let (dim, direction, nan_mode) = parse_arguments(&rest)?;
     match value {
         Value::GpuTensor(handle) => cumprod_gpu(handle, dim, direction, nan_mode).await,
