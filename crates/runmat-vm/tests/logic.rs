@@ -221,6 +221,48 @@ fn integer_casts_preserve_complex_storage_for_every_integer_class_through_vm_dis
 }
 
 #[test]
+fn conj_preserves_typed_complex_storage_through_vm_dispatch() {
+    let vars = execute_source(
+        "a = complex(int8([1 -2]), int8([3 -128])); b = conj(a); u = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); v = conj(u); z = conj(complex(uint16(7), uint16(0))); tf = [isreal(b) isreal(v) isreal(z)]; w = conj(complex(7)); tw = isreal(w);",
+    )
+    .expect("typed complex conjugates should execute");
+
+    assert!(matches!(
+        &vars[1],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                == Some((
+                    &IntegerStorage::I8(vec![1, -2]),
+                    &IntegerStorage::I8(vec![-3, i8::MAX]),
+                ))
+    ));
+    assert!(matches!(
+        &vars[3],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                == Some((
+                    &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                    &IntegerStorage::U64(vec![0, 0]),
+                ))
+    ));
+    assert!(matches!(
+        &vars[4],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                == Some((
+                    &IntegerStorage::U16(vec![7]),
+                    &IntegerStorage::U16(vec![0]),
+                ))
+    ));
+    assert!(matches!(
+        &vars[5],
+        Value::LogicalArray(flags) if flags.data == vec![0; 3]
+    ));
+    assert!(matches!(&vars[6], Value::Complex(re, im) if *re == 7.0 && *im == 0.0));
+    assert!(!logical_truth(&vars[7]));
+}
+
+#[test]
 fn issparse_reports_sparse_storage_through_vm_dispatch() {
     let vars = execute_source(
         "s = sparse([1 2], [1 2], [10 20], 2, 2); a = issparse(s); b = issparse([10 0; 0 20]); c = issparse(42);",

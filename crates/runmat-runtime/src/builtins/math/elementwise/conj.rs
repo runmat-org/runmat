@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -166,39 +166,45 @@ fn conj_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn conj_complex_scalar(re: f64, im: f64) -> BuiltinResult<Value> {
-    let imag = -im;
-    if imag == 0.0 && !imag.is_nan() {
-        Ok(Value::Num(re))
-    } else {
-        Ok(Value::Complex(re, imag))
-    }
+    Ok(Value::Complex(re, -im))
 }
 
 fn conj_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let ComplexTensor {
-        data: ct_data,
-        shape,
-        ..
-    } = ct;
-
-    let mut all_real = true;
-    let mut data = Vec::with_capacity(ct_data.len());
-    for (re, im) in ct_data {
-        let imag = -im;
-        if imag != 0.0 || imag.is_nan() {
-            all_real = false;
-        }
-        data.push((re, imag));
-    }
-    if all_real {
-        let real: Vec<f64> = data.into_iter().map(|(re, _)| re).collect();
-        let tensor = Tensor::new(real, shape.clone())
-            .map_err(|e| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, e))?;
-        Ok(tensor::tensor_into_value(tensor))
-    } else {
-        let tensor = ComplexTensor::new(data, shape)
+    if let Some(storage) = ct.integer_data {
+        let storage = IntegerComplexStorage::new(
+            storage.real,
+            conjugate_integer_imaginary_storage(storage.imag),
+        )
+        .map_err(|e| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, e))?;
+        let tensor = ComplexTensor::new_integer(storage, ct.shape)
             .map_err(|e| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, e))?;
         Ok(Value::ComplexTensor(tensor))
+    } else {
+        let data = ct.data.into_iter().map(|(re, im)| (re, -im)).collect();
+        let tensor = ComplexTensor::new(data, ct.shape)
+            .map_err(|e| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, e))?;
+        Ok(Value::ComplexTensor(tensor))
+    }
+}
+
+fn conjugate_integer_imaginary_storage(storage: IntegerStorage) -> IntegerStorage {
+    match storage {
+        IntegerStorage::I8(values) => {
+            IntegerStorage::I8(values.into_iter().map(i8::saturating_neg).collect())
+        }
+        IntegerStorage::I16(values) => {
+            IntegerStorage::I16(values.into_iter().map(i16::saturating_neg).collect())
+        }
+        IntegerStorage::I32(values) => {
+            IntegerStorage::I32(values.into_iter().map(i32::saturating_neg).collect())
+        }
+        IntegerStorage::I64(values) => {
+            IntegerStorage::I64(values.into_iter().map(i64::saturating_neg).collect())
+        }
+        IntegerStorage::U8(values) => IntegerStorage::U8(vec![0; values.len()]),
+        IntegerStorage::U16(values) => IntegerStorage::U16(vec![0; values.len()]),
+        IntegerStorage::U32(values) => IntegerStorage::U32(vec![0; values.len()]),
+        IntegerStorage::U64(values) => IntegerStorage::U64(vec![0; values.len()]),
     }
 }
 
@@ -295,11 +301,14 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn conj_complex_scalar_zero_imag_returns_real() {
+    fn conj_complex_scalar_zero_imag_remains_complex() {
         let result = conj_builtin(Value::Complex(5.0, 0.0)).expect("conj");
         match result {
-            Value::Num(n) => assert!((n - 5.0).abs() < 1e-12),
-            other => panic!("expected scalar result, got {other:?}"),
+            Value::Complex(re, im) => {
+                assert!((re - 5.0).abs() < 1e-12);
+                assert_eq!(im, -0.0);
+            }
+            other => panic!("expected complex scalar result, got {other:?}"),
         }
     }
 
@@ -346,16 +355,57 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn conj_complex_tensor_realises_real_when_imag_zero() {
+    fn conj_complex_tensor_zero_imag_remains_complex() {
         let tensor =
             ComplexTensor::new(vec![(1.0, 0.0), (2.0, -0.0)], vec![2, 1]).expect("complex tensor");
         let result = conj_builtin(Value::ComplexTensor(tensor)).expect("conj");
         match result {
-            Value::Tensor(t) => {
+            Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![1.0, 2.0]);
+                assert_eq!(t.data, vec![(1.0, -0.0), (2.0, 0.0)]);
             }
-            other => panic!("expected real tensor, got {other:?}"),
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn conj_typed_integer_imaginary_storage_preserves_class_and_saturates() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![3, i8::MIN]),
+                IntegerStorage::I8(vec![-3, i8::MAX]),
+            ),
+            (
+                IntegerStorage::I16(vec![3, i16::MIN]),
+                IntegerStorage::I16(vec![-3, i16::MAX]),
+            ),
+            (
+                IntegerStorage::I32(vec![3, i32::MIN]),
+                IntegerStorage::I32(vec![-3, i32::MAX]),
+            ),
+            (
+                IntegerStorage::I64(vec![3, i64::MIN]),
+                IntegerStorage::I64(vec![-3, i64::MAX]),
+            ),
+            (
+                IntegerStorage::U8(vec![3, u8::MAX]),
+                IntegerStorage::U8(vec![0, 0]),
+            ),
+            (
+                IntegerStorage::U16(vec![3, u16::MAX]),
+                IntegerStorage::U16(vec![0, 0]),
+            ),
+            (
+                IntegerStorage::U32(vec![3, u32::MAX]),
+                IntegerStorage::U32(vec![0, 0]),
+            ),
+            (
+                IntegerStorage::U64(vec![3, u64::MAX]),
+                IntegerStorage::U64(vec![0, 0]),
+            ),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(conjugate_integer_imaginary_storage(input), expected);
         }
     }
 
