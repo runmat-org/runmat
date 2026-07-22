@@ -45,6 +45,28 @@ fn short_circuit_or_accepts_boolean_lhs_without_numeric_coercion() {
 }
 
 #[test]
+fn integer_scalar_arithmetic_keeps_int64_and_uint64_exact_through_vm_dispatch() {
+    let vars = execute_source(
+        "u = uint64(9223372036854775808); up = u + 1; down = uint64(18446744073709551615) - 1; lo = int64(-9223372036854775808) + 1; reverse = 1 - int64(-9223372036854775808); same = up .* 1; row = uint64([9223372036854775808 18446744073709551615]); rowdown = row - 1;",
+    )
+    .expect("integer arithmetic should execute");
+
+    assert_eq!(vars[0], Value::Int(IntValue::U64(1_u64 << 63)));
+    assert_eq!(vars[1], Value::Int(IntValue::U64((1_u64 << 63) + 1)));
+    assert_eq!(vars[2], Value::Int(IntValue::U64(u64::MAX - 1)));
+    assert_eq!(vars[3], Value::Int(IntValue::I64(i64::MIN + 1)));
+    assert_eq!(vars[4], Value::Int(IntValue::I64(i64::MAX)));
+    assert_eq!(vars[5], Value::Int(IntValue::U64((1_u64 << 63) + 1)));
+    assert!(matches!(
+        &vars[7],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![1, 2]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![(1_u64 << 63) - 1, u64::MAX - 1]))
+    ));
+}
+
+#[test]
 fn issparse_reports_sparse_storage_through_vm_dispatch() {
     let vars = execute_source(
         "s = sparse([1 2], [1 2], [10 20], 2, 2); a = issparse(s); b = issparse([10 0; 0 20]); c = issparse(42);",

@@ -136,17 +136,16 @@ fn apply_integer_scalar(
     operation: IntegerBinaryOp,
 ) -> Result<Value, String> {
     let mut values = Vec::with_capacity(integer.storage.len());
+    let exact_scalar = exact_integer_scalar(integer.target, scalar);
     for index in 0..integer.storage.len() {
         let integer_value = integer.storage.value_at(index);
-        if matches!(operation, IntegerBinaryOp::Divide) {
-            if let Some(scalar_value) = exact_integer_scalar(integer.target, scalar) {
-                values.push(if integer_is_left {
-                    exact_integer_divide(integer_value, scalar_value)
-                } else {
-                    exact_integer_divide(scalar_value, integer_value)
-                });
-                continue;
-            }
+        if let Some(scalar_value) = exact_scalar.clone() {
+            values.push(if integer_is_left {
+                apply_exact(integer_value, scalar_value, operation)
+            } else {
+                apply_exact(scalar_value, integer_value, operation)
+            });
+            continue;
         }
         if matches!(operation, IntegerBinaryOp::Power)
             && integer_is_left
@@ -627,5 +626,55 @@ mod tests {
         .expect("integer operation")
         .expect("integer path");
         assert_eq!(result, integer(IntegerStorage::U64(vec![0, 1]), vec![1, 2]));
+    }
+
+    #[test]
+    fn integral_scalar_arithmetic_preserves_int64_and_uint64_bits() {
+        let uint64 = Value::Int(IntValue::U64((1_u64 << 63) + 1));
+        let uint64_add =
+            try_integer_binary(&uint64, &Value::Num(1.0), IntegerBinaryOp::Add, "plus")
+                .expect("integer operation")
+                .expect("integer path");
+        assert_eq!(uint64_add, Value::Int(IntValue::U64((1_u64 << 63) + 2)));
+
+        let uint64_subtract = try_integer_binary(
+            &Value::Int(IntValue::U64(u64::MAX)),
+            &Value::Num(1.0),
+            IntegerBinaryOp::Subtract,
+            "minus",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(uint64_subtract, Value::Int(IntValue::U64(u64::MAX - 1)));
+
+        let uint64_multiply = try_integer_binary(
+            &uint64,
+            &Value::Num(1.0),
+            IntegerBinaryOp::Multiply,
+            "times",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(uint64_multiply, uint64);
+
+        let int64_add = try_integer_binary(
+            &Value::Int(IntValue::I64(i64::MIN)),
+            &Value::Num(1.0),
+            IntegerBinaryOp::Add,
+            "plus",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(int64_add, Value::Int(IntValue::I64(i64::MIN + 1)));
+
+        let int64_reverse_subtract = try_integer_binary(
+            &Value::Num(1.0),
+            &Value::Int(IntValue::I64(i64::MIN)),
+            IntegerBinaryOp::Subtract,
+            "minus",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(int64_reverse_subtract, Value::Int(IntValue::I64(i64::MAX)));
     }
 }
