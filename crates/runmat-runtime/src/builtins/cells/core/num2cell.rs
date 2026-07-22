@@ -5,7 +5,8 @@ use std::collections::HashSet;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, StringArray, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -123,23 +124,28 @@ fn num2cell_value(value: Value, grouped_dims: &[usize]) -> BuiltinResult<Value> 
                     .map_err(|err| error(&ERROR_INTERNAL, format!("num2cell: {err}")))
             },
         ),
-        Value::ComplexTensor(tensor) => num2cell_array(
-            tensor.shape.clone(),
-            grouped_dims,
-            |coords| {
-                let (re, im) = tensor.data[linear_col_major(coords, &tensor.shape)];
-                Value::Complex(re, im)
-            },
-            |shape, coords| {
-                let data = coords
-                    .iter()
-                    .map(|coord| tensor.data[linear_col_major(coord, &tensor.shape)])
-                    .collect();
-                ComplexTensor::new(data, shape.to_vec())
-                    .map(Value::ComplexTensor)
-                    .map_err(|err| error(&ERROR_INTERNAL, format!("num2cell: {err}")))
-            },
-        ),
+        Value::ComplexTensor(tensor) => {
+            if let Some(storage) = tensor.integer_data {
+                return num2cell_typed_complex_integer(tensor.shape, storage, grouped_dims);
+            }
+            num2cell_array(
+                tensor.shape.clone(),
+                grouped_dims,
+                |coords| {
+                    let (re, im) = tensor.data[linear_col_major(coords, &tensor.shape)];
+                    Value::Complex(re, im)
+                },
+                |shape, coords| {
+                    let data = coords
+                        .iter()
+                        .map(|coord| tensor.data[linear_col_major(coord, &tensor.shape)])
+                        .collect();
+                    ComplexTensor::new(data, shape.to_vec())
+                        .map(Value::ComplexTensor)
+                        .map_err(|err| error(&ERROR_INTERNAL, format!("num2cell: {err}")))
+                },
+            )
+        }
         Value::LogicalArray(array) => num2cell_array(
             array.shape.clone(),
             grouped_dims,
@@ -200,6 +206,57 @@ fn num2cell_value(value: Value, grouped_dims: &[usize]) -> BuiltinResult<Value> 
             "num2cell: grouped dimensions require an array input",
         )),
     }
+}
+
+fn num2cell_typed_complex_integer(
+    shape: Vec<usize>,
+    storage: IntegerComplexStorage,
+    grouped_dims: &[usize],
+) -> BuiltinResult<Value> {
+    num2cell_array(
+        shape.clone(),
+        grouped_dims,
+        |coords| {
+            let index = linear_col_major(coords, &shape);
+            typed_complex_integer_cell_value(&storage, vec![1, 1], [index])
+                .expect("valid typed complex scalar cell")
+        },
+        |slice_shape, coords| {
+            let indices = coords.iter().map(|coord| linear_col_major(coord, &shape));
+            typed_complex_integer_cell_value(&storage, slice_shape.to_vec(), indices)
+        },
+    )
+}
+
+fn typed_complex_integer_cell_value(
+    storage: &IntegerComplexStorage,
+    shape: Vec<usize>,
+    indices: impl IntoIterator<Item = usize>,
+) -> BuiltinResult<Value> {
+    let indices = indices.into_iter().collect::<Vec<_>>();
+    let real = storage
+        .real
+        .from_exact_values_like(
+            indices
+                .iter()
+                .map(|&index| storage.real.value_at(index).expect("index is in bounds"))
+                .collect(),
+        )
+        .map_err(|err| error(&ERROR_INTERNAL, format!("num2cell: {err}")))?;
+    let imag = storage
+        .imag
+        .from_exact_values_like(
+            indices
+                .iter()
+                .map(|&index| storage.imag.value_at(index).expect("index is in bounds"))
+                .collect(),
+        )
+        .map_err(|err| error(&ERROR_INTERNAL, format!("num2cell: {err}")))?;
+    let storage = IntegerComplexStorage::new(real, imag)
+        .map_err(|err| error(&ERROR_INTERNAL, format!("num2cell: {err}")))?;
+    ComplexTensor::new_integer(storage, shape)
+        .map(Value::ComplexTensor)
+        .map_err(|err| error(&ERROR_INTERNAL, format!("num2cell: {err}")))
 }
 
 fn num2cell_array<F, G>(

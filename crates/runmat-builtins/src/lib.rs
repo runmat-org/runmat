@@ -611,6 +611,10 @@ impl IntegerComplexStorage {
         self.real.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.real.is_empty()
+    }
+
     pub fn class_name(&self) -> &'static str {
         self.real.class_name()
     }
