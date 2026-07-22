@@ -7,8 +7,8 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, NumericDType, ResolveContext, SparseTensor, Tensor,
-    Type, Value,
+    CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, NumericDType, ResolveContext,
+    SparseTensor, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -213,11 +213,120 @@ fn blkdiag_host(args: Vec<Value>) -> BuiltinResult<Value> {
         return Ok(Value::Tensor(tensor));
     }
 
+    if let Some(result) = assemble_typed_complex_integer_blocks(&args) {
+        return result;
+    }
+
     let mut blocks = Vec::with_capacity(args.len());
     for value in args {
         blocks.push(Block::from_value(value)?);
     }
     assemble_blocks(blocks)
+}
+
+/// Assemble same-class complex integer blocks without consulting the lossy f64 mirror.
+///
+/// MATLAB does not permit complex integer arithmetic. `blkdiag` is a structural operation,
+/// however, so same-class typed-complex inputs retain their paired integer components and the
+/// off-diagonal elements are class-correct zeroes. Mixed representations need their own
+/// conversion policy and are rejected before the legacy floating-point assembly path.
+fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>> {
+    let has_typed_complex_integer = args.iter().any(
+        |value| matches!(value, Value::ComplexTensor(tensor) if tensor.integer_data.is_some()),
+    );
+    if !has_typed_complex_integer {
+        return None;
+    }
+
+    let mut tensors = Vec::with_capacity(args.len());
+    let mut prototype: Option<&IntegerComplexStorage> = None;
+    for value in args {
+        let Value::ComplexTensor(tensor) = value else {
+            return Some(Err(error_with_detail(
+                &ERROR_INVALID_INPUT,
+                "typed complex integer blkdiag inputs must all use the same integer class",
+            )));
+        };
+        let Some(storage) = tensor.integer_data.as_ref() else {
+            return Some(Err(error_with_detail(
+                &ERROR_INVALID_INPUT,
+                "typed complex integer blkdiag inputs must all use the same integer class",
+            )));
+        };
+        if let Some(existing) = prototype {
+            if existing.class_name() != storage.class_name() {
+                return Some(Err(error_with_detail(
+                    &ERROR_INVALID_INPUT,
+                    "typed complex integer blkdiag inputs must all use the same integer class",
+                )));
+            }
+        } else {
+            prototype = Some(storage);
+        }
+        if let Err(error) = validate_matrix_shape(&tensor.shape) {
+            return Some(Err(error));
+        }
+        tensors.push(tensor);
+    }
+
+    let prototype = prototype.expect("typed complex input establishes an integer class");
+    let rows = match tensors
+        .iter()
+        .try_fold(0usize, |total, tensor| total.checked_add(tensor.rows))
+    {
+        Some(rows) => rows,
+        None => return Some(Err(size_overflow())),
+    };
+    let cols = match tensors
+        .iter()
+        .try_fold(0usize, |total, tensor| total.checked_add(tensor.cols))
+    {
+        Some(cols) => cols,
+        None => return Some(Err(size_overflow())),
+    };
+    let len = match checked_len(rows, cols) {
+        Ok(len) => len,
+        Err(error) => return Some(Err(error)),
+    };
+    let mut real = prototype.real.zeros_like(len).exact_values();
+    let mut imag = prototype.imag.zeros_like(len).exact_values();
+    let mut row_offset = 0usize;
+    let mut col_offset = 0usize;
+    for tensor in tensors {
+        let storage = tensor
+            .integer_data
+            .as_ref()
+            .expect("typed complex input was checked above");
+        let source_real = storage.real.exact_values();
+        let source_imag = storage.imag.exact_values();
+        for col in 0..tensor.cols {
+            for row in 0..tensor.rows {
+                let src = row + col * tensor.rows;
+                let dst = (row_offset + row) + (col_offset + col) * rows;
+                real[dst] = source_real[src].clone();
+                imag[dst] = source_imag[src].clone();
+            }
+        }
+        row_offset += tensor.rows;
+        col_offset += tensor.cols;
+    }
+    let real = match prototype.real.from_exact_values_like(real) {
+        Ok(storage) => storage,
+        Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
+    };
+    let imag = match prototype.imag.from_exact_values_like(imag) {
+        Ok(storage) => storage,
+        Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
+    };
+    let storage = match IntegerComplexStorage::new(real, imag) {
+        Ok(storage) => storage,
+        Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
+    };
+    Some(
+        ComplexTensor::new_integer(storage, vec![rows, cols])
+            .map(Value::ComplexTensor)
+            .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail)),
+    )
 }
 
 fn assemble_blocks(blocks: Vec<Block>) -> BuiltinResult<Value> {

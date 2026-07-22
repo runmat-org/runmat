@@ -388,6 +388,44 @@ fn typed_complex_integer_fft_shifts_preserve_exact_components() {
 }
 
 #[test]
+fn typed_complex_integer_blkdiag_preserves_exact_components() {
+    let vars = execute_source(
+        "a = complex(uint64([18446744073709551615 9223372036854775808]), uint64([5 6])); b = complex(uint64([7; 8]), uint64([9; 10])); out = blkdiag(a, b); real_out = real(out); imag_out = imag(out);",
+    )
+    .expect("blkdiag should preserve typed complex integer storage");
+
+    assert!(matches!(
+        &vars[3],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![3, 3]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![u64::MAX, 0, 0, 1_u64 << 63, 0, 0, 0, 7, 8]))
+    ));
+    assert!(matches!(
+        &vars[4],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![3, 3]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![5, 0, 0, 6, 0, 0, 0, 9, 10]))
+    ));
+}
+
+#[test]
+fn typed_complex_integer_blkdiag_rejects_mixed_representations_before_f64_coercion() {
+    for source in [
+        "a = complex(uint64(9223372036854775808), uint64(1)); b = complex(uint32(2), uint32(3)); out = blkdiag(a, b);",
+        "a = complex(uint64(9223372036854775808), uint64(1)); out = blkdiag(a, 2);",
+    ] {
+        let err = execute_source(source).expect_err("mixed blkdiag inputs must not coerce to f64");
+        assert!(
+            err.to_string()
+                .contains("typed complex integer blkdiag inputs must all use the same integer class"),
+            "unexpected error: {err}"
+        );
+    }
+}
+
+#[test]
 fn typed_complex_integer_numerical_integration_is_rejected_before_f64_coercion() {
     for operation in [
         "gradient(z)",
