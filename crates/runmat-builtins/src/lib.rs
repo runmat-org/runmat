@@ -3,8 +3,7 @@ pub mod symbolic;
 use runmat_gc_api::{GcHandle, Trace, Tracer};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
@@ -496,6 +495,8 @@ pub struct SparseTensor {
     /// Exact homogeneous backing storage for typed integer sparse values.
     pub integer_data: Option<IntegerStorage>,
 }
+
+type SparseCscParts<T> = (Vec<usize>, Vec<usize>, Vec<T>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComplexTensor {
@@ -1033,106 +1034,133 @@ impl SparseTensor {
         self.integer_data.as_ref()
     }
 
-    fn checked_entry_position(
+    fn merged_linear_updates<T: Clone>(
         &self,
-        row: usize,
-        col: usize,
-    ) -> Result<Result<usize, usize>, String> {
-        if row >= self.rows || col >= self.cols {
-            return Err(format!(
-                "SparseTensor assignment index ({}, {}) exceeds shape ({}, {})",
-                row, col, self.rows, self.cols
-            ));
+        updates: &[(usize, T)],
+        mut stored_value: impl FnMut(usize) -> Result<T, String>,
+        is_zero: impl Fn(&T) -> bool,
+    ) -> Result<SparseCscParts<T>, String> {
+        let total = self
+            .rows
+            .checked_mul(self.cols)
+            .ok_or_else(|| "SparseTensor assignment dimensions overflow usize".to_string())?;
+        let mut latest = BTreeMap::new();
+        for (index, value) in updates {
+            if *index >= total {
+                return Err(format!(
+                    "SparseTensor assignment linear index {} exceeds {} elements",
+                    index, total
+                ));
+            }
+            latest.insert(*index, value.clone());
         }
-        let start = self.col_ptrs[col];
-        let end = self.col_ptrs[col + 1];
-        Ok(self.row_indices[start..end]
-            .binary_search(&row)
-            .map(|offset| start + offset)
-            .map_err(|offset| start + offset))
+
+        let capacity = self
+            .nnz()
+            .checked_add(latest.len())
+            .ok_or_else(|| "SparseTensor assignment nnz overflow".to_string())?;
+        let mut col_ptrs = Vec::with_capacity(self.cols.saturating_add(1));
+        let mut row_indices = Vec::new();
+        let mut values = Vec::new();
+        row_indices
+            .try_reserve_exact(capacity)
+            .map_err(|error| format!("SparseTensor assignment allocation failed: {error}"))?;
+        values
+            .try_reserve_exact(capacity)
+            .map_err(|error| format!("SparseTensor assignment allocation failed: {error}"))?;
+        col_ptrs.push(0);
+
+        for col in 0..self.cols {
+            let column_start = col * self.rows;
+            let column_end = column_start + self.rows;
+            let mut stored = self.col_ptrs[col];
+            let stored_end = self.col_ptrs[col + 1];
+            for (&linear, value) in latest.range(column_start..column_end) {
+                let row = linear - column_start;
+                while stored < stored_end && self.row_indices[stored] < row {
+                    row_indices.push(self.row_indices[stored]);
+                    values.push(stored_value(stored)?);
+                    stored += 1;
+                }
+                if stored < stored_end && self.row_indices[stored] == row {
+                    stored += 1;
+                }
+                if !is_zero(value) {
+                    row_indices.push(row);
+                    values.push(value.clone());
+                }
+            }
+            while stored < stored_end {
+                row_indices.push(self.row_indices[stored]);
+                values.push(stored_value(stored)?);
+                stored += 1;
+            }
+            col_ptrs.push(values.len());
+        }
+        Ok((col_ptrs, row_indices, values))
     }
 
-    fn adjusted_col_ptrs(&self, col: usize, delta: isize) -> Result<Vec<usize>, String> {
-        let mut col_ptrs = self.col_ptrs.clone();
-        for pointer in col_ptrs.iter_mut().skip(col + 1) {
-            *pointer = if delta > 0 {
-                pointer
-                    .checked_add(delta as usize)
-                    .ok_or_else(|| "SparseTensor assignment nnz overflow".to_string())?
-            } else {
-                pointer.checked_sub(delta.unsigned_abs()).ok_or_else(|| {
-                    "SparseTensor assignment produced invalid column pointers".to_string()
-                })?
-            };
-        }
-        Ok(col_ptrs)
-    }
-
-    /// Returns a CSC-preserving floating sparse update. Assigning zero removes
-    /// a stored entry and keeps the existing direct f64 sparse representation.
-    pub fn with_updated_value(&self, row: usize, col: usize, value: f64) -> Result<Self, String> {
+    /// Applies floating updates in one CSC merge. Repeated indices use the
+    /// final assignment value and zeros are elided without densifying.
+    pub fn with_updated_linear_values(&self, updates: &[(usize, f64)]) -> Result<Self, String> {
         if self.integer_data.is_some() {
             return Err("cannot assign floating sparse value to typed integer storage".to_string());
         }
-        let position = self.checked_entry_position(row, col)?;
-        let mut row_indices = self.row_indices.clone();
-        let mut values = self.values.clone();
-        let mut col_ptrs = self.col_ptrs.clone();
-        match position {
-            Ok(position) if value == 0.0 => {
-                row_indices.remove(position);
-                values.remove(position);
-                col_ptrs = self.adjusted_col_ptrs(col, -1)?;
-            }
-            Ok(position) => values[position] = value,
-            Err(position) if value != 0.0 => {
-                row_indices.insert(position, row);
-                values.insert(position, value);
-                col_ptrs = self.adjusted_col_ptrs(col, 1)?;
-            }
-            Err(_) => {}
-        }
+        let (col_ptrs, row_indices, values) = self.merged_linear_updates(
+            updates,
+            |index| Ok(self.values[index]),
+            |value| *value == 0.0,
+        )?;
         Self::new(self.rows, self.cols, col_ptrs, row_indices, values)
     }
 
-    /// Returns a CSC-preserving exact integer sparse update. The value must
-    /// already be in this sparse matrix's class; coercion belongs to the VM
-    /// assignment layer so core storage never relies on f64 compatibility data.
+    /// Applies exact integer updates in one CSC merge. Values must already be
+    /// in this sparse matrix's class; coercion belongs to the VM layer.
+    pub fn with_updated_integer_linear_values(
+        &self,
+        updates: &[(usize, IntValue)],
+    ) -> Result<Self, String> {
+        let storage = self
+            .integer_data
+            .as_ref()
+            .ok_or_else(|| "cannot assign integer sparse value to floating storage".to_string())?;
+        let (col_ptrs, row_indices, values) = self.merged_linear_updates(
+            updates,
+            |index| {
+                storage
+                    .value_at(index)
+                    .ok_or_else(|| "SparseTensor integer storage is inconsistent".to_string())
+            },
+            IntValue::is_zero,
+        )?;
+        Self::new_integer_like(self.rows, self.cols, col_ptrs, row_indices, values, storage)
+    }
+
+    pub fn with_updated_value(&self, row: usize, col: usize, value: f64) -> Result<Self, String> {
+        let index = self.checked_assignment_linear_index(row, col)?;
+        self.with_updated_linear_values(&[(index, value)])
+    }
+
     pub fn with_updated_integer_value(
         &self,
         row: usize,
         col: usize,
         value: IntValue,
     ) -> Result<Self, String> {
-        let storage = self
-            .integer_data
-            .as_ref()
-            .ok_or_else(|| "cannot assign integer sparse value to floating storage".to_string())?;
-        let position = self.checked_entry_position(row, col)?;
-        let mut row_indices = self.row_indices.clone();
-        let mut values = (0..storage.len())
-            .map(|index| {
-                storage
-                    .value_at(index)
-                    .ok_or_else(|| "SparseTensor integer storage is inconsistent".to_string())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut col_ptrs = self.col_ptrs.clone();
-        match position {
-            Ok(position) if value.is_zero() => {
-                row_indices.remove(position);
-                values.remove(position);
-                col_ptrs = self.adjusted_col_ptrs(col, -1)?;
-            }
-            Ok(position) => values[position] = value,
-            Err(position) if !value.is_zero() => {
-                row_indices.insert(position, row);
-                values.insert(position, value);
-                col_ptrs = self.adjusted_col_ptrs(col, 1)?;
-            }
-            Err(_) => {}
+        let index = self.checked_assignment_linear_index(row, col)?;
+        self.with_updated_integer_linear_values(&[(index, value)])
+    }
+
+    fn checked_assignment_linear_index(&self, row: usize, col: usize) -> Result<usize, String> {
+        if row >= self.rows || col >= self.cols {
+            return Err(format!(
+                "SparseTensor assignment index ({}, {}) exceeds shape ({}, {})",
+                row, col, self.rows, self.cols
+            ));
         }
-        Self::new_integer_like(self.rows, self.cols, col_ptrs, row_indices, values, storage)
+        col.checked_mul(self.rows)
+            .and_then(|base| base.checked_add(row))
+            .ok_or_else(|| "SparseTensor assignment linear index overflow".to_string())
     }
 
     pub fn class_name(&self) -> &'static str {

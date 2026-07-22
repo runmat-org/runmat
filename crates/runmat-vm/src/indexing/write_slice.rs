@@ -1,7 +1,7 @@
 use crate::indexing::integer_assignment::{self, IntegerAssignmentValue};
 use crate::indexing::plan::IndexPlan;
 use crate::interpreter::errors::mex;
-use runmat_builtins::{ComplexTensor, IntegerStorage, StringArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntegerStorage, SparseTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
 
 fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
@@ -21,7 +21,7 @@ fn is_empty_delete_rhs(value: &Value) -> bool {
         value,
         Value::ComplexTensor(t)
             if t.data.is_empty() || t.rows == 0 || t.cols == 0
-    )
+    ) || matches!(value, Value::OutputList(values) if values.is_empty())
 }
 
 pub(crate) fn deleted_vector_shape(rows: usize, _cols: usize, len: usize) -> Vec<usize> {
@@ -411,7 +411,7 @@ pub async fn materialize_rhs_real_for_plan(
     }
 }
 
-async fn materialize_integer_rhs_for_plan(
+pub(crate) async fn materialize_integer_rhs_for_plan(
     rhs: &Value,
     plan: &IndexPlan,
 ) -> Result<Vec<IntegerAssignmentValue>, RuntimeError> {
@@ -524,6 +524,54 @@ pub fn scatter_real_with_plan(
         t.data[dst as usize] = value;
     }
     Ok(())
+}
+
+/// Assigns an index-plan selection into a host-resident CSC sparse matrix.
+/// Sparse storage owns the batched merge; this module owns MATLAB selector and
+/// RHS broadcasting semantics shared with dense tensor assignment.
+pub async fn assign_sparse_with_plan(
+    sparse: SparseTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    if is_empty_delete_rhs(rhs) {
+        return Err(mex(
+            "SparseAssignmentUnsupported",
+            "Sparse indexed deletion is not yet supported",
+        ));
+    }
+    if plan.indices.is_empty() {
+        return Ok(Value::SparseTensor(sparse));
+    }
+    let updated = if let Some(storage) = sparse.integer_storage() {
+        let rhs_values = materialize_integer_rhs_for_plan(rhs, plan).await?;
+        let updates = plan
+            .indices
+            .iter()
+            .zip(rhs_values.iter())
+            .map(|(&index, value)| {
+                (
+                    index as usize,
+                    integer_assignment::scalar_value(storage, value),
+                )
+            })
+            .collect::<Vec<_>>();
+        sparse
+            .with_updated_integer_linear_values(&updates)
+            .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
+    } else {
+        let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+        let updates = plan
+            .indices
+            .iter()
+            .zip(rhs_values)
+            .map(|(&index, value)| (index as usize, value))
+            .collect::<Vec<_>>();
+        sparse
+            .with_updated_linear_values(&updates)
+            .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
+    };
+    Ok(Value::SparseTensor(updated))
 }
 
 pub async fn assign_tensor_with_plan(
@@ -1006,12 +1054,14 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        assign_tensor_with_plan, build_complex_rhs_view, build_string_rhs_view,
-        delete_tensor_with_plan, map_acceleration_error,
+        assign_sparse_with_plan, assign_tensor_with_plan, build_complex_rhs_view,
+        build_string_rhs_view, delete_tensor_with_plan, map_acceleration_error,
     };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, ComplexTensor, IntegerStorage, StringArray, Tensor, Value};
+    use runmat_builtins::{
+        CellArray, ComplexTensor, IntegerStorage, SparseTensor, StringArray, Tensor, Value,
+    };
 
     #[test]
     fn integer_plan_assignment_preserves_exact_uint64_rhs() {
@@ -1066,6 +1116,70 @@ mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::I8(vec![i8::MAX, i8::MAX]))
         );
+    }
+
+    #[test]
+    fn sparse_integer_plan_assignment_preserves_exact_values_and_last_write_wins() {
+        let sparse =
+            SparseTensor::new_integer(2, 2, vec![0, 0, 0], vec![], IntegerStorage::U64(vec![]))
+                .expect("sparse");
+        let rhs = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![1, 9_223_372_036_854_775_808, 3, u64::MAX]),
+                vec![1, 4],
+            )
+            .expect("rhs"),
+        );
+        let plan = IndexPlan::new(vec![0, 3, 1, 3], vec![1, 4], vec![4], 1, vec![2, 2]);
+        let result = block_on(assign_sparse_with_plan(sparse, &plan, &rhs)).expect("assign");
+
+        let Value::SparseTensor(output) = result else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(output.col_ptrs, vec![0, 2, 3]);
+        assert_eq!(output.row_indices, vec![0, 1, 1]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1, 3, u64::MAX]))
+        );
+    }
+
+    #[test]
+    fn sparse_integer_plan_assignment_broadcasts_exact_rhs_across_rows() {
+        let sparse =
+            SparseTensor::new_integer(2, 2, vec![0, 0, 0], vec![], IntegerStorage::I8(vec![]))
+                .expect("sparse");
+        let rhs = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I8(vec![5, 6]), vec![1, 2]).expect("rhs"),
+        );
+        let plan = IndexPlan::new(vec![0, 1, 2, 3], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+        let result = block_on(assign_sparse_with_plan(sparse, &plan, &rhs)).expect("assign");
+
+        let Value::SparseTensor(output) = result else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(output.col_ptrs, vec![0, 2, 4]);
+        assert_eq!(output.row_indices, vec![0, 1, 0, 1]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I8(vec![5, 5, 6, 6]))
+        );
+    }
+
+    #[test]
+    fn sparse_real_plan_assignment_elides_zero_values() {
+        let sparse = SparseTensor::new(2, 2, vec![0, 2, 3], vec![0, 1, 0], vec![1.0, 2.0, 3.0])
+            .expect("sparse");
+        let plan = IndexPlan::new(vec![0, 1], vec![2, 1], vec![2, 1], 2, vec![2, 2]);
+        let result =
+            block_on(assign_sparse_with_plan(sparse, &plan, &Value::Num(0.0))).expect("assign");
+
+        let Value::SparseTensor(output) = result else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(output.col_ptrs, vec![0, 0, 1]);
+        assert_eq!(output.row_indices, vec![0]);
+        assert_eq!(output.values, vec![3.0]);
     }
 
     #[test]

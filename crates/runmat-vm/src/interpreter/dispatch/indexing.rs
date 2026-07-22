@@ -1696,7 +1696,20 @@ pub async fn dispatch_indexing(
                         )?,
                     );
                 }
-                Value::SparseTensor(_) => return Err(sparse_assignment_unsupported()),
+                Value::SparseTensor(sparse) => {
+                    if delete {
+                        return Err(sparse_assignment_unsupported());
+                    }
+                    let shape = sparse.shape();
+                    let selectors =
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape)
+                            .await
+                            .map_err(|e| map_slice_plan_error("sparse slice assign", e))?;
+                    let plan = build_index_plan(&selectors, *dims, &shape)
+                        .map_err(|e| map_slice_plan_error("sparse slice assign", e))?;
+                    stack
+                        .push(idx_write_slice::assign_sparse_with_plan(sparse, &plan, &rhs).await?);
+                }
                 Value::StringArray(mut sa) => {
                     if delete {
                         return Err(crate::interpreter::errors::mex(
@@ -2304,7 +2317,31 @@ pub async fn dispatch_indexing(
                     };
                     stack.push(updated);
                 }
-                Value::SparseTensor(_) => return Err(sparse_assignment_unsupported()),
+                Value::SparseTensor(sparse) => {
+                    if delete {
+                        return Err(sparse_assignment_unsupported());
+                    }
+                    let shape = sparse.shape();
+                    let vm_plan = build_expr_slice_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &shape,
+                        },
+                        vars,
+                    )
+                    .await?;
+                    stack.push(
+                        idx_write_slice::assign_sparse_with_plan(sparse, &vm_plan, &rhs).await?,
+                    );
+                }
                 Value::Object(obj) => {
                     if let Some(err) = missing_member_index_overload_error(
                         &Value::Object(obj.clone()),

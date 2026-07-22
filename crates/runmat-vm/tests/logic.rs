@@ -203,26 +203,28 @@ fn typed_sparse_slice_indexing_preserves_uint64_storage() {
 }
 
 #[test]
-fn sparse_scalar_assignment_updates_entries_and_keeps_slice_errors_stable() {
+fn sparse_assignment_updates_scalar_and_selector_entries() {
     let vars = execute_source(
-        "s = sparse([1], [1], [5], 2, 2); s(2,2) = 7; s(1) = 0; f = full(s); n = nnz(s);",
+        "s = sparse([1], [1], [5], 2, 2); s(2,2) = 7; s(1) = 0; s(:,1) = [1;2]; s(1:2,2) = [3;4]; s([3 3]) = [5 6]; f = full(s); n = nnz(s); t = sparse(uint64([0 0;0 0])); t(:,1) = uint64([1;9223372036854775808]);",
     )
-    .expect("execute scalar sparse assignment");
+    .expect("execute sparse assignment");
     assert!(matches!(
         &vars[1],
-        Value::Tensor(tensor) if tensor.data == vec![0.0, 0.0, 0.0, 7.0]
+        Value::Tensor(tensor) if tensor.data == vec![1.0, 2.0, 6.0, 4.0]
     ));
-    assert!(matches!(&vars[2], Value::Num(value) if *value == 1.0));
+    assert!(matches!(&vars[2], Value::Num(value) if *value == 4.0));
+    assert!(matches!(
+        &vars[3],
+        Value::SparseTensor(sparse)
+            if sparse.col_ptrs == vec![0, 2, 2]
+                && sparse.row_indices == vec![0, 1]
+                && sparse.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![1, 9_223_372_036_854_775_808]))
+    ));
 
-    let slice_err = execute_source("s = sparse([1], [1], [5], 2, 2); s(:,1) = 0;").unwrap_err();
+    let deletion_err = execute_source("s = sparse([1], [1], [5], 2, 2); s(:,1) = [];").unwrap_err();
     assert_eq!(
-        slice_err.identifier(),
-        Some("RunMat:SparseAssignmentUnsupported")
-    );
-
-    let range_err = execute_source("s = sparse([1], [1], [5], 2, 2); s(1:2,1) = 0;").unwrap_err();
-    assert_eq!(
-        range_err.identifier(),
+        deletion_err.identifier(),
         Some("RunMat:SparseAssignmentUnsupported")
     );
 
@@ -230,7 +232,7 @@ fn sparse_scalar_assignment_updates_entries_and_keeps_slice_errors_stable() {
         execute_source("s = sparse([1], [1], [5], 2, 2); s([0]) = 0;").unwrap_err();
     assert_eq!(
         invalid_slice_err.identifier(),
-        Some("RunMat:SparseAssignmentUnsupported")
+        Some("RunMat:IndexOutOfBounds")
     );
 }
 
