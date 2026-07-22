@@ -35,7 +35,7 @@ const SPARSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Sparse double matrix.",
+    description: "Sparse matrix.",
 }];
 
 const SPARSE_INPUT_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -288,7 +288,7 @@ fn sparse_error(
 #[runtime_builtin(
     name = "sparse",
     category = "array/creation",
-    summary = "Create sparse double matrices from full arrays or row/column/value triplets.",
+    summary = "Create sparse matrices from full arrays or row/column/value triplets.",
     keywords = "sparse,csc,matrix,nonzero,gpu",
     accel = "custom",
     type_resolver(sparse_type),
@@ -1555,11 +1555,11 @@ fn sparse_from_logical_array(logical: &LogicalArray) -> BuiltinResult<SparseTens
 }
 
 fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
-    let rows_vec = numeric_vector(&args[0], "i")?;
-    let cols_vec = numeric_vector(&args[1], "j")?;
-    let values_vec = numeric_vector(&args[2], "v")?;
+    let rows_vec = triplet_subscripts(&args[0], "row")?;
+    let cols_vec = triplet_subscripts(&args[1], "column")?;
+    let values = triplet_values(&args[2])?;
 
-    let target_length = rows_vec.len().max(cols_vec.len()).max(values_vec.len());
+    let target_length = rows_vec.len().max(cols_vec.len()).max(values.len());
 
     let rows_vec = if rows_vec.len() == 1 && target_length > 1 {
         vec![rows_vec[0]; target_length]
@@ -1571,13 +1571,9 @@ fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
     } else {
         cols_vec
     };
-    let values_vec = if values_vec.len() == 1 && target_length > 1 {
-        vec![values_vec[0]; target_length]
-    } else {
-        values_vec
-    };
+    let values = values.expand_to(target_length)?;
 
-    if rows_vec.len() != cols_vec.len() || rows_vec.len() != values_vec.len() {
+    if rows_vec.len() != cols_vec.len() || rows_vec.len() != values.len() {
         return Err(sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
             "sparse: i, j, and v must have the same number of elements",
@@ -1599,12 +1595,8 @@ fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
         let _ = parse_size_arg(&args[5], "nzmax")?;
     }
 
-    let mut entries: BTreeMap<(usize, usize), f64> = BTreeMap::new();
-    for ((&row_raw, &col_raw), &value) in
-        rows_vec.iter().zip(cols_vec.iter()).zip(values_vec.iter())
-    {
-        let row = parse_subscript(row_raw, "row")?;
-        let col = parse_subscript(col_raw, "column")?;
+    let mut coordinates = Vec::with_capacity(target_length);
+    for (&row, &col) in rows_vec.iter().zip(cols_vec.iter()) {
         if explicit_dims {
             if row > rows || col > cols {
                 return Err(sparse_error(
@@ -1616,9 +1608,87 @@ fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
             rows = rows.max(row);
             cols = cols.max(col);
         }
+        coordinates.push((col - 1, row - 1));
+    }
+
+    match values {
+        TripletValues::Float(values) => sparse_from_float_triplets(rows, cols, coordinates, values),
+        TripletValues::Integer(values) => {
+            sparse_from_integer_triplets(rows, cols, coordinates, values)
+        }
+    }
+}
+
+enum TripletValues {
+    Float(Vec<f64>),
+    Integer(IntegerStorage),
+}
+
+impl TripletValues {
+    fn len(&self) -> usize {
+        match self {
+            Self::Float(values) => values.len(),
+            Self::Integer(values) => values.len(),
+        }
+    }
+
+    fn expand_to(self, len: usize) -> BuiltinResult<Self> {
+        if self.len() != 1 || len <= 1 {
+            return Ok(self);
+        }
+        match self {
+            Self::Float(values) => Ok(Self::Float(vec![values[0]; len])),
+            Self::Integer(storage) => {
+                let value = storage.value_at(0).expect("single integer storage value");
+                let values = vec![value; len];
+                storage
+                    .from_same_class_values(values)
+                    .map(Self::Integer)
+                    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+            }
+        }
+    }
+}
+
+fn triplet_values(value: &Value) -> BuiltinResult<TripletValues> {
+    match value {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => Ok(TripletValues::Integer(
+            tensor
+                .integer_storage()
+                .expect("checked integer storage")
+                .clone(),
+        )),
+        Value::Int(value) => {
+            let storage = match value {
+                runmat_builtins::IntValue::I8(value) => IntegerStorage::I8(vec![*value]),
+                runmat_builtins::IntValue::I16(value) => IntegerStorage::I16(vec![*value]),
+                runmat_builtins::IntValue::I32(value) => IntegerStorage::I32(vec![*value]),
+                runmat_builtins::IntValue::I64(value) => IntegerStorage::I64(vec![*value]),
+                runmat_builtins::IntValue::U8(value) => IntegerStorage::U8(vec![*value]),
+                runmat_builtins::IntValue::U16(value) => IntegerStorage::U16(vec![*value]),
+                runmat_builtins::IntValue::U32(value) => IntegerStorage::U32(vec![*value]),
+                runmat_builtins::IntValue::U64(value) => IntegerStorage::U64(vec![*value]),
+            };
+            Ok(TripletValues::Integer(storage))
+        }
+        Value::SparseTensor(sparse) if sparse.integer_storage().is_some() => {
+            dense_typed_triplet_sparse(sparse, "v")
+                .and_then(|dense| triplet_values(&Value::Tensor(dense)))
+        }
+        _ => numeric_triplet_array(value, "v").map(TripletValues::Float),
+    }
+}
+
+fn sparse_from_float_triplets(
+    rows: usize,
+    cols: usize,
+    coordinates: Vec<(usize, usize)>,
+    values: Vec<f64>,
+) -> BuiltinResult<SparseTensor> {
+    let mut entries: BTreeMap<(usize, usize), f64> = BTreeMap::new();
+    for (coordinate, value) in coordinates.into_iter().zip(values) {
         if is_stored_value(value) {
-            let key = (col - 1, row - 1);
-            let entry = entries.entry(key).or_insert(0.0);
+            let entry = entries.entry(coordinate).or_insert(0.0);
             *entry += value;
         }
     }
@@ -1648,6 +1718,174 @@ fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
 
     SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
         .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+}
+
+fn sparse_from_integer_triplets(
+    rows: usize,
+    cols: usize,
+    coordinates: Vec<(usize, usize)>,
+    storage: IntegerStorage,
+) -> BuiltinResult<SparseTensor> {
+    let mut entries: BTreeMap<(usize, usize), runmat_builtins::IntValue> = BTreeMap::new();
+    for (index, coordinate) in coordinates.into_iter().enumerate() {
+        let value = storage.value_at(index).ok_or_else(|| {
+            sparse_error(&SPARSE_ERROR_INTERNAL, "sparse: integer value is missing")
+        })?;
+        if value.is_zero() {
+            continue;
+        }
+        match entries.get_mut(&coordinate) {
+            Some(existing) => {
+                *existing = existing.saturating_add(&value).map_err(|err| {
+                    sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}"))
+                })?;
+            }
+            None => {
+                entries.insert(coordinate, value);
+            }
+        }
+    }
+
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    let mut values = Vec::new();
+    col_ptrs.push(0);
+    for col in 0..cols {
+        for (&(entry_col, row), value) in entries.range((col, 0)..=(col, usize::MAX)) {
+            if entry_col != col {
+                break;
+            }
+            if row >= rows {
+                return Err(sparse_error(
+                    &SPARSE_ERROR_INVALID_INDEX,
+                    "sparse: row index exceeds matrix dimensions",
+                ));
+            }
+            if !value.is_zero() {
+                row_indices.push(row);
+                values.push(value.clone());
+            }
+        }
+        col_ptrs.push(values.len());
+    }
+    let values = storage
+        .from_same_class_values(values)
+        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))?;
+    SparseTensor::new_integer(rows, cols, col_ptrs, row_indices, values)
+        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+}
+
+fn numeric_triplet_array(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
+    match value {
+        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::SparseTensor(sparse) => {
+            let total_elements = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+                sparse_error(
+                    &SPARSE_ERROR_INVALID_INPUT,
+                    format!("sparse: {name} sparse dimensions overflow"),
+                )
+            })?;
+            if total_elements > SPARSE_DENSE_INPUT_VECTOR_LIMIT {
+                return Err(sparse_error(
+                    &SPARSE_ERROR_INVALID_INPUT,
+                    format!(
+                        "sparse: cannot densify sparse {name} input {}x{} with {} stored entries ({} elements exceeds safe threshold)",
+                        sparse.rows,
+                        sparse.cols,
+                        sparse.nnz(),
+                        total_elements
+                    ),
+                ));
+            }
+            sparse
+                .to_dense()
+                .map(|dense| dense.data)
+                .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+        }
+        Value::LogicalArray(logical) => Ok(logical
+            .data
+            .iter()
+            .map(|&bit| if bit == 0 { 0.0 } else { 1.0 })
+            .collect()),
+        Value::Num(value) => Ok(vec![*value]),
+        Value::Int(value) => Ok(vec![value.to_f64()]),
+        Value::Bool(value) => Ok(vec![if *value { 1.0 } else { 0.0 }]),
+        other => Err(numeric_vector_error(other, name)),
+    }
+}
+
+fn triplet_subscripts(value: &Value, name: &str) -> BuiltinResult<Vec<usize>> {
+    match value {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            let storage = tensor.integer_storage().expect("checked integer storage");
+            (0..storage.len())
+                .map(|index| {
+                    let integer = storage
+                        .value_at(index)
+                        .expect("integer storage length matches tensor data");
+                    parse_integer_subscript(&integer, name)
+                })
+                .collect()
+        }
+        Value::Int(integer) => Ok(vec![parse_integer_subscript(integer, name)?]),
+        Value::SparseTensor(sparse) if sparse.integer_storage().is_some() => {
+            dense_typed_triplet_sparse(sparse, name)
+                .and_then(|dense| triplet_subscripts(&Value::Tensor(dense), name))
+        }
+        _ => numeric_triplet_array(value, name).and_then(|values| {
+            values
+                .into_iter()
+                .map(|value| parse_subscript(value, name))
+                .collect()
+        }),
+    }
+}
+
+fn dense_typed_triplet_sparse(sparse: &SparseTensor, name: &str) -> BuiltinResult<Tensor> {
+    let total_elements = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+        sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!("sparse: {name} sparse dimensions overflow"),
+        )
+    })?;
+    if total_elements > SPARSE_DENSE_INPUT_VECTOR_LIMIT {
+        return Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!(
+                "sparse: cannot densify sparse {name} input {}x{} with {} stored entries ({} elements exceeds safe threshold)",
+                sparse.rows,
+                sparse.cols,
+                sparse.nnz(),
+                total_elements
+            ),
+        ));
+    }
+    sparse
+        .to_dense()
+        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+}
+
+fn parse_integer_subscript(value: &runmat_builtins::IntValue, name: &str) -> BuiltinResult<usize> {
+    match integer_to_usize(value) {
+        Some(index) if index > 0 => Ok(index),
+        _ => Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INDEX,
+            format!("sparse: {name} indices must be positive integers"),
+        )),
+    }
+}
+
+fn integer_to_usize(value: &runmat_builtins::IntValue) -> Option<usize> {
+    match value {
+        runmat_builtins::IntValue::I8(value) => usize::try_from(*value).ok(),
+        runmat_builtins::IntValue::I16(value) => usize::try_from(*value).ok(),
+        runmat_builtins::IntValue::I32(value) => usize::try_from(*value).ok(),
+        runmat_builtins::IntValue::I64(value) => usize::try_from(*value).ok(),
+        runmat_builtins::IntValue::U8(value) => Some(usize::from(*value)),
+        runmat_builtins::IntValue::U16(value) => Some(usize::from(*value)),
+        runmat_builtins::IntValue::U32(value) => usize::try_from(*value).ok(),
+        runmat_builtins::IntValue::U64(value) => usize::try_from(*value).ok(),
+    }
 }
 
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
@@ -1778,9 +2016,16 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 }
 
 fn parse_size_arg(value: &Value, name: &str) -> BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return integer_to_usize(value).ok_or_else(|| {
+            sparse_error(
+                &SPARSE_ERROR_INVALID_INPUT,
+                format!("sparse: {name} exceeds the maximum supported size"),
+            )
+        });
+    }
     let raw = match value {
         Value::Num(n) => *n,
-        Value::Int(i) => i.to_f64(),
         Value::Bool(b) => {
             if *b {
                 1.0

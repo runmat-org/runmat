@@ -139,6 +139,124 @@ fn sparse_full_and_nonzeros_preserve_exact_integer_storage() {
 }
 
 #[test]
+fn sparse_triplets_preserve_integer_values_and_saturate_duplicates() {
+    let rows = Tensor::new(vec![1.0, 1.0, 2.0], vec![3, 1]).expect("row subscripts");
+    let cols = Tensor::new(vec![1.0, 1.0, 2.0], vec![3, 1]).expect("column subscripts");
+    let values = Tensor::new_integer(IntegerStorage::I8(vec![100, 100, 0]), vec![3, 1])
+        .expect("int8 values");
+
+    let sparse = match runmat_runtime::call_builtin(
+        "sparse",
+        &[
+            Value::Tensor(rows),
+            Value::Tensor(cols),
+            Value::Tensor(values),
+        ],
+    )
+    .expect("integer sparse triplets")
+    {
+        Value::SparseTensor(sparse) => sparse,
+        other => panic!("expected sparse tensor, got {other:?}"),
+    };
+    assert_eq!(sparse.shape(), vec![2, 2]);
+    assert_eq!(
+        sparse.integer_storage(),
+        Some(&IntegerStorage::I8(vec![i8::MAX]))
+    );
+
+    let dense = match runmat_runtime::call_builtin("full", &[Value::SparseTensor(sparse)])
+        .expect("full integer triplets")
+    {
+        Value::Tensor(tensor) => tensor,
+        other => panic!("expected tensor, got {other:?}"),
+    };
+    assert_eq!(
+        dense.integer_storage(),
+        Some(&IntegerStorage::I8(vec![i8::MAX, 0, 0, 0]))
+    );
+}
+
+#[test]
+fn sparse_triplets_preserve_uint64_and_expand_integer_scalars() {
+    let rows = Tensor::new(vec![1.0, 1.0], vec![2, 1]).expect("row subscripts");
+    let cols = Tensor::new(vec![1.0, 1.0], vec![2, 1]).expect("column subscripts");
+    let values = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1]), vec![2, 1])
+        .expect("uint64 values");
+    let sparse = match runmat_runtime::call_builtin(
+        "sparse",
+        &[
+            Value::Tensor(rows),
+            Value::Tensor(cols),
+            Value::Tensor(values),
+        ],
+    )
+    .expect("uint64 sparse triplets")
+    {
+        Value::SparseTensor(sparse) => sparse,
+        other => panic!("expected sparse tensor, got {other:?}"),
+    };
+    assert_eq!(
+        sparse.integer_storage(),
+        Some(&IntegerStorage::U64(vec![u64::MAX]))
+    );
+
+    let rows = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1])
+        .expect("integer row subscripts");
+    let cols = Value::Int(runmat_builtins::IntValue::I16(1));
+    let sparse = match runmat_runtime::call_builtin(
+        "sparse",
+        &[
+            Value::Tensor(rows),
+            cols,
+            Value::Int(runmat_builtins::IntValue::I16(3)),
+        ],
+    )
+    .expect("expanded integer scalar sparse triplets")
+    {
+        Value::SparseTensor(sparse) => sparse,
+        other => panic!("expected sparse tensor, got {other:?}"),
+    };
+    assert_eq!(
+        sparse.integer_storage(),
+        Some(&IntegerStorage::I16(vec![3, 3]))
+    );
+}
+
+#[test]
+fn sparse_triplets_accept_matrix_subscripts_and_integer_values() {
+    let rows = Tensor::new(vec![1.0, 2.0, 1.0, 2.0], vec![2, 2]).expect("row subscripts");
+    let cols = Tensor::new(vec![1.0, 1.0, 2.0, 2.0], vec![2, 2]).expect("column subscripts");
+    let values = Tensor::new_integer(IntegerStorage::U32(vec![1, 2, 3, u32::MAX]), vec![2, 2])
+        .expect("uint32 values");
+
+    let sparse = match runmat_runtime::call_builtin(
+        "sparse",
+        &[
+            Value::Tensor(rows),
+            Value::Tensor(cols),
+            Value::Tensor(values),
+        ],
+    )
+    .expect("matrix integer sparse triplets")
+    {
+        Value::SparseTensor(sparse) => sparse,
+        other => panic!("expected sparse tensor, got {other:?}"),
+    };
+
+    assert_eq!(
+        sparse.integer_storage(),
+        Some(&IntegerStorage::U32(vec![1, 2, 3, u32::MAX]))
+    );
+    assert_eq!(
+        sparse
+            .to_dense()
+            .expect("dense matrix triplets")
+            .integer_storage(),
+        Some(&IntegerStorage::U32(vec![1, 2, 3, u32::MAX]))
+    );
+}
+
+#[test]
 fn randn_single_sets_f32_dtype() {
     let result = runmat_runtime::call_builtin(
         "randn",

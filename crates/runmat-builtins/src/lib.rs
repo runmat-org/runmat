@@ -174,6 +174,26 @@ impl IntValue {
             IntValue::U64(_) => "uint64",
         }
     }
+
+    /// Add two values of the same MATLAB integer class with saturating
+    /// semantics. Sparse triplet construction uses this for duplicate entries.
+    pub fn saturating_add(&self, rhs: &Self) -> Result<Self, String> {
+        match (self, rhs) {
+            (Self::I8(lhs), Self::I8(rhs)) => Ok(Self::I8(lhs.saturating_add(*rhs))),
+            (Self::I16(lhs), Self::I16(rhs)) => Ok(Self::I16(lhs.saturating_add(*rhs))),
+            (Self::I32(lhs), Self::I32(rhs)) => Ok(Self::I32(lhs.saturating_add(*rhs))),
+            (Self::I64(lhs), Self::I64(rhs)) => Ok(Self::I64(lhs.saturating_add(*rhs))),
+            (Self::U8(lhs), Self::U8(rhs)) => Ok(Self::U8(lhs.saturating_add(*rhs))),
+            (Self::U16(lhs), Self::U16(rhs)) => Ok(Self::U16(lhs.saturating_add(*rhs))),
+            (Self::U32(lhs), Self::U32(rhs)) => Ok(Self::U32(lhs.saturating_add(*rhs))),
+            (Self::U64(lhs), Self::U64(rhs)) => Ok(Self::U64(lhs.saturating_add(*rhs))),
+            (lhs, rhs) => Err(format!(
+                "cannot add {} and {} integer values",
+                lhs.class_name(),
+                rhs.class_name()
+            )),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -336,6 +356,36 @@ impl IntegerStorage {
                 value.class_name(),
                 storage.class_name()
             )),
+        }
+    }
+
+    /// Builds storage with this buffer's class from same-class exact values.
+    pub fn from_same_class_values(&self, values: Vec<IntValue>) -> Result<Self, String> {
+        macro_rules! collect_values {
+            ($variant:ident, $type:ty) => {
+                values
+                    .into_iter()
+                    .map(|value| match value {
+                        IntValue::$variant(value) => Ok(value),
+                        value => Err(format!(
+                            "cannot store {} in {} integer storage",
+                            value.class_name(),
+                            self.class_name()
+                        )),
+                    })
+                    .collect::<Result<Vec<$type>, String>>()
+                    .map(Self::$variant)
+            };
+        }
+        match self {
+            Self::I8(_) => collect_values!(I8, i8),
+            Self::I16(_) => collect_values!(I16, i16),
+            Self::I32(_) => collect_values!(I32, i32),
+            Self::I64(_) => collect_values!(I64, i64),
+            Self::U8(_) => collect_values!(U8, u8),
+            Self::U16(_) => collect_values!(U16, u16),
+            Self::U32(_) => collect_values!(U32, u32),
+            Self::U64(_) => collect_values!(U64, u64),
         }
     }
 }
