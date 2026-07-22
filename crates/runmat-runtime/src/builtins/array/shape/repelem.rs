@@ -486,6 +486,18 @@ fn repelem_complex_tensor(
     factors: &[RepFactor],
     single_arg: bool,
 ) -> crate::BuiltinResult<ComplexTensor> {
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        let (_, shape) = repelem_column_major(&tensor.data, &tensor.shape, factors, single_arg)?;
+        let storage = storage
+            .reorder(|values| {
+                repelem_column_major(values, &tensor.shape, factors, single_arg)
+                    .map(|(values, _)| values)
+                    .map_err(|e| e.to_string())
+            })
+            .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
+        return ComplexTensor::new_integer(storage, shape)
+            .map_err(|e| repelem_internal(format!("repelem: {e}")));
+    }
     let (data, shape) = repelem_column_major(&tensor.data, &tensor.shape, factors, single_arg)?;
     ComplexTensor::new(data, shape).map_err(|e| repelem_internal(format!("repelem: {e}")))
 }
