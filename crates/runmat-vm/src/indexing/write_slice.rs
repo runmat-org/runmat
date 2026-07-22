@@ -540,6 +540,15 @@ pub async fn assign_sparse_with_plan(
             "Sparse indexed deletion is not yet supported",
         ));
     }
+    let target_rows = plan.base_shape.first().copied().unwrap_or(sparse.rows);
+    let target_cols = plan.base_shape.get(1).copied().unwrap_or(sparse.cols);
+    let sparse = if target_rows != sparse.rows || target_cols != sparse.cols {
+        sparse
+            .with_expanded_shape(target_rows, target_cols)
+            .map_err(|error| map_slice_shape_error("sparse slice expansion", error))?
+    } else {
+        sparse
+    };
     if plan.indices.is_empty() {
         return Ok(Value::SparseTensor(sparse));
     }

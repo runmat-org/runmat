@@ -6,7 +6,10 @@ use crate::call::shared::{
     ObjectIndexDescriptor, ObjectIndexOp, ObjectParenExprSelectorSpec,
 };
 use crate::indexing::end_expr as idx_end_expr;
-use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
+use crate::indexing::plan::{
+    build_expr_index_plan, build_expr_sparse_assignment_plan, build_index_plan,
+    build_sparse_assignment_plan, ExprPlanSpec,
+};
 use crate::indexing::read_linear as idx_read_linear;
 use crate::indexing::read_slice as idx_read_slice;
 use crate::indexing::selectors::{
@@ -1691,12 +1694,25 @@ pub async fn dispatch_indexing(
                 }
                 Value::SparseTensor(sparse) => {
                     let shape = sparse.shape();
-                    let selectors =
-                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape)
-                            .await
-                            .map_err(|e| map_slice_plan_error("sparse slice assign", e))?;
-                    let plan = build_index_plan(&selectors, *dims, &shape)
-                        .map_err(|e| map_slice_plan_error("sparse slice assign", e))?;
+                    let selectors = if delete {
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape).await
+                    } else {
+                        crate::indexing::selectors::build_sparse_assignment_selectors(
+                            *dims,
+                            *colon_mask,
+                            *end_mask,
+                            &numeric,
+                            &shape,
+                        )
+                        .await
+                    }
+                    .map_err(|e| map_slice_plan_error("sparse slice assign", e))?;
+                    let plan = if delete {
+                        build_index_plan(&selectors, *dims, &shape)
+                    } else {
+                        build_sparse_assignment_plan(&selectors, *dims, &shape)
+                    }
+                    .map_err(|e| map_slice_plan_error("sparse slice assign", e))?;
                     stack.push(if delete {
                         idx_write_slice::delete_sparse_with_plan(sparse, &plan, &rhs)?
                     } else {
@@ -2312,22 +2328,30 @@ pub async fn dispatch_indexing(
                 }
                 Value::SparseTensor(sparse) => {
                     let shape = sparse.shape();
-                    let vm_plan = build_expr_slice_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &shape,
-                        },
-                        vars,
-                    )
-                    .await?;
+                    let read_only_vars: &[Value] = vars;
+                    let spec = ExprPlanSpec {
+                        dims: *dims,
+                        colon_mask: *colon_mask,
+                        end_mask: *end_mask,
+                        range_dims,
+                        range_params: &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        numeric: &numeric,
+                        shape: &shape,
+                    };
+                    let vm_plan = if delete {
+                        build_expr_slice_plan(spec, vars).await?
+                    } else {
+                        build_expr_sparse_assignment_plan(spec, |dim_len, expr| {
+                            let expr = expr.clone();
+                            async move {
+                                resolve_range_end_value(dim_len, &expr, read_only_vars).await
+                            }
+                        })
+                        .await?
+                    };
                     stack.push(if delete {
                         idx_write_slice::delete_sparse_with_plan(sparse, &vm_plan, &rhs)?
                     } else {

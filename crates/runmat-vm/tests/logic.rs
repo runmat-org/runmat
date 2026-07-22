@@ -298,6 +298,58 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
         Value::Tensor(tensor) if tensor.shape == vec![1, 4] && tensor.data == vec![1.0, 0.0, 0.0, 0.0]
     ));
 
+    let selector_grown = execute_source(
+        "s = sparse(uint64([1 2;3 4])); s([3 4],[4 5]) = uint64([5 9223372036854775808;7 8]); a = full(s); r = 5:6; c = [6 8]; s(r,c) = uint64([9 10;11 12]); b = full(s); t = sparse(uint64([1;2])); t(:,4) = uint64([9223372036854775808;6]); q = full(t); u = sparse(uint64([1 0;0 2])); u([4],[5]) = uint64(0); ue = full(u); un = nnz(u);",
+    )
+    .expect("execute sparse selector growth");
+    assert!(matches!(
+        &selector_grown[1],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![4, 5]
+                && tensor.integer_storage().and_then(|storage| storage.value_at(18))
+                    == Some(IntValue::U64(9_223_372_036_854_775_808))
+                && tensor.integer_storage().and_then(|storage| storage.value_at(0))
+                    == Some(IntValue::U64(1))
+                && tensor.integer_storage().and_then(|storage| storage.value_at(4))
+                    == Some(IntValue::U64(2))
+    ));
+    assert!(matches!(
+        &selector_grown[4],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![6, 8]
+                && tensor.integer_storage().and_then(|storage| storage.value_at(34))
+                    == Some(IntValue::U64(9))
+                && tensor.integer_storage().and_then(|storage| storage.value_at(47))
+                    == Some(IntValue::U64(12))
+                && tensor.integer_storage().and_then(|storage| storage.value_at(1))
+                    == Some(IntValue::U64(3))
+    ));
+    assert!(matches!(
+        &selector_grown[6],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 4]
+                && tensor.integer_storage().and_then(|storage| storage.value_at(6))
+                    == Some(IntValue::U64(9_223_372_036_854_775_808))
+                && tensor.integer_storage().and_then(|storage| storage.value_at(7))
+                    == Some(IntValue::U64(6))
+    ));
+    assert!(matches!(
+        &selector_grown[7],
+        Value::SparseTensor(sparse)
+            if sparse.shape() == vec![4, 5]
+                && sparse.integer_storage() == Some(&IntegerStorage::U64(vec![1, 2]))
+    ));
+    assert!(matches!(
+        &selector_grown[8],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![4, 5]
+                && tensor.integer_storage().and_then(|storage| storage.value_at(0))
+                    == Some(IntValue::U64(1))
+                && tensor.integer_storage().and_then(|storage| storage.value_at(5))
+                    == Some(IntValue::U64(2))
+    ));
+    assert!(matches!(&selector_grown[9], Value::Num(value) if *value == 2.0));
+
     let invalid_slice_err =
         execute_source("s = sparse([1], [1], [5], 2, 2); s([0]) = 0;").unwrap_err();
     assert_eq!(

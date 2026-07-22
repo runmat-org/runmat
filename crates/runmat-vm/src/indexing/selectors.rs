@@ -147,7 +147,11 @@ pub async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmRes
     }
 }
 
-pub async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<SliceSelector> {
+async fn selector_from_value_dim_with_bounds(
+    value: &Value,
+    dim_len: usize,
+    require_in_bounds: bool,
+) -> VmResult<SliceSelector> {
     if let Value::Bool(b) = value {
         if *b {
             return Ok(SliceSelector::Indices(vec![1]));
@@ -163,7 +167,7 @@ pub async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<
         }
     }
     if let Some(idx_val) = index_scalar_from_value(value).await? {
-        if idx_val < 1 || (idx_val as usize) > dim_len {
+        if idx_val < 1 || (require_in_bounds && (idx_val as usize) > dim_len) {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
         return Ok(SliceSelector::Scalar(idx_val as usize));
@@ -186,7 +190,7 @@ pub async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<
                         "Index values must be positive integers or logical values",
                     )
                 })?;
-                if idx < 1 || (idx as usize) > dim_len {
+                if idx < 1 || (require_in_bounds && (idx as usize) > dim_len) {
                     return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                 }
                 indices.push(idx as usize);
@@ -213,6 +217,10 @@ pub async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<
             "Unsupported index type for slicing",
         )),
     }
+}
+
+pub async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<SliceSelector> {
+    selector_from_value_dim_with_bounds(value, dim_len, true).await
 }
 
 pub async fn build_slice_selectors(
@@ -291,6 +299,48 @@ pub async fn build_slice_selectors(
             .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index for slice"))?;
         numeric_iter += 1;
         selectors.push(selector_from_value_dim(value, dim_len).await?);
+    }
+    Ok(selectors)
+}
+
+/// Builds selectors for sparse two-subscript assignment. Numeric selectors may
+/// grow their addressed dimension; colon and logical selectors remain tied to
+/// the existing shape, matching MATLAB indexed-assignment rules.
+pub async fn build_sparse_assignment_selectors(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+) -> VmResult<Vec<SliceSelector>> {
+    if dims != 2 {
+        return build_slice_selectors(dims, colon_mask, end_mask, numeric, base_shape).await;
+    }
+
+    let mut selectors = Vec::with_capacity(dims);
+    let mut numeric_iter = 0usize;
+    for d in 0..dims {
+        if selector_mask_has_dim(colon_mask, d) {
+            selectors.push(SliceSelector::Colon);
+            continue;
+        }
+        let dim_len = base_shape.get(d).copied().unwrap_or(1);
+        if selector_mask_has_dim(end_mask, d) {
+            selectors.push(SliceSelector::Scalar(dim_len));
+            continue;
+        }
+        let value = numeric
+            .get(numeric_iter)
+            .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index for slice"))?;
+        numeric_iter += 1;
+        match value {
+            Value::Bool(_) | Value::LogicalArray(_) => {
+                selectors.push(selector_from_value_dim_with_bounds(value, dim_len, true).await?);
+            }
+            _ => {
+                selectors.push(selector_from_value_dim_with_bounds(value, dim_len, false).await?);
+            }
+        }
     }
     Ok(selectors)
 }

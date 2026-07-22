@@ -301,6 +301,47 @@ pub fn build_index_plan(
     ))
 }
 
+/// Builds a write plan for sparse two-subscript indexed assignment. The plan's
+/// base shape is the target shape so CSC updates use the expanded stride, while
+/// colon selectors are materialized against the original shape before planning.
+pub fn build_sparse_assignment_plan(
+    selectors: &[SliceSelector],
+    dims: usize,
+    base_shape: &[usize],
+) -> VmResult<IndexPlan> {
+    if dims != 2 {
+        return build_index_plan(selectors, dims, base_shape);
+    }
+
+    let mut target_shape = base_shape.to_vec();
+    target_shape.resize(dims, 1);
+    let mut planned_selectors = Vec::with_capacity(dims);
+    for (d, target_len) in target_shape.iter_mut().enumerate().take(dims) {
+        let original_len = base_shape.get(d).copied().unwrap_or(1);
+        let selector = selectors
+            .get(d)
+            .cloned()
+            .unwrap_or(SliceSelector::Indices(Vec::new()));
+        let values = match &selector {
+            SliceSelector::Colon => (1..=original_len).collect::<Vec<_>>(),
+            SliceSelector::Scalar(value) => vec![*value],
+            SliceSelector::Indices(values) => values.clone(),
+            SliceSelector::LinearIndices { values, .. } => values.clone(),
+        };
+        if values.contains(&0) {
+            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        if let Some(&max_value) = values.iter().max() {
+            *target_len = (*target_len).max(max_value);
+        }
+        planned_selectors.push(match selector {
+            SliceSelector::Colon => SliceSelector::Indices(values),
+            other => other,
+        });
+    }
+    build_index_plan(&planned_selectors, dims, &target_shape)
+}
+
 #[derive(Clone)]
 enum ExprSel {
     Colon,
@@ -373,12 +414,36 @@ fn validate_expr_range_selector_plan(
 
 pub async fn build_expr_index_plan<ResolveEnd, Fut>(
     spec: ExprPlanSpec<'_>,
-    mut resolve_end: ResolveEnd,
+    resolve_end: ResolveEnd,
 ) -> Result<IndexPlan, RuntimeError>
 where
     ResolveEnd: FnMut(usize, &EndExpr) -> Fut,
     Fut: Future<Output = Result<f64, RuntimeError>>,
 {
+    build_expr_index_plan_with_growth(spec, resolve_end, false).await
+}
+
+pub async fn build_expr_sparse_assignment_plan<ResolveEnd, Fut>(
+    spec: ExprPlanSpec<'_>,
+    resolve_end: ResolveEnd,
+) -> Result<IndexPlan, RuntimeError>
+where
+    ResolveEnd: FnMut(usize, &EndExpr) -> Fut,
+    Fut: Future<Output = Result<f64, RuntimeError>>,
+{
+    build_expr_index_plan_with_growth(spec, resolve_end, true).await
+}
+
+async fn build_expr_index_plan_with_growth<ResolveEnd, Fut>(
+    spec: ExprPlanSpec<'_>,
+    mut resolve_end: ResolveEnd,
+    allow_sparse_growth: bool,
+) -> Result<IndexPlan, RuntimeError>
+where
+    ResolveEnd: FnMut(usize, &EndExpr) -> Fut,
+    Fut: Future<Output = Result<f64, RuntimeError>>,
+{
+    let allow_sparse_growth = allow_sparse_growth && spec.dims == 2;
     let rank = spec.shape.len();
     let full_shape: Vec<usize> = if spec.dims == 1 {
         vec![checked_total_len_from_shape(spec.shape)?]
@@ -551,7 +616,7 @@ where
                 let end_i = end_i as i64;
                 if stp > 0 {
                     while cur <= end_i {
-                        if cur < 1 || cur > dim_len {
+                        if cur < 1 || (!allow_sparse_growth && cur > dim_len) {
                             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                         }
                         v.push(cur as usize);
@@ -559,7 +624,7 @@ where
                     }
                 } else {
                     while cur >= end_i {
-                        if cur < 1 || cur > dim_len {
+                        if cur < 1 || (!allow_sparse_growth && cur > dim_len) {
                             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                         }
                         v.push(cur as usize);
@@ -569,7 +634,10 @@ where
                 v
             }
         };
-        if idxs.iter().any(|&i| i == 0 || i > full_shape[d]) {
+        if idxs
+            .iter()
+            .any(|&i| i == 0 || (!allow_sparse_growth && i > full_shape[d]))
+        {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
         selection_lengths.push(idxs.len());
@@ -577,12 +645,20 @@ where
         scalar_mask.push(matches!(sel, ExprSel::Scalar(_)));
     }
 
+    let mut planned_shape = full_shape.clone();
+    if allow_sparse_growth && spec.dims > 1 {
+        for (d, indices) in per_dim_indices.iter().enumerate().take(spec.dims) {
+            if let Some(&max_index) = indices.iter().max() {
+                planned_shape[d] = planned_shape[d].max(max_index);
+            }
+        }
+    }
     let mut strides: Vec<usize> = vec![0; spec.dims];
     let mut acc = 1usize;
     for (d, stride) in strides.iter_mut().enumerate().take(spec.dims) {
         *stride = acc;
         acc = acc
-            .checked_mul(full_shape[d])
+            .checked_mul(planned_shape[d])
             .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))?;
     }
     let total_out: usize = per_dim_indices.iter().try_fold(1usize, |acc, values| {
@@ -632,7 +708,7 @@ where
             output_shape,
             selection_lengths,
             spec.dims,
-            spec.shape.to_vec(),
+            planned_shape,
         ));
     }
 
@@ -708,16 +784,28 @@ where
         output_shape,
         selection_lengths,
         spec.dims,
-        spec.shape.to_vec(),
+        planned_shape,
     ))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
+    use super::{
+        build_expr_index_plan, build_index_plan, build_sparse_assignment_plan, ExprPlanSpec,
+    };
     use crate::bytecode::EndExpr;
     use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
     use runmat_builtins::{LogicalArray, Tensor, Value};
+
+    #[test]
+    fn sparse_assignment_plan_expands_numeric_dimensions_but_keeps_colon_at_old_extent() {
+        let selectors = vec![SliceSelector::Indices(vec![3, 4]), SliceSelector::Colon];
+        let plan = build_sparse_assignment_plan(&selectors, 2, &[2, 2])
+            .expect("sparse assignment plan should grow rows");
+        assert_eq!(plan.base_shape, vec![4, 2]);
+        assert_eq!(plan.selection_lengths, vec![2, 2]);
+        assert_eq!(plan.indices, vec![2, 3, 6, 7]);
+    }
 
     #[test]
     fn plain_and_expr_linear_range_plans_match() {
