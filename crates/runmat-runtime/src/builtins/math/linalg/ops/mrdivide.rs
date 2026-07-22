@@ -159,6 +159,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::linalg::ops::mrdivide"
 )]
 async fn mrdivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&lhs)
+        || crate::builtins::common::validation::is_typed_complex_integer(&rhs)
+    {
+        return Err(mrdivide_invalid_input(
+            "complex integer arithmetic is not supported",
+        ));
+    }
     mrdivide_eval(&lhs, &rhs).await
 }
 

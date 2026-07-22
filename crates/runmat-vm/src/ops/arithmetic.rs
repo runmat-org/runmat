@@ -5,6 +5,19 @@ use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
+fn reject_typed_complex_integer_arithmetic(values: &[&Value]) -> Result<(), RuntimeError> {
+    if values
+        .iter()
+        .any(|value| matches!(value, Value::ComplexTensor(tensor) if tensor.integer_data.is_some()))
+    {
+        return Err(mex(
+            "ComplexIntegerArithmetic",
+            "complex integer arithmetic is not supported",
+        ));
+    }
+    Ok(())
+}
+
 pub async fn add<CM, CMFut, RM, RMFut, F, FFut>(
     stack: &mut Vec<Value>,
     mut call_method: CM,
@@ -20,6 +33,7 @@ where
     FFut: Future<Output = Result<Value, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), "plus", b.clone()).await {
@@ -54,6 +68,7 @@ where
     FFut: Future<Output = Result<Value, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), "minus", b.clone()).await {
@@ -88,6 +103,7 @@ where
     FFut: Future<Output = Result<Value, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), "mtimes", b.clone()).await {
@@ -123,6 +139,7 @@ where
     FFut: Future<Output = Result<Value, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), method, b.clone()).await {
@@ -151,6 +168,7 @@ where
     FFut: Future<Output = Result<Value, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     stack.push(fallback(a, b).await?);
     Ok(())
 }
@@ -170,6 +188,7 @@ where
     FFut: Future<Output = Result<Value, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), "power", b.clone()).await {
@@ -197,6 +216,22 @@ where
     let value = stack
         .pop()
         .ok_or(mex("StackUnderflow", "stack underflow"))?;
+    stack.push(op(value).await?);
+    Ok(())
+}
+
+pub async fn unary_arithmetic<UF, UFut>(
+    stack: &mut Vec<Value>,
+    mut op: UF,
+) -> Result<(), RuntimeError>
+where
+    UF: FnMut(Value) -> UFut,
+    UFut: Future<Output = Result<Value, RuntimeError>>,
+{
+    let value = stack
+        .pop()
+        .ok_or(mex("StackUnderflow", "stack underflow"))?;
+    reject_typed_complex_integer_arithmetic(&[&value])?;
     stack.push(op(value).await?);
     Ok(())
 }

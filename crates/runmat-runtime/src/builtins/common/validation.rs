@@ -15,6 +15,13 @@ use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::underlying_type::underlying_type_matches;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+/// MATLAB stores complex integer arrays, but does not support arithmetic on
+/// them. Arithmetic builtins use this before selecting floating or provider
+/// execution paths so exact integer components are never coerced to `f64`.
+pub fn is_typed_complex_integer(value: &Value) -> bool {
+    matches!(value, Value::ComplexTensor(tensor) if tensor.integer_data.is_some())
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidationAtom {
     Number(f64),

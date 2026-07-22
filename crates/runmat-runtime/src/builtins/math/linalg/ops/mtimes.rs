@@ -157,6 +157,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::linalg::ops::mtimes"
 )]
 async fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&lhs)
+        || crate::builtins::common::validation::is_typed_complex_integer(&rhs)
+    {
+        return Err(mtimes_invalid_input(
+            "complex integer arithmetic is not supported",
+        ));
+    }
     mtimes_eval(&lhs, &rhs).await
 }
 

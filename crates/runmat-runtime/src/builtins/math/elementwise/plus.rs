@@ -246,6 +246,14 @@ fn plus_error_with_detail(
     builtin_path = "crate::builtins::math::elementwise::plus"
 )]
 async fn plus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&lhs)
+        || crate::builtins::common::validation::is_typed_complex_integer(&rhs)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::is_typed_complex_integer)
+    {
+        return Err(builtin_error("complex integer arithmetic is not supported"));
+    }
     let template = parse_output_template(&rest)?;
     let base = match (lhs, rhs) {
         (Value::GpuTensor(la), Value::GpuTensor(lb)) => plus_gpu_pair(la, lb).await,

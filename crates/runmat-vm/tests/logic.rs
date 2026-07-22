@@ -152,6 +152,36 @@ fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
 }
 
 #[test]
+fn typed_complex_integer_arithmetic_is_rejected_before_f64_coercion() {
+    let operators = [
+        ("plus", "z + z"),
+        ("minus", "z - z"),
+        ("times", "z .* z"),
+        ("rdivide", "z ./ z"),
+        ("ldivide", "z .\\ z"),
+        ("power", "z .^ z"),
+        ("mtimes", "z * z"),
+        ("mrdivide", "z / z"),
+        ("mldivide", "z \\ z"),
+        ("mpower", "z ^ z"),
+        ("uminus", "-z"),
+        ("uplus", "+z"),
+        ("plus like", "plus(z, z, 'like', z)"),
+    ];
+
+    for (name, operation) in operators {
+        let source =
+            format!("z = complex(uint64(9223372036854775808), uint64(1)); out = {operation};");
+        let err = execute_source(&source).expect_err(name);
+        assert!(
+            err.to_string()
+                .contains("complex integer arithmetic is not supported"),
+            "{name} returned an unexpected error: {err}"
+        );
+    }
+}
+
+#[test]
 fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispatch() {
     let vars = execute_source(
         "a = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); rhs = complex(uint64([18446744073709551615 9223372036854775808]), uint64([7 8])); a(:, :) = rhs; ar = real(a); ai = imag(a); b = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); b(1:end, :) = rhs;",

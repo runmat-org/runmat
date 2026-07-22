@@ -167,6 +167,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::linalg::ops::mpower"
 )]
 async fn mpower_builtin(base: Value, exponent: Value) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&base)
+        || crate::builtins::common::validation::is_typed_complex_integer(&exponent)
+    {
+        return Err(mpower_invalid_input(
+            "complex integer arithmetic is not supported",
+        ));
+    }
     mpower_eval(&base, &exponent).await
 }
 
