@@ -229,6 +229,12 @@ async fn gradient_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         return Ok(Value::OutputList(Vec::new()));
     }
 
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        return Err(gradient_invalid_input(
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
+
     let available_outputs = gradient_output_dims(value_shape(&value), value_len(&value));
     if requested_outputs > available_outputs.len() {
         return Err(gradient_invalid_argument(format!(

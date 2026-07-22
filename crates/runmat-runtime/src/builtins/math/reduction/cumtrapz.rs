@@ -223,6 +223,12 @@ fn cumtrapz_internal_error(detail: impl AsRef<str>) -> RuntimeError {
 )]
 async fn cumtrapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let parsed = parse_arguments(first, rest)?;
+    if crate::builtins::common::validation::is_typed_complex_integer(&parsed.y) {
+        return Err(cumtrapz_error_with_detail(
+            &CUMTRAPZ_ERROR_INVALID_INPUT,
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
     if let Value::GpuTensor(handle) = &parsed.y {
         if let Some(provider) = runmat_accelerate_api::provider() {
             let shape = if handle.shape.is_empty() {
