@@ -1972,14 +1972,14 @@ pub(crate) mod tests {
         }
         match nested.fields.get("values") {
             Some(Value::Cell(cell)) => {
-                match cell.data[0].as_ref() {
+                match &cell.data[0] {
                     Value::Tensor(tensor) => assert_eq!(
                         tensor.integer_storage(),
                         Some(&IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]))
                     ),
                     other => panic!("expected unsigned cell tensor, got {other:?}"),
                 }
-                match cell.data[1].as_ref() {
+                match &cell.data[1] {
                     Value::Tensor(tensor) => assert_eq!(
                         tensor.integer_storage(),
                         Some(&IntegerStorage::I64(vec![i64::MIN, i64::MAX]))

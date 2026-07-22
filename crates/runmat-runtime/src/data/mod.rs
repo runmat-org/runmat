@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::Utc;
-use runmat_builtins::{ObjectInstance, Tensor, Value};
+use runmat_builtins::{IntValue, IntegerStorage, ObjectInstance, Tensor, Value};
 use runmat_filesystem as fs;
 use runmat_filesystem::data_contract::{
     DataChunkDescriptor, DataChunkUploadRequest, DataChunkUploadTarget,
@@ -13,6 +13,7 @@ use runmat_filesystem::data_contract::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,7 +50,382 @@ fn default_array_order() -> String {
 pub struct DataArrayPayload {
     pub dtype: String,
     pub shape: Vec<usize>,
-    pub values: Vec<f64>,
+    pub values: DataArrayValues,
+}
+
+/// The persisted backing values of a data-array payload.
+///
+/// JSON arrays written before integer storage was introduced are decoded as
+/// `F64`; new writes use the tagged representation below so every integer
+/// class can round-trip without passing through a floating point value.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DataArrayValues {
+    F64(Vec<f64>),
+    I8(Vec<i8>),
+    I16(Vec<i16>),
+    I32(Vec<i32>),
+    I64(Vec<i64>),
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+    U64(Vec<u64>),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "encoding", content = "data", rename_all = "snake_case")]
+enum TaggedDataArrayValues {
+    F64(Vec<f64>),
+    I8(Vec<i8>),
+    I16(Vec<i16>),
+    I32(Vec<i32>),
+    I64(Vec<i64>),
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+    U64(Vec<u64>),
+}
+
+#[derive(Serialize)]
+#[serde(tag = "encoding", content = "data", rename_all = "snake_case")]
+enum TaggedDataArrayValuesRef<'a> {
+    F64(&'a [f64]),
+    I8(&'a [i8]),
+    I16(&'a [i16]),
+    I32(&'a [i32]),
+    I64(&'a [i64]),
+    U8(&'a [u8]),
+    U16(&'a [u16]),
+    U32(&'a [u32]),
+    U64(&'a [u64]),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum DataArrayValuesWire {
+    Tagged(TaggedDataArrayValues),
+    Legacy(Vec<f64>),
+}
+
+impl Serialize for DataArrayValues {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let tagged = match self {
+            Self::F64(values) => TaggedDataArrayValuesRef::F64(values),
+            Self::I8(values) => TaggedDataArrayValuesRef::I8(values),
+            Self::I16(values) => TaggedDataArrayValuesRef::I16(values),
+            Self::I32(values) => TaggedDataArrayValuesRef::I32(values),
+            Self::I64(values) => TaggedDataArrayValuesRef::I64(values),
+            Self::U8(values) => TaggedDataArrayValuesRef::U8(values),
+            Self::U16(values) => TaggedDataArrayValuesRef::U16(values),
+            Self::U32(values) => TaggedDataArrayValuesRef::U32(values),
+            Self::U64(values) => TaggedDataArrayValuesRef::U64(values),
+        };
+        tagged.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for DataArrayValues {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(match DataArrayValuesWire::deserialize(deserializer)? {
+            DataArrayValuesWire::Legacy(values) => Self::F64(values),
+            DataArrayValuesWire::Tagged(tagged) => match tagged {
+                TaggedDataArrayValues::F64(values) => Self::F64(values),
+                TaggedDataArrayValues::I8(values) => Self::I8(values),
+                TaggedDataArrayValues::I16(values) => Self::I16(values),
+                TaggedDataArrayValues::I32(values) => Self::I32(values),
+                TaggedDataArrayValues::I64(values) => Self::I64(values),
+                TaggedDataArrayValues::U8(values) => Self::U8(values),
+                TaggedDataArrayValues::U16(values) => Self::U16(values),
+                TaggedDataArrayValues::U32(values) => Self::U32(values),
+                TaggedDataArrayValues::U64(values) => Self::U64(values),
+            },
+        })
+    }
+}
+
+impl DataArrayValues {
+    pub fn zeros(dtype: &str, len: usize) -> Self {
+        match integer_dtype(dtype) {
+            Some("int8") => Self::I8(vec![0; len]),
+            Some("int16") => Self::I16(vec![0; len]),
+            Some("int32") => Self::I32(vec![0; len]),
+            Some("int64") => Self::I64(vec![0; len]),
+            Some("uint8") => Self::U8(vec![0; len]),
+            Some("uint16") => Self::U16(vec![0; len]),
+            Some("uint32") => Self::U32(vec![0; len]),
+            Some("uint64") => Self::U64(vec![0; len]),
+            _ => Self::F64(vec![0.0; len]),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::F64(values) => values.len(),
+            Self::I8(values) => values.len(),
+            Self::I16(values) => values.len(),
+            Self::I32(values) => values.len(),
+            Self::I64(values) => values.len(),
+            Self::U8(values) => values.len(),
+            Self::U16(values) => values.len(),
+            Self::U32(values) => values.len(),
+            Self::U64(values) => values.len(),
+        }
+    }
+
+    pub fn into_tensor(self, shape: Vec<usize>) -> Result<Tensor, String> {
+        match self {
+            Self::F64(values) => Tensor::new(values, shape),
+            Self::I8(values) => Tensor::new_integer(IntegerStorage::I8(values), shape),
+            Self::I16(values) => Tensor::new_integer(IntegerStorage::I16(values), shape),
+            Self::I32(values) => Tensor::new_integer(IntegerStorage::I32(values), shape),
+            Self::I64(values) => Tensor::new_integer(IntegerStorage::I64(values), shape),
+            Self::U8(values) => Tensor::new_integer(IntegerStorage::U8(values), shape),
+            Self::U16(values) => Tensor::new_integer(IntegerStorage::U16(values), shape),
+            Self::U32(values) => Tensor::new_integer(IntegerStorage::U32(values), shape),
+            Self::U64(values) => Tensor::new_integer(IntegerStorage::U64(values), shape),
+        }
+    }
+
+    pub fn to_f64_vec(&self) -> Vec<f64> {
+        match self {
+            Self::F64(values) => values.clone(),
+            Self::I8(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::I16(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::I32(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::I64(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U8(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U16(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U32(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U64(values) => values.iter().map(|&value| value as f64).collect(),
+        }
+    }
+
+    pub fn get(&self, index: usize) -> BuiltinResult<DataScalar> {
+        match self {
+            Self::F64(values) => values.get(index).copied().map(DataScalar::F64),
+            Self::I8(values) => values.get(index).copied().map(|v| DataScalar::I8(v)),
+            Self::I16(values) => values.get(index).copied().map(|v| DataScalar::I16(v)),
+            Self::I32(values) => values.get(index).copied().map(|v| DataScalar::I32(v)),
+            Self::I64(values) => values.get(index).copied().map(|v| DataScalar::I64(v)),
+            Self::U8(values) => values.get(index).copied().map(|v| DataScalar::U8(v)),
+            Self::U16(values) => values.get(index).copied().map(|v| DataScalar::U16(v)),
+            Self::U32(values) => values.get(index).copied().map(|v| DataScalar::U32(v)),
+            Self::U64(values) => values.get(index).copied().map(|v| DataScalar::U64(v)),
+        }
+        .ok_or_else(|| data_error(format!("data payload index {index} is out of bounds")))
+    }
+
+    pub fn push(&mut self, value: DataScalar) -> BuiltinResult<()> {
+        match (self, value) {
+            (Self::F64(values), DataScalar::F64(value)) => values.push(value),
+            (Self::I8(values), DataScalar::I8(value)) => values.push(value),
+            (Self::I16(values), DataScalar::I16(value)) => values.push(value),
+            (Self::I32(values), DataScalar::I32(value)) => values.push(value),
+            (Self::I64(values), DataScalar::I64(value)) => values.push(value),
+            (Self::U8(values), DataScalar::U8(value)) => values.push(value),
+            (Self::U16(values), DataScalar::U16(value)) => values.push(value),
+            (Self::U32(values), DataScalar::U32(value)) => values.push(value),
+            (Self::U64(values), DataScalar::U64(value)) => values.push(value),
+            _ => return Err(data_error("data payload storage class mismatch")),
+        }
+        Ok(())
+    }
+
+    pub fn set(&mut self, index: usize, value: DataScalar) -> BuiltinResult<()> {
+        match (self, value) {
+            (Self::F64(values), DataScalar::F64(value)) => set_at(values, index, value),
+            (Self::I8(values), DataScalar::I8(value)) => set_at(values, index, value),
+            (Self::I16(values), DataScalar::I16(value)) => set_at(values, index, value),
+            (Self::I32(values), DataScalar::I32(value)) => set_at(values, index, value),
+            (Self::I64(values), DataScalar::I64(value)) => set_at(values, index, value),
+            (Self::U8(values), DataScalar::U8(value)) => set_at(values, index, value),
+            (Self::U16(values), DataScalar::U16(value)) => set_at(values, index, value),
+            (Self::U32(values), DataScalar::U32(value)) => set_at(values, index, value),
+            (Self::U64(values), DataScalar::U64(value)) => set_at(values, index, value),
+            _ => return Err(data_error("data payload storage class mismatch")),
+        }?;
+        Ok(())
+    }
+
+    fn cast_to_dtype(self, dtype: &str) -> BuiltinResult<Self> {
+        let Some(target) = integer_target(dtype) else {
+            return Ok(Self::F64(self.to_f64_vec()));
+        };
+        let mut values = Vec::with_capacity(self.len());
+        for index in 0..self.len() {
+            let value = self.get(index)?;
+            values.push(match value {
+                DataScalar::F64(value) => target.cast_scalar(value),
+                value => target.cast_int(&value.to_int_value()),
+            });
+        }
+        Ok(Self::from_integer_storage(target.storage(values)))
+    }
+
+    fn from_integer_storage(storage: IntegerStorage) -> Self {
+        match storage {
+            IntegerStorage::I8(values) => Self::I8(values),
+            IntegerStorage::I16(values) => Self::I16(values),
+            IntegerStorage::I32(values) => Self::I32(values),
+            IntegerStorage::I64(values) => Self::I64(values),
+            IntegerStorage::U8(values) => Self::U8(values),
+            IntegerStorage::U16(values) => Self::U16(values),
+            IntegerStorage::U32(values) => Self::U32(values),
+            IntegerStorage::U64(values) => Self::U64(values),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DataScalar {
+    F64(f64),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+}
+
+impl DataScalar {
+    fn to_int_value(self) -> IntValue {
+        match self {
+            Self::F64(value) => IntValue::I64(value as i64),
+            Self::I8(value) => IntValue::I8(value),
+            Self::I16(value) => IntValue::I16(value),
+            Self::I32(value) => IntValue::I32(value),
+            Self::I64(value) => IntValue::I64(value),
+            Self::U8(value) => IntValue::U8(value),
+            Self::U16(value) => IntValue::U16(value),
+            Self::U32(value) => IntValue::U32(value),
+            Self::U64(value) => IntValue::U64(value),
+        }
+    }
+}
+
+fn set_at<T>(values: &mut [T], index: usize, value: T) -> BuiltinResult<()> {
+    let target = values
+        .get_mut(index)
+        .ok_or_else(|| data_error(format!("data payload index {index} is out of bounds")))?;
+    *target = value;
+    Ok(())
+}
+
+fn integer_dtype(dtype: &str) -> Option<&'static str> {
+    match dtype.to_ascii_lowercase().as_str() {
+        "int8" => Some("int8"),
+        "int16" => Some("int16"),
+        "int32" => Some("int32"),
+        "int64" => Some("int64"),
+        "uint8" => Some("uint8"),
+        "uint16" => Some("uint16"),
+        "uint32" => Some("uint32"),
+        "uint64" => Some("uint64"),
+        _ => None,
+    }
+}
+
+fn integer_target(dtype: &str) -> Option<IntegerTarget> {
+    match integer_dtype(dtype) {
+        Some("int8") => Some(IntegerTarget::I8),
+        Some("int16") => Some(IntegerTarget::I16),
+        Some("int32") => Some(IntegerTarget::I32),
+        Some("int64") => Some(IntegerTarget::I64),
+        Some("uint8") => Some(IntegerTarget::U8),
+        Some("uint16") => Some(IntegerTarget::U16),
+        Some("uint32") => Some(IntegerTarget::U32),
+        Some("uint64") => Some(IntegerTarget::U64),
+        _ => None,
+    }
+}
+
+impl DataArrayPayload {
+    pub fn zeros(dtype: String, shape: Vec<usize>) -> Self {
+        let values = DataArrayValues::zeros(&dtype, shape.iter().copied().product());
+        Self {
+            dtype,
+            shape,
+            values,
+        }
+    }
+
+    pub fn from_value(dtype: String, value: &Value) -> BuiltinResult<Self> {
+        let (shape, values) = data_values_from_value(value)?;
+        Ok(Self {
+            dtype: dtype.clone(),
+            shape,
+            values: values.cast_to_dtype(&dtype)?,
+        })
+    }
+
+    pub fn filled(dtype: String, shape: Vec<usize>, value: &Value) -> BuiltinResult<Self> {
+        let scalar = Self::from_value(dtype.clone(), value)?;
+        if scalar.values.len() != 1 {
+            return Err(data_error("expected numeric scalar"));
+        }
+        let scalar = scalar.values.get(0)?;
+        let len = shape.iter().copied().product();
+        let mut values = DataArrayValues::zeros(&dtype, len);
+        for index in 0..len {
+            values.set(index, scalar)?;
+        }
+        Ok(Self {
+            dtype,
+            shape,
+            values,
+        })
+    }
+
+    pub fn normalize_for_dtype(mut self, dtype: &str) -> BuiltinResult<Self> {
+        self.values = self.values.cast_to_dtype(dtype)?;
+        self.dtype = dtype.to_string();
+        Ok(self)
+    }
+
+    pub fn into_value(self) -> BuiltinResult<Value> {
+        self.values
+            .into_tensor(self.shape)
+            .map(Value::Tensor)
+            .map_err(|err| data_error(format!("invalid data payload: {err}")))
+    }
+}
+
+fn data_values_from_value(value: &Value) -> BuiltinResult<(Vec<usize>, DataArrayValues)> {
+    match value {
+        Value::Tensor(tensor) => {
+            let values = match tensor.integer_storage() {
+                Some(IntegerStorage::I8(values)) => DataArrayValues::I8(values.clone()),
+                Some(IntegerStorage::I16(values)) => DataArrayValues::I16(values.clone()),
+                Some(IntegerStorage::I32(values)) => DataArrayValues::I32(values.clone()),
+                Some(IntegerStorage::I64(values)) => DataArrayValues::I64(values.clone()),
+                Some(IntegerStorage::U8(values)) => DataArrayValues::U8(values.clone()),
+                Some(IntegerStorage::U16(values)) => DataArrayValues::U16(values.clone()),
+                Some(IntegerStorage::U32(values)) => DataArrayValues::U32(values.clone()),
+                Some(IntegerStorage::U64(values)) => DataArrayValues::U64(values.clone()),
+                None => DataArrayValues::F64(tensor.data.clone()),
+            };
+            Ok((tensor.shape.clone(), values))
+        }
+        Value::Num(value) => Ok((vec![1, 1], DataArrayValues::F64(vec![*value]))),
+        Value::Int(IntValue::I8(value)) => Ok((vec![1, 1], DataArrayValues::I8(vec![*value]))),
+        Value::Int(IntValue::I16(value)) => Ok((vec![1, 1], DataArrayValues::I16(vec![*value]))),
+        Value::Int(IntValue::I32(value)) => Ok((vec![1, 1], DataArrayValues::I32(vec![*value]))),
+        Value::Int(IntValue::I64(value)) => Ok((vec![1, 1], DataArrayValues::I64(vec![*value]))),
+        Value::Int(IntValue::U8(value)) => Ok((vec![1, 1], DataArrayValues::U8(vec![*value]))),
+        Value::Int(IntValue::U16(value)) => Ok((vec![1, 1], DataArrayValues::U16(vec![*value]))),
+        Value::Int(IntValue::U32(value)) => Ok((vec![1, 1], DataArrayValues::U32(vec![*value]))),
+        Value::Int(IntValue::U64(value)) => Ok((vec![1, 1], DataArrayValues::U64(vec![*value]))),
+        _ => Err(data_error(
+            "DataArray.write supports tensor or numeric scalar values",
+        )),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -385,12 +761,14 @@ pub async fn read_array_payload_async(
             payload_path.display()
         ))
     })?;
-    serde_json::from_slice::<DataArrayPayload>(&bytes).map_err(|err| {
-        data_error(format!(
-            "failed to parse payload '{}': {err}",
-            payload_path.display()
-        ))
-    })
+    serde_json::from_slice::<DataArrayPayload>(&bytes)
+        .map_err(|err| {
+            data_error(format!(
+                "failed to parse payload '{}': {err}",
+                payload_path.display()
+            ))
+        })?
+        .normalize_for_dtype(&meta.dtype)
 }
 
 pub async fn read_array_slice_payload_async(
@@ -437,7 +815,7 @@ async fn read_array_payload_chunked_slice_async(
         ))
     })?;
 
-    let mut values = vec![0.0; slice_shape.iter().copied().product::<usize>()];
+    let mut values = DataArrayValues::zeros(&meta.dtype, slice_shape.iter().copied().product());
     for chunk in index.chunks {
         let coords = chunk_coords_from_entry(&chunk, meta.shape.len())?;
         let chunk_start = chunk_start_for_coords(&coords, &meta.chunk_shape);
@@ -457,12 +835,14 @@ async fn read_array_payload_chunked_slice_async(
                 chunk_path.display()
             ))
         })?;
-        let payload: DataArrayPayload = serde_json::from_slice(&bytes).map_err(|err| {
-            data_error(format!(
-                "failed to parse chunk payload '{}': {err}",
-                chunk_path.display()
-            ))
-        })?;
+        let payload: DataArrayPayload = serde_json::from_slice::<DataArrayPayload>(&bytes)
+            .map_err(|err| {
+                data_error(format!(
+                    "failed to parse chunk payload '{}': {err}",
+                    chunk_path.display()
+                ))
+            })?
+            .normalize_for_dtype(&meta.dtype)?;
         if payload.shape != chunk_extent {
             return Err(data_error(format!(
                 "chunk payload shape mismatch for key '{}': {:?} != {:?}",
@@ -483,7 +863,7 @@ async fn read_array_payload_chunked_slice_async(
                     dst.push(global[dim].saturating_sub(slice_start[dim]));
                 }
                 let dst_linear = linear_index_column_major(&dst, slice_shape)?;
-                values[dst_linear] = payload.values[src_linear];
+                values.set(dst_linear, payload.values.get(src_linear)?)?;
             }
             if !advance_index(&mut local, &chunk_extent) {
                 break;
@@ -515,7 +895,7 @@ async fn read_array_payload_chunked_async(
             index_path.display()
         ))
     })?;
-    let mut values = vec![0.0; meta.shape.iter().copied().product::<usize>()];
+    let mut values = DataArrayValues::zeros(&meta.dtype, meta.shape.iter().copied().product());
     for chunk in index.chunks {
         let chunk_path = root.join(&chunk.data_path);
         let bytes = fs::read_async(&chunk_path).await.map_err(|err| {
@@ -524,12 +904,14 @@ async fn read_array_payload_chunked_async(
                 chunk_path.display()
             ))
         })?;
-        let payload: DataArrayPayload = serde_json::from_slice(&bytes).map_err(|err| {
-            data_error(format!(
-                "failed to parse chunk payload '{}': {err}",
-                chunk_path.display()
-            ))
-        })?;
+        let payload: DataArrayPayload = serde_json::from_slice::<DataArrayPayload>(&bytes)
+            .map_err(|err| {
+                data_error(format!(
+                    "failed to parse chunk payload '{}': {err}",
+                    chunk_path.display()
+                ))
+            })?
+            .normalize_for_dtype(&meta.dtype)?;
         let coords = chunk_coords_from_entry(&chunk, meta.shape.len())?;
         let chunk_start = chunk_start_for_coords(&coords, &meta.chunk_shape);
         let chunk_extent = if chunk.shape.is_empty() {
@@ -551,7 +933,7 @@ async fn read_array_payload_chunked_async(
             }
             let src_linear = linear_index_column_major(&local, &chunk_extent)?;
             let dst_linear = linear_index_column_major(&global, &meta.shape)?;
-            values[dst_linear] = payload.values[src_linear];
+            values.set(dst_linear, payload.values.get(src_linear)?)?;
             if !advance_index(&mut local, &chunk_extent) {
                 break;
             }
@@ -672,16 +1054,16 @@ fn collect_chunk_values(
     payload: &DataArrayPayload,
     chunk_start: &[usize],
     chunk_extent: &[usize],
-) -> BuiltinResult<Vec<f64>> {
+) -> BuiltinResult<DataArrayValues> {
     let mut local = vec![0usize; chunk_extent.len()];
-    let mut values = Vec::with_capacity(chunk_extent.iter().copied().product());
+    let mut values = DataArrayValues::zeros(&payload.dtype, 0);
     loop {
         let mut global = Vec::with_capacity(chunk_extent.len());
         for dim in 0..chunk_extent.len() {
             global.push(chunk_start[dim] + local[dim]);
         }
         let linear = linear_index_column_major(&global, &payload.shape)?;
-        values.push(payload.values[linear]);
+        values.push(payload.values.get(linear)?)?;
         if !advance_index(&mut local, chunk_extent) {
             break;
         }
@@ -779,7 +1161,7 @@ fn extract_slice_payload(
     start: &[usize],
     shape: &[usize],
 ) -> BuiltinResult<DataArrayPayload> {
-    let mut values = Vec::with_capacity(shape.iter().copied().product());
+    let mut values = DataArrayValues::zeros(&payload.dtype, 0);
     if shape.is_empty() {
         return Ok(DataArrayPayload {
             dtype: payload.dtype.clone(),
@@ -794,7 +1176,7 @@ fn extract_slice_payload(
             global.push(start[dim] + local[dim]);
         }
         let linear = linear_index_column_major(&global, &payload.shape)?;
-        values.push(payload.values[linear]);
+        values.push(payload.values.get(linear)?)?;
         if !advance_index(&mut local, shape) {
             break;
         }
@@ -1112,6 +1494,75 @@ pub fn remove_tx(tx_id: &str) -> BuiltinResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn payload_roundtrips_every_native_integer_storage_class() {
+        let cases = vec![
+            DataArrayValues::I8(vec![i8::MIN, i8::MAX]),
+            DataArrayValues::I16(vec![i16::MIN, i16::MAX]),
+            DataArrayValues::I32(vec![i32::MIN, i32::MAX]),
+            DataArrayValues::I64(vec![i64::MIN, i64::MAX]),
+            DataArrayValues::U8(vec![0, u8::MAX]),
+            DataArrayValues::U16(vec![0, u16::MAX]),
+            DataArrayValues::U32(vec![0, u32::MAX]),
+            DataArrayValues::U64(vec![0, u64::MAX]),
+        ];
+
+        for values in cases {
+            let dtype = match &values {
+                DataArrayValues::I8(_) => "int8",
+                DataArrayValues::I16(_) => "int16",
+                DataArrayValues::I32(_) => "int32",
+                DataArrayValues::I64(_) => "int64",
+                DataArrayValues::U8(_) => "uint8",
+                DataArrayValues::U16(_) => "uint16",
+                DataArrayValues::U32(_) => "uint32",
+                DataArrayValues::U64(_) => "uint64",
+                DataArrayValues::F64(_) => unreachable!(),
+            };
+            let payload = DataArrayPayload {
+                dtype: dtype.to_string(),
+                shape: vec![1, 2],
+                values: values.clone(),
+            };
+            let bytes = serde_json::to_vec(&payload).expect("encode typed payload");
+            let decoded: DataArrayPayload = serde_json::from_slice(&bytes).expect("decode payload");
+            assert_eq!(decoded.values, values, "{dtype} payload must remain exact");
+            let Value::Tensor(tensor) = decoded.into_value().expect("tensor value") else {
+                panic!("expected tensor");
+            };
+            assert_eq!(
+                tensor.integer_storage().map(IntegerStorage::class_name),
+                Some(dtype)
+            );
+        }
+    }
+
+    #[test]
+    fn payload_decodes_legacy_f64_arrays_and_normalizes_declared_integer_dtypes() {
+        let legacy = br#"{"dtype":"uint64","shape":[1,2],"values":[1,2]}"#;
+        let payload: DataArrayPayload =
+            serde_json::from_slice(legacy).expect("decode legacy payload");
+        assert_eq!(payload.values, DataArrayValues::F64(vec![1.0, 2.0]));
+
+        let payload = payload
+            .normalize_for_dtype("uint64")
+            .expect("normalize legacy payload");
+        assert_eq!(payload.values, DataArrayValues::U64(vec![1, 2]));
+    }
+
+    #[test]
+    fn payload_construction_preserves_uint64_tensor_extrema() {
+        let input =
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
+                .expect("uint64 tensor");
+        let payload = DataArrayPayload::from_value("uint64".to_string(), &Value::Tensor(input))
+            .expect("payload");
+        assert_eq!(
+            payload.values,
+            DataArrayValues::U64(vec![1_u64 << 63, u64::MAX])
+        );
+    }
 
     #[test]
     fn ensure_manifest_sequence_accepts_matching_sequence() {

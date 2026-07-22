@@ -58,7 +58,7 @@ fn integer_array_elementwise_arithmetic_preserves_native_storage() {
         )
     );
     assert_eq!(
-        runmat_runtime::call_builtin("minus", &[signed, signed_rhs]).expect("minus"),
+        runmat_runtime::call_builtin("minus", &[signed.clone(), signed_rhs]).expect("minus"),
         Value::Tensor(
             Tensor::new_integer(IntegerStorage::I8(vec![70, -128]), vec![1, 2])
                 .expect("minus expected"),

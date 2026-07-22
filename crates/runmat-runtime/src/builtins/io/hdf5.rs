@@ -2111,7 +2111,7 @@ mod imp {
         }
     }
 
-    fn type_name(dtype: &TypeDescriptor) -> String {
+    pub(super) fn type_name(dtype: &TypeDescriptor) -> String {
         match dtype {
             TypeDescriptor::Float(FloatSize::U4) => "single".to_string(),
             TypeDescriptor::Float(FloatSize::U8) => "double".to_string(),
@@ -2173,6 +2173,7 @@ mod tests {
     use runmat_builtins::{IntValue, IntegerStorage};
     use tempfile::tempdir;
 
+    use super::imp::type_name;
     use super::*;
 
     #[test]

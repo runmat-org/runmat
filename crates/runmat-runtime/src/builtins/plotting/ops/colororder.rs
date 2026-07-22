@@ -415,6 +415,7 @@ mod tests {
             rows,
             shape: vec![rows, 3],
             data,
+            integer_data: None,
             dtype: runmat_builtins::NumericDType::F64,
         })
     }

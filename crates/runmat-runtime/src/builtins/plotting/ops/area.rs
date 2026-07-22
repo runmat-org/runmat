@@ -786,6 +786,7 @@ mod tests {
     fn matrix_tensor(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
         Tensor {
             data,
+            integer_data: None,
             shape: vec![rows, cols],
             rows,
             cols,

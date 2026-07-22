@@ -1434,6 +1434,7 @@ pub(crate) mod tests {
                 &opts,
                 &Value::Tensor(Tensor {
                     data,
+                    integer_data: None,
                     shape: vec![1, 3],
                     rows: 1,
                     cols: 3,

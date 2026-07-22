@@ -16,6 +16,7 @@ pub(crate) enum IntegerComparisonOp {
     Ge,
 }
 
+#[derive(Debug)]
 pub(crate) enum IntegerComparisonError {
     SizeMismatch,
     Internal,
