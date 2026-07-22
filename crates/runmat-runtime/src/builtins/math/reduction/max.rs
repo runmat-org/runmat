@@ -591,6 +591,11 @@ fn empty_placeholder() -> Value {
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
 pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MaxEvaluation> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        return Err(max_invalid_input(
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
     let parsed = parse_call(rest).await?;
     if std::env::var("RUNMAT_DEBUG_MAX").is_ok() {
         let call_label = match &parsed {

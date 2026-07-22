@@ -456,6 +456,12 @@ async fn cummin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
 pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvaluation> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        return Err(cummin_error_with_detail(
+            &CUMMIN_ERROR_INVALID_INPUT,
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
     let (dim, direction, nan_mode) = parse_arguments(rest)?;
     match value {
         Value::GpuTensor(handle) => cummin_gpu(handle, dim, direction, nan_mode).await,

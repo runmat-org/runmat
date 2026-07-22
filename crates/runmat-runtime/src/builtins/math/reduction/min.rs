@@ -464,6 +464,11 @@ pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
 pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        return Err(min_invalid_input(
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
     match parse_call(rest).await? {
         ParsedCall::Elementwise(args) => elementwise_min(value, args).await,
         ParsedCall::Reduction(args) => reduction_min(value, args).await,

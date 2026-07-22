@@ -491,6 +491,12 @@ pub(crate) async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::Built
     // mean('all', X) as mean(X, 'all').
     let (value, rest) = normalise_mean_call_args(value, rest);
 
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        return Err(mean_invalid_input(
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
+
     let input_meta = InputMeta::from_value(&value);
     let parsed = parse_arguments(&rest).await?;
     if matches!(parsed.output, OutputTemplate::Native) {
