@@ -3,11 +3,12 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, NumericDType, Tensor, Value,
+    ComplexTensor, IntValue, IntegerComplexStorage, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
+use crate::builtins::math::elementwise::conj::conjugate_integer_imaginary_storage;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "toeplitz";
@@ -116,6 +117,7 @@ enum InputVector {
         dtype: NumericDType,
     },
     Complex(Vec<(f64, f64)>),
+    TypedComplex(IntegerComplexStorage),
 }
 
 impl InputVector {
@@ -142,7 +144,10 @@ impl InputVector {
             Value::Complex(re, im) => Ok(Self::Complex(vec![(re, im)])),
             Value::ComplexTensor(tensor) => {
                 validate_vector_shape(&tensor.shape, tensor.data.len())?;
-                Ok(Self::Complex(tensor.data))
+                Ok(match tensor.integer_data {
+                    Some(storage) => Self::TypedComplex(storage),
+                    None => Self::Complex(tensor.data),
+                })
             }
             other => Err(error_with_detail(
                 &ERROR_INVALID_INPUT,
@@ -155,17 +160,21 @@ impl InputVector {
         match self {
             Self::Real { values, .. } => values.len(),
             Self::Complex(values) => values.len(),
+            Self::TypedComplex(storage) => storage.len(),
         }
     }
 
     fn is_complex(&self) -> bool {
-        matches!(self, Self::Complex(_))
+        matches!(self, Self::Complex(_) | Self::TypedComplex(_))
     }
 
     fn real_at(&self, index: usize) -> f64 {
         match self {
             Self::Real { values, .. } => values[index],
             Self::Complex(values) => values[index].0,
+            Self::TypedComplex(_) => {
+                unreachable!("typed complex integers use toeplitz_typed_complex")
+            }
         }
     }
 
@@ -173,6 +182,9 @@ impl InputVector {
         match self {
             Self::Real { values, .. } => (values[index], 0.0),
             Self::Complex(values) => values[index],
+            Self::TypedComplex(_) => {
+                unreachable!("typed complex integers use toeplitz_typed_complex")
+            }
         }
     }
 
@@ -185,6 +197,13 @@ impl InputVector {
             Self::Complex(values) => {
                 Self::Complex(values.iter().map(|&(re, im)| (re, -im)).collect())
             }
+            Self::TypedComplex(storage) => Self::TypedComplex(
+                IntegerComplexStorage::new(
+                    storage.real.clone(),
+                    conjugate_integer_imaginary_storage(storage.imag.clone()),
+                )
+                .expect("existing typed complex storage has matching components"),
+            ),
         }
     }
 
@@ -192,6 +211,7 @@ impl InputVector {
         match self {
             Self::Real { dtype, .. } => Some(*dtype),
             Self::Complex(_) => None,
+            Self::TypedComplex(_) => None,
         }
     }
 }
@@ -199,10 +219,78 @@ impl InputVector {
 fn toeplitz_from_vectors(c: InputVector, r: InputVector, one_input: bool) -> BuiltinResult<Value> {
     let rows = c.len();
     let cols = r.len();
+    if matches!(&c, InputVector::TypedComplex(_)) || matches!(&r, InputVector::TypedComplex(_)) {
+        return toeplitz_typed_complex(c, r, rows, cols, one_input);
+    }
     if c.is_complex() || r.is_complex() {
         return toeplitz_complex(c, r, rows, cols, one_input);
     }
     toeplitz_real(c, r, rows, cols)
+}
+
+fn toeplitz_typed_complex(
+    c: InputVector,
+    r: InputVector,
+    rows: usize,
+    cols: usize,
+    one_input: bool,
+) -> BuiltinResult<Value> {
+    let (InputVector::TypedComplex(c), InputVector::TypedComplex(r)) = (c, r) else {
+        return Err(error_with_detail(
+            &ERROR_INVALID_INPUT,
+            "typed complex integer inputs must use the same integer class",
+        ));
+    };
+    if c.class_name() != r.class_name() {
+        return Err(error_with_detail(
+            &ERROR_INVALID_INPUT,
+            "typed complex integer inputs must use the same integer class",
+        ));
+    }
+    let len = rows
+        .checked_mul(cols)
+        .ok_or_else(|| error_with_detail(&ERROR_INTERNAL, "output size overflow"))?;
+    let mut real = Vec::with_capacity(len);
+    let mut imag = Vec::with_capacity(len);
+    for col in 0..cols {
+        for row in 0..rows {
+            let index = if row >= col { row - col } else { col - row };
+            let storage = if row >= col { &c } else { &r };
+            real.push(
+                storage
+                    .real
+                    .value_at(index)
+                    .expect("toeplitz index is in bounds"),
+            );
+            imag.push(
+                storage
+                    .imag
+                    .value_at(index)
+                    .expect("toeplitz index is in bounds"),
+            );
+        }
+    }
+    if one_input && !real.is_empty() {
+        let diagonal_real = r.real.value_at(0).expect("nonempty diagonal");
+        let diagonal_imag = r.imag.value_at(0).expect("nonempty diagonal");
+        for index in 0..rows.min(cols) {
+            real[index + index * rows] = diagonal_real.clone();
+            imag[index + index * rows] = diagonal_imag.clone();
+        }
+    }
+    let real = c
+        .real
+        .from_exact_values_like(real)
+        .map_err(|err| error_with_detail(&ERROR_INTERNAL, err))?;
+    let imag = c
+        .imag
+        .from_exact_values_like(imag)
+        .map_err(|err| error_with_detail(&ERROR_INTERNAL, err))?;
+    let storage = IntegerComplexStorage::new(real, imag)
+        .map_err(|err| error_with_detail(&ERROR_INTERNAL, err))?;
+    ComplexTensor::new_integer(storage, vec![rows, cols])
+        .map(Value::ComplexTensor)
+        .map_err(|err| error_with_detail(&ERROR_INTERNAL, err))
 }
 
 fn toeplitz_real(c: InputVector, r: InputVector, rows: usize, cols: usize) -> BuiltinResult<Value> {

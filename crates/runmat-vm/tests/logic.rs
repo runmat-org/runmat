@@ -501,6 +501,43 @@ fn typed_complex_integer_perms_preserves_exact_components() {
 }
 
 #[test]
+fn typed_complex_integer_toeplitz_preserves_exact_components() {
+    let vars = execute_source(
+        "c = complex(uint64([18446744073709551615 7]), uint64([5 6])); r = complex(uint64([18446744073709551615 9223372036854775808 9]), uint64([5 8 10])); out = toeplitz(c, r); real_out = real(out); imag_out = imag(out);",
+    )
+    .expect("two-vector toeplitz should preserve typed complex integer storage");
+
+    assert!(matches!(
+        &vars[3],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 3]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![u64::MAX, 7, 1_u64 << 63, u64::MAX, 9, 1_u64 << 63]))
+    ));
+    assert!(matches!(
+        &vars[4],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 3]
+                && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![5, 6, 8, 5, 10, 8]))
+    ));
+
+    let vars = execute_source(
+        "z = complex(int64([1 2]), int64([5 6])); out = toeplitz(z); real_out = real(out); imag_out = imag(out);",
+    )
+    .expect("one-vector toeplitz should use typed complex conjugation");
+    assert!(matches!(
+        &vars[2],
+        Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::I64(vec![1, 2, 2, 1]))
+    ));
+    assert!(matches!(
+        &vars[3],
+        Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::I64(vec![5, -6, 6, 5]))
+    ));
+}
+
+#[test]
 fn typed_complex_integer_numerical_integration_is_rejected_before_f64_coercion() {
     for operation in [
         "gradient(z)",
