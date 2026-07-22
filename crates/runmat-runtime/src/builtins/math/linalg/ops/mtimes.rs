@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{linalg, tensor};
+use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::linalg::type_resolvers::matmul_type;
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
@@ -160,6 +161,9 @@ async fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 pub(crate) async fn mtimes_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
+    if contains_integer(lhs) || contains_integer(rhs) {
+        return mtimes_cpu(lhs.clone(), rhs.clone()).await;
+    }
     if let Some(result) = try_gpu_matmul(lhs, rhs).await? {
         return Ok(result);
     }
@@ -282,6 +286,19 @@ async fn mtimes_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
     if let Some(result) = symbolic_binary(&lhs, &rhs, SymbolicBinaryOp::Mul) {
         return Ok(result);
+    }
+
+    if contains_integer(&lhs) || contains_integer(&rhs) {
+        if !mtimes_scalar(&lhs) && !mtimes_scalar(&rhs) {
+            return Err(mtimes_invalid_input(
+                "mtimes: if one input is an integer class, the other input must be scalar",
+            ));
+        }
+        if let Some(result) = try_integer_binary(&lhs, &rhs, IntegerBinaryOp::Multiply, NAME)
+            .map_err(mtimes_invalid_input)?
+        {
+            return Ok(result);
+        }
     }
 
     match (lhs, rhs) {
@@ -420,6 +437,23 @@ fn contains_complex(value: &Value) -> bool {
     matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_))
 }
 
+fn contains_integer(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        _ => false,
+    }
+}
+
+fn mtimes_scalar(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Num(_) | Value::Bool(_) => true,
+        Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
+        Value::LogicalArray(logical) => logical.data.len() == 1,
+        _ => false,
+    }
+}
+
 struct PreparedOperand {
     handle: GpuTensorHandle,
     owned: bool,
@@ -450,7 +484,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -604,14 +638,26 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn mix_int_and_matrix() {
+    fn integer_matrix_times_scalar_preserves_uint64_storage() {
+        let a = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![2, 1])
+            .expect("integer matrix");
+        let result = mtimes_builtin(Value::Tensor(a), Value::Num(1.0)).expect("mtimes");
+        assert_eq!(
+            result,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![2, 1])
+                    .expect("integer result")
+            )
+        );
+    }
+
+    #[test]
+    fn integer_mtimes_rejects_two_nonscalar_operands() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let result =
-            mtimes_builtin(Value::Int(IntValue::I32(2)), Value::Tensor(a)).expect("mtimes");
-        match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 4.0, 6.0, 8.0]),
-            other => panic!("expected tensor result, got {other:?}"),
-        }
+        let err = mtimes_builtin(Value::Int(IntValue::I32(2)), Value::Tensor(a))
+            .expect_err("integer matrix product must reject");
+        assert_eq!(err.identifier(), MTIMES_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains("other input must be scalar"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
