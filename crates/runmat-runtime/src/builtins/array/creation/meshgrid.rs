@@ -7,7 +7,7 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntValue, IntegerComplexStorage, ResolveContext, Tensor, Type, Value,
 };
 
 use crate::builtins::array::type_resolvers::size_vector_len;
@@ -660,6 +660,7 @@ struct AxisData {
     values: Vec<(f64, f64)>,
     len: usize,
     is_complex: bool,
+    integer_data: Option<IntegerComplexStorage>,
     gpu_real: Option<GpuTensorHandle>,
 }
 
@@ -678,6 +679,7 @@ async fn axis_from_value(
             values: vec![(n, 0.0)],
             len: 1,
             is_complex: false,
+            integer_data: None,
             gpu_real: None,
         }),
         Value::Int(i) => {
@@ -686,6 +688,7 @@ async fn axis_from_value(
                 values: vec![(val, 0.0)],
                 len: 1,
                 is_complex: false,
+                integer_data: None,
                 gpu_real: None,
             })
         }
@@ -693,12 +696,14 @@ async fn axis_from_value(
             values: vec![(if b { 1.0 } else { 0.0 }, 0.0)],
             len: 1,
             is_complex: false,
+            integer_data: None,
             gpu_real: None,
         }),
         Value::Complex(re, im) => Ok(AxisData {
             values: vec![(re, im)],
             len: 1,
             is_complex: im != 0.0,
+            integer_data: None,
             gpu_real: None,
         }),
         Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor, index),
@@ -713,6 +718,7 @@ async fn axis_from_value(
                     values: Vec::new(),
                     len: vector_len_from_shape(&handle.shape),
                     is_complex,
+                    integer_data: None,
                     gpu_real: Some(handle),
                 });
             }
@@ -756,6 +762,7 @@ fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisDa
             len: values.len(),
             values,
             is_complex: false,
+            integer_data: None,
             gpu_real: None,
         });
     }
@@ -782,12 +789,24 @@ fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> crate::Built
             .data
             .iter()
             .any(|&(_, imag)| !imag.is_nan() && imag != 0.0);
+        let ComplexTensor {
+            data, integer_data, ..
+        } = tensor;
         return Ok(AxisData {
-            len: tensor.data.len(),
-            values: tensor.data,
+            len: data.len(),
+            values: data,
             is_complex,
+            integer_data,
             gpu_real: None,
         });
+    }
+
+    if tensor.integer_data.is_some() {
+        return Err(builtin_error(format!(
+            "meshgrid: input argument {} must be a vector (1xN or Nx1), got shape {:?}",
+            index + 1,
+            tensor.shape
+        )));
     }
 
     if let Some(axis) = axis_from_meshgrid_matrix_complex(&tensor, index)? {
@@ -831,6 +850,7 @@ fn axis_from_meshgrid_matrix_real(
             len: values.len(),
             values,
             is_complex: false,
+            integer_data: None,
             gpu_real: None,
         }));
     }
@@ -847,6 +867,7 @@ fn axis_from_meshgrid_matrix_real(
         len: values.len(),
         values,
         is_complex: false,
+        integer_data: None,
         gpu_real: None,
     }))
 }
@@ -878,6 +899,7 @@ fn axis_from_meshgrid_matrix_complex(
             len: values.len(),
             values,
             is_complex,
+            integer_data: None,
             gpu_real: None,
         }));
     }
@@ -894,6 +916,7 @@ fn axis_from_meshgrid_matrix_complex(
         len: values.len(),
         values,
         is_complex,
+        integer_data: None,
         gpu_real: None,
     }))
 }
@@ -984,12 +1007,14 @@ async fn axis_to_host_async(axis: &AxisData) -> crate::BuiltinResult<AxisData> {
             values: vec![(n, 0.0)],
             len: 1,
             is_complex: false,
+            integer_data: None,
             gpu_real: None,
         }),
         Value::Complex(re, im) => Ok(AxisData {
             values: vec![(re, im)],
             len: 1,
             is_complex: im != 0.0,
+            integer_data: None,
             gpu_real: None,
         }),
         other => Err(builtin_error(format!(
@@ -1123,16 +1148,32 @@ fn build_outputs(
     let mut x_data = Vec::with_capacity(total);
     let mut y_data = Vec::with_capacity(total);
     let mut z_data = z_axis.map(|_| Vec::with_capacity(total));
+    let mut x_integer_values = x_axis
+        .integer_data
+        .as_ref()
+        .map(|_| (Vec::with_capacity(total), Vec::with_capacity(total)));
+    let mut y_integer_values = y_axis
+        .integer_data
+        .as_ref()
+        .map(|_| (Vec::with_capacity(total), Vec::with_capacity(total)));
+    let mut z_integer_values = z_axis.and_then(|axis| {
+        axis.integer_data
+            .as_ref()
+            .map(|_| (Vec::with_capacity(total), Vec::with_capacity(total)))
+    });
 
     for k in 0..nz {
-        let z_value = z_axis.map(|axis| axis.values[k]);
         for col in 0..nx {
-            let x_value = x_axis.values[col];
             for row in 0..ny {
-                x_data.push(x_value);
-                y_data.push(y_axis.values[row]);
+                append_axis_value(x_axis, col, &mut x_data, x_integer_values.as_mut());
+                append_axis_value(y_axis, row, &mut y_data, y_integer_values.as_mut());
                 if let Some(ref mut z_vec) = z_data {
-                    z_vec.push(z_value.unwrap());
+                    append_axis_value(
+                        z_axis.expect("z output has a z axis"),
+                        k,
+                        z_vec,
+                        z_integer_values.as_mut(),
+                    );
                 }
             }
         }
@@ -1147,23 +1188,55 @@ fn build_outputs(
     outputs.push(GridOutput {
         shape: base_shape.clone(),
         data: x_data,
+        integer_data: x_axis.integer_data.clone(),
+        integer_values: x_integer_values,
     });
     outputs.push(GridOutput {
         shape: base_shape.clone(),
         data: y_data,
+        integer_data: y_axis.integer_data.clone(),
+        integer_values: y_integer_values,
     });
     if let Some(z_vec) = z_data {
         outputs.push(GridOutput {
             shape: base_shape,
             data: z_vec,
+            integer_data: z_axis.and_then(|axis| axis.integer_data.clone()),
+            integer_values: z_integer_values,
         });
     }
     outputs
 }
 
+fn append_axis_value(
+    axis: &AxisData,
+    index: usize,
+    data: &mut Vec<(f64, f64)>,
+    integer_values: Option<&mut (Vec<IntValue>, Vec<IntValue>)>,
+) {
+    if let (Some(storage), Some((real, imag))) = (axis.integer_data.as_ref(), integer_values) {
+        real.push(
+            storage
+                .real
+                .value_at(index)
+                .expect("axis index is in bounds"),
+        );
+        imag.push(
+            storage
+                .imag
+                .value_at(index)
+                .expect("axis index is in bounds"),
+        );
+    } else {
+        data.push(axis.values[index]);
+    }
+}
+
 struct GridOutput {
     shape: Vec<usize>,
     data: Vec<(f64, f64)>,
+    integer_data: Option<IntegerComplexStorage>,
+    integer_values: Option<(Vec<IntValue>, Vec<IntValue>)>,
 }
 
 impl GridOutput {
@@ -1197,6 +1270,28 @@ impl GridOutput {
     }
 
     fn to_complex_value(&self, residency: DevicePreference) -> crate::BuiltinResult<Value> {
+        if let (Some(prototype), Some((real, imag))) =
+            (self.integer_data.as_ref(), self.integer_values.as_ref())
+        {
+            let real = prototype
+                .real
+                .from_exact_values_like(real.clone())
+                .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
+            let imag = prototype
+                .imag
+                .from_exact_values_like(imag.clone())
+                .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
+            let storage = IntegerComplexStorage::new(real, imag)
+                .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
+            let tensor = ComplexTensor::new_integer(storage, self.shape.clone())
+                .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
+            return match residency {
+                DevicePreference::Host => Ok(Value::ComplexTensor(tensor)),
+                DevicePreference::Gpu => Err(builtin_error(
+                    "meshgrid: GPU-resident typed complex integer outputs are not supported",
+                )),
+            };
+        }
         let tensor = ComplexTensor::new(self.data.clone(), self.shape.clone())
             .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
         match residency {
