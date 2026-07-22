@@ -138,6 +138,16 @@ fn apply_integer_scalar(
     let mut values = Vec::with_capacity(integer.storage.len());
     for index in 0..integer.storage.len() {
         let integer_value = integer.storage.value_at(index);
+        if matches!(operation, IntegerBinaryOp::Divide) {
+            if let Some(scalar_value) = exact_integer_scalar(integer.target, scalar) {
+                values.push(if integer_is_left {
+                    exact_integer_divide(integer_value, scalar_value)
+                } else {
+                    exact_integer_divide(scalar_value, integer_value)
+                });
+                continue;
+            }
+        }
         if matches!(operation, IntegerBinaryOp::Power)
             && integer_is_left
             && nonnegative_integer_exponent(scalar)
@@ -154,6 +164,23 @@ fn apply_integer_scalar(
         values.push(integer.target.cast_scalar(result));
     }
     integer_values_into_value(integer.target, values, integer.shape.clone())
+}
+
+fn exact_integer_scalar(target: IntegerTarget, value: f64) -> Option<IntValue> {
+    if !value.is_finite() || value.fract() != 0.0 {
+        return None;
+    }
+    let in_range = match target {
+        IntegerTarget::I8 => value >= i8::MIN as f64 && value < i8::MAX as f64 + 1.0,
+        IntegerTarget::I16 => value >= i16::MIN as f64 && value < i16::MAX as f64 + 1.0,
+        IntegerTarget::I32 => value >= i32::MIN as f64 && value < i32::MAX as f64 + 1.0,
+        IntegerTarget::I64 => value >= i64::MIN as f64 && value < 9_223_372_036_854_775_808.0,
+        IntegerTarget::U8 => value >= 0.0 && value < u8::MAX as f64 + 1.0,
+        IntegerTarget::U16 => value >= 0.0 && value < u16::MAX as f64 + 1.0,
+        IntegerTarget::U32 => value >= 0.0 && value < u32::MAX as f64 + 1.0,
+        IntegerTarget::U64 => value >= 0.0 && value < 18_446_744_073_709_551_616.0,
+    };
+    in_range.then(|| target.cast_scalar(value))
 }
 
 fn apply_float(lhs: f64, rhs: f64, operation: IntegerBinaryOp) -> f64 {
@@ -574,5 +601,31 @@ mod tests {
         .expect("integer operation")
         .expect("integer path");
         assert_eq!(result, Value::Int(IntValue::U64(u64::MAX)));
+    }
+
+    #[test]
+    fn integral_scalar_division_preserves_exact_uint64_values() {
+        let result = try_integer_binary(
+            &integer(IntegerStorage::U64(vec![u64::MAX, 3]), vec![1, 2]),
+            &Value::Num(2.0),
+            IntegerBinaryOp::Divide,
+            "rdivide",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(
+            result,
+            integer(IntegerStorage::U64(vec![1_u64 << 63, 2]), vec![1, 2])
+        );
+
+        let result = try_integer_binary(
+            &Value::Num(2.0),
+            &integer(IntegerStorage::U64(vec![u64::MAX, 2]), vec![1, 2]),
+            IntegerBinaryOp::Divide,
+            "ldivide",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(result, integer(IntegerStorage::U64(vec![0, 1]), vec![1, 2]));
     }
 }

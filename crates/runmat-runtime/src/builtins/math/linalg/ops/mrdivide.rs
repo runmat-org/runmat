@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::linalg::type_resolvers::right_divide_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -162,6 +163,15 @@ async fn mrdivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 pub(crate) async fn mrdivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
+    if contains_integer(lhs) || contains_integer(rhs) {
+        let lhs_host = crate::dispatcher::gather_if_needed_async(lhs)
+            .await
+            .map_err(map_control_flow)?;
+        let rhs_host = crate::dispatcher::gather_if_needed_async(rhs)
+            .await
+            .map_err(map_control_flow)?;
+        return mrdivide_cpu(lhs_host, rhs_host);
+    }
     if let Some(result) = try_gpu_mrdivide(lhs, rhs).await? {
         return Ok(result);
     }
@@ -213,6 +223,18 @@ async fn try_gpu_mrdivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Valu
 }
 
 fn mrdivide_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if contains_integer(&lhs) || contains_integer(&rhs) {
+        if !scalar_divide_input(&rhs) || (contains_integer(&rhs) && !scalar_divide_input(&lhs)) {
+            return Err(mrdivide_invalid_input(
+                "mrdivide: integer inputs are only supported for scalar right division",
+            ));
+        }
+        if let Some(result) = try_integer_binary(&lhs, &rhs, IntegerBinaryOp::Divide, NAME)
+            .map_err(mrdivide_invalid_input)?
+        {
+            return Ok(result);
+        }
+    }
     let lhs_numeric = classify_numeric(lhs)?;
     let rhs_numeric = classify_numeric(rhs)?;
 
@@ -235,6 +257,23 @@ fn mrdivide_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
             let result = mrdivide_complex(&lhs_c, &rhs_c)?;
             Ok(complex_tensor_into_value(result))
         }
+    }
+}
+
+fn contains_integer(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        _ => false,
+    }
+}
+
+fn scalar_divide_input(value: &Value) -> bool {
+    match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
+        Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
+        Value::LogicalArray(logical) => logical.data.len() == 1,
+        _ => false,
     }
 }
 
@@ -507,7 +546,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::ProviderTelemetry;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -591,6 +630,30 @@ pub(crate) mod tests {
             Value::Tensor(out) => assert_eq!(out.data, vec![1.0, 2.0, 3.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn integer_matrix_right_division_by_scalar_preserves_uint64_storage() {
+        let values =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
+                .expect("integer values");
+        let result = mrdivide_builtin(Value::Tensor(values), Value::Num(1.0)).expect("mrdivide");
+        assert_eq!(
+            result,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
+                    .expect("integer result")
+            )
+        );
+    }
+
+    #[test]
+    fn integer_scalar_divisor_rejects_nonscalar_double_numerator() {
+        let numerator = Tensor::new(vec![2.0, 4.0], vec![1, 2]).expect("numerator");
+        let err = mrdivide_builtin(Value::Tensor(numerator), Value::Int(IntValue::I32(2)))
+            .expect_err("integer scalar divisor needs scalar numerator");
+        assert_eq!(err.identifier(), MRDIVIDE_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains("only supported for scalar"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
