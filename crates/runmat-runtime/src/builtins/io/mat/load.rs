@@ -9,8 +9,8 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LogicalArray, NumericDType, SparseTensor, StringArray,
-    StructValue, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, SparseTensor,
+    StringArray, StructValue, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -770,6 +770,21 @@ fn parse_numeric_array(
 ) -> BuiltinResult<MatArray> {
     let real_elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: numeric array missing real component"))?;
+    if class_is_integer(class) {
+        if has_imag {
+            return Err(load_error(
+                "load: complex integer MAT arrays require typed complex integer storage",
+            ));
+        }
+        return Ok(MatArray {
+            class,
+            dims,
+            data: MatData::Integer {
+                storage: decode_integer_storage(&real_elem, class, endian)?,
+            },
+        });
+    }
+
     let real = decode_numeric_values(&real_elem, endian)?;
 
     let imag = if has_imag {
@@ -787,6 +802,101 @@ fn parse_numeric_array(
     };
 
     Ok(MatArray { class, dims, data })
+}
+
+fn class_is_integer(class: MatClass) -> bool {
+    matches!(
+        class,
+        MatClass::Int8
+            | MatClass::UInt8
+            | MatClass::Int16
+            | MatClass::UInt16
+            | MatClass::Int32
+            | MatClass::UInt32
+            | MatClass::Int64
+            | MatClass::UInt64
+    )
+}
+
+fn decode_integer_storage(
+    elem: &TaggedData,
+    class: MatClass,
+    endian: Endian,
+) -> BuiltinResult<IntegerStorage> {
+    let expected_type = match class {
+        MatClass::Int8 => MI_INT8,
+        MatClass::UInt8 => MI_UINT8,
+        MatClass::Int16 => MI_INT16,
+        MatClass::UInt16 => MI_UINT16,
+        MatClass::Int32 => MI_INT32,
+        MatClass::UInt32 => MI_UINT32,
+        MatClass::Int64 => MI_INT64,
+        MatClass::UInt64 => MI_UINT64,
+        _ => return Err(load_error("load: expected an integer MAT class")),
+    };
+    if elem.data_type != expected_type {
+        return Err(load_error(format!(
+            "load: integer MAT class payload type {} does not match class {:?}",
+            elem.data_type, class
+        )));
+    }
+
+    let data = &elem.data;
+    match class {
+        MatClass::Int8 => Ok(IntegerStorage::I8(
+            data.iter().map(|value| *value as i8).collect(),
+        )),
+        MatClass::UInt8 => Ok(IntegerStorage::U8(data.clone())),
+        MatClass::Int16 => {
+            ensure_data_width(data, 2, "integer int16 data")?;
+            Ok(IntegerStorage::I16(
+                data.chunks_exact(2)
+                    .map(|chunk| endian.read_i16(chunk))
+                    .collect(),
+            ))
+        }
+        MatClass::UInt16 => {
+            ensure_data_width(data, 2, "integer uint16 data")?;
+            Ok(IntegerStorage::U16(
+                data.chunks_exact(2)
+                    .map(|chunk| endian.read_u16(chunk))
+                    .collect(),
+            ))
+        }
+        MatClass::Int32 => {
+            ensure_data_width(data, 4, "integer int32 data")?;
+            Ok(IntegerStorage::I32(
+                data.chunks_exact(4)
+                    .map(|chunk| endian.read_i32(chunk))
+                    .collect(),
+            ))
+        }
+        MatClass::UInt32 => {
+            ensure_data_width(data, 4, "integer uint32 data")?;
+            Ok(IntegerStorage::U32(
+                data.chunks_exact(4)
+                    .map(|chunk| endian.read_u32(chunk))
+                    .collect(),
+            ))
+        }
+        MatClass::Int64 => {
+            ensure_data_width(data, 8, "integer int64 data")?;
+            Ok(IntegerStorage::I64(
+                data.chunks_exact(8)
+                    .map(|chunk| endian.read_i64(chunk))
+                    .collect(),
+            ))
+        }
+        MatClass::UInt64 => {
+            ensure_data_width(data, 8, "integer uint64 data")?;
+            Ok(IntegerStorage::U64(
+                data.chunks_exact(8)
+                    .map(|chunk| endian.read_u64(chunk))
+                    .collect(),
+            ))
+        }
+        _ => Err(load_error("load: expected an integer MAT class")),
+    }
 }
 
 fn parse_logical_array(
@@ -1154,6 +1264,14 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
                 .map_err(|e| load_error(format!("load: {e}")))?;
             Ok(Value::Tensor(tensor))
         }
+        MatData::Integer { storage } => {
+            if storage.len() == 1 {
+                return Ok(Value::Int(integer_storage_scalar(&storage, 0)));
+            }
+            let tensor = Tensor::new_integer(storage, array.dims.clone())
+                .map_err(|e| load_error(format!("load: {e}")))?;
+            Ok(Value::Tensor(tensor))
+        }
         MatData::Logical { data } => {
             let total: usize = array
                 .dims
@@ -1239,6 +1357,19 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
                 .map_err(|e| load_error(format!("load: {e}")))?;
             Ok(Value::SparseTensor(sparse))
         }
+    }
+}
+
+fn integer_storage_scalar(storage: &IntegerStorage, index: usize) -> IntValue {
+    match storage {
+        IntegerStorage::I8(values) => IntValue::I8(values[index]),
+        IntegerStorage::I16(values) => IntValue::I16(values[index]),
+        IntegerStorage::I32(values) => IntValue::I32(values[index]),
+        IntegerStorage::I64(values) => IntValue::I64(values[index]),
+        IntegerStorage::U8(values) => IntValue::U8(values[index]),
+        IntegerStorage::U16(values) => IntValue::U16(values[index]),
+        IntegerStorage::U32(values) => IntValue::U32(values[index]),
+        IntegerStorage::U64(values) => IntValue::U64(values[index]),
     }
 }
 
@@ -1459,7 +1590,7 @@ pub(crate) mod tests {
     use flate2::write::ZlibEncoder;
     use flate2::Compression;
     use futures::executor::block_on;
-    use runmat_builtins::StringArray;
+    use runmat_builtins::{IntegerStorage, StringArray};
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -1748,6 +1879,57 @@ pub(crate) mod tests {
             other => panic!("expected tensor, got {other:?}"),
         }
         assert_eq!(values.get("i"), Some(&Value::Int(IntValue::I16(-7))));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn load_save_roundtrip_preserves_every_integer_tensor_class_exactly() {
+        let cases = vec![
+            ("i8", IntegerStorage::I8(vec![i8::MIN, i8::MAX])),
+            ("u8", IntegerStorage::U8(vec![0, u8::MAX])),
+            ("i16", IntegerStorage::I16(vec![i16::MIN, i16::MAX])),
+            ("u16", IntegerStorage::U16(vec![0, u16::MAX])),
+            ("i32", IntegerStorage::I32(vec![i32::MIN, i32::MAX])),
+            ("u32", IntegerStorage::U32(vec![0, u32::MAX])),
+            ("i64", IntegerStorage::I64(vec![i64::MIN, i64::MAX])),
+            ("u64", IntegerStorage::U64(vec![1_u64 << 63, u64::MAX])),
+        ];
+        let mut entries = Vec::new();
+        for (name, storage) in &cases {
+            let tensor = Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
+            entries.push(((*name).to_string(), Value::Tensor(tensor)));
+        }
+        let empty = Tensor::new_integer(IntegerStorage::U64(Vec::new()), vec![0, 2])
+            .expect("empty integer tensor");
+        entries.push(("empty_u64".to_string(), Value::Tensor(empty)));
+        entries.push((
+            "scalar_u64".to_string(),
+            Value::Int(IntValue::U64(u64::MAX)),
+        ));
+
+        let bytes = block_on(encode_workspace_to_mat_bytes(&entries)).expect("encode MAT bytes");
+        let values: HashMap<_, _> = load_entries_from_bytes(bytes).into_iter().collect();
+
+        for (name, storage) in cases {
+            match values.get(name).expect("loaded integer tensor") {
+                Value::Tensor(tensor) => assert_eq!(tensor.integer_storage(), Some(&storage)),
+                other => panic!("expected tensor for {name}, got {other:?}"),
+            }
+        }
+        match values.get("empty_u64").expect("loaded empty tensor") {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![0, 2]);
+                assert_eq!(
+                    tensor.integer_storage(),
+                    Some(&IntegerStorage::U64(Vec::new()))
+                );
+            }
+            other => panic!("expected empty tensor, got {other:?}"),
+        }
+        assert_eq!(
+            values.get("scalar_u64"),
+            Some(&Value::Int(IntValue::U64(u64::MAX)))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
