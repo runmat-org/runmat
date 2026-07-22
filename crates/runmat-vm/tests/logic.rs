@@ -300,6 +300,22 @@ fn typed_complex_integer_extrema_and_mean_are_rejected_before_f64_coercion() {
 }
 
 #[test]
+fn typed_complex_integer_ordering_operations_are_rejected_before_f64_coercion() {
+    for operation in ["sort(z)", "argsort(z)", "issorted(z)", "sortrows(z)"] {
+        let source = format!(
+            "z = complex(uint64([9223372036854775808 1]), uint64([1 0])); out = {operation};"
+        );
+        let err = execute_source(&source).expect_err(operation);
+        assert!(
+            err.to_string().contains(
+                "operations involving complex numbers with integer types are not supported"
+            ),
+            "{operation} returned an unexpected error: {err}"
+        );
+    }
+}
+
+#[test]
 fn typed_complex_integer_numerical_integration_is_rejected_before_f64_coercion() {
     for operation in [
         "gradient(z)",

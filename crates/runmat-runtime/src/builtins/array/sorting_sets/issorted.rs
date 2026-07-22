@@ -290,6 +290,7 @@ fn issorted_internal(message: impl Into<String>) -> crate::RuntimeError {
     builtin_path = "crate::builtins::array::sorting_sets::issorted"
 )]
 async fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     let input = normalize_input(value).await?;
     let shape = input.shape();
     let args = IssortedArgs::parse(&rest, &shape)?;

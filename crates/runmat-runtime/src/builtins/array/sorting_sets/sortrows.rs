@@ -386,6 +386,7 @@ async fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
 
 /// Evaluate the `sortrows` builtin once and expose both outputs.
 pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => sortrows_gpu(handle, rest).await,
         other => sortrows_host(other, rest),

@@ -349,6 +349,7 @@ async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
 
 /// Evaluate the `sort` builtin once and expose both outputs.
 pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortEvaluation> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     let args = SortArgs::parse(rest)?;
     match value {
         Value::GpuTensor(handle) => sort_gpu(handle, &args).await,

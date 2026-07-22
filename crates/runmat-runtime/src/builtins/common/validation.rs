@@ -22,6 +22,17 @@ pub fn is_typed_complex_integer(value: &Value) -> bool {
     matches!(value, Value::ComplexTensor(tensor) if tensor.integer_data.is_some())
 }
 
+/// Reject a value that would otherwise enter a floating complex operation.
+pub fn reject_typed_complex_integer(value: &Value, builtin: &str) -> BuiltinResult<()> {
+    if is_typed_complex_integer(value) {
+        return Err(build_runtime_error(format!(
+            "{builtin}: operations involving complex numbers with integer types are not supported"
+        ))
+        .build());
+    }
+    Ok(())
+}
+
 /// Reject operations that would consume the lossy `f64` compatibility view of
 /// a typed complex integer tensor. MATLAB permits storage/inspection of these
 /// values, but not operations on them.
