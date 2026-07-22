@@ -1163,6 +1163,140 @@ impl SparseTensor {
             .ok_or_else(|| "SparseTensor assignment linear index overflow".to_string())
     }
 
+    fn checked_deletion_indices(
+        indices: &[usize],
+        bound: usize,
+        axis: &str,
+    ) -> Result<Vec<usize>, String> {
+        let mut sorted = indices.to_vec();
+        sorted.sort_unstable();
+        for pair in sorted.windows(2) {
+            if pair[0] == pair[1] {
+                return Err(format!(
+                    "SparseTensor {axis} deletion indices must be unique"
+                ));
+            }
+        }
+        if sorted.iter().any(|&index| index >= bound) {
+            return Err(format!(
+                "SparseTensor {axis} deletion index exceeds dimension"
+            ));
+        }
+        Ok(sorted)
+    }
+
+    fn rebuilt_csc<T: Clone>(
+        &self,
+        source_columns: &[usize],
+        mut map_row: impl FnMut(usize) -> Option<usize>,
+        mut stored_value: impl FnMut(usize) -> Result<T, String>,
+    ) -> Result<SparseCscParts<T>, String> {
+        let mut col_ptrs = Vec::new();
+        col_ptrs
+            .try_reserve_exact(
+                source_columns
+                    .len()
+                    .checked_add(1)
+                    .ok_or_else(|| "SparseTensor deletion column count overflow".to_string())?,
+            )
+            .map_err(|error| format!("SparseTensor deletion allocation failed: {error}"))?;
+        let mut row_indices = Vec::new();
+        let mut values = Vec::new();
+        row_indices
+            .try_reserve_exact(self.nnz())
+            .map_err(|error| format!("SparseTensor deletion allocation failed: {error}"))?;
+        values
+            .try_reserve_exact(self.nnz())
+            .map_err(|error| format!("SparseTensor deletion allocation failed: {error}"))?;
+        col_ptrs.push(0);
+        for &source_column in source_columns {
+            let start = self.col_ptrs[source_column];
+            let end = self.col_ptrs[source_column + 1];
+            for index in start..end {
+                if let Some(row) = map_row(self.row_indices[index]) {
+                    row_indices.push(row);
+                    values.push(stored_value(index)?);
+                }
+            }
+            col_ptrs.push(values.len());
+        }
+        Ok((col_ptrs, row_indices, values))
+    }
+
+    /// Deletes complete sparse matrix rows without materializing dense storage.
+    pub fn with_deleted_rows(&self, rows: &[usize]) -> Result<Self, String> {
+        let rows = Self::checked_deletion_indices(rows, self.rows, "row")?;
+        let source_columns = (0..self.cols).collect::<Vec<_>>();
+        let output_rows = self
+            .rows
+            .checked_sub(rows.len())
+            .ok_or_else(|| "SparseTensor deletion row count underflow".to_string())?;
+        if let Some(storage) = self.integer_storage() {
+            let (col_ptrs, row_indices, values) = self.rebuilt_csc(
+                &source_columns,
+                |row| match rows.binary_search(&row) {
+                    Ok(_) => None,
+                    Err(removed_before) => Some(row - removed_before),
+                },
+                |index| {
+                    storage
+                        .value_at(index)
+                        .ok_or_else(|| "SparseTensor integer storage is inconsistent".to_string())
+                },
+            )?;
+            return Self::new_integer_like(
+                output_rows,
+                self.cols,
+                col_ptrs,
+                row_indices,
+                values,
+                storage,
+            );
+        }
+        let (col_ptrs, row_indices, values) = self.rebuilt_csc(
+            &source_columns,
+            |row| match rows.binary_search(&row) {
+                Ok(_) => None,
+                Err(removed_before) => Some(row - removed_before),
+            },
+            |index| Ok(self.values[index]),
+        )?;
+        Self::new(output_rows, self.cols, col_ptrs, row_indices, values)
+    }
+
+    /// Deletes complete sparse matrix columns without materializing dense storage.
+    pub fn with_deleted_columns(&self, columns: &[usize]) -> Result<Self, String> {
+        let columns = Self::checked_deletion_indices(columns, self.cols, "column")?;
+        let source_columns = (0..self.cols)
+            .filter(|column| columns.binary_search(column).is_err())
+            .collect::<Vec<_>>();
+        if let Some(storage) = self.integer_storage() {
+            let (col_ptrs, row_indices, values) =
+                self.rebuilt_csc(&source_columns, Some, |index| {
+                    storage
+                        .value_at(index)
+                        .ok_or_else(|| "SparseTensor integer storage is inconsistent".to_string())
+                })?;
+            return Self::new_integer_like(
+                self.rows,
+                source_columns.len(),
+                col_ptrs,
+                row_indices,
+                values,
+                storage,
+            );
+        }
+        let (col_ptrs, row_indices, values) =
+            self.rebuilt_csc(&source_columns, Some, |index| Ok(self.values[index]))?;
+        Self::new(
+            self.rows,
+            source_columns.len(),
+            col_ptrs,
+            row_indices,
+            values,
+        )
+    }
+
     pub fn class_name(&self) -> &'static str {
         self.integer_data
             .as_ref()
@@ -1219,6 +1353,41 @@ mod sparse_tensor_tests {
         let removed = inserted.with_updated_value(1, 0, 0.0).expect("remove");
         assert_eq!(removed.row_indices, vec![0, 2]);
         assert_eq!(removed.values, vec![1.0, 3.0]);
+    }
+
+    #[test]
+    fn sparse_structural_deletion_preserves_csc_and_exact_integer_values() {
+        let sparse = SparseTensor::new_integer(
+            3,
+            3,
+            vec![0, 2, 3, 5],
+            vec![0, 2, 1, 0, 2],
+            IntegerStorage::U64(vec![1, u64::MAX, 9_223_372_036_854_775_808, 4, 5]),
+        )
+        .expect("sparse");
+
+        let without_middle_row = sparse.with_deleted_rows(&[1]).expect("delete row");
+        assert_eq!(without_middle_row.shape(), vec![2, 3]);
+        assert_eq!(without_middle_row.col_ptrs, vec![0, 2, 2, 4]);
+        assert_eq!(without_middle_row.row_indices, vec![0, 1, 0, 1]);
+        assert_eq!(
+            without_middle_row.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1, u64::MAX, 4, 5]))
+        );
+
+        let without_outer_columns = sparse
+            .with_deleted_columns(&[0, 2])
+            .expect("delete columns");
+        assert_eq!(without_outer_columns.shape(), vec![3, 1]);
+        assert_eq!(without_outer_columns.col_ptrs, vec![0, 1]);
+        assert_eq!(without_outer_columns.row_indices, vec![1]);
+        assert_eq!(
+            without_outer_columns.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_223_372_036_854_775_808]))
+        );
+
+        assert!(sparse.with_deleted_rows(&[1, 1]).is_err());
+        assert!(sparse.with_deleted_columns(&[3]).is_err());
     }
 
     #[test]

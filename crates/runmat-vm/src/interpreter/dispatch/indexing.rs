@@ -225,13 +225,6 @@ fn assign_scalar_struct_index(
     }
 }
 
-fn sparse_assignment_unsupported() -> RuntimeError {
-    crate::interpreter::errors::mex(
-        "SparseAssignmentUnsupported",
-        "Sparse matrix assignment is not yet supported",
-    )
-}
-
 async fn resolve_cell_indices(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
     let selectors = build_cell_scalar_selectors(values)
         .await
@@ -1697,9 +1690,6 @@ pub async fn dispatch_indexing(
                     );
                 }
                 Value::SparseTensor(sparse) => {
-                    if delete {
-                        return Err(sparse_assignment_unsupported());
-                    }
                     let shape = sparse.shape();
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape)
@@ -1707,8 +1697,11 @@ pub async fn dispatch_indexing(
                             .map_err(|e| map_slice_plan_error("sparse slice assign", e))?;
                     let plan = build_index_plan(&selectors, *dims, &shape)
                         .map_err(|e| map_slice_plan_error("sparse slice assign", e))?;
-                    stack
-                        .push(idx_write_slice::assign_sparse_with_plan(sparse, &plan, &rhs).await?);
+                    stack.push(if delete {
+                        idx_write_slice::delete_sparse_with_plan(sparse, &plan, &rhs)?
+                    } else {
+                        idx_write_slice::assign_sparse_with_plan(sparse, &plan, &rhs).await?
+                    });
                 }
                 Value::StringArray(mut sa) => {
                     if delete {
@@ -2318,9 +2311,6 @@ pub async fn dispatch_indexing(
                     stack.push(updated);
                 }
                 Value::SparseTensor(sparse) => {
-                    if delete {
-                        return Err(sparse_assignment_unsupported());
-                    }
                     let shape = sparse.shape();
                     let vm_plan = build_expr_slice_plan(
                         ExprPlanSpec {
@@ -2338,9 +2328,11 @@ pub async fn dispatch_indexing(
                         vars,
                     )
                     .await?;
-                    stack.push(
-                        idx_write_slice::assign_sparse_with_plan(sparse, &vm_plan, &rhs).await?,
-                    );
+                    stack.push(if delete {
+                        idx_write_slice::delete_sparse_with_plan(sparse, &vm_plan, &rhs)?
+                    } else {
+                        idx_write_slice::assign_sparse_with_plan(sparse, &vm_plan, &rhs).await?
+                    });
                 }
                 Value::Object(obj) => {
                     if let Some(err) = missing_member_index_overload_error(

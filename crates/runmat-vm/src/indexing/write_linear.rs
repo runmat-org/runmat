@@ -392,9 +392,9 @@ pub async fn assign_tensor_scalar(
     }
 }
 
-/// Assigns one existing sparse matrix element without densifying its CSC
-/// representation. Structural resizing and selector assignment deliberately
-/// remain in the slice-assignment implementation.
+/// Assigns one sparse matrix element, or deletes one vector element, without
+/// densifying its CSC representation. Structural resizing and selector
+/// assignment deliberately remain in the slice-assignment implementation.
 pub async fn assign_sparse_scalar(
     sparse: SparseTensor,
     indices: &[usize],
@@ -402,10 +402,56 @@ pub async fn assign_sparse_scalar(
     delete: bool,
 ) -> Result<Value, RuntimeError> {
     if delete {
-        return Err(mex(
-            "UnsupportedDeletion",
-            "Sparse indexed deletion is not yet supported",
-        ));
+        if !is_empty_tensor(rhs) {
+            return Err(mex(
+                "DeletionRequiresEmptyRhs",
+                "Indexed deletion requires empty RHS",
+            ));
+        }
+        let updated = match indices {
+            [index] => {
+                let total = sparse
+                    .rows
+                    .checked_mul(sparse.cols)
+                    .ok_or_else(|| mex("IndexOutOfBounds", "Index out of bounds"))?;
+                if *index == 0 || *index > total {
+                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+                }
+                if sparse.rows == 1 {
+                    sparse.with_deleted_columns(&[*index - 1])
+                } else if sparse.cols == 1 {
+                    sparse.with_deleted_rows(&[*index - 1])
+                } else {
+                    return Err(mex(
+                        "UnsupportedDeletion",
+                        "Linear sparse deletion is only supported for vectors",
+                    ));
+                }
+            }
+            [row, column] => {
+                if *row == 0 || *row > sparse.rows || *column == 0 || *column > sparse.cols {
+                    return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
+                }
+                if sparse.rows == 1 {
+                    sparse.with_deleted_columns(&[*column - 1])
+                } else if sparse.cols == 1 {
+                    sparse.with_deleted_rows(&[*row - 1])
+                } else {
+                    return Err(mex(
+                        "UnsupportedDeletion",
+                        "Sparse deletion requires selecting complete rows or columns",
+                    ));
+                }
+            }
+            _ => {
+                return Err(mex(
+                    "UnsupportedDeletion",
+                    "Sparse scalar deletion is only supported for vector indices",
+                ))
+            }
+        }
+        .map_err(map_assignment_shape_error)?;
+        return Ok(Value::SparseTensor(updated));
     }
     let (row, col) = match indices {
         [index] => {
@@ -826,13 +872,25 @@ mod tests {
         );
 
         let deletion = block_on(assign_sparse_scalar(
-            sparse.clone(),
+            runmat_builtins::SparseTensor::zeros(2, 2),
             &[1],
-            &Value::Num(0.0),
+            &Value::Tensor(Tensor::zeros(vec![0, 0])),
             true,
         ))
-        .expect_err("sparse deletion must remain unsupported");
+        .expect_err("matrix linear deletion must remain unsupported");
         assert_eq!(deletion.identifier(), Some("RunMat:UnsupportedDeletion"));
+
+        let nonempty_deletion = block_on(assign_sparse_scalar(
+            sparse.clone(),
+            &[1],
+            &Value::Num(1.0),
+            true,
+        ))
+        .expect_err("deletion with a nonempty RHS must fail");
+        assert_eq!(
+            nonempty_deletion.identifier(),
+            Some("RunMat:DeletionRequiresEmptyRhs")
+        );
 
         let rank = block_on(assign_sparse_scalar(
             sparse,

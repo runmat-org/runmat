@@ -222,11 +222,53 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
                     == Some(&IntegerStorage::U64(vec![1, 9_223_372_036_854_775_808]))
     ));
 
-    let deletion_err = execute_source("s = sparse([1], [1], [5], 2, 2); s(:,1) = [];").unwrap_err();
+    let deleted = execute_source(
+        "s = sparse([1 3 2], [1 1 2], [1 3 2], 3, 2); s(:,1) = []; a = full(s); s([1 3],:) = []; b = full(s); t = sparse(uint64([1 0 9223372036854775808])); t(1,2) = []; c = full(t); u = sparse([1; 0; 3]); u(2) = []; d = full(u);",
+    )
+    .expect("execute sparse structural deletion");
+    assert!(matches!(
+        &deleted[1],
+        Value::Tensor(tensor) if tensor.shape == vec![3, 1] && tensor.data == vec![0.0, 2.0, 0.0]
+    ));
+    assert!(matches!(
+        &deleted[2],
+        Value::Tensor(tensor) if tensor.shape == vec![1, 1] && tensor.data == vec![2.0]
+    ));
+    assert!(matches!(
+        &deleted[4],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![1, 2]
+                && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![1, 9_223_372_036_854_775_808]))
+    ));
+    assert!(matches!(
+        &deleted[6],
+        Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.data == vec![1.0, 3.0]
+    ));
+
+    let deletion_err = execute_source("s = sparse([1], [1], [5], 2, 2); s(1,1) = [];").unwrap_err();
     assert_eq!(
         deletion_err.identifier(),
-        Some("RunMat:SparseAssignmentUnsupported")
+        Some("RunMat:UnsupportedDeletion")
     );
+
+    let expression_deleted = execute_source(
+        "s = sparse([1 3 2], [1 1 2], [1 3 2], 3, 2); s(:,1) = []; rows = [1 3]; s(rows,:) = []; f = full(s);",
+    )
+    .expect("execute expression-backed sparse row deletion");
+    assert!(matches!(
+        &expression_deleted[2],
+        Value::Tensor(tensor) if tensor.shape == vec![1, 1] && tensor.data == vec![2.0]
+    ));
+
+    let all_deleted =
+        execute_source("s = sparse(uint64([1 0; 0 9223372036854775808])); s(:,:) = [];")
+            .expect("delete all sparse entries structurally");
+    assert!(matches!(
+        &all_deleted[0],
+        Value::SparseTensor(sparse)
+            if sparse.shape() == vec![0, 0]
+                && sparse.integer_storage() == Some(&IntegerStorage::U64(vec![]))
+    ));
 
     let invalid_slice_err =
         execute_source("s = sparse([1], [1], [5], 2, 2); s([0]) = 0;").unwrap_err();

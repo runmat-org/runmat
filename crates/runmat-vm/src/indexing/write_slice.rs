@@ -574,6 +574,92 @@ pub async fn assign_sparse_with_plan(
     Ok(Value::SparseTensor(updated))
 }
 
+enum SparseDeletionAxis {
+    Rows(Vec<usize>),
+    Columns(Vec<usize>),
+    All,
+}
+
+fn sparse_deletion_axis(
+    sparse: &SparseTensor,
+    plan: &IndexPlan,
+) -> Result<SparseDeletionAxis, RuntimeError> {
+    if plan.indices.is_empty() {
+        return Ok(SparseDeletionAxis::Rows(Vec::new()));
+    }
+    if plan.dims == 1 {
+        let indices = plan.indices.iter().map(|&index| index as usize).collect();
+        if sparse.rows == 1 {
+            return Ok(SparseDeletionAxis::Columns(indices));
+        }
+        if sparse.cols == 1 {
+            return Ok(SparseDeletionAxis::Rows(indices));
+        }
+        return Err(mex(
+            "UnsupportedDeletion",
+            "Linear sparse deletion is only supported for vectors",
+        ));
+    }
+    if plan.dims != 2 {
+        return Err(mex(
+            "UnsupportedDeletion",
+            "Sparse deletion currently supports vectors and complete matrix rows or columns",
+        ));
+    }
+    let selected_rows = plan.selection_lengths.first().copied().unwrap_or(0);
+    let selected_cols = plan.selection_lengths.get(1).copied().unwrap_or(0);
+    if selected_rows == sparse.rows && selected_cols == sparse.cols {
+        return Ok(SparseDeletionAxis::All);
+    }
+    if selected_rows == sparse.rows {
+        let columns = plan
+            .indices
+            .chunks(sparse.rows)
+            .map(|chunk| chunk[0] as usize / sparse.rows)
+            .collect();
+        return Ok(SparseDeletionAxis::Columns(columns));
+    }
+    if selected_cols == sparse.cols {
+        let rows = plan
+            .indices
+            .iter()
+            .take(selected_rows)
+            .map(|index| *index as usize % sparse.rows)
+            .collect();
+        return Ok(SparseDeletionAxis::Rows(rows));
+    }
+    Err(mex(
+        "UnsupportedDeletion",
+        "Sparse deletion requires selecting complete rows or columns",
+    ))
+}
+
+pub fn delete_sparse_with_plan(
+    sparse: SparseTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    if !is_empty_delete_rhs(rhs) {
+        return Err(mex(
+            "DeletionRequiresEmptyRhs",
+            "Indexed deletion requires empty RHS",
+        ));
+    }
+    let updated = match sparse_deletion_axis(&sparse, plan)? {
+        SparseDeletionAxis::Rows(rows) => sparse.with_deleted_rows(&rows),
+        SparseDeletionAxis::Columns(columns) => sparse.with_deleted_columns(&columns),
+        SparseDeletionAxis::All => {
+            let rows = (0..sparse.rows).collect::<Vec<_>>();
+            let columns = (0..sparse.cols).collect::<Vec<_>>();
+            sparse
+                .with_deleted_rows(&rows)
+                .and_then(|sparse| sparse.with_deleted_columns(&columns))
+        }
+    }
+    .map_err(|error| map_slice_shape_error("sparse deletion", error))?;
+    Ok(Value::SparseTensor(updated))
+}
+
 pub async fn assign_tensor_with_plan(
     mut t: Tensor,
     plan: &IndexPlan,
