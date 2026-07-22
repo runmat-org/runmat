@@ -291,6 +291,52 @@ fn complex_integer_transpose_and_ctranspose_preserve_exact_components_through_vm
 }
 
 #[test]
+fn complex_integer_concatenation_preserves_exact_components_through_vm_dispatch() {
+    let vars = execute_source(
+        "a = complex(uint64([9223372036854775808 18446744073709551615]), uint64([7 8])); b = complex(uint64([1 2]), uint64([3 4])); h = horzcat(a, b); v = vertcat(a, b); c = cat(2, a, uint64([9 10])); q = [a b];",
+    )
+    .expect("typed complex integer concatenation should execute");
+
+    assert!(matches!(
+        &vars[2],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (storage.real.clone(), storage.imag.clone()))
+                == Some((
+                    IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 1, 2]),
+                    IntegerStorage::U64(vec![7, 8, 3, 4]),
+                ))
+    ));
+    assert!(matches!(
+        &vars[3],
+        Value::ComplexTensor(tensor)
+            if tensor.shape == vec![2, 2]
+                && tensor.integer_data.as_ref().map(|storage| (storage.real.clone(), storage.imag.clone()))
+                    == Some((
+                        IntegerStorage::U64(vec![9_223_372_036_854_775_808, 1, u64::MAX, 2]),
+                        IntegerStorage::U64(vec![7, 3, 8, 4]),
+                    ))
+    ));
+    assert!(matches!(
+        &vars[4],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (storage.real.clone(), storage.imag.clone()))
+                == Some((
+                    IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 9, 10]),
+                    IntegerStorage::U64(vec![7, 8, 0, 0]),
+                ))
+    ));
+    assert!(matches!(
+        &vars[5],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (storage.real.clone(), storage.imag.clone()))
+                == Some((
+                    IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 1, 2]),
+                    IntegerStorage::U64(vec![7, 8, 3, 4]),
+                ))
+    ));
+}
+
+#[test]
 fn integer_casts_preserve_complex_storage_for_every_integer_class_through_vm_dispatch() {
     let vars = execute_source(
         "z = complex([1.5 -2.5], [0.49 -1.5]); a = int8(z); b = int16(z); c = int32(z); d = int64(z); e = uint8(z); f = uint16(z); g = uint32(z); h = uint64(z); flags = [isreal(a) isreal(b) isreal(c) isreal(d) isreal(e) isreal(f) isreal(g) isreal(h)]; q = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); q64 = int64(q);",

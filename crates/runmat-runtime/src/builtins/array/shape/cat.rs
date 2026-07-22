@@ -15,8 +15,8 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    CellArray, CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, ResolveContext,
+    StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -804,12 +804,16 @@ fn cat_logical_arrays(
 fn cat_complex_arrays(
     dim_zero: usize,
     values: Vec<Value>,
-    _like: &LikeSpec,
+    like: &LikeSpec,
 ) -> BuiltinResult<Value> {
     if values.iter().any(|v| matches!(v, Value::GpuTensor(_))) {
         return Err(cat_err(
             "cat: complex concatenation requires host arrays; convert gpuArray values first",
         ));
+    }
+
+    if let Some(target) = leftmost_complex_integer_target(&values) {
+        return cat_typed_complex_integer_arrays(target, dim_zero, values, like);
     }
 
     let mut tensors = Vec::with_capacity(values.len());
@@ -831,6 +835,140 @@ fn cat_complex_arrays(
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
     let tensor = ComplexTensor::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
+}
+
+fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerTarget> {
+    let mut empty_target = None;
+    for value in values {
+        let Value::ComplexTensor(tensor) = value else {
+            continue;
+        };
+        let Some(storage) = &tensor.integer_data else {
+            continue;
+        };
+        let target = IntegerTarget::from_storage(&storage.real);
+        if !is_true_empty_neutral_shape(&tensor.shape) {
+            return Some(target);
+        }
+        empty_target.get_or_insert(target);
+    }
+    empty_target
+}
+
+fn cat_typed_complex_integer_arrays(
+    target: IntegerTarget,
+    dim_zero: usize,
+    values: Vec<Value>,
+    like: &LikeSpec,
+) -> BuiltinResult<Value> {
+    like.ensure_device(CatCategory::Complex)?;
+    if matches!(like.device, LikeDevice::Gpu) {
+        return Err(cat_err(
+            "cat: GPU typed complex-integer output is not supported until the acceleration provider supports typed integer buffers",
+        ));
+    }
+
+    let mut shapes = Vec::with_capacity(values.len());
+    let mut real_buffers = Vec::with_capacity(values.len());
+    let mut imag_buffers = Vec::with_capacity(values.len());
+    for value in values {
+        let (shape, real, imag) = typed_complex_integer_concat_input(target, value)?;
+        shapes.push(shape);
+        real_buffers.push(real);
+        imag_buffers.push(imag);
+    }
+
+    let real_refs: Vec<&[runmat_builtins::IntValue]> =
+        real_buffers.iter().map(Vec::as_slice).collect();
+    let imag_refs: Vec<&[runmat_builtins::IntValue]> =
+        imag_buffers.iter().map(Vec::as_slice).collect();
+    let (real, shape) = concat_column_major(dim_zero, &shapes, &real_refs, "cat")?;
+    let (imag, imag_shape) = concat_column_major(dim_zero, &shapes, &imag_refs, "cat")?;
+    debug_assert_eq!(shape, imag_shape);
+    IntegerComplexStorage::new(target.storage(real), target.storage(imag))
+        .and_then(|storage| ComplexTensor::new_integer(storage, shape))
+        .map(Value::ComplexTensor)
+        .map_err(|error| cat_err(format!("cat: {error}")))
+}
+
+fn typed_complex_integer_concat_input(
+    target: IntegerTarget,
+    value: Value,
+) -> BuiltinResult<(
+    Vec<usize>,
+    Vec<runmat_builtins::IntValue>,
+    Vec<runmat_builtins::IntValue>,
+)> {
+    let zero = || target.cast_scalar(0.0);
+    match value {
+        Value::ComplexTensor(tensor) => {
+            if let Some(storage) = tensor.integer_data {
+                return Ok((
+                    tensor.shape,
+                    integer_values(storage.real)
+                        .iter()
+                        .map(|value| target.cast_int(value))
+                        .collect(),
+                    integer_values(storage.imag)
+                        .iter()
+                        .map(|value| target.cast_int(value))
+                        .collect(),
+                ));
+            }
+            Ok((
+                tensor.shape,
+                tensor
+                    .data
+                    .iter()
+                    .map(|&(real, _)| target.cast_scalar(real))
+                    .collect(),
+                tensor
+                    .data
+                    .iter()
+                    .map(|&(_, imag)| target.cast_scalar(imag))
+                    .collect(),
+            ))
+        }
+        Value::Complex(real, imag) => Ok((
+            vec![1, 1],
+            vec![target.cast_scalar(real)],
+            vec![target.cast_scalar(imag)],
+        )),
+        Value::Tensor(tensor) => {
+            let real: Vec<runmat_builtins::IntValue> = match tensor.integer_data {
+                Some(storage) => integer_values(storage)
+                    .iter()
+                    .map(|value| target.cast_int(value))
+                    .collect(),
+                None => tensor
+                    .data
+                    .iter()
+                    .map(|&value| target.cast_scalar(value))
+                    .collect(),
+            };
+            let imag = vec![zero(); real.len()];
+            Ok((tensor.shape, real, imag))
+        }
+        Value::Int(value) => Ok((vec![1, 1], vec![target.cast_int(&value)], vec![zero()])),
+        Value::Num(value) => Ok((vec![1, 1], vec![target.cast_scalar(value)], vec![zero()])),
+        Value::Bool(value) => Ok((
+            vec![1, 1],
+            vec![target.cast_scalar(if value { 1.0 } else { 0.0 })],
+            vec![zero()],
+        )),
+        Value::LogicalArray(array) => {
+            let real: Vec<_> = array
+                .data
+                .iter()
+                .map(|&value| target.cast_scalar(if value == 0 { 0.0 } else { 1.0 }))
+                .collect();
+            let imag = vec![zero(); real.len()];
+            Ok((array.shape, real, imag))
+        }
+        other => Err(cat_err(format!(
+            "cat: cannot concatenate typed complex integer arrays with {other:?}"
+        ))),
+    }
 }
 
 fn cat_char_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> {
