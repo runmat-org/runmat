@@ -188,6 +188,11 @@ pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult
             return Ok(result);
         }
     }
+    if contains_integer(base) || contains_integer(exponent) {
+        return Err(mpower_invalid_argument(
+            "mpower: non-scalar integer matrix powers are not supported",
+        ));
+    }
     if let Some(result) = try_gpu_mpower(base, exponent).await? {
         return Ok(result);
     }
@@ -487,6 +492,16 @@ pub(crate) mod tests {
 
         let result = mpower_builtin(Value::Num(2.0), Value::Int(IntValue::U8(3))).expect("mpower");
         assert_eq!(result, Value::Int(IntValue::U8(8)));
+    }
+
+    #[test]
+    fn non_scalar_integer_mpower_is_rejected_without_floating_fallback() {
+        let matrix = Tensor::new_integer(IntegerStorage::I32(vec![1, 0, 0, 1]), vec![2, 2])
+            .expect("integer matrix");
+        let err = mpower_builtin(Value::Tensor(matrix), Value::Num(2.0))
+            .expect_err("integer matrix power must reject");
+        assert_eq!(err.identifier(), MPOWER_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(err.message().contains("non-scalar integer"));
     }
 
     #[test]
