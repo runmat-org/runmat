@@ -291,6 +291,61 @@ impl IntegerStorage {
             Self::U64(values) => values.iter().map(|&value| value as f64).collect(),
         }
     }
+
+    /// Returns an exact scalar from this homogeneous buffer.
+    pub fn value_at(&self, index: usize) -> Option<IntValue> {
+        match self {
+            Self::I8(values) => values.get(index).copied().map(IntValue::I8),
+            Self::I16(values) => values.get(index).copied().map(IntValue::I16),
+            Self::I32(values) => values.get(index).copied().map(IntValue::I32),
+            Self::I64(values) => values.get(index).copied().map(IntValue::I64),
+            Self::U8(values) => values.get(index).copied().map(IntValue::U8),
+            Self::U16(values) => values.get(index).copied().map(IntValue::U16),
+            Self::U32(values) => values.get(index).copied().map(IntValue::U32),
+            Self::U64(values) => values.get(index).copied().map(IntValue::U64),
+        }
+    }
+
+    /// Allocates zeros while preserving this integer class.
+    pub fn zeros_like(&self, len: usize) -> Self {
+        match self {
+            Self::I8(_) => Self::I8(vec![0; len]),
+            Self::I16(_) => Self::I16(vec![0; len]),
+            Self::I32(_) => Self::I32(vec![0; len]),
+            Self::I64(_) => Self::I64(vec![0; len]),
+            Self::U8(_) => Self::U8(vec![0; len]),
+            Self::U16(_) => Self::U16(vec![0; len]),
+            Self::U32(_) => Self::U32(vec![0; len]),
+            Self::U64(_) => Self::U64(vec![0; len]),
+        }
+    }
+
+    /// Stores a same-class exact scalar without floating-point conversion.
+    pub fn set_value(&mut self, index: usize, value: IntValue) -> Result<(), String> {
+        match (self, value) {
+            (Self::I8(values), IntValue::I8(value)) => set_integer_element(values, index, value),
+            (Self::I16(values), IntValue::I16(value)) => set_integer_element(values, index, value),
+            (Self::I32(values), IntValue::I32(value)) => set_integer_element(values, index, value),
+            (Self::I64(values), IntValue::I64(value)) => set_integer_element(values, index, value),
+            (Self::U8(values), IntValue::U8(value)) => set_integer_element(values, index, value),
+            (Self::U16(values), IntValue::U16(value)) => set_integer_element(values, index, value),
+            (Self::U32(values), IntValue::U32(value)) => set_integer_element(values, index, value),
+            (Self::U64(values), IntValue::U64(value)) => set_integer_element(values, index, value),
+            (storage, value) => Err(format!(
+                "cannot store {} in {} integer storage",
+                value.class_name(),
+                storage.class_name()
+            )),
+        }
+    }
+}
+
+fn set_integer_element<T>(values: &mut [T], index: usize, value: T) -> Result<(), String> {
+    let slot = values
+        .get_mut(index)
+        .ok_or_else(|| format!("integer storage index {index} is out of bounds"))?;
+    *slot = value;
+    Ok(())
 }
 
 impl NumericDType {
@@ -386,7 +441,10 @@ pub struct SparseTensor {
     pub col_ptrs: Vec<usize>,
     /// Zero-based row indices, sorted within each column.
     pub row_indices: Vec<usize>,
+    /// Floating compatibility view for legacy sparse consumers.
     pub values: Vec<f64>,
+    /// Exact homogeneous backing storage for typed integer sparse values.
+    pub integer_data: Option<IntegerStorage>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -733,6 +791,44 @@ impl SparseTensor {
         row_indices: Vec<usize>,
         values: Vec<f64>,
     ) -> Result<Self, String> {
+        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, values.len())?;
+        Ok(Self {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            values,
+            integer_data: None,
+        })
+    }
+
+    /// Constructs a sparse matrix backed by an exact integer value buffer.
+    pub fn new_integer(
+        rows: usize,
+        cols: usize,
+        col_ptrs: Vec<usize>,
+        row_indices: Vec<usize>,
+        integer_data: IntegerStorage,
+    ) -> Result<Self, String> {
+        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, integer_data.len())?;
+        let values = integer_data.to_f64_vec();
+        Ok(Self {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            values,
+            integer_data: Some(integer_data),
+        })
+    }
+
+    fn validate_structure(
+        rows: usize,
+        cols: usize,
+        col_ptrs: &[usize],
+        row_indices: &[usize],
+        values_len: usize,
+    ) -> Result<(), String> {
         if col_ptrs.len() != cols.saturating_add(1) {
             return Err(format!(
                 "SparseTensor col_ptrs length {} doesn't match cols {}",
@@ -740,17 +836,17 @@ impl SparseTensor {
                 cols
             ));
         }
-        if row_indices.len() != values.len() {
+        if row_indices.len() != values_len {
             return Err(format!(
                 "SparseTensor row index length {} doesn't match value length {}",
                 row_indices.len(),
-                values.len()
+                values_len
             ));
         }
         if col_ptrs.first().copied().unwrap_or(usize::MAX) != 0 {
             return Err("SparseTensor col_ptrs must start at 0".to_string());
         }
-        if col_ptrs.last().copied().unwrap_or(usize::MAX) != values.len() {
+        if col_ptrs.last().copied().unwrap_or(usize::MAX) != values_len {
             return Err("SparseTensor final col_ptr must equal nnz".to_string());
         }
         for window in col_ptrs.windows(2) {
@@ -772,13 +868,7 @@ impl SparseTensor {
                 prev = Some(row);
             }
         }
-        Ok(Self {
-            rows,
-            cols,
-            col_ptrs,
-            row_indices,
-            values,
-        })
+        Ok(())
     }
 
     pub fn zeros(rows: usize, cols: usize) -> Self {
@@ -788,11 +878,14 @@ impl SparseTensor {
             col_ptrs: vec![0; cols.saturating_add(1)],
             row_indices: Vec::new(),
             values: Vec::new(),
+            integer_data: None,
         }
     }
 
     pub fn nnz(&self) -> usize {
-        self.values.len()
+        self.integer_data
+            .as_ref()
+            .map_or_else(|| self.values.len(), IntegerStorage::len)
     }
 
     pub fn shape(&self) -> Vec<usize> {
@@ -804,6 +897,19 @@ impl SparseTensor {
             .rows
             .checked_mul(self.cols)
             .ok_or_else(|| "SparseTensor dense dimensions overflow usize".to_string())?;
+        if let Some(integer_data) = &self.integer_data {
+            let mut data = integer_data.zeros_like(len);
+            for col in 0..self.cols {
+                for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                    let row = self.row_indices[idx];
+                    let value = integer_data.value_at(idx).ok_or_else(|| {
+                        "SparseTensor integer storage is inconsistent".to_string()
+                    })?;
+                    data.set_value(row + col * self.rows, value)?;
+                }
+            }
+            return Tensor::new_integer(data, self.shape());
+        }
         let mut data = Vec::new();
         data.try_reserve_exact(len)
             .map_err(|err| format!("SparseTensor dense allocation failed: {err}"))?;
@@ -828,6 +934,30 @@ impl SparseTensor {
             .ok()
             .map(|offset| self.values[start + offset])
     }
+
+    /// Returns an exact stored integer value when this sparse matrix is typed.
+    pub fn integer_at(&self, row: usize, col: usize) -> Option<IntValue> {
+        let integer_data = self.integer_data.as_ref()?;
+        if row >= self.rows || col >= self.cols {
+            return None;
+        }
+        let start = self.col_ptrs[col];
+        let end = self.col_ptrs[col + 1];
+        self.row_indices[start..end]
+            .binary_search(&row)
+            .ok()
+            .and_then(|offset| integer_data.value_at(start + offset))
+    }
+
+    pub fn integer_storage(&self) -> Option<&IntegerStorage> {
+        self.integer_data.as_ref()
+    }
+
+    pub fn class_name(&self) -> &'static str {
+        self.integer_data
+            .as_ref()
+            .map_or("double", IntegerStorage::class_name)
+    }
 }
 
 #[cfg(test)]
@@ -842,6 +972,7 @@ mod sparse_tensor_tests {
             col_ptrs: vec![0, 0, 0],
             row_indices: Vec::new(),
             values: Vec::new(),
+            integer_data: None,
         };
 
         let err = sparse.to_dense().unwrap_err();

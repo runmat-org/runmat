@@ -1124,6 +1124,7 @@ mod tests {
             col_ptrs: vec![0, 0],
             row_indices: Vec::new(),
             values: Vec::new(),
+            integer_data: None,
         };
         let wide = SparseTensor {
             rows: 1,
@@ -1131,6 +1132,7 @@ mod tests {
             col_ptrs: vec![0],
             row_indices: Vec::new(),
             values: Vec::new(),
+            integer_data: None,
         };
         let err = sparse_binary(
             &Value::SparseTensor(tall),

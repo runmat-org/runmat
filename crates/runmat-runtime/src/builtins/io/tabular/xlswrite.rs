@@ -1666,6 +1666,7 @@ mod tests {
             col_ptrs: vec![0, 1, 2],
             row_indices: vec![1, 0],
             values: vec![9.0, 8.0],
+            integer_data: None,
         };
 
         block_on(xlswrite_builtin(
@@ -1826,6 +1827,7 @@ mod tests {
             col_ptrs: vec![0, 0],
             row_indices: Vec::new(),
             values: Vec::new(),
+            integer_data: None,
         };
         let err = block_on(xlswrite_builtin(
             Value::from("out.xlsx"),

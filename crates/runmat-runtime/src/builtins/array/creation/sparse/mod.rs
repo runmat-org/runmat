@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, ResolveContext, SparseTensor, Tensor, Type, Value,
+    ComplexTensor, IntegerStorage, LogicalArray, ResolveContext, SparseTensor, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -526,7 +526,10 @@ fn sparse_identity(rows: usize, cols: usize) -> BuiltinResult<SparseTensor> {
 
 fn nonzeros_value(value: &Value) -> BuiltinResult<Value> {
     match value {
-        Value::SparseTensor(sparse) => tensor_column(sparse.values.clone(), "nonzeros"),
+        Value::SparseTensor(sparse) => match sparse.integer_storage() {
+            Some(storage) => integer_tensor_column(storage.clone(), "nonzeros"),
+            None => tensor_column(sparse.values.clone(), "nonzeros"),
+        },
         Value::Tensor(tensor) => {
             let data = tensor
                 .data
@@ -581,6 +584,13 @@ fn nonzeros_value(value: &Value) -> BuiltinResult<Value> {
 
 fn tensor_column(data: Vec<f64>, label: &str) -> BuiltinResult<Value> {
     Tensor::new(data.clone(), vec![data.len(), 1])
+        .map(Value::Tensor)
+        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
+}
+
+fn integer_tensor_column(storage: IntegerStorage, label: &str) -> BuiltinResult<Value> {
+    let len = storage.len();
+    Tensor::new_integer(storage, vec![len, 1])
         .map(Value::Tensor)
         .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
 }
@@ -1425,10 +1435,7 @@ fn sparse_from_value(value: Value) -> BuiltinResult<SparseTensor> {
             &Tensor::new(vec![n], vec![1, 1])
                 .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))?,
         ),
-        Value::Int(i) => sparse_from_dense_tensor(
-            &Tensor::new(vec![i.to_f64()], vec![1, 1])
-                .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))?,
-        ),
+        Value::Int(i) => sparse_from_integer_scalar(i),
         Value::Bool(b) => sparse_from_dense_tensor(
             &Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
                 .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))?,
@@ -1441,6 +1448,9 @@ fn sparse_from_value(value: Value) -> BuiltinResult<SparseTensor> {
 }
 
 fn sparse_from_dense_tensor(tensor: &Tensor) -> BuiltinResult<SparseTensor> {
+    if let Some(storage) = tensor.integer_storage() {
+        return sparse_from_integer_dense_tensor(tensor.rows(), tensor.cols(), storage);
+    }
     let rows = tensor.rows();
     let cols = tensor.cols();
     let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
@@ -1459,6 +1469,64 @@ fn sparse_from_dense_tensor(tensor: &Tensor) -> BuiltinResult<SparseTensor> {
     }
     SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
         .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+}
+
+fn sparse_from_integer_scalar(value: runmat_builtins::IntValue) -> BuiltinResult<SparseTensor> {
+    let storage = match value {
+        runmat_builtins::IntValue::I8(value) => IntegerStorage::I8(vec![value]),
+        runmat_builtins::IntValue::I16(value) => IntegerStorage::I16(vec![value]),
+        runmat_builtins::IntValue::I32(value) => IntegerStorage::I32(vec![value]),
+        runmat_builtins::IntValue::I64(value) => IntegerStorage::I64(vec![value]),
+        runmat_builtins::IntValue::U8(value) => IntegerStorage::U8(vec![value]),
+        runmat_builtins::IntValue::U16(value) => IntegerStorage::U16(vec![value]),
+        runmat_builtins::IntValue::U32(value) => IntegerStorage::U32(vec![value]),
+        runmat_builtins::IntValue::U64(value) => IntegerStorage::U64(vec![value]),
+    };
+    sparse_from_integer_dense_tensor(1, 1, &storage)
+}
+
+fn sparse_from_integer_dense_tensor(
+    rows: usize,
+    cols: usize,
+    storage: &IntegerStorage,
+) -> BuiltinResult<SparseTensor> {
+    macro_rules! construct_integer_sparse {
+        ($source:expr, $variant:ident) => {{
+            let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+            let mut row_indices = Vec::new();
+            let mut values = Vec::new();
+            col_ptrs.push(0);
+            for col in 0..cols {
+                for row in 0..rows {
+                    let value = $source[row + col * rows];
+                    if value != 0 {
+                        row_indices.push(row);
+                        values.push(value);
+                    }
+                }
+                col_ptrs.push(values.len());
+            }
+            SparseTensor::new_integer(
+                rows,
+                cols,
+                col_ptrs,
+                row_indices,
+                IntegerStorage::$variant(values),
+            )
+        }};
+    }
+
+    let sparse = match storage {
+        IntegerStorage::I8(values) => construct_integer_sparse!(values, I8),
+        IntegerStorage::I16(values) => construct_integer_sparse!(values, I16),
+        IntegerStorage::I32(values) => construct_integer_sparse!(values, I32),
+        IntegerStorage::I64(values) => construct_integer_sparse!(values, I64),
+        IntegerStorage::U8(values) => construct_integer_sparse!(values, U8),
+        IntegerStorage::U16(values) => construct_integer_sparse!(values, U16),
+        IntegerStorage::U32(values) => construct_integer_sparse!(values, U32),
+        IntegerStorage::U64(values) => construct_integer_sparse!(values, U64),
+    };
+    sparse.map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
 }
 
 fn sparse_from_logical_array(logical: &LogicalArray) -> BuiltinResult<SparseTensor> {
@@ -1830,6 +1898,62 @@ pub(crate) mod tests {
         assert_eq!(sparse.shape(), vec![3, 4]);
         assert_eq!(sparse.nnz(), 0);
         assert_eq!(sparse.col_ptrs, vec![0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn sparse_from_integer_tensor_preserves_every_integer_class_exactly() {
+        let cases = vec![
+            IntegerStorage::I8(vec![0, i8::MIN, i8::MAX, 0]),
+            IntegerStorage::I16(vec![0, i16::MIN, i16::MAX, 0]),
+            IntegerStorage::I32(vec![0, i32::MIN, i32::MAX, 0]),
+            IntegerStorage::I64(vec![0, i64::MIN, i64::MAX, 0]),
+            IntegerStorage::U8(vec![0, 1, u8::MAX, 0]),
+            IntegerStorage::U16(vec![0, 1, u16::MAX, 0]),
+            IntegerStorage::U32(vec![0, 1, u32::MAX, 0]),
+            IntegerStorage::U64(vec![0, 1, u64::MAX, 0]),
+        ];
+
+        for storage in cases {
+            let expected_class = storage.class_name();
+            let tensor = Tensor::new_integer(storage.clone(), vec![2, 2]).expect("integer tensor");
+            let sparse = expect_sparse(
+                sparse_builtin(vec![Value::Tensor(tensor)]).expect("sparse integer tensor"),
+            );
+
+            assert_eq!(sparse.class_name(), expected_class);
+            assert_eq!(
+                sparse.integer_storage().map(IntegerStorage::class_name),
+                Some(expected_class)
+            );
+            assert_eq!(sparse.integer_at(1, 0), storage.value_at(1));
+            assert_eq!(sparse.integer_at(0, 1), storage.value_at(2));
+            assert_eq!(sparse.integer_at(0, 0), None);
+            assert_eq!(sparse.integer_at(1, 1), None);
+            assert_eq!(
+                sparse
+                    .to_dense()
+                    .expect("dense integer sparse")
+                    .integer_storage(),
+                Some(&storage)
+            );
+        }
+    }
+
+    #[test]
+    fn nonzeros_of_uint64_sparse_preserves_exact_values() {
+        let source = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX, 7, 0]), vec![2, 2])
+            .expect("uint64 tensor");
+        let sparse = expect_sparse(
+            sparse_builtin(vec![Value::Tensor(source)]).expect("sparse uint64 tensor"),
+        );
+
+        let values = expect_tensor(
+            nonzeros_builtin(Value::SparseTensor(sparse)).expect("nonzeros uint64 sparse"),
+        );
+        assert_eq!(
+            values.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 7]))
+        );
     }
 
     #[test]

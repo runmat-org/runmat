@@ -214,6 +214,29 @@ pub(crate) mod tests {
         assert_eq!(dense.data, vec![10.0, 0.0, 30.0, 0.0, 20.0, 0.0]);
     }
 
+    #[test]
+    fn full_preserves_exact_uint64_sparse_storage() {
+        let sparse = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![1, 0],
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 7]),
+        )
+        .expect("uint64 sparse");
+
+        let dense = expect_tensor(run_full(Value::SparseTensor(sparse)).expect("full sparse"));
+        assert_eq!(
+            dense.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::U64(vec![
+                0,
+                u64::MAX,
+                7,
+                0
+            ]))
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_sparse_matrix_densifies_to_zero_tensor() {
@@ -260,6 +283,7 @@ pub(crate) mod tests {
             col_ptrs: vec![0, 0, 0],
             row_indices: Vec::new(),
             values: Vec::new(),
+            integer_data: None,
         };
         let err = run_full(Value::SparseTensor(sparse)).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:full:Internal"));

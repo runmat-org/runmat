@@ -590,6 +590,7 @@ mod tests {
             col_ptrs: vec![0, 0],
             row_indices: Vec::new(),
             values: Vec::new(),
+            integer_data: None,
         });
         let err = call(sparse).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:perms:InvalidInput"));
