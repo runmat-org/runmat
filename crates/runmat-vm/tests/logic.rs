@@ -212,6 +212,24 @@ fn typed_complex_integer_analytic_operations_are_rejected_before_f64_coercion() 
 }
 
 #[test]
+fn find_preserves_typed_complex_integer_values_through_vm_dispatch() {
+    let vars = execute_source(
+        "z = complex(uint64([0 9223372036854775808 18446744073709551615]), uint64([0 1 2])); [row, col, values] = find(z);",
+    )
+    .expect("find should preserve selected typed complex integer values");
+    assert!(matches!(
+        &vars[3],
+        Value::ComplexTensor(tensor)
+            if tensor.shape == vec![2, 1]
+                && tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                    == Some((
+                        &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                        &IntegerStorage::U64(vec![1, 2]),
+                    ))
+    ));
+}
+
+#[test]
 fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispatch() {
     let vars = execute_source(
         "a = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); rhs = complex(uint64([18446744073709551615 9223372036854775808]), uint64([7 8])); a(:, :) = rhs; ar = real(a); ai = imag(a); b = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); b(1:end, :) = rhs;",

@@ -4,7 +4,8 @@ use runmat_accelerate_api::{HostTensorView, ProviderFindResult};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, ResolveContext, Tensor, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -437,6 +438,7 @@ enum FindValues {
     Real(Vec<f64>),
     Integer(IntegerStorage),
     Complex(Vec<(f64, f64)>),
+    IntegerComplex(IntegerComplexStorage),
 }
 
 pub struct FindEval {
@@ -644,7 +646,8 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
             let mut values = Vec::new();
 
             if matches!(limit, Some(0)) {
-                return FindResult::new(shape, indices, FindValues::Complex(values));
+                let values = find_values_for_complex_tensor(tensor, &indices, values);
+                return FindResult::new(shape, indices, values);
             }
 
             let len = tensor.data.len();
@@ -675,7 +678,8 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                 }
             }
 
-            FindResult::new(shape, indices, FindValues::Complex(values))
+            let values = find_values_for_complex_tensor(tensor, &indices, values);
+            FindResult::new(shape, indices, values)
         }
     }
 }
@@ -833,6 +837,13 @@ impl FindResult {
                     })?;
                 Ok(complex_tensor_into_value(tensor))
             }
+            FindValues::IntegerComplex(storage) => {
+                let tensor = ComplexTensor::new_integer(storage.clone(), vec![storage.len(), 1])
+                    .map_err(|e| {
+                        find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
+                    })?;
+                Ok(complex_tensor_into_value(tensor))
+            }
         }
     }
 }
@@ -843,6 +854,22 @@ fn find_values_for_tensor(tensor: &Tensor, indices: &[usize]) -> FindValues {
     };
     let selected: Vec<usize> = indices.iter().map(|index| index - 1).collect();
     FindValues::Integer(select_integer_values(storage, &selected))
+}
+
+fn find_values_for_complex_tensor(
+    tensor: &ComplexTensor,
+    indices: &[usize],
+    values: Vec<(f64, f64)>,
+) -> FindValues {
+    let Some(storage) = tensor.integer_data.as_ref() else {
+        return FindValues::Complex(values);
+    };
+    let selected: Vec<usize> = indices.iter().map(|index| index - 1).collect();
+    let real = select_integer_values(&storage.real, &selected);
+    let imag = select_integer_values(&storage.imag, &selected);
+    let storage = IntegerComplexStorage::new(real, imag)
+        .expect("paired typed complex storage preserves class and length through find");
+    FindValues::IntegerComplex(storage)
 }
 
 fn select_integer_values(storage: &IntegerStorage, indices: &[usize]) -> IntegerStorage {
