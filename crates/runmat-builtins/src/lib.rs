@@ -268,6 +268,21 @@ pub enum IntegerStorage {
 }
 
 impl IntegerStorage {
+    /// Construct a one-element buffer preserving the scalar's MATLAB integer
+    /// class.
+    pub fn from_scalar(value: IntValue) -> Self {
+        match value {
+            IntValue::I8(value) => Self::I8(vec![value]),
+            IntValue::I16(value) => Self::I16(vec![value]),
+            IntValue::I32(value) => Self::I32(vec![value]),
+            IntValue::I64(value) => Self::I64(vec![value]),
+            IntValue::U8(value) => Self::U8(vec![value]),
+            IntValue::U16(value) => Self::U16(vec![value]),
+            IntValue::U32(value) => Self::U32(vec![value]),
+            IntValue::U64(value) => Self::U64(vec![value]),
+        }
+    }
+
     pub fn len(&self) -> usize {
         match self {
             Self::I8(values) => values.len(),
@@ -421,7 +436,7 @@ impl NumericDType {
 
 #[cfg(test)]
 mod integer_storage_tests {
-    use super::{IntegerStorage, Tensor};
+    use super::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
 
     #[test]
     fn uint64_tensor_keeps_exact_backing_values() {
@@ -467,6 +482,41 @@ mod integer_storage_tests {
             Some(&IntegerStorage::I64(vec![-1, i64::MAX]))
         );
     }
+
+    #[test]
+    fn integer_complex_storage_preserves_paired_uint64_values() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
+            IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_809]),
+        )
+        .expect("matching uint64 components");
+        let tensor = ComplexTensor::new_integer(storage.clone(), vec![1, 2])
+            .expect("integer complex tensor");
+
+        assert_eq!(tensor.integer_data, Some(storage));
+        assert_eq!(
+            tensor
+                .integer_data
+                .as_ref()
+                .map(IntegerComplexStorage::class_name),
+            Some("uint64")
+        );
+    }
+
+    #[test]
+    fn integer_complex_storage_rejects_mismatched_components() {
+        let class_mismatch =
+            IntegerComplexStorage::new(IntegerStorage::I64(vec![1]), IntegerStorage::U64(vec![1]))
+                .expect_err("integer classes must match");
+        assert!(class_mismatch.contains("matching class"));
+
+        let length_mismatch = IntegerComplexStorage::new(
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::I64(vec![1, 2]),
+        )
+        .expect_err("component lengths must match");
+        assert!(length_mismatch.contains("matching class and length"));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -508,11 +558,25 @@ pub struct ComplexTensor {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct IntegerComplexStorage { pub real: IntegerStorage, pub imag: IntegerStorage }
+pub struct IntegerComplexStorage {
+    pub real: IntegerStorage,
+    pub imag: IntegerStorage,
+}
+
 impl IntegerComplexStorage {
     pub fn new(real: IntegerStorage, imag: IntegerStorage) -> Result<Self, String> {
-        if real.class_name() != imag.class_name() || real.len() != imag.len() { return Err("complex integer components must have matching class and length".into()); }
+        if real.class_name() != imag.class_name() || real.len() != imag.len() {
+            return Err("complex integer components must have matching class and length".into());
+        }
         Ok(Self { real, imag })
+    }
+
+    pub fn len(&self) -> usize {
+        self.real.len()
+    }
+
+    pub fn class_name(&self) -> &'static str {
+        self.real.class_name()
     }
 }
 
@@ -1494,8 +1558,15 @@ impl ComplexTensor {
     }
     pub fn new_integer(storage: IntegerComplexStorage, shape: Vec<usize>) -> Result<Self, String> {
         let expected: usize = shape.iter().product();
-        if storage.real.len() != expected { return Err("complex integer storage length does not match shape".into()); }
-        let data = storage.real.to_f64_vec().into_iter().zip(storage.imag.to_f64_vec()).collect();
+        if storage.len() != expected {
+            return Err("complex integer storage length does not match shape".into());
+        }
+        let data = storage
+            .real
+            .to_f64_vec()
+            .into_iter()
+            .zip(storage.imag.to_f64_vec())
+            .collect();
         let mut tensor = Self::new(data, shape)?;
         tensor.integer_data = Some(storage);
         Ok(tensor)

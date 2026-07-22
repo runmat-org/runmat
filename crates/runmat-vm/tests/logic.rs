@@ -67,6 +67,52 @@ fn integer_scalar_arithmetic_keeps_int64_and_uint64_exact_through_vm_dispatch() 
 }
 
 #[test]
+fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
+    let vars = execute_source(
+        "r = uint64([9223372036854775808 18446744073709551615]); z = complex(r, 1); zr = real(z); zi = imag(z); scalar = complex(int64(-9223372036854775808), int64(7)); sr = real(scalar); si = imag(scalar); tf = isreal(z); high = uint64(9223372036854775808) + 1; highz = complex(high, 1); highr = real(highz);",
+    )
+    .expect("integer complex construction should execute");
+
+    assert!(matches!(
+        &vars[1],
+        Value::ComplexTensor(tensor)
+            if tensor.shape == vec![1, 2]
+                && tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                    == Some((
+                        &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX]),
+                        &IntegerStorage::U64(vec![1, 1]),
+                    ))
+    ));
+    assert!(matches!(
+        &vars[2],
+        Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX]))
+    ));
+    assert!(matches!(
+        &vars[3],
+        Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::U64(vec![1, 1]))
+    ));
+    assert!(matches!(
+        &vars[4],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                == Some((
+                    &IntegerStorage::I64(vec![i64::MIN]),
+                    &IntegerStorage::I64(vec![7]),
+                ))
+    ));
+    assert_eq!(vars[5], Value::Int(IntValue::I64(i64::MIN)));
+    assert_eq!(vars[6], Value::Int(IntValue::I64(7)));
+    assert!(!logical_truth(&vars[7]));
+    assert_eq!(
+        vars[10],
+        Value::Int(IntValue::U64(9_223_372_036_854_775_809))
+    );
+}
+
+#[test]
 fn issparse_reports_sparse_storage_through_vm_dispatch() {
     let vars = execute_source(
         "s = sparse([1 2], [1 2], [10 20], 2, 2); a = issparse(s); b = issparse([10 0; 0 20]); c = issparse(42);",

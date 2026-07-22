@@ -2014,6 +2014,7 @@ fn promote_real_tensor_to_complex(tensor: Tensor) -> ComplexTensor {
         .collect::<Vec<_>>();
     ComplexTensor {
         data,
+        integer_data: None,
         shape: tensor.shape.clone(),
         rows: tensor.rows,
         cols: tensor.cols,

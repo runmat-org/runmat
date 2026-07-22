@@ -735,6 +735,12 @@ pub fn read_complex_slice_from_plan(
     tensor: &ComplexTensor,
     plan: &IndexPlan,
 ) -> Result<Value, RuntimeError> {
+    if tensor.integer_data.is_some() {
+        return Err(crate::interpreter::errors::mex(
+            "UnsupportedTypedComplexInteger",
+            "typed complex integer indexing is not implemented",
+        ));
+    }
     if plan.indices.is_empty() {
         let empty = ComplexTensor::new(Vec::new(), plan.output_shape.clone())
             .map_err(map_slice_shape_error)?;

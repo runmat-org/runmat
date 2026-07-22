@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use runmat_builtins::{LogicalArray, NumericDType, Tensor, Value};
+use runmat_builtins::{IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
 
 use crate::dispatcher::gather_if_needed_async;
 
@@ -55,9 +55,8 @@ fn value_into_tensor_impl(name: &str, value: Value) -> Result<Tensor, String> {
         Value::Tensor(t) => Ok(t),
         Value::LogicalArray(logical) => logical_to_tensor(&logical),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("tensor: {e}")),
-        Value::Int(i) => {
-            Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| format!("tensor: {e}"))
-        }
+        Value::Int(i) => Tensor::new_integer(IntegerStorage::from_scalar(i), vec![1, 1])
+            .map_err(|e| format!("tensor: {e}")),
         Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
             .map_err(|e| format!("tensor: {e}")),
         other => Err(format!(
@@ -84,10 +83,13 @@ pub fn value_to_tensor(value: &Value) -> Result<Tensor, String> {
 
 /// Convert a `Tensor` back into a runtime value.
 ///
-/// Scalars (exactly one element) become `Value::Num`, all other tensors
-/// remain as dense tensor variants.
+/// Scalars (exactly one element) become their exact scalar representation;
+/// all other tensors remain as dense tensor variants.
 pub fn tensor_into_value(tensor: Tensor) -> Value {
     if tensor.data.len() == 1 {
+        if let Some(storage) = tensor.integer_storage() {
+            return Value::Int(storage.value_at(0).expect("one-element integer storage"));
+        }
         Value::Num(tensor.data[0])
     } else {
         Value::Tensor(tensor)

@@ -308,6 +308,7 @@ fn evaluate_host_gradient_outputs(
         Value::Complex(re, im) => {
             let tensor = ComplexTensor {
                 data: vec![(re, im)],
+                integer_data: None,
                 shape: vec![1, 1],
                 rows: 1,
                 cols: 1,

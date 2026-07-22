@@ -206,8 +206,10 @@ fn delete_integer_tensor_linear(mut t: Tensor, idx: usize) -> Result<Value, Runt
 }
 
 fn tensor_to_complex(t: Tensor) -> ComplexTensor {
+    debug_assert!(t.integer_data.is_none());
     ComplexTensor {
         data: t.data.into_iter().map(|re| (re, 0.0)).collect(),
+        integer_data: None,
         shape: t.shape,
         rows: t.rows,
         cols: t.cols,
@@ -215,6 +217,12 @@ fn tensor_to_complex(t: Tensor) -> ComplexTensor {
 }
 
 fn delete_complex_linear(mut t: ComplexTensor, idx: usize) -> Result<Value, RuntimeError> {
+    if t.integer_data.is_some() {
+        return Err(mex(
+            "UnsupportedTypedComplexInteger",
+            "typed complex integer deletion is not implemented",
+        ));
+    }
     let total = t.rows * t.cols;
     if idx == 0 || idx > total {
         return Err(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -331,6 +339,12 @@ pub async fn assign_tensor_scalar(
             };
         }
         if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
+            if t.integer_storage().is_some() {
+                return Err(mex(
+                    "UnsupportedTypedComplexInteger",
+                    "typed complex integer assignment is not implemented",
+                ));
+            }
             return assign_complex_scalar(tensor_to_complex(t), indices, rhs, false).await;
         }
         if t.integer_storage().is_some() {
@@ -375,6 +389,12 @@ pub async fn assign_tensor_scalar(
             ));
         }
         if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
+            if t.integer_storage().is_some() {
+                return Err(mex(
+                    "UnsupportedTypedComplexInteger",
+                    "typed complex integer assignment is not implemented",
+                ));
+            }
             return assign_complex_scalar(tensor_to_complex(t), indices, rhs, false).await;
         }
         if t.integer_storage().is_some() {
@@ -577,6 +597,12 @@ pub async fn assign_complex_scalar(
     rhs: &Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
+    if t.integer_data.is_some() {
+        return Err(mex(
+            "UnsupportedTypedComplexInteger",
+            "typed complex integer assignment is not implemented",
+        ));
+    }
     if indices.len() == 1 {
         let total = t.rows * t.cols;
         let idx = indices[0];

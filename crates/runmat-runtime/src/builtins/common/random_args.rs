@@ -61,7 +61,7 @@ pub(crate) fn shape_from_value(value: &Value, label: &str) -> Result<Vec<usize>,
 
 /// Convert a complex tensor back into an appropriate runtime value.
 pub(crate) fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
+    if tensor.data.len() == 1 && tensor.integer_data.is_none() {
         let (re, im) = tensor.data[0];
         Value::Complex(re, im)
     } else {

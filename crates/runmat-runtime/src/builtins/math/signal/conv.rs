@@ -429,6 +429,7 @@ fn convert_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<ConvInput> {
         shape: _,
         rows,
         cols,
+        ..
     } = tensor;
     let len = data.len();
     let hint = classify_orientation(rows, cols, len);

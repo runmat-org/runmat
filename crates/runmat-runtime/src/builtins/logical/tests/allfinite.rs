@@ -296,6 +296,7 @@ mod tests {
     fn complex_tensor_checks_real_and_imaginary_parts() {
         let finite = ComplexTensor {
             data: vec![(1.0, 0.0), (2.0, -3.0)],
+            integer_data: None,
             shape: vec![1, 2],
             rows: 1,
             cols: 2,
@@ -307,6 +308,7 @@ mod tests {
 
         let nonfinite = ComplexTensor {
             data: vec![(1.0, 0.0), (2.0, f64::INFINITY)],
+            integer_data: None,
             shape: vec![1, 2],
             rows: 1,
             cols: 2,

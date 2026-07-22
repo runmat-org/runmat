@@ -678,8 +678,15 @@ pub async fn assign_tensor_with_plan(
         return Ok(Value::Tensor(t));
     }
     if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
+        if t.integer_storage().is_some() {
+            return Err(mex(
+                "UnsupportedTypedComplexInteger",
+                "typed complex integer assignment is not implemented",
+            ));
+        }
         let mut ct = ComplexTensor {
             data: t.data.into_iter().map(|re| (re, 0.0)).collect(),
+            integer_data: None,
             shape: t.shape,
             rows: t.rows,
             cols: t.cols,
@@ -770,6 +777,12 @@ pub fn delete_complex_with_plan(
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
+    if t.integer_data.is_some() {
+        return Err(mex(
+            "UnsupportedTypedComplexInteger",
+            "typed complex integer deletion is not implemented",
+        ));
+    }
     if !is_empty_delete_rhs(rhs) {
         return Err(mex(
             "DeletionRequiresEmptyRhs",

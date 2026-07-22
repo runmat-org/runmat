@@ -9,13 +9,14 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::tensor;
+use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "complex";
@@ -94,11 +95,19 @@ const COMPLEX_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "complex: internal error",
 };
 
-const COMPLEX_ERRORS: [BuiltinErrorDescriptor; 4] = [
+const COMPLEX_ERROR_INTEGER_CLASS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COMPLEX.INTEGER_CLASS",
+    identifier: Some("RunMat:complex:IntegerClass"),
+    when: "An integer input is paired with an unsupported unlike input class.",
+    message: "complex: integer inputs require matching integer classes or a scalar double",
+};
+
+const COMPLEX_ERRORS: [BuiltinErrorDescriptor; 5] = [
     COMPLEX_ERROR_INVALID_ARGUMENT,
     COMPLEX_ERROR_INVALID_INPUT,
     COMPLEX_ERROR_SIZE_MISMATCH,
     COMPLEX_ERROR_INTERNAL,
+    COMPLEX_ERROR_INTEGER_CLASS,
 ];
 
 pub const COMPLEX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -229,8 +238,18 @@ fn unary_complex_host(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         other => {
-            let tensor = value_into_real_tensor(other)?;
+            let input = value_into_real_input(other)?;
+            let tensor = input.tensor;
             let shape = tensor.shape.clone();
+            if let Some(storage) = tensor.integer_storage() {
+                let complex = ComplexTensor::new_integer(
+                    IntegerComplexStorage::new(storage.clone(), storage.zeros_like(storage.len()))
+                        .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?,
+                    shape,
+                )
+                .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
+                return Ok(complex_tensor_into_value(complex));
+            }
             if is_scalar_tensor(&tensor) {
                 return Ok(Value::Complex(tensor.data[0], 0.0));
             }
@@ -249,16 +268,16 @@ async fn binary_complex(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
             Ok(None) => {
                 let real_value = gather_if_gpu_value(&lhs).await?;
                 let imag_value = gather_if_gpu_value(&rhs).await?;
-                let real_tensor = value_into_real_tensor(real_value)?;
-                let imag_tensor = value_into_real_tensor(imag_value)?;
-                return compose_complex(&real_tensor, &imag_tensor);
+                let real_input = value_into_real_input(real_value)?;
+                let imag_input = value_into_real_input(imag_value)?;
+                return compose_complex(&real_input, &imag_input);
             }
             Err(err) => return Err(err),
         }
     }
-    let real_tensor = value_into_real_tensor(lhs)?;
-    let imag_tensor = value_into_real_tensor(rhs)?;
-    compose_complex(&real_tensor, &imag_tensor)
+    let real_input = value_into_real_input(lhs)?;
+    let imag_input = value_into_real_input(rhs)?;
+    compose_complex(&real_input, &imag_input)
 }
 
 async fn unary_complex_gpu(handle: runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<Value> {
@@ -359,8 +378,8 @@ async fn value_to_real_gpu_handle(
             })
         }
         other => {
-            let tensor = value_into_real_tensor(other.clone())?;
-            upload_real_tensor(provider, &tensor).map(|handle| RealGpuOperand {
+            let input = value_into_real_input(other.clone())?;
+            upload_real_tensor(provider, &input.tensor).map(|handle| RealGpuOperand {
                 handle,
                 owned: true,
             })
@@ -388,7 +407,20 @@ fn upload_real_tensor(
     Ok(handle)
 }
 
-fn compose_complex(real: &Tensor, imag: &Tensor) -> BuiltinResult<Value> {
+struct RealInput {
+    tensor: Tensor,
+    is_scalar_double: bool,
+}
+
+fn compose_complex(real: &RealInput, imag: &RealInput) -> BuiltinResult<Value> {
+    if real.tensor.integer_storage().is_some() || imag.tensor.integer_storage().is_some() {
+        return compose_integer_complex(real, imag);
+    }
+
+    compose_floating_complex(&real.tensor, &imag.tensor)
+}
+
+fn compose_floating_complex(real: &Tensor, imag: &Tensor) -> BuiltinResult<Value> {
     let (shape, data) = if real.shape == imag.shape {
         let data: Vec<(f64, f64)> = real
             .data
@@ -422,11 +454,111 @@ fn compose_complex(real: &Tensor, imag: &Tensor) -> BuiltinResult<Value> {
     Ok(complex_tensor_into_value(ct))
 }
 
+fn compose_integer_complex(real: &RealInput, imag: &RealInput) -> BuiltinResult<Value> {
+    let real_storage = real.tensor.integer_storage();
+    let imag_storage = imag.tensor.integer_storage();
+    let prototype = real_storage
+        .or(imag_storage)
+        .expect("integer input was checked");
+
+    match (real_storage, imag_storage) {
+        (Some(real_storage), Some(imag_storage))
+            if real_storage.class_name() != imag_storage.class_name() =>
+        {
+            return Err(complex_error_with_detail(
+                &COMPLEX_ERROR_INTEGER_CLASS,
+                format!(
+                    "got {} and {}; integer inputs must have the same class",
+                    real_storage.class_name(),
+                    imag_storage.class_name()
+                ),
+            ));
+        }
+        (Some(_), None) if !imag.is_scalar_double => {
+            return Err(complex_error_with_detail(
+                &COMPLEX_ERROR_INTEGER_CLASS,
+                "the noninteger input must be a full scalar double",
+            ));
+        }
+        (None, Some(_)) if !real.is_scalar_double => {
+            return Err(complex_error_with_detail(
+                &COMPLEX_ERROR_INTEGER_CLASS,
+                "the noninteger input must be a full scalar double",
+            ));
+        }
+        _ => {}
+    }
+
+    let shape = compatible_complex_shape(&real.tensor, &imag.tensor)?;
+    let len = shape.iter().product();
+    let target = IntegerTarget::from_storage(prototype);
+    let real_values = integer_component_values(&real.tensor, real.is_scalar_double, target, len)?;
+    let imag_values = integer_component_values(&imag.tensor, imag.is_scalar_double, target, len)?;
+    let storage = IntegerComplexStorage::new(real_values, imag_values)
+        .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
+    let complex = ComplexTensor::new_integer(storage, shape)
+        .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
+    Ok(complex_tensor_into_value(complex))
+}
+
+fn integer_component_values(
+    tensor: &Tensor,
+    is_scalar_double: bool,
+    target: IntegerTarget,
+    output_len: usize,
+) -> BuiltinResult<IntegerStorage> {
+    match tensor.integer_storage() {
+        Some(storage) if storage.len() == output_len => Ok(storage.clone()),
+        Some(storage) if storage.len() == 1 => {
+            let value = storage.value_at(0).expect("one-element integer storage");
+            prototype_storage_from_values(storage, vec![value; output_len])
+        }
+        Some(_) => Err(complex_error_with_detail(
+            &COMPLEX_ERROR_SIZE_MISMATCH,
+            "real and imaginary parts must have the same size, unless one input is scalar",
+        )),
+        None if is_scalar_double => Ok(target.storage(
+            std::iter::repeat_with(|| target.cast_scalar(tensor.data[0]))
+                .take(output_len)
+                .collect(),
+        )),
+        None => Err(complex_error_with_detail(
+            &COMPLEX_ERROR_INTEGER_CLASS,
+            "the noninteger input must be a full scalar double",
+        )),
+    }
+}
+
+fn prototype_storage_from_values(
+    prototype: &IntegerStorage,
+    values: Vec<runmat_builtins::IntValue>,
+) -> BuiltinResult<IntegerStorage> {
+    prototype
+        .from_same_class_values(values)
+        .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))
+}
+
+fn compatible_complex_shape(real: &Tensor, imag: &Tensor) -> BuiltinResult<Vec<usize>> {
+    if real.shape == imag.shape {
+        Ok(real.shape.clone())
+    } else if is_scalar_tensor(real) {
+        Ok(imag.shape.clone())
+    } else if is_scalar_tensor(imag) {
+        Ok(real.shape.clone())
+    } else {
+        Err(complex_error_with_detail(
+            &COMPLEX_ERROR_SIZE_MISMATCH,
+            "real and imaginary parts must have the same size, unless one input is scalar",
+        ))
+    }
+}
+
 fn is_scalar_tensor(tensor: &Tensor) -> bool {
     tensor.data.len() == 1
 }
 
-fn value_into_real_tensor(value: Value) -> BuiltinResult<Tensor> {
+fn value_into_real_input(value: Value) -> BuiltinResult<RealInput> {
+    let is_scalar_double = matches!(value, Value::Num(_));
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(complex_error_with_detail(
             &COMPLEX_ERROR_INVALID_INPUT,
@@ -441,6 +573,10 @@ fn value_into_real_tensor(value: Value) -> BuiltinResult<Tensor> {
             "expected numeric input, got char",
         )),
         other => tensor::value_into_tensor_for(BUILTIN_NAME, other)
+            .map(|tensor| RealInput {
+                tensor,
+                is_scalar_double,
+            })
             .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INVALID_INPUT, e)),
     }
 }
@@ -451,7 +587,9 @@ pub(crate) mod tests {
     use crate::builtins::common::gpu_helpers;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Type, Value};
+    use runmat_builtins::{
+        CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor, Type, Value,
+    };
 
     fn complex_call(real: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::complex_builtin(real, rest))
@@ -541,6 +679,68 @@ pub(crate) mod tests {
             }
             other => panic!("expected Complex result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn complex_integer_components_preserve_uint64_storage_and_scalar_double_expansion() {
+        let real = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
+            vec![1, 2],
+        )
+        .unwrap();
+        let result = complex_call(Value::Tensor(real), vec![Value::Num(1.0)]).expect("complex");
+        let Value::ComplexTensor(complex) = result else {
+            panic!("integer complex values must retain complex tensor storage");
+        };
+        assert_eq!(complex.shape, vec![1, 2]);
+        assert_eq!(
+            complex.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
+                    IntegerStorage::U64(vec![1, 1]),
+                )
+                .unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn complex_integer_scalar_keeps_exact_complex_storage() {
+        let result = complex_call(
+            Value::Int(IntValue::I64(i64::MIN)),
+            vec![Value::Int(IntValue::I64(7))],
+        )
+        .expect("complex");
+        let Value::ComplexTensor(complex) = result else {
+            panic!("integer complex scalar must retain exact storage");
+        };
+        assert_eq!(complex.shape, vec![1, 1]);
+        assert_eq!(
+            complex.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![i64::MIN]),
+                    IntegerStorage::I64(vec![7]),
+                )
+                .unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn complex_rejects_mixed_integer_classes_and_non_scalar_double_arrays() {
+        let mixed = complex_call(
+            Value::Int(IntValue::I16(1)),
+            vec![Value::Int(IntValue::U16(2))],
+        )
+        .expect_err("mixed integer classes should fail");
+        assert_eq!(mixed.identifier(), COMPLEX_ERROR_INTEGER_CLASS.identifier);
+
+        let doubles = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let array = complex_call(Value::Int(IntValue::I16(1)), vec![Value::Tensor(doubles)])
+            .expect_err("integer inputs only permit scalar doubles as unlike operands");
+        assert_eq!(array.identifier(), COMPLEX_ERROR_INTEGER_CLASS.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

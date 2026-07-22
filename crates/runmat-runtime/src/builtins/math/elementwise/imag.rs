@@ -166,11 +166,20 @@ fn imag_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn imag_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+    if let Some(storage) = tensor.integer_storage() {
+        return Tensor::new_integer(storage.zeros_like(storage.len()), tensor.shape.clone())
+            .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e));
+    }
     Tensor::new(vec![0.0; tensor.data.len()], tensor.shape.clone())
         .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))
 }
 
 fn imag_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
+    if let Some(storage) = ct.integer_data {
+        let tensor = Tensor::new_integer(storage.imag, ct.shape)
+            .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))?;
+        return Ok(tensor::tensor_into_value(tensor));
+    }
     let data = ct.data.iter().map(|&(_, im)| im).collect::<Vec<_>>();
     let tensor = Tensor::new(data, ct.shape.clone())
         .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))?;
@@ -252,6 +261,21 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn imag_integer_complex_scalar_preserves_int64_value() {
+        let complex = ComplexTensor::new_integer(
+            runmat_builtins::IntegerComplexStorage::new(
+                runmat_builtins::IntegerStorage::I64(vec![i64::MIN]),
+                runmat_builtins::IntegerStorage::I64(vec![i64::MAX]),
+            )
+            .unwrap(),
+            vec![1, 1],
+        )
+        .unwrap();
+        let result = imag_builtin(Value::ComplexTensor(complex)).expect("imag");
+        assert_eq!(result, Value::Int(IntValue::I64(i64::MAX)));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_bool_scalar_zero() {
@@ -266,10 +290,7 @@ pub(crate) mod tests {
     #[test]
     fn imag_int_scalar_zero() {
         let result = imag_builtin(Value::Int(IntValue::I32(-42))).expect("imag");
-        match result {
-            Value::Num(n) => assert_eq!(n, 0.0),
-            other => panic!("expected scalar result, got {other:?}"),
-        }
+        assert_eq!(result, Value::Int(IntValue::I32(0)));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

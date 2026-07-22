@@ -169,6 +169,11 @@ fn real_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn real_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
+    if let Some(storage) = ct.integer_data {
+        let tensor = Tensor::new_integer(storage.real, ct.shape)
+            .map_err(|e| builtin_error_with_detail(&REAL_ERROR_INTERNAL, e))?;
+        return Ok(tensor::tensor_into_value(tensor));
+    }
     let data = ct.data.iter().map(|&(re, _)| re).collect::<Vec<_>>();
     let tensor = Tensor::new(data, ct.shape.clone())
         .map_err(|e| builtin_error_with_detail(&REAL_ERROR_INTERNAL, e))?;
@@ -256,12 +261,9 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn real_int_promotes_to_double() {
+    fn real_int_scalar_preserves_integer_class() {
         let result = real_builtin(Value::Int(IntValue::I32(7))).expect("real");
-        match result {
-            Value::Num(n) => assert!((n - 7.0).abs() < 1e-12),
-            other => panic!("expected scalar result, got {other:?}"),
-        }
+        assert_eq!(result, Value::Int(IntValue::I32(7)));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -278,6 +280,30 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn real_integer_complex_tensor_preserves_uint64_values() {
+        let complex = ComplexTensor::new_integer(
+            runmat_builtins::IntegerComplexStorage::new(
+                runmat_builtins::IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
+                runmat_builtins::IntegerStorage::U64(vec![2, 3]),
+            )
+            .unwrap(),
+            vec![1, 2],
+        )
+        .unwrap();
+        let result = real_builtin(Value::ComplexTensor(complex)).expect("real");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected typed real tensor");
+        };
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::U64(vec![
+                9_223_372_036_854_775_809,
+                u64::MAX,
+            ]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
