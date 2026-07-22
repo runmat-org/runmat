@@ -182,6 +182,19 @@ fn typed_complex_integer_arithmetic_is_rejected_before_f64_coercion() {
 }
 
 #[test]
+fn typed_complex_integer_gpuarray_is_rejected_before_provider_dispatch() {
+    let err = execute_source(
+        "z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); g = gpuArray(z);",
+    )
+    .expect_err("typed complex integer gpuArray input must be rejected");
+    assert!(
+        err.to_string()
+            .contains("typed complex integer arrays are not supported"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispatch() {
     let vars = execute_source(
         "a = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); rhs = complex(uint64([18446744073709551615 9223372036854775808]), uint64([7 8])); a(:, :) = rhs; ar = real(a); ai = imag(a); b = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); b(1:end, :) = rhs;",

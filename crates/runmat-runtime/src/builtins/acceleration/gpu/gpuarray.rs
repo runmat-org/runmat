@@ -219,6 +219,13 @@ const GPUARRAY_ERROR_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor
     message: "gpuArray: unsupported input type",
 };
 
+const GPUARRAY_ERROR_TYPED_COMPLEX_INTEGER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.TYPED_COMPLEX_INTEGER",
+    identifier: Some("RunMat:gpuArray:TypedComplexIntegerUnsupported"),
+    when: "A typed complex integer array is uploaded without a matching provider storage format.",
+    message: "gpuArray: typed complex integer arrays are not supported by the active acceleration provider",
+};
+
 const GPUARRAY_ERROR_CONVERSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.GPUARRAY.CONVERSION",
     identifier: Some("RunMat:gpuArray:ConversionFailed"),
@@ -247,7 +254,7 @@ const GPUARRAY_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "gpuArray: internal error",
 };
 
-const GPUARRAY_ERRORS: [BuiltinErrorDescriptor; 14] = [
+const GPUARRAY_ERRORS: [BuiltinErrorDescriptor; 15] = [
     GPUARRAY_ERROR_NO_PROVIDER,
     GPUARRAY_ERROR_OPTION_ARGUMENT,
     GPUARRAY_ERROR_LIKE_MISSING,
@@ -258,6 +265,7 @@ const GPUARRAY_ERRORS: [BuiltinErrorDescriptor; 14] = [
     GPUARRAY_ERROR_SIZE_ARGUMENT,
     GPUARRAY_ERROR_LIKE_PROTOTYPE,
     GPUARRAY_ERROR_INPUT_TYPE,
+    GPUARRAY_ERROR_TYPED_COMPLEX_INTEGER,
     GPUARRAY_ERROR_CONVERSION,
     GPUARRAY_ERROR_RESHAPE,
     GPUARRAY_ERROR_PROVIDER_IO,
@@ -653,6 +661,10 @@ struct PreparedHandle {
 }
 
 fn upload_host_value(value: Value, dtype: DataClass) -> BuiltinResult<PreparedHandle> {
+    if matches!(&value, Value::ComplexTensor(tensor) if tensor.integer_data.is_some()) {
+        return Err(gpu_array_error(&GPUARRAY_ERROR_TYPED_COMPLEX_INTEGER));
+    }
+
     #[cfg(all(test, feature = "wgpu"))]
     {
         if runmat_accelerate_api::provider().is_none() {
@@ -705,6 +717,10 @@ fn upload_complex_host_value(
     mut tensor: ComplexTensor,
     dtype: DataClass,
 ) -> BuiltinResult<PreparedHandle> {
+    if tensor.integer_data.is_some() {
+        return Err(gpu_array_error(&GPUARRAY_ERROR_TYPED_COMPLEX_INTEGER));
+    }
+
     match dtype {
         DataClass::Double => {}
         DataClass::Single => {
@@ -977,7 +993,10 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
-    use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+        ResolveContext, Type,
+    };
 
     fn call(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(gpu_array_builtin(value, rest))
@@ -1053,6 +1072,31 @@ pub(crate) mod tests {
             let gathered = gather_complex(Value::GpuTensor(handle.clone()));
             assert_eq!(gathered.shape, complex.shape);
             assert_complex_close(&gathered.data, &complex.data);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gpu_array_rejects_typed_complex_integer_tensor_without_uploading() {
+        test_support::with_test_provider(|_| {
+            let complex = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                    IntegerStorage::U64(vec![1, 2]),
+                )
+                .unwrap(),
+                vec![1, 2],
+            )
+            .unwrap();
+            let err = call(Value::ComplexTensor(complex), Vec::new())
+                .expect_err("typed complex integer gpuArray input must be rejected");
+            assert_eq!(
+                err.identifier.as_deref(),
+                Some("RunMat:gpuArray:TypedComplexIntegerUnsupported")
+            );
+            assert!(err
+                .to_string()
+                .contains("typed complex integer arrays are not supported"));
         });
     }
 

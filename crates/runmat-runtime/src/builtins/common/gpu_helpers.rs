@@ -52,6 +52,13 @@ pub fn upload_complex_tensor(
     provider: &dyn AccelProvider,
     tensor: &ComplexTensor,
 ) -> crate::BuiltinResult<GpuTensorHandle> {
+    if tensor.integer_data.is_some() {
+        return Err(build_runtime_error(
+            "typed complex integer GPU buffers are not supported by the active acceleration provider",
+        )
+        .build());
+    }
+
     let mut interleaved = Vec::with_capacity(tensor.data.len() * 2);
     for &(re, im) in &tensor.data {
         interleaved.push(re);
