@@ -257,6 +257,30 @@ fn sparse_triplets_accept_matrix_subscripts_and_integer_values() {
 }
 
 #[test]
+fn transpose_preserves_exact_sparse_integer_storage() {
+    let sparse = SparseTensor::new_integer(
+        3,
+        2,
+        vec![0, 2, 3],
+        vec![0, 2, 1],
+        IntegerStorage::U64(vec![u64::MAX, 7, 9]),
+    )
+    .expect("uint64 sparse");
+
+    let transposed = match runmat_runtime::call_builtin("transpose", &[Value::SparseTensor(sparse)])
+        .expect("transpose sparse")
+    {
+        Value::SparseTensor(sparse) => sparse,
+        other => panic!("expected sparse tensor, got {other:?}"),
+    };
+    assert_eq!(transposed.shape(), vec![2, 3]);
+    assert_eq!(
+        transposed.integer_storage(),
+        Some(&IntegerStorage::U64(vec![u64::MAX, 9, 7]))
+    );
+}
+
+#[test]
 fn randn_single_sets_f32_dtype() {
     let result = runmat_runtime::call_builtin(
         "randn",

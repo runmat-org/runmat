@@ -21,6 +21,9 @@ pub use mrdivide::mrdivide_host_real_for_provider;
 pub(super) fn transpose_real_sparse_tensor(
     sparse: runmat_builtins::SparseTensor,
 ) -> Result<runmat_builtins::SparseTensor, String> {
+    if let Some(storage) = sparse.integer_storage() {
+        return transpose_integer_sparse_tensor(&sparse, storage);
+    }
     let mut triplets = Vec::with_capacity(sparse.nnz());
     for col in 0..sparse.cols {
         for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
@@ -47,6 +50,40 @@ pub(super) fn transpose_real_sparse_tensor(
     runmat_builtins::SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
 }
 
+fn transpose_integer_sparse_tensor(
+    sparse: &runmat_builtins::SparseTensor,
+    storage: &runmat_builtins::IntegerStorage,
+) -> Result<runmat_builtins::SparseTensor, String> {
+    let mut triplets = Vec::with_capacity(sparse.nnz());
+    for col in 0..sparse.cols {
+        for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
+            let value = storage
+                .value_at(idx)
+                .ok_or_else(|| "SparseTensor integer storage is inconsistent".to_string())?;
+            triplets.push((col, sparse.row_indices[idx], value));
+        }
+    }
+    triplets.sort_by_key(|(row, col, _)| (*col, *row));
+
+    let rows = sparse.cols;
+    let cols = sparse.rows;
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::with_capacity(triplets.len());
+    let mut values = Vec::with_capacity(triplets.len());
+    col_ptrs.push(0);
+    let mut next = 0usize;
+    for col in 0..cols {
+        while next < triplets.len() && triplets[next].1 == col {
+            row_indices.push(triplets[next].0);
+            values.push(triplets[next].2.clone());
+            next += 1;
+        }
+        col_ptrs.push(values.len());
+    }
+    let values = storage.from_same_class_values(values)?;
+    runmat_builtins::SparseTensor::new_integer(rows, cols, col_ptrs, row_indices, values)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,5 +101,26 @@ mod tests {
         assert_eq!(transposed.col_ptrs, vec![0, 1, 2, 3]);
         assert_eq!(transposed.row_indices, vec![0, 1, 0]);
         assert_eq!(transposed.values, vec![10.0, 20.0, 30.0]);
+    }
+
+    #[test]
+    fn transpose_real_sparse_tensor_preserves_exact_uint64_values() {
+        let sparse = SparseTensor::new_integer(
+            3,
+            2,
+            vec![0, 2, 3],
+            vec![0, 2, 1],
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 7, 9]),
+        )
+        .expect("typed sparse");
+
+        let transposed = transpose_real_sparse_tensor(sparse).expect("transpose");
+
+        assert_eq!(transposed.rows, 2);
+        assert_eq!(transposed.cols, 3);
+        assert_eq!(
+            transposed.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 9, 7]))
+        );
     }
 }
