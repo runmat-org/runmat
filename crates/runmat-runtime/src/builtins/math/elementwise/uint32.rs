@@ -16,6 +16,9 @@ use crate::builtins::common::{
     },
     tensor,
 };
+use crate::builtins::math::elementwise::integer_cast::{
+    cast_complex_value, CastError, IntegerTarget,
+};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -139,7 +142,12 @@ async fn uint32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         }
         Value::CharArray(chars) => from_char_array(chars),
         Value::GpuTensor(handle) => from_gpu(handle).await,
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(conversion_error("complex")),
+        value @ (Value::Complex(_, _) | Value::ComplexTensor(_)) => {
+            cast_complex_value(value, IntegerTarget::U32).map_err(|cause| match cause {
+                CastError::Unsupported(type_name) => conversion_error(&type_name),
+                CastError::Internal(detail) => error_with_detail(&ERROR_INTERNAL, detail),
+            })
+        }
         Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
         Value::Symbolic(expr) => expr
             .numeric_constant_value()

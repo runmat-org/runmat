@@ -1,6 +1,8 @@
 //! Shared exact host-side conversion support for MATLAB integer cast builtins.
 
-use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+use runmat_builtins::{
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Value,
+};
 
 use crate::builtins::common::{gpu_helpers, tensor};
 
@@ -166,6 +168,7 @@ impl IntegerTarget {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum CastError {
     Unsupported(String),
     Internal(String),
@@ -204,8 +207,8 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
                 .map_err(|error| CastError::Internal(error.message))?;
             cast_tensor_value(target, tensor)
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(CastError::Unsupported("complex".to_string()))
+        value @ (Value::Complex(_, _) | Value::ComplexTensor(_)) => {
+            cast_complex_value(value, target)
         }
         Value::String(_) | Value::StringArray(_) => {
             Err(CastError::Unsupported("string".to_string()))
@@ -228,6 +231,46 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
         Value::MException(_) => Err(CastError::Unsupported("MException".to_string())),
         Value::OutputList(_) => Err(CastError::Unsupported("OutputList".to_string())),
     }
+}
+
+pub(crate) fn cast_complex_value(value: Value, target: IntegerTarget) -> Result<Value, CastError> {
+    let (real, imag, shape) = match value {
+        Value::Complex(real, imag) => (
+            vec![target.cast_scalar(real)],
+            vec![target.cast_scalar(imag)],
+            vec![1, 1],
+        ),
+        Value::ComplexTensor(tensor) => {
+            let shape = tensor.shape;
+            if let Some(storage) = tensor.integer_data {
+                (
+                    integer_values(storage.real)
+                        .iter()
+                        .map(|value| target.cast_int(value))
+                        .collect(),
+                    integer_values(storage.imag)
+                        .iter()
+                        .map(|value| target.cast_int(value))
+                        .collect(),
+                    shape,
+                )
+            } else {
+                let (real, imag): (Vec<_>, Vec<_>) = tensor
+                    .data
+                    .into_iter()
+                    .map(|(real, imag)| (target.cast_scalar(real), target.cast_scalar(imag)))
+                    .unzip();
+                (real, imag, shape)
+            }
+        }
+        _ => return Err(CastError::Unsupported("complex".to_string())),
+    };
+
+    let storage = IntegerComplexStorage::new(target.storage(real), target.storage(imag))
+        .map_err(CastError::Internal)?;
+    ComplexTensor::new_integer(storage, shape)
+        .map(Value::ComplexTensor)
+        .map_err(CastError::Internal)
 }
 
 fn cast_tensor_value(target: IntegerTarget, tensor: Tensor) -> Result<Value, CastError> {
@@ -291,6 +334,7 @@ pub(crate) fn integer_values(storage: IntegerStorage) -> Vec<IntValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
 
     #[test]
     fn uint64_to_int64_array_saturates_without_f64_rounding() {
@@ -317,6 +361,63 @@ mod tests {
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![0, i64::MAX as u64]))
+        );
+    }
+
+    #[test]
+    fn complex_float_arrays_convert_every_integer_class_and_remain_complex() {
+        for target in [
+            IntegerTarget::I8,
+            IntegerTarget::I16,
+            IntegerTarget::I32,
+            IntegerTarget::I64,
+            IntegerTarget::U8,
+            IntegerTarget::U16,
+            IntegerTarget::U32,
+            IntegerTarget::U64,
+        ] {
+            let input = ComplexTensor::new(vec![(1.5, 0.49), (-2.5, -1.5)], vec![1, 2])
+                .expect("complex input");
+            let output = block_on(cast_value(Value::ComplexTensor(input), target))
+                .expect("complex integer conversion");
+            let Value::ComplexTensor(output) = output else {
+                panic!("integer conversion must preserve complex storage");
+            };
+            let expected = IntegerComplexStorage::new(
+                target.storage(vec![target.cast_scalar(1.5), target.cast_scalar(-2.5)]),
+                target.storage(vec![target.cast_scalar(0.49), target.cast_scalar(-1.5)]),
+            )
+            .expect("matching storage");
+            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.integer_data, Some(expected));
+        }
+    }
+
+    #[test]
+    fn typed_complex_casts_preserve_exact_uint64_components_before_saturation() {
+        let input = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                IntegerStorage::U64(vec![1, 2]),
+            )
+            .expect("matching components"),
+            vec![1, 2],
+        )
+        .expect("typed complex input");
+        let output = block_on(cast_value(Value::ComplexTensor(input), IntegerTarget::I64))
+            .expect("int64 conversion");
+        let Value::ComplexTensor(output) = output else {
+            panic!("integer conversion must preserve complex storage");
+        };
+        assert_eq!(
+            output.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![i64::MAX, i64::MAX]),
+                    IntegerStorage::I64(vec![1, 2]),
+                )
+                .expect("matching components")
+            )
         );
     }
 }

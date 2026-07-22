@@ -152,6 +152,75 @@ fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
 }
 
 #[test]
+fn integer_casts_preserve_complex_storage_for_every_integer_class_through_vm_dispatch() {
+    let vars = execute_source(
+        "z = complex([1.5 -2.5], [0.49 -1.5]); a = int8(z); b = int16(z); c = int32(z); d = int64(z); e = uint8(z); f = uint16(z); g = uint32(z); h = uint64(z); flags = [isreal(a) isreal(b) isreal(c) isreal(d) isreal(e) isreal(f) isreal(g) isreal(h)]; q = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); q64 = int64(q);",
+    )
+    .expect("complex integer casts should execute");
+
+    let expected = vec![
+        (
+            IntegerStorage::I8(vec![2, -3]),
+            IntegerStorage::I8(vec![0, -2]),
+        ),
+        (
+            IntegerStorage::I16(vec![2, -3]),
+            IntegerStorage::I16(vec![0, -2]),
+        ),
+        (
+            IntegerStorage::I32(vec![2, -3]),
+            IntegerStorage::I32(vec![0, -2]),
+        ),
+        (
+            IntegerStorage::I64(vec![2, -3]),
+            IntegerStorage::I64(vec![0, -2]),
+        ),
+        (
+            IntegerStorage::U8(vec![2, 0]),
+            IntegerStorage::U8(vec![0, 0]),
+        ),
+        (
+            IntegerStorage::U16(vec![2, 0]),
+            IntegerStorage::U16(vec![0, 0]),
+        ),
+        (
+            IntegerStorage::U32(vec![2, 0]),
+            IntegerStorage::U32(vec![0, 0]),
+        ),
+        (
+            IntegerStorage::U64(vec![2, 0]),
+            IntegerStorage::U64(vec![0, 0]),
+        ),
+    ];
+    for (value, (real, imag)) in vars[1..9].iter().zip(expected) {
+        let Value::ComplexTensor(tensor) = value else {
+            panic!("integer cast must preserve complex tensor storage: {value:?}");
+        };
+        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(
+            tensor
+                .integer_data
+                .as_ref()
+                .map(|storage| (&storage.real, &storage.imag)),
+            Some((&real, &imag))
+        );
+    }
+    assert!(matches!(
+        &vars[9],
+        Value::LogicalArray(flags) if flags.data == vec![0; 8]
+    ));
+    assert!(matches!(
+        &vars[11],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                == Some((
+                    &IntegerStorage::I64(vec![i64::MAX, i64::MAX]),
+                    &IntegerStorage::I64(vec![1, 2]),
+                ))
+    ));
+}
+
+#[test]
 fn issparse_reports_sparse_storage_through_vm_dispatch() {
     let vars = execute_source(
         "s = sparse([1 2], [1 2], [10 20], 2, 2); a = issparse(s); b = issparse([10 0; 0 20]); c = issparse(42);",

@@ -303,12 +303,20 @@ mod tests {
     }
 
     #[test]
-    fn integer_casts_reject_complex_inputs_with_builtin_identifiers() {
-        let error = block_on(super::uint64::uint64_builtin(
-            Value::Complex(1.0, 0.0),
+    fn integer_casts_preserve_complex_storage_even_when_imaginary_part_rounds_to_zero() {
+        let output = block_on(super::uint64::uint64_builtin(
+            Value::Complex(1.0, 1e-48),
             Vec::new(),
         ))
-        .expect_err("complex input should fail");
-        assert_eq!(error.identifier(), Some("RunMat:uint64:InvalidInput"));
+        .expect("complex input should convert");
+        assert!(matches!(
+            output,
+            Value::ComplexTensor(tensor)
+                if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                    == Some((
+                        &IntegerStorage::U64(vec![1]),
+                        &IntegerStorage::U64(vec![0]),
+                    ))
+        ));
     }
 }
