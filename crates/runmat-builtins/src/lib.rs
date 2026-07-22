@@ -944,6 +944,24 @@ impl SparseTensor {
         }
     }
 
+    /// Creates a typed sparse matrix using the class of `prototype`.
+    pub fn new_integer_like(
+        rows: usize,
+        cols: usize,
+        col_ptrs: Vec<usize>,
+        row_indices: Vec<usize>,
+        values: Vec<IntValue>,
+        prototype: &IntegerStorage,
+    ) -> Result<Self, String> {
+        Self::new_integer(
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            prototype.from_same_class_values(values)?,
+        )
+    }
+
     pub fn nnz(&self) -> usize {
         self.integer_data
             .as_ref()

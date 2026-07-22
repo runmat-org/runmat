@@ -280,7 +280,23 @@ fn sparse_output_shape(plan: &IndexPlan) -> Result<(usize, usize), RuntimeError>
     }
 }
 
-fn sparse_scalar_value(value: f64) -> Result<Value, RuntimeError> {
+fn sparse_scalar_value(
+    sparse: &SparseTensor,
+    row: usize,
+    col: usize,
+) -> Result<Value, RuntimeError> {
+    if let Some(storage) = sparse.integer_storage() {
+        let scalar = match sparse.integer_at(row, col) {
+            Some(value) => {
+                SparseTensor::new_integer_like(1, 1, vec![0, 1], vec![0], vec![value], storage)
+            }
+            None => Ok(SparseTensor::zeros_with_integer_storage(1, 1, storage)),
+        }
+        .map_err(map_slice_shape_error)?;
+        return Ok(Value::SparseTensor(scalar));
+    }
+
+    let value = sparse.get(row, col).unwrap_or(0.0);
     if value == 0.0 {
         return Ok(Value::SparseTensor(SparseTensor::zeros(1, 1)));
     }
@@ -295,6 +311,39 @@ fn checked_sparse_numel(sparse: &SparseTensor) -> Result<usize, RuntimeError> {
     })
 }
 
+fn sparse_zeros_like(sparse: &SparseTensor, rows: usize, cols: usize) -> SparseTensor {
+    sparse.integer_storage().map_or_else(
+        || SparseTensor::zeros(rows, cols),
+        |storage| SparseTensor::zeros_with_integer_storage(rows, cols, storage),
+    )
+}
+
+fn typed_sparse_from_column_entries(
+    rows: usize,
+    cols: usize,
+    mut col_entries: Vec<Vec<(usize, IntValue)>>,
+    prototype: &IntegerStorage,
+) -> Result<Value, RuntimeError> {
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    let mut values = Vec::new();
+    col_ptrs.push(0);
+    for entries in col_entries.iter_mut().take(cols) {
+        entries.sort_by_key(|(row, _)| *row);
+        for (row, value) in entries.drain(..) {
+            if !value.is_zero() {
+                row_indices.push(row);
+                values.push(value);
+            }
+        }
+        col_ptrs.push(values.len());
+    }
+    let sparse =
+        SparseTensor::new_integer_like(rows, cols, col_ptrs, row_indices, values, prototype)
+            .map_err(map_slice_shape_error)?;
+    Ok(Value::SparseTensor(sparse))
+}
+
 fn linear_sparse_slice(
     sparse: &SparseTensor,
     selector: &SliceSelector,
@@ -303,15 +352,29 @@ fn linear_sparse_slice(
     let base_is_row_vector = sparse.rows == 1 && sparse.cols > 1;
     if matches!(selector, SliceSelector::Colon) {
         let mut row_indices = Vec::with_capacity(sparse.values.len());
-        let mut values = Vec::with_capacity(sparse.values.len());
         for col in 0..sparse.cols {
             for entry in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
                 row_indices.push(sparse.row_indices[entry] + col * sparse.rows);
-                values.push(sparse.values[entry]);
             }
         }
-        let sparse = SparseTensor::new(total, 1, vec![0, values.len()], row_indices, values)
-            .map_err(map_slice_shape_error)?;
+        let sparse = if let Some(storage) = sparse.integer_storage() {
+            SparseTensor::new_integer(
+                total,
+                1,
+                vec![0, sparse.nnz()],
+                row_indices,
+                storage.clone(),
+            )
+        } else {
+            SparseTensor::new(
+                total,
+                1,
+                vec![0, sparse.values.len()],
+                row_indices,
+                sparse.values.clone(),
+            )
+        }
+        .map_err(map_slice_shape_error)?;
         return Ok(Value::SparseTensor(sparse));
     }
     let (indices, output_shape) = match selector {
@@ -344,7 +407,7 @@ fn linear_sparse_slice(
         let lin = indices[0] - 1;
         let row = lin % sparse.rows;
         let col = lin / sparse.rows;
-        return sparse_scalar_value(sparse.get(row, col).unwrap_or(0.0));
+        return sparse_scalar_value(sparse, row, col);
     }
     let (out_rows, out_cols) = match output_shape.as_slice() {
         [rows, cols] => (*rows, *cols),
@@ -357,7 +420,24 @@ fn linear_sparse_slice(
         }
     };
     if indices.is_empty() {
-        return Ok(Value::SparseTensor(SparseTensor::zeros(out_rows, out_cols)));
+        return Ok(Value::SparseTensor(sparse_zeros_like(
+            sparse, out_rows, out_cols,
+        )));
+    }
+
+    if let Some(storage) = sparse.integer_storage() {
+        let mut col_entries: Vec<Vec<(usize, IntValue)>> = vec![Vec::new(); out_cols];
+        for (out_pos, &index) in indices.iter().enumerate() {
+            let base_lin = index - 1;
+            let base_row = base_lin % sparse.rows;
+            let base_col = base_lin / sparse.rows;
+            if let Some(value) = sparse.integer_at(base_row, base_col) {
+                let out_row = out_pos % out_rows;
+                let out_col = out_pos / out_rows;
+                col_entries[out_col].push((out_row, value));
+            }
+        }
+        return typed_sparse_from_column_entries(out_rows, out_cols, col_entries, storage);
     }
 
     let mut col_entries: Vec<Vec<(usize, f64)>> = vec![Vec::new(); out_cols];
@@ -435,7 +515,9 @@ fn matrix_sparse_slice(
     let out_rows = if all_rows { sparse.rows } else { rows.len() };
     let out_cols = cols.len();
     if out_rows == 0 || out_cols == 0 {
-        return Ok(Value::SparseTensor(SparseTensor::zeros(out_rows, out_cols)));
+        return Ok(Value::SparseTensor(sparse_zeros_like(
+            sparse, out_rows, out_cols,
+        )));
     }
 
     let mut row_positions: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -444,6 +526,41 @@ fn matrix_sparse_slice(
             row_positions.entry(row - 1).or_default().push(out_row);
         }
     }
+    if let Some(storage) = sparse.integer_storage() {
+        let mut col_entries: Vec<Vec<(usize, IntValue)>> = vec![Vec::new(); out_cols];
+        for (out_col, &col) in cols.iter().enumerate() {
+            let base_col = col - 1;
+            for entry in sparse.col_ptrs[base_col]..sparse.col_ptrs[base_col + 1] {
+                let base_row = sparse.row_indices[entry];
+                let value = storage
+                    .value_at(entry)
+                    .expect("typed sparse entry is present");
+                if all_rows {
+                    col_entries[out_col].push((base_row, value));
+                } else if let Some(output_rows) = row_positions.get(&base_row) {
+                    for &out_row in output_rows {
+                        col_entries[out_col].push((out_row, value.clone()));
+                    }
+                }
+            }
+        }
+        if out_rows == 1 && out_cols == 1 {
+            let value = col_entries
+                .first()
+                .and_then(|entries| entries.first())
+                .map(|(_, value)| value.clone());
+            let scalar = match value {
+                Some(value) => {
+                    SparseTensor::new_integer_like(1, 1, vec![0, 1], vec![0], vec![value], storage)
+                }
+                None => Ok(SparseTensor::zeros_with_integer_storage(1, 1, storage)),
+            }
+            .map_err(map_slice_shape_error)?;
+            return Ok(Value::SparseTensor(scalar));
+        }
+        return typed_sparse_from_column_entries(out_rows, out_cols, col_entries, storage);
+    }
+
     let mut col_entries = vec![Vec::new(); out_cols];
     for (out_col, &col) in cols.iter().enumerate() {
         let base_col = col - 1;
@@ -465,7 +582,12 @@ fn matrix_sparse_slice(
             .and_then(|entries| entries.first())
             .map(|(_, value)| *value)
             .unwrap_or(0.0);
-        return sparse_scalar_value(value);
+        if value == 0.0 {
+            return Ok(Value::SparseTensor(SparseTensor::zeros(1, 1)));
+        }
+        let scalar = SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![value])
+            .map_err(map_slice_shape_error)?;
+        return Ok(Value::SparseTensor(scalar));
     }
     sparse_from_column_entries(out_rows, out_cols, col_entries)
 }
@@ -508,12 +630,14 @@ pub fn read_sparse_slice_from_plan(
         }
         let row = lin % sparse.rows;
         let col = lin / sparse.rows;
-        return sparse_scalar_value(sparse.get(row, col).unwrap_or(0.0));
+        return sparse_scalar_value(sparse, row, col);
     }
 
     let (out_rows, out_cols) = sparse_output_shape(plan)?;
     if plan.indices.is_empty() {
-        return Ok(Value::SparseTensor(SparseTensor::zeros(out_rows, out_cols)));
+        return Ok(Value::SparseTensor(sparse_zeros_like(
+            sparse, out_rows, out_cols,
+        )));
     }
 
     let total = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
@@ -523,6 +647,44 @@ pub fn read_sparse_slice_from_plan(
     let mut row_indices = Vec::new();
     let mut values = Vec::new();
     col_ptrs.push(0);
+    if let Some(storage) = sparse.integer_storage() {
+        let mut integer_values = Vec::new();
+        for out_col in 0..out_cols {
+            for out_row in 0..out_rows {
+                let out_lin = out_row + out_col * out_rows;
+                let Some(&base_lin) = plan.indices.get(out_lin) else {
+                    return Err(crate::interpreter::errors::mex(
+                        "ShapeMismatch",
+                        "sparse slice plan output shape does not match selected indices",
+                    ));
+                };
+                let base_lin = base_lin as usize;
+                if sparse.rows == 0 || base_lin >= total {
+                    return Err(crate::interpreter::errors::mex(
+                        "IndexOutOfBounds",
+                        "Index out of bounds",
+                    ));
+                }
+                let base_row = base_lin % sparse.rows;
+                let base_col = base_lin / sparse.rows;
+                if let Some(value) = sparse.integer_at(base_row, base_col) {
+                    row_indices.push(out_row);
+                    integer_values.push(value);
+                }
+            }
+            col_ptrs.push(integer_values.len());
+        }
+        let out = SparseTensor::new_integer_like(
+            out_rows,
+            out_cols,
+            col_ptrs,
+            row_indices,
+            integer_values,
+            storage,
+        )
+        .map_err(map_slice_shape_error)?;
+        return Ok(Value::SparseTensor(out));
+    }
     for out_col in 0..out_cols {
         for out_row in 0..out_rows {
             let out_lin = out_row + out_col * out_rows;
@@ -687,12 +849,15 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
 mod tests {
     use super::{
         gather_string_slice, map_slice_acceleration_error, read_complex_slice_from_plan,
-        read_string_slice, read_tensor_slice_from_plan, try_tensor_slice_2d_fast_path,
+        read_sparse_slice_from_plan, read_string_slice, read_tensor_slice_from_plan,
+        try_tensor_slice_2d_fast_path,
     };
     use crate::indexing::plan::IndexPlan;
     use crate::indexing::selectors::SliceSelector;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntValue, IntegerStorage, StringArray, Tensor, Value};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, IntegerStorage, SparseTensor, StringArray, Tensor, Value,
+    };
 
     #[test]
     fn tensor_slice_plan_preserves_exact_uint64_storage() {
@@ -708,6 +873,38 @@ mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![1, 3, u64::MAX, 4]))
         );
+    }
+
+    #[test]
+    fn sparse_slice_plan_preserves_exact_uint64_storage_and_empty_class() {
+        let sparse = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            IntegerStorage::U64(vec![1, u64::MAX]),
+        )
+        .expect("sparse");
+        let plan = IndexPlan::new(vec![0, 3, 1, 2], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+        let result = read_sparse_slice_from_plan(&sparse, &plan).expect("slice");
+        let Value::SparseTensor(output) = result else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(output.shape(), vec![2, 2]);
+        assert_eq!(output.col_ptrs, vec![0, 2, 2]);
+        assert_eq!(output.row_indices, vec![0, 1]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1, u64::MAX]))
+        );
+
+        let empty_plan = IndexPlan::new(Vec::new(), vec![0, 1], vec![0], 1, vec![2, 2]);
+        let empty = read_sparse_slice_from_plan(&sparse, &empty_plan).expect("empty slice");
+        let Value::SparseTensor(empty) = empty else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(empty.shape(), vec![0, 1]);
+        assert_eq!(empty.integer_storage(), Some(&IntegerStorage::U64(vec![])));
     }
 
     #[test]

@@ -3,7 +3,7 @@ mod test_helpers;
 
 use test_helpers::execute_source;
 
-use runmat_builtins::Value;
+use runmat_builtins::{IntegerStorage, Value};
 
 fn logical_truth(value: &Value) -> bool {
     match value {
@@ -145,6 +145,61 @@ fn sparse_slice_indexing_preserves_sparse_outputs() {
                 && tensor.data == vec![10.0, 0.0, 30.0, 0.0, 0.0, 0.0, 0.0, 23.0, 0.0]
     ));
     assert!(logical_truth(&vars[12]));
+}
+
+#[test]
+fn typed_sparse_slice_indexing_preserves_uint64_storage() {
+    let vars = execute_source(
+        "s = sparse([1 3 2], [1 1 3], uint64([1 9223372036854775808 4]), 3, 3); a = s(3,1); z = s(2,1); lin = s(:); pick = s([1 3 8]); sub = s([3 1], [1 3]); empty = s([],1);",
+    )
+    .unwrap();
+
+    let expected_scalar = IntegerStorage::U64(vec![9_223_372_036_854_775_808]);
+    assert!(matches!(
+        &vars[1],
+        Value::SparseTensor(sparse)
+            if sparse.shape() == vec![1, 1]
+                && sparse.integer_storage() == Some(&expected_scalar)
+    ));
+    assert!(matches!(
+        &vars[2],
+        Value::SparseTensor(sparse)
+            if sparse.shape() == vec![1, 1]
+                && sparse.integer_storage() == Some(&IntegerStorage::U64(vec![]))
+    ));
+    assert!(matches!(
+        &vars[3],
+        Value::SparseTensor(sparse)
+            if sparse.shape() == vec![9, 1]
+                && sparse.row_indices == vec![0, 2, 7]
+                && sparse.integer_storage() == Some(&IntegerStorage::U64(vec![1, 9_223_372_036_854_775_808, 4]))
+    ));
+    let Value::SparseTensor(pick) = &vars[4] else {
+        panic!("expected typed sparse linear selection, got {:?}", vars[4]);
+    };
+    assert_eq!(pick.shape(), vec![1, 3]);
+    assert_eq!(pick.col_ptrs, vec![0, 1, 2, 3]);
+    assert_eq!(pick.row_indices, vec![0, 0, 0]);
+    assert_eq!(
+        pick.integer_storage(),
+        Some(&IntegerStorage::U64(vec![1, 9_223_372_036_854_775_808, 4]))
+    );
+    let Value::SparseTensor(sub) = &vars[5] else {
+        panic!("expected typed sparse matrix selection, got {:?}", vars[5]);
+    };
+    assert_eq!(sub.shape(), vec![2, 2]);
+    assert_eq!(sub.col_ptrs, vec![0, 2, 2]);
+    assert_eq!(sub.row_indices, vec![0, 1]);
+    assert_eq!(
+        sub.integer_storage(),
+        Some(&IntegerStorage::U64(vec![9_223_372_036_854_775_808, 1]))
+    );
+    assert!(matches!(
+        &vars[6],
+        Value::SparseTensor(sparse)
+            if sparse.shape() == vec![0, 1]
+                && sparse.integer_storage() == Some(&IntegerStorage::U64(vec![]))
+    ));
 }
 
 #[test]

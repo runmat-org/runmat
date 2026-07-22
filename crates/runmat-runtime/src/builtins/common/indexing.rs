@@ -37,7 +37,19 @@ fn positive_integer_index(value: f64, identifier: &str) -> Result<usize, Runtime
 }
 
 fn sparse_scalar_index(sparse: &SparseTensor, indices: &[f64]) -> Result<Value, RuntimeError> {
-    fn sparse_scalar(value: f64) -> Result<Value, RuntimeError> {
+    fn sparse_scalar(sparse: &SparseTensor, row: usize, col: usize) -> Result<Value, RuntimeError> {
+        if let Some(storage) = sparse.integer_storage() {
+            let result = match sparse.integer_at(row, col) {
+                Some(value) => {
+                    SparseTensor::new_integer_like(1, 1, vec![0, 1], vec![0], vec![value], storage)
+                }
+                None => Ok(SparseTensor::zeros_with_integer_storage(1, 1, storage)),
+            }
+            .map_err(indexing_error)?;
+            return Ok(Value::SparseTensor(result));
+        }
+
+        let value = sparse.get(row, col).unwrap_or(0.0);
         if value == 0.0 {
             return Ok(Value::SparseTensor(SparseTensor::zeros(1, 1)));
         }
@@ -63,7 +75,7 @@ fn sparse_scalar_index(sparse: &SparseTensor, indices: &[f64]) -> Result<Value, 
         let zero = idx - 1;
         let row = zero % sparse.rows;
         let col = zero / sparse.rows;
-        return sparse_scalar(sparse.get(row, col).unwrap_or(0.0));
+        return sparse_scalar(sparse, row, col);
     }
     if indices.len() == 2 {
         let row = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
@@ -77,7 +89,7 @@ fn sparse_scalar_index(sparse: &SparseTensor, indices: &[f64]) -> Result<Value, 
                 "RunMat:IndexOutOfBounds",
             ));
         }
-        return sparse_scalar(sparse.get(row - 1, col - 1).unwrap_or(0.0));
+        return sparse_scalar(sparse, row - 1, col - 1);
     }
     Err(indexing_error_with_identifier(
         format!(
@@ -489,7 +501,7 @@ async fn gpu_index_scalar(
 mod tests {
     use super::perform_indexing;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, LogicalArray, SparseTensor, Value};
+    use runmat_builtins::{CellArray, IntegerStorage, LogicalArray, SparseTensor, Value};
 
     fn sparse_scalar_value(value: Value) -> f64 {
         match value {
@@ -555,6 +567,45 @@ mod tests {
             ),
             23.0
         );
+    }
+
+    #[test]
+    fn sparse_integer_scalar_indexing_preserves_exact_class_and_zero() {
+        let cases = vec![
+            IntegerStorage::I8(vec![i8::MIN]),
+            IntegerStorage::I16(vec![i16::MIN]),
+            IntegerStorage::I32(vec![i32::MIN]),
+            IntegerStorage::I64(vec![i64::MIN]),
+            IntegerStorage::U8(vec![u8::MAX]),
+            IntegerStorage::U16(vec![u16::MAX]),
+            IntegerStorage::U32(vec![u32::MAX]),
+            IntegerStorage::U64(vec![u64::MAX]),
+        ];
+
+        for storage in cases {
+            let sparse = SparseTensor::new_integer(2, 2, vec![0, 1, 1], vec![0], storage.clone())
+                .expect("typed sparse");
+            for indices in [&[1.0][..], &[1.0, 1.0][..], &[2.0, 2.0][..]] {
+                let result = block_on(perform_indexing(
+                    &Value::SparseTensor(sparse.clone()),
+                    indices,
+                ))
+                .expect("sparse scalar index");
+                let Value::SparseTensor(result) = result else {
+                    panic!("expected sparse scalar result");
+                };
+                assert_eq!(
+                    result.integer_storage().map(IntegerStorage::class_name),
+                    Some(storage.class_name())
+                );
+                let expected = if indices == &[1.0] || indices == &[1.0, 1.0] {
+                    storage.clone()
+                } else {
+                    storage.zeros_like(0)
+                };
+                assert_eq!(result.integer_storage(), Some(&expected));
+            }
+        }
     }
 
     #[test]

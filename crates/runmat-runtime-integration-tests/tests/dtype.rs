@@ -154,6 +154,43 @@ fn zeros_like_typed_sparse_proto_preserves_integer_class() {
 }
 
 #[test]
+fn typed_sparse_scalar_indexing_preserves_all_integer_classes() {
+    let cases = vec![
+        IntegerStorage::I8(vec![i8::MIN]),
+        IntegerStorage::I16(vec![i16::MIN]),
+        IntegerStorage::I32(vec![i32::MIN]),
+        IntegerStorage::I64(vec![i64::MIN]),
+        IntegerStorage::U8(vec![u8::MAX]),
+        IntegerStorage::U16(vec![u16::MAX]),
+        IntegerStorage::U32(vec![u32::MAX]),
+        IntegerStorage::U64(vec![u64::MAX]),
+    ];
+
+    for storage in cases {
+        let sparse = SparseTensor::new_integer(2, 2, vec![0, 1, 1], vec![0], storage.clone())
+            .expect("typed sparse");
+        for indices in [&[1.0][..], &[1.0, 1.0][..], &[2.0, 2.0][..]] {
+            let result = block_on(
+                runmat_runtime::builtins::common::indexing::perform_indexing(
+                    &Value::SparseTensor(sparse.clone()),
+                    indices,
+                ),
+            )
+            .expect("sparse scalar index");
+            let Value::SparseTensor(result) = result else {
+                panic!("expected sparse scalar result");
+            };
+            let expected = if indices == &[1.0] || indices == &[1.0, 1.0] {
+                storage.clone()
+            } else {
+                storage.zeros_like(0)
+            };
+            assert_eq!(result.integer_storage(), Some(&expected));
+        }
+    }
+}
+
+#[test]
 fn sparse_full_and_nonzeros_preserve_exact_integer_storage() {
     let cases = vec![
         IntegerStorage::I8(vec![0, i8::MIN, i8::MAX, 0]),
