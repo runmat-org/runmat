@@ -178,10 +178,10 @@ fn scatter_tetrahedron4(
         for local_row_axis in 0..TETRAHEDRON4_NODE_DOF_COUNT {
             let local_row = local_row_node * TETRAHEDRON4_NODE_DOF_COUNT + local_row_axis;
             let global_row = dof_offsets[local_row_node] + local_row_axis;
-            for local_col_node in 0..4 {
+            for (local_col_node, global_col_offset) in dof_offsets.iter().enumerate() {
                 for local_col_axis in 0..TETRAHEDRON4_NODE_DOF_COUNT {
                     let local_col = local_col_node * TETRAHEDRON4_NODE_DOF_COUNT + local_col_axis;
-                    let global_col = dof_offsets[local_col_node] + local_col_axis;
+                    let global_col = global_col_offset + local_col_axis;
                     dense[global_row * dof_count + global_col] +=
                         element_stiffness[local_row][local_col];
                 }
@@ -199,10 +199,10 @@ fn scatter_tetrahedron4_csr_rows(
         for local_row_axis in 0..TETRAHEDRON4_NODE_DOF_COUNT {
             let local_row = local_row_node * TETRAHEDRON4_NODE_DOF_COUNT + local_row_axis;
             let global_row = dof_offsets[local_row_node] + local_row_axis;
-            for local_col_node in 0..4 {
+            for (local_col_node, global_col_offset) in dof_offsets.iter().enumerate() {
                 for local_col_axis in 0..TETRAHEDRON4_NODE_DOF_COUNT {
                     let local_col = local_col_node * TETRAHEDRON4_NODE_DOF_COUNT + local_col_axis;
-                    let global_col = dof_offsets[local_col_node] + local_col_axis;
+                    let global_col = global_col_offset + local_col_axis;
                     *rows[global_row].entry(global_col).or_insert(0.0) +=
                         element_stiffness[local_row][local_col];
                 }

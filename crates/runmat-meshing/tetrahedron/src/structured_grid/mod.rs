@@ -109,7 +109,7 @@ mod generate;
 use generate::generate_grid_tetrahedra;
 
 mod artifact;
-use artifact::build_analysis_mesh_artifact;
+use artifact::{build_analysis_mesh_artifact, AnalysisMeshArtifactParts};
 
 mod validation;
 use validation::{
@@ -168,11 +168,13 @@ impl StructuredTetrahedronMesher {
             input,
             options,
             &grid,
-            nodes,
-            generated_tetrahedra.volume_elements,
-            boundary_faces,
-            quality,
-            mesh_sizing,
+            AnalysisMeshArtifactParts {
+                nodes,
+                volume_elements: generated_tetrahedra.volume_elements,
+                boundary_faces,
+                quality,
+                sizing: mesh_sizing,
+            },
         ))
     }
 }

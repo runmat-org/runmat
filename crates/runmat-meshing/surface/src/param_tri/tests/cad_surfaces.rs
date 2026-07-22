@@ -124,12 +124,10 @@ fn curve_driven_cad_surface_uses_curve_boundary_nodes() {
             .iter()
             .any(|edge_id| *edge_id != INTERNAL_SOURCE_EDGE_ID)
     }));
-    assert!(surface.elements.iter().any(|element| {
-        element
-            .source_edge_ids
-            .iter()
-            .any(|edge_id| *edge_id == INTERNAL_SOURCE_EDGE_ID)
-    }));
+    assert!(surface
+        .elements
+        .iter()
+        .any(|element| { element.source_edge_ids.contains(&INTERNAL_SOURCE_EDGE_ID) }));
 }
 
 #[test]
@@ -222,13 +220,11 @@ fn cad_topology_surface_marks_display_diagonal_internal() {
     assert!(surface
         .elements
         .iter()
-        .all(|element| { !element.source_edge_ids.iter().any(|edge_id| *edge_id == 2) }));
-    assert!(surface.elements.iter().any(|element| {
-        element
-            .source_edge_ids
-            .iter()
-            .any(|edge_id| *edge_id == INTERNAL_SOURCE_EDGE_ID)
-    }));
+        .all(|element| !element.source_edge_ids.contains(&2)));
+    assert!(surface
+        .elements
+        .iter()
+        .any(|element| { element.source_edge_ids.contains(&INTERNAL_SOURCE_EDGE_ID) }));
     let loop_coverage = surface
         .loop_coverage
         .as_ref()

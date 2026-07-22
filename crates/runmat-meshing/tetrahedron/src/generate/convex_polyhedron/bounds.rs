@@ -4,9 +4,12 @@ use runmat_meshing_core::contracts::{ProtectedBoundaryComplex, TopologyEntityId}
 
 use super::super::TetrahedronGenerationError;
 
+type PlcCoordinates = BTreeMap<TopologyEntityId, [f64; 3]>;
+type AxisAlignedBounds = [[f64; 3]; 2];
+
 pub(in crate::generate) fn plc_coordinates_and_bounds(
     plc: &ProtectedBoundaryComplex,
-) -> Result<(BTreeMap<TopologyEntityId, [f64; 3]>, [[f64; 3]; 2]), TetrahedronGenerationError> {
+) -> Result<(PlcCoordinates, AxisAlignedBounds), TetrahedronGenerationError> {
     let mut coordinates_by_id = BTreeMap::<TopologyEntityId, [f64; 3]>::new();
     let mut min = [f64::INFINITY; 3];
     let mut max = [f64::NEG_INFINITY; 3];

@@ -1015,10 +1015,8 @@ fn generated_solid_mesh_maps_solver_fields_to_boundary_visualization_topology() 
         .iter()
         .find(|value| value.face_id == first_face.face_id)
         .expect("first boundary face should have a mapped vector");
-    for component in 0..3 {
-        assert!(
-            (mapped_vector.value[component] - expected_vector[component]).abs() <= f64::EPSILON
-        );
+    for (component, expected) in expected_vector.iter().enumerate() {
+        assert!((mapped_vector.value[component] - expected).abs() <= f64::EPSILON);
     }
 }
 

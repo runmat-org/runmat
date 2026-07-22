@@ -240,9 +240,9 @@ fn solve_dense_direct(summary: &AssemblySummary, dense: &[f64]) -> Result<Vec<f6
         .filter(|idx| !summary.operator.constrained[*idx])
         .collect::<Vec<_>>();
     let mut x = vec![0.0_f64; n];
-    for row in 0..n {
+    for (row, value) in x.iter_mut().enumerate().take(n) {
         if summary.operator.constrained[row] {
-            x[row] = summary.operator.rhs[row];
+            *value = summary.operator.rhs[row];
         }
     }
     if free_dofs.is_empty() {

@@ -32,9 +32,9 @@ pub enum PlcValidationError {
         facet_id: TopologyEntityId,
     },
     DuplicateBoundaryFacet {
-        first_facet_id: TopologyEntityId,
-        second_facet_id: TopologyEntityId,
-        node_ids: [TopologyEntityId; 3],
+        first_facet_id: Box<TopologyEntityId>,
+        second_facet_id: Box<TopologyEntityId>,
+        node_ids: Box<[TopologyEntityId; 3]>,
     },
     FacetHasRepeatedNode {
         facet_id: TopologyEntityId,
@@ -64,9 +64,9 @@ pub enum PlcValidationError {
         edge_id: TopologyEntityId,
     },
     DuplicateProtectedBoundarySegment {
-        first_edge_id: TopologyEntityId,
-        second_edge_id: TopologyEntityId,
-        node_ids: [TopologyEntityId; 2],
+        first_edge_id: Box<TopologyEntityId>,
+        second_edge_id: Box<TopologyEntityId>,
+        node_ids: Box<[TopologyEntityId; 2]>,
     },
     ProtectedEdgeHasRepeatedNode {
         edge_id: TopologyEntityId,

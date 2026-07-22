@@ -23,6 +23,7 @@ use crate::recover::{
     TetrahedronRecoveryQueue, TetrahedronRecoveryStatus,
 };
 
+#[derive(Default)]
 pub(in crate::recover) struct SourceEdgeSplitRefillRecovery {
     pub(in crate::recover) attempted_source_edge_count: usize,
     pub(in crate::recover) attempted_cad_curve_source_edge_count: usize,
@@ -224,22 +225,6 @@ pub(in crate::recover) fn apply_source_edge_split_refill_recovery(
     }
 
     recovery
-}
-
-impl Default for SourceEdgeSplitRefillRecovery {
-    fn default() -> Self {
-        Self {
-            attempted_source_edge_count: 0,
-            attempted_cad_curve_source_edge_count: 0,
-            accepted_source_edge_count: 0,
-            accepted_cad_curve_source_edge_count: 0,
-            applied_source_edge_count: 0,
-            applied_cad_curve_source_edge_count: 0,
-            rejected_source_edge_count: 0,
-            rejected_cad_curve_source_edge_count: 0,
-            rejection_counts: BTreeMap::new(),
-        }
-    }
 }
 
 impl SourceEdgeSplitRefillRecovery {

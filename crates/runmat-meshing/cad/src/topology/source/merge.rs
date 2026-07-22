@@ -52,7 +52,8 @@ pub(super) fn merge_stable_cad_faces(face_seeds: Vec<CadFace>) -> Vec<CadFace> {
             face.material_region_ids.dedup();
             face.loop_edge_ids = edge_counts
                 .into_iter()
-                .filter_map(|(edge_id, count)| (count == 1).then(|| format!("cad_edge_{edge_id}")))
+                .filter(|(_, count)| *count == 1)
+                .map(|(edge_id, _)| format!("cad_edge_{edge_id}"))
                 .collect();
             face
         })

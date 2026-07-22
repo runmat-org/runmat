@@ -214,9 +214,9 @@ fn rejects_duplicate_boundary_facet() {
     assert_eq!(
         validate_protected_boundary_complex(&plc),
         Err(PlcValidationError::DuplicateBoundaryFacet {
-            first_facet_id: entity("f0"),
-            second_facet_id: entity("f1"),
-            node_ids: [entity("0"), entity("1"), entity("2")],
+            first_facet_id: Box::new(entity("f0")),
+            second_facet_id: Box::new(entity("f1")),
+            node_ids: Box::new([entity("0"), entity("1"), entity("2")]),
         })
     );
 }
@@ -371,9 +371,9 @@ fn rejects_duplicate_protected_boundary_segment() {
     assert_eq!(
         validate_protected_boundary_complex(&plc),
         Err(PlcValidationError::DuplicateProtectedBoundarySegment {
-            first_edge_id: entity("edge_01_a"),
-            second_edge_id: entity("edge_01_b"),
-            node_ids: [entity("0"), entity("1")],
+            first_edge_id: Box::new(entity("edge_01_a")),
+            second_edge_id: Box::new(entity("edge_01_b")),
+            node_ids: Box::new([entity("0"), entity("1")]),
         })
     );
 }

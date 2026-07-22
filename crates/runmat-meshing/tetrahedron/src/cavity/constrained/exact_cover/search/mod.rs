@@ -79,11 +79,8 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         {
             return None;
         }
-        let Some((forced_volume_m3, forced_indices)) =
-            self.propagate_forced_interior_mates(current_volume_m3, face_counts, selected)
-        else {
-            return None;
-        };
+        let (forced_volume_m3, forced_indices) =
+            self.propagate_forced_interior_mates(current_volume_m3, face_counts, selected)?;
         let current_volume_m3 = current_volume_m3 + forced_volume_m3;
         let Some(candidate_indices) = self.next_cover_candidates(face_counts, selected) else {
             if self.cover_is_complete(face_counts, current_volume_m3) {

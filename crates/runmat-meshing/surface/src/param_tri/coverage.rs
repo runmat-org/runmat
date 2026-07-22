@@ -85,10 +85,10 @@ impl SurfaceCadCurveBoundaryProvenanceAccumulator {
         }
     }
 
-    pub(super) fn record_segments<'a>(
+    pub(super) fn record_segments(
         &mut self,
         segment_loops: &[Vec<FaceCurveSegment>],
-        provenance_by_source_edge: &BTreeMap<u32, &'a CadCurveEdgeProvenance>,
+        provenance_by_source_edge: &BTreeMap<u32, &CadCurveEdgeProvenance>,
     ) -> Result<(), SurfaceDiscretizationError> {
         for segment in segment_loops.iter().flatten() {
             let source = provenance_by_source_edge

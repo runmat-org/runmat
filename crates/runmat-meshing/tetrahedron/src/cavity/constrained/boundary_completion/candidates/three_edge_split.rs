@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use super::super::BoundaryFaceCompletion;
+
 use runmat_meshing_core::{
     quality::predicate::{
         point_in_closed_triangle_surface, tetrahedron_centroid, Point3, PointInClosedSurface,
@@ -14,9 +16,8 @@ use super::super::super::{
     },
     cavity_boundary_node_ids, split_constrained_cavity_boundary_faces_on_three_edges,
     topology::{face_edges, sorted_edge, sorted_face, sorted_tetrahedron_nodes},
-    validate_constrained_cavity, ConstrainedCavity, ConstrainedCavityNode,
-    ConstrainedCavityRefillOptions, ConstrainedCavityRefillTetrahedron,
-    ConstrainedCavityValidationError,
+    validate_constrained_cavity, ConstrainedCavity, ConstrainedCavityRefillOptions,
+    ConstrainedCavityRefillTetrahedron, ConstrainedCavityValidationError,
 };
 
 pub(in super::super::super) fn best_boundary_face_three_edge_split_completion(
@@ -26,14 +27,7 @@ pub(in super::super::super) fn best_boundary_face_three_edge_split_completion(
     boundary_triangles: &[Triangle3],
     refill_tetrahedra: &[ConstrainedCavityRefillTetrahedron],
     options: ConstrainedCavityRefillOptions,
-) -> Result<
-    Option<(
-        ConstrainedCavity,
-        Vec<ConstrainedCavityNode>,
-        Vec<ConstrainedCavityRefillTetrahedron>,
-    )>,
-    ConstrainedCavityValidationError,
-> {
+) -> Result<Option<BoundaryFaceCompletion>, ConstrainedCavityValidationError> {
     let split_nodes = boundary_face_mid_edge_split_nodes(face, boundary_nodes);
     let split_node_by_edge = face_edges(face)
         .into_iter()

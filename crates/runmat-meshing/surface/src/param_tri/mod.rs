@@ -25,7 +25,7 @@ use boundary::{
 };
 use coverage::{SurfaceCadCurveBoundaryProvenanceAccumulator, SurfaceLoopCoverageAccumulator};
 use elements::append_curve_driven_face_elements;
-use subdivision::{append_centroid_subdivision, triangle_centroid};
+use subdivision::{append_centroid_subdivision, triangle_centroid, CentroidSubdivision};
 pub use types::{
     SurfaceCadCurveBoundaryEdgeProvenance, SurfaceCadCurveBoundaryProvenanceReport,
     SurfaceDiscretization, SurfaceDiscretizationError, SurfaceDiscretizationOptions,
@@ -151,10 +151,12 @@ pub fn discretize_cad_surfaces(
             append_centroid_subdivision(
                 face,
                 frame,
-                parametric_node_uv,
-                centroid,
-                centroid_projection.uv,
-                max_projection_error_m,
+                CentroidSubdivision {
+                    corner_uv: parametric_node_uv,
+                    centroid_m: centroid,
+                    centroid_uv: centroid_projection.uv,
+                    corner_projection_error_m: max_projection_error_m,
+                },
                 &mut nodes,
                 &mut elements,
             );

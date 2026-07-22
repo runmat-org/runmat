@@ -101,9 +101,9 @@ pub fn validate_protected_boundary_complex(
             facet_id_by_nodes.insert(facet_key.clone(), facet.facet_id.clone())
         {
             return Err(PlcValidationError::DuplicateBoundaryFacet {
-                first_facet_id,
-                second_facet_id: facet.facet_id.clone(),
-                node_ids: facet_key,
+                first_facet_id: Box::new(first_facet_id),
+                second_facet_id: Box::new(facet.facet_id.clone()),
+                node_ids: Box::new(facet_key),
             });
         }
         referenced_node_ids.extend(facet.node_ids.iter().cloned());
@@ -168,9 +168,9 @@ pub fn validate_protected_boundary_complex(
             protected_edge_id_by_segment.insert(edge.clone(), protected_edge.edge_id.clone())
         {
             return Err(PlcValidationError::DuplicateProtectedBoundarySegment {
-                first_edge_id,
-                second_edge_id: protected_edge.edge_id.clone(),
-                node_ids: edge,
+                first_edge_id: Box::new(first_edge_id),
+                second_edge_id: Box::new(protected_edge.edge_id.clone()),
+                node_ids: Box::new(edge),
             });
         }
         if !edge_incidence.contains_key(&edge) {

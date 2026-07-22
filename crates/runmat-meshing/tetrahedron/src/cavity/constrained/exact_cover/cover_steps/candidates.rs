@@ -16,10 +16,10 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         face_counts: &BTreeMap<[u32; 3], usize>,
         selected: &[usize],
     ) -> (&'static str, Option<[u32; 3]>) {
-        for face in self
+        if let Some(face) = self
             .boundary_faces
             .iter()
-            .filter(|face| face_counts.get(*face).copied().unwrap_or(0) == 0)
+            .find(|face| face_counts.get(*face).copied().unwrap_or(0) == 0)
         {
             let raw_count = self.raw_candidate_count_for_face(*face, selected);
             if raw_count == 0 {
@@ -32,9 +32,13 @@ impl<'a> BoundaryExactCoverSearch<'a> {
             return ("boundary_face_candidates_exhausted", Some(*face));
         }
 
-        for face in face_counts.iter().filter_map(|(face, count)| {
-            (!self.boundary_faces.contains(face) && *count == 1).then_some(*face)
-        }) {
+        if let Some(face) = face_counts
+            .iter()
+            .filter_map(|(face, count)| {
+                (!self.boundary_faces.contains(face) && *count == 1).then_some(*face)
+            })
+            .next()
+        {
             let raw_count = self.raw_candidate_count_for_face(face, selected);
             if raw_count == 0 {
                 return ("interior_face_no_raw_candidate", Some(face));

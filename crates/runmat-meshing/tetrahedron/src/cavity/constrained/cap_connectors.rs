@@ -17,8 +17,7 @@ use super::{
 
 #[cfg(test)]
 pub(super) fn append_cap_side_connector_tetrahedra(
-    cap_tetrahedron_start: usize,
-    cap_tetrahedron_count: usize,
+    cap_tetrahedra: CapTetrahedronRange,
     candidate_tetrahedra: &mut Vec<ConstrainedCavityRefillTetrahedron>,
     seen_tetrahedra: &mut BTreeSet<[u32; 4]>,
     node_points: &BTreeMap<u32, [f64; 3]>,
@@ -28,8 +27,8 @@ pub(super) fn append_cap_side_connector_tetrahedra(
 ) -> usize {
     let cap_tetrahedra = candidate_tetrahedra
         .iter()
-        .skip(cap_tetrahedron_start)
-        .take(cap_tetrahedron_count)
+        .skip(cap_tetrahedra.start)
+        .take(cap_tetrahedra.count)
         .cloned()
         .collect::<Vec<_>>();
     let mut inserted_count = 0_usize;
@@ -79,6 +78,12 @@ pub(super) fn append_cap_side_connector_tetrahedra(
             boundary_triangles,
             options,
         )
+}
+
+#[cfg(test)]
+pub(super) struct CapTetrahedronRange {
+    pub(super) start: usize,
+    pub(super) count: usize,
 }
 
 pub(super) fn append_cap_side_connector_chain_tetrahedra(

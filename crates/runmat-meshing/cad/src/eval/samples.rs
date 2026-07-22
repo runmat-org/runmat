@@ -267,9 +267,7 @@ fn bounded_cad_face_evaluation_samples(
 
 fn bounded_sample_is_valid(sample: &CadFaceEvaluationSample) -> bool {
     finite_point(sample.point_m)
-        && sample
-            .projected_point_m
-            .is_none_or(|point| finite_point(point))
+        && sample.projected_point_m.is_none_or(finite_point)
         && sample
             .uv
             .is_none_or(|uv| uv.iter().all(|value| value.is_finite()))

@@ -185,12 +185,9 @@ fn triangle_edge_containing_point(
     points: &[FaceTriangulationPoint],
 ) -> Option<[usize; 2]> {
     let point = points[point_index].uv;
-    for edge in triangle_edges_2d(triangle.point_indices) {
-        if point_on_segment_2d(point, points[edge[0]].uv, points[edge[1]].uv) {
-            return Some(edge);
-        }
-    }
-    None
+    triangle_edges_2d(triangle.point_indices)
+        .into_iter()
+        .find(|&edge| point_on_segment_2d(point, points[edge[0]].uv, points[edge[1]].uv))
 }
 
 fn push_non_degenerate_face_triangle(

@@ -22,23 +22,25 @@ use super::{
     ConstrainedCavityValidationError,
 };
 
+pub(super) type BoundaryFaceCompletion = (
+    ConstrainedCavity,
+    Vec<ConstrainedCavityNode>,
+    Vec<ConstrainedCavityRefillTetrahedron>,
+);
+type MissingBoundaryFaceCompletion = (
+    ConstrainedCavity,
+    Vec<ConstrainedCavityRefillTetrahedron>,
+    Vec<ConstrainedCavityNode>,
+);
+type MissingBoundaryFaceCompletionOutcome = Result<MissingBoundaryFaceCompletion, &'static str>;
+
 pub(super) fn complete_missing_boundary_face_tetrahedra(
     cavity: &ConstrainedCavity,
     boundary_nodes: &BTreeMap<u32, Point3>,
     mut refill_tetrahedra: Vec<ConstrainedCavityRefillTetrahedron>,
     boundary_triangles: &[Triangle3],
     options: ConstrainedCavityRefillOptions,
-) -> Result<
-    Result<
-        (
-            ConstrainedCavity,
-            Vec<ConstrainedCavityRefillTetrahedron>,
-            Vec<ConstrainedCavityNode>,
-        ),
-        &'static str,
-    >,
-    ConstrainedCavityValidationError,
-> {
+) -> Result<MissingBoundaryFaceCompletionOutcome, ConstrainedCavityValidationError> {
     let mut refined_cavity = cavity.clone();
     let mut refined_boundary_nodes = boundary_nodes.clone();
     let mut inserted_nodes = Vec::<ConstrainedCavityNode>::new();

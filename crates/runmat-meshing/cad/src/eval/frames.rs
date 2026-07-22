@@ -79,28 +79,28 @@ pub fn build_cad_evaluation_model_with_provider(
             let exact_sample = exact_backend_sample(&evaluator_samples.samples);
             let evaluator_max_projection_error_m =
                 evaluator_max_projection_error(&evaluator_samples.samples);
-            let frame = face_frame(
-                face.entity_id.id.clone(),
-                *source_face_id,
+            let frame = face_frame(FaceFrameInput {
+                face_id: face.entity_id.id.clone(),
+                source_face_id: *source_face_id,
                 points,
-                exact_sample
+                unit_normal: exact_sample
                     .and_then(|sample| sample.unit_normal)
                     .or(face.evaluator_unit_normal)
                     .unwrap_or(source_face.unit_normal),
-                source_face.area_m2,
-                exact_sample
+                area_m2: source_face.area_m2,
+                evaluator_reference_point_m: exact_sample
                     .map(exact_backend_sample_point)
                     .or(face.evaluator_reference_point_m),
-                face.evaluator_id.is_some()
+                evaluator_backed: face.evaluator_id.is_some()
                     || face.evaluator_unit_normal.is_some()
                     || !evaluator_samples.samples.is_empty(),
-                exact_sample.is_some(),
+                exact_query_backed: exact_sample.is_some(),
                 live_query_backed,
-                evaluator_samples.samples.len(),
-                evaluator_samples.rejected_count,
+                evaluator_sample_count: evaluator_samples.samples.len(),
+                evaluator_rejected_sample_count: evaluator_samples.rejected_count,
                 evaluator_max_projection_error_m,
-                evaluator_samples.samples,
-            )?;
+                evaluator_samples: evaluator_samples.samples,
+            })?;
             frames.push(frame);
         }
     }
@@ -114,7 +114,7 @@ pub fn build_cad_evaluation_model_with_provider(
     })
 }
 
-fn face_frame(
+struct FaceFrameInput {
     face_id: String,
     source_face_id: u32,
     points: Triangle3,
@@ -128,7 +128,24 @@ fn face_frame(
     evaluator_rejected_sample_count: usize,
     evaluator_max_projection_error_m: f64,
     evaluator_samples: Vec<CadFaceEvaluationSample>,
-) -> Result<CadFaceEvaluationFrame, CadEvaluationError> {
+}
+
+fn face_frame(input: FaceFrameInput) -> Result<CadFaceEvaluationFrame, CadEvaluationError> {
+    let FaceFrameInput {
+        face_id,
+        source_face_id,
+        points,
+        unit_normal,
+        area_m2,
+        evaluator_reference_point_m,
+        evaluator_backed,
+        exact_query_backed,
+        live_query_backed,
+        evaluator_sample_count,
+        evaluator_rejected_sample_count,
+        evaluator_max_projection_error_m,
+        evaluator_samples,
+    } = input;
     let edge = sub(points[1], points[0]);
     let edge_length = norm(edge);
     let normal_length = norm(unit_normal);

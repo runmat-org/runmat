@@ -60,7 +60,7 @@ pub enum PlcBuildError {
         node_ids: [u32; 2],
         incidence_count: usize,
     },
-    ProtectedBoundaryValidation(PlcValidationError),
+    ProtectedBoundaryValidation(Box<PlcValidationError>),
 }
 
 impl std::fmt::Display for PlcBuildError {

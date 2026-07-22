@@ -113,11 +113,11 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
                     face_passed = true;
                 }
                 Err(reason) => {
-                    if exact_scaled_jacobian.is_finite() {
-                        if exact_scaled_jacobian > best_failed_face_quality {
-                            best_failed_face_quality = exact_scaled_jacobian;
-                            best_failed_face_source = Some(apex.source);
-                        }
+                    if exact_scaled_jacobian.is_finite()
+                        && exact_scaled_jacobian > best_failed_face_quality
+                    {
+                        best_failed_face_quality = exact_scaled_jacobian;
+                        best_failed_face_source = Some(apex.source);
                     }
                     *diagnostic.rejected_by_reason.entry(reason).or_default() += 1;
                 }

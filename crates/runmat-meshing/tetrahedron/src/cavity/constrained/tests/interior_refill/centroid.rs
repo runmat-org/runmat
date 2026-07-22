@@ -17,7 +17,7 @@ fn candidate_orphan_interior_face_counts_report_global_orphans() {
     };
 
     assert_eq!(
-        candidate_orphan_interior_face_counts(&cavity, &[lower.clone()]),
+        candidate_orphan_interior_face_counts(&cavity, std::slice::from_ref(&lower)),
         (1, 0)
     );
     assert_eq!(

@@ -7,14 +7,7 @@ pub(in super::super::super) fn best_boundary_face_three_edge_split_completion_fo
     boundary_triangles: &[Triangle3],
     refill_tetrahedra: &[ConstrainedCavityRefillTetrahedron],
     options: ConstrainedCavityRefillOptions,
-) -> Result<
-    Option<(
-        ConstrainedCavity,
-        Vec<ConstrainedCavityNode>,
-        Vec<ConstrainedCavityRefillTetrahedron>,
-    )>,
-    ConstrainedCavityValidationError,
-> {
+) -> Result<Option<BoundaryFaceCompletion>, ConstrainedCavityValidationError> {
     let current_delta = refill_boundary_face_delta(cavity, refill_tetrahedra)?;
     let current_delta_count = current_delta.missing.len() + current_delta.unexpected.len();
     let mut best = None::<(

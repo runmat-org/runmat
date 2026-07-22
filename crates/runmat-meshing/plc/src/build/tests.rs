@@ -379,11 +379,11 @@ fn rejects_degenerate_surface_facet_geometry_before_returning_plc() {
 
     assert_eq!(
         build_protected_boundary_complex(&surface),
-        Err(PlcBuildError::ProtectedBoundaryValidation(
+        Err(PlcBuildError::ProtectedBoundaryValidation(Box::new(
             PlcValidationError::DegenerateFacet {
                 facet_id: topology_entity_id(MeshingStage::ProtectedBoundaryComplex, 0),
             }
-        ))
+        )))
     );
 }
 
@@ -401,12 +401,15 @@ fn rejects_inconsistent_surface_orientation_before_returning_plc() {
         Some(curve_entity_id(2)),
     ];
 
+    let error = build_protected_boundary_complex(&surface).expect_err("invalid surface");
     assert!(matches!(
-        build_protected_boundary_complex(&surface),
-        Err(PlcBuildError::ProtectedBoundaryValidation(
-            PlcValidationError::InconsistentBoundaryEdgeOrientation { .. }
-                | PlcValidationError::DuplicateProtectedBoundarySegment { .. }
-        ))
+        error,
+        PlcBuildError::ProtectedBoundaryValidation(validation)
+            if matches!(
+                *validation,
+                PlcValidationError::InconsistentBoundaryEdgeOrientation { .. }
+                    | PlcValidationError::DuplicateProtectedBoundarySegment { .. }
+            )
     ));
 }
 

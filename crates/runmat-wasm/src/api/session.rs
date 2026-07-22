@@ -1450,7 +1450,7 @@ impl RunMatWasm {
                     ))
                 })?,
             };
-        let values: Vec<f64> = payload.values.into_iter().take(limit).collect();
+        let values = payload.values.preview_f64(limit);
         let response = DataMaterializedVariablePayload {
             name: array.to_string(),
             class_name: infer_dataset_class_name(meta.shape.len()).to_string(),

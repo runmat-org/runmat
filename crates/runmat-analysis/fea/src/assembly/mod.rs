@@ -1083,10 +1083,10 @@ fn assemble_linear_system_impl(
     };
     if let Some(csr) = stiffness_csr.as_ref() {
         apply_csr_constraints(csr, &constrained, &mut rhs, dof_count);
-        for i in 0..dof_count {
+        for (i, diagonal) in stiffness_diag.iter_mut().enumerate().take(dof_count) {
             let start = csr.row_offsets[i];
             let end = csr.row_offsets[i + 1];
-            stiffness_diag[i] = csr.column_indices[start..end]
+            *diagonal = csr.column_indices[start..end]
                 .iter()
                 .zip(csr.values[start..end].iter())
                 .find_map(|(&column, &value)| (column == i).then_some(value.abs()))

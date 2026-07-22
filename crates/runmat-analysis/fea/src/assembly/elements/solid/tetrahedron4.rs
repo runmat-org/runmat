@@ -93,11 +93,9 @@ pub fn elasticity_matrix(
     let lambda = material.lame_lambda_pa()?;
     let mu = material.shear_modulus_pa()?;
     let mut d = [[0.0_f64; 6]; 6];
-    for row in 0..3 {
-        for col in 0..3 {
-            d[row][col] = lambda;
-        }
-        d[row][row] += 2.0 * mu;
+    for (row, diagonal) in d.iter_mut().enumerate().take(3) {
+        diagonal[..3].fill(lambda);
+        diagonal[row] += 2.0 * mu;
     }
     d[3][3] = mu;
     d[4][4] = mu;

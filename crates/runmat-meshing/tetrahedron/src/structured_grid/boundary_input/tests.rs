@@ -100,10 +100,7 @@ fn boundary_input_converts_millimeter_vertices_to_meters() {
 
     assert_eq!(input.bounds_min_m, [0.0, 0.0, 0.0]);
     assert_eq!(input.bounds_max_m, [1.0, 1.0, 1.0]);
-    assert!(input
-        .vertices
-        .iter()
-        .any(|vertex| *vertex == [1.0, 1.0, 1.0]));
+    assert!(input.vertices.contains(&[1.0, 1.0, 1.0]));
 }
 
 #[test]

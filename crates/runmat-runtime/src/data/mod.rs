@@ -205,6 +205,58 @@ impl DataArrayValues {
         }
     }
 
+    /// Returns at most `limit` values converted to the numeric preview format.
+    ///
+    /// Data-file previews cross the WASM boundary as JavaScript numbers. Keep
+    /// that established representation while only converting the requested
+    /// prefix: a fallback full-payload read may contain substantially more
+    /// values than the preview is allowed to return.
+    pub fn preview_f64(&self, limit: usize) -> Vec<f64> {
+        match self {
+            Self::F64(values) => values.iter().take(limit).copied().collect(),
+            Self::I8(values) => values
+                .iter()
+                .take(limit)
+                .map(|&value| value as f64)
+                .collect(),
+            Self::I16(values) => values
+                .iter()
+                .take(limit)
+                .map(|&value| value as f64)
+                .collect(),
+            Self::I32(values) => values
+                .iter()
+                .take(limit)
+                .map(|&value| value as f64)
+                .collect(),
+            Self::I64(values) => values
+                .iter()
+                .take(limit)
+                .map(|&value| value as f64)
+                .collect(),
+            Self::U8(values) => values
+                .iter()
+                .take(limit)
+                .map(|&value| value as f64)
+                .collect(),
+            Self::U16(values) => values
+                .iter()
+                .take(limit)
+                .map(|&value| value as f64)
+                .collect(),
+            Self::U32(values) => values
+                .iter()
+                .take(limit)
+                .map(|&value| value as f64)
+                .collect(),
+            Self::U64(values) => values
+                .iter()
+                .take(limit)
+                .map(|&value| value as f64)
+                .collect(),
+        }
+    }
+
     pub fn get(&self, index: usize) -> BuiltinResult<DataScalar> {
         match self {
             Self::F64(values) => values.get(index).copied().map(DataScalar::F64),
@@ -1549,6 +1601,14 @@ mod tests {
             .normalize_for_dtype("uint64")
             .expect("normalize legacy payload");
         assert_eq!(payload.values, DataArrayValues::U64(vec![1, 2]));
+    }
+
+    #[test]
+    fn preview_conversion_is_bounded_for_typed_integer_payloads() {
+        let values = DataArrayValues::I16(vec![-2, 0, 3, 7]);
+
+        assert_eq!(values.preview_f64(3), vec![-2.0, 0.0, 3.0]);
+        assert!(values.preview_f64(0).is_empty());
     }
 
     #[test]

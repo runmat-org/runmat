@@ -88,7 +88,7 @@ pub(crate) fn diagnostic_boundary_exact_cover_mates_for_face(
 
     let target_face = sorted_face(target_face);
     let mut diagnostics = Vec::<BoundaryExactCoverMateCandidateDiagnostic>::new();
-    for candidate_index in 0..candidates.len() {
+    for (candidate_index, candidate) in candidates.iter().enumerate() {
         if selected.contains(&candidate_index)
             || !search.candidate_faces[candidate_index].contains(&target_face)
         {
@@ -124,8 +124,8 @@ pub(crate) fn diagnostic_boundary_exact_cover_mates_for_face(
             &selected,
         );
         diagnostics.push(BoundaryExactCoverMateCandidateDiagnostic {
-            node_ids: candidates[candidate_index].node_ids,
-            exact_scaled_jacobian: candidates[candidate_index].exact_scaled_jacobian,
+            node_ids: candidate.node_ids,
+            exact_scaled_jacobian: candidate.exact_scaled_jacobian,
             addable,
             conflicting_faces,
             missing_future_mate_faces,

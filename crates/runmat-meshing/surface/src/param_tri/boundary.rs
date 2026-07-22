@@ -282,10 +282,10 @@ fn surface_node_for_curve_node(
     Ok(node_id)
 }
 
-fn capped_curve_nodes<'a>(
-    curve_nodes: Vec<&'a CurveNode>,
+fn capped_curve_nodes(
+    curve_nodes: Vec<&CurveNode>,
     max_segments_per_edge: usize,
-) -> Vec<&'a CurveNode> {
+) -> Vec<&CurveNode> {
     if curve_nodes.len() <= max_segments_per_edge.saturating_add(1) {
         return curve_nodes;
     }

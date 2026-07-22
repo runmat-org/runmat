@@ -389,7 +389,7 @@ pub fn build_protected_boundary_complex(
         shell_classification.max_nesting_depth,
     );
     plc.validation = validate_protected_boundary_complex(&plc)
-        .map_err(PlcBuildError::ProtectedBoundaryValidation)?;
+        .map_err(|error| PlcBuildError::ProtectedBoundaryValidation(Box::new(error)))?;
     Ok(plc)
 }
 

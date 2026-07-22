@@ -1,6 +1,6 @@
 use super::*;
 
-use super::finish::finish_missing_face_stitch_candidates;
+use super::finish::{finish_missing_face_stitch_candidates, MissingFaceStitchCandidates};
 use super::setup::{missing_face_stitch_setup, MissingFaceStitchSetup};
 
 #[cfg(test)]
@@ -94,8 +94,10 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
     }
     finish_missing_face_stitch_candidates(
         cavity,
-        candidate_tetrahedra,
-        cap_tetrahedron_start,
+        MissingFaceStitchCandidates {
+            tetrahedra: candidate_tetrahedra,
+            cap_tetrahedron_start,
+        },
         &node_points,
         &inserted_nodes,
         &boundary_triangles,

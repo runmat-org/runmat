@@ -158,10 +158,10 @@ fn apply_csr_with_constraints(csr: &CsrMatrix, constrained: &[bool], x: &[f64]) 
 
 fn apply_csr_unconstrained(csr: &CsrMatrix, x: &[f64]) -> Vec<f64> {
     let mut y = vec![0.0; x.len()];
-    for row in 0..x.len() {
+    for (row, value) in y.iter_mut().enumerate().take(x.len()) {
         let start = csr.row_offsets[row];
         let end = csr.row_offsets[row + 1];
-        y[row] = (start..end)
+        *value = (start..end)
             .map(|entry| csr.values[entry] * x[csr.column_indices[entry]])
             .sum();
     }

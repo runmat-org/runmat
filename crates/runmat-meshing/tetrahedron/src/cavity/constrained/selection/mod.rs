@@ -54,19 +54,18 @@ pub fn constrained_cavity_from_refill_tetrahedron_component(
     }
     let boundary_faces = face_counts
         .into_iter()
-        .filter_map(|(face, count)| {
-            (count == 1).then(|| {
-                inherited_faces
-                    .get(&face)
-                    .map(|source| (*source).clone())
-                    .unwrap_or(ConstrainedCavityBoundaryFace {
-                        node_ids: face,
-                        outside_tetrahedron_ids: Vec::new(),
-                        source_face_id: None,
-                        source_edge_ids: [None, None, None],
-                        region_ids: Vec::new(),
-                    })
-            })
+        .filter(|(_, count)| *count == 1)
+        .map(|(face, _)| {
+            inherited_faces
+                .get(&face)
+                .map(|source| (*source).clone())
+                .unwrap_or(ConstrainedCavityBoundaryFace {
+                    node_ids: face,
+                    outside_tetrahedron_ids: Vec::new(),
+                    source_face_id: None,
+                    source_edge_ids: [None, None, None],
+                    region_ids: Vec::new(),
+                })
         })
         .collect::<Vec<_>>();
     let cavity = ConstrainedCavity {

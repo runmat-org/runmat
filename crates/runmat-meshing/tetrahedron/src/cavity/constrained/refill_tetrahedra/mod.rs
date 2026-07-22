@@ -130,19 +130,18 @@ pub(super) fn boundary_faces_from_refill_tetrahedra(
     }
     let boundary_faces = face_counts
         .into_iter()
-        .filter_map(|(face, count)| {
-            (count == 1).then(|| {
-                cavity_faces
-                    .get(&face)
-                    .map(|source| (*source).clone())
-                    .unwrap_or(ConstrainedCavityBoundaryFace {
-                        node_ids: face,
-                        outside_tetrahedron_ids: Vec::new(),
-                        source_face_id: None,
-                        source_edge_ids: [None, None, None],
-                        region_ids: Vec::new(),
-                    })
-            })
+        .filter(|(_, count)| *count == 1)
+        .map(|(face, _)| {
+            cavity_faces
+                .get(&face)
+                .map(|source| (*source).clone())
+                .unwrap_or(ConstrainedCavityBoundaryFace {
+                    node_ids: face,
+                    outside_tetrahedron_ids: Vec::new(),
+                    source_face_id: None,
+                    source_edge_ids: [None, None, None],
+                    region_ids: Vec::new(),
+                })
         })
         .collect::<Vec<_>>();
     Ok(boundary_faces)

@@ -51,7 +51,7 @@ pub fn evaluate_local_tetrahedron_flip_improvement(
         <= MIN_IMPROVEMENT;
     let reduces_tetrahedron_count =
         candidate_quality.created_tetrahedron_count < removed_tetrahedra.len();
-    if !improves_quality && !(preserves_quality && reduces_tetrahedron_count) {
+    if !(improves_quality || preserves_quality && reduces_tetrahedron_count) {
         return Err(LocalTetrahedronFlipError::QualityDoesNotImprove);
     }
 

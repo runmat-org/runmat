@@ -182,7 +182,7 @@ fn boundary_source_facet_index(
     outer_source_faces: &BTreeMap<usize, usize>,
     inner_source_faces: &BTreeMap<usize, usize>,
 ) -> Result<usize, TetrahedronGenerationError> {
-    for coordinate_index in 0..4 {
+    for (coordinate_index, inner_lower_bound) in inner_lower_bounds.iter().enumerate() {
         if node_ids
             .iter()
             .all(|node_id| builder.barycentric_by_id[node_id][coordinate_index].abs() <= 1.0e-12)
@@ -193,9 +193,7 @@ fn boundary_source_facet_index(
                 .ok_or(TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc);
         }
         if node_ids.iter().all(|node_id| {
-            (builder.barycentric_by_id[node_id][coordinate_index]
-                - inner_lower_bounds[coordinate_index])
-                .abs()
+            (builder.barycentric_by_id[node_id][coordinate_index] - inner_lower_bound).abs()
                 <= 1.0e-12
         }) {
             return inner_source_faces

@@ -5,13 +5,16 @@ use super::{SurfaceElement, SurfaceNode};
 pub(super) fn append_centroid_subdivision(
     face: &SourceTopologyFace,
     frame: &CadFaceEvaluationFrame,
-    corner_uv: [[f64; 2]; 3],
-    centroid_m: [f64; 3],
-    centroid_uv: [f64; 2],
-    corner_projection_error_m: f64,
+    subdivision: CentroidSubdivision,
     nodes: &mut Vec<SurfaceNode>,
     elements: &mut Vec<SurfaceElement>,
 ) {
+    let CentroidSubdivision {
+        corner_uv,
+        centroid_m,
+        centroid_uv,
+        corner_projection_error_m,
+    } = subdivision;
     let centroid_node_id = nodes.len() as u32;
     nodes.push(SurfaceNode {
         node_id: centroid_node_id,
@@ -50,6 +53,13 @@ pub(super) fn append_centroid_subdivision(
             unit_normal: frame.unit_normal,
         });
     }
+}
+
+pub(super) struct CentroidSubdivision {
+    pub(super) corner_uv: [[f64; 2]; 3],
+    pub(super) centroid_m: [f64; 3],
+    pub(super) centroid_uv: [f64; 2],
+    pub(super) corner_projection_error_m: f64,
 }
 
 pub(super) fn triangle_centroid(points: [[f64; 3]; 3]) -> [f64; 3] {

@@ -46,15 +46,16 @@ fn boundary_face_completion_selector_reduces_boundary_delta() {
             &[blocked_face, fillable_face],
             &cavity,
             &boundary_nodes,
-            &[duplicate_tetrahedron.clone()],
+            std::slice::from_ref(&duplicate_tetrahedron),
             &boundary_triangles,
             options,
         )
         .expect("completion search should evaluate")
         .expect("completion search should find a delta-reducing face");
 
-    let initial_delta = refill_boundary_face_delta(&cavity, &[duplicate_tetrahedron.clone()])
-        .expect("initial delta should evaluate");
+    let initial_delta =
+        refill_boundary_face_delta(&cavity, std::slice::from_ref(&duplicate_tetrahedron))
+            .expect("initial delta should evaluate");
     let next_delta = refill_boundary_face_delta(
         &cavity,
         &[duplicate_tetrahedron, selected_tetrahedron.clone()],

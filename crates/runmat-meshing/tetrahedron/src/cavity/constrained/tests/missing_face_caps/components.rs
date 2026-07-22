@@ -41,7 +41,7 @@ fn open_interior_refill_faces_reports_unpaired_non_boundary_faces() {
     };
 
     assert_eq!(
-        open_interior_refill_faces(&cavity, &[lower.clone()]),
+        open_interior_refill_faces(&cavity, std::slice::from_ref(&lower)),
         vec![[0, 1, 2]]
     );
     assert!(open_interior_refill_faces(&cavity, &[lower, upper]).is_empty());

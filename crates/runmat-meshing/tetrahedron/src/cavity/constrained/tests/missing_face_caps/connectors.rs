@@ -15,10 +15,11 @@ fn cap_side_face_mate_counts_report_connector_coverage() {
         exact_scaled_jacobian: 0.5,
     };
 
+    let candidates = [cap_tetrahedron, mate_tetrahedron];
     assert_eq!(
         cap_side_face_mate_counts(
-            &[cap_tetrahedron.clone()],
-            &[cap_tetrahedron, mate_tetrahedron],
+            std::slice::from_ref(&candidates[0]),
+            &candidates,
             &BTreeSet::from([4])
         ),
         vec![1, 0, 0]

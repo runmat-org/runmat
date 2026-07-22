@@ -7,14 +7,17 @@ use super::*;
 
 pub(super) fn finish_missing_face_stitch_candidates(
     cavity: &ConstrainedCavity,
-    mut candidate_tetrahedra: Vec<ConstrainedCavityRefillTetrahedron>,
-    cap_tetrahedron_start: usize,
+    candidates: MissingFaceStitchCandidates,
     node_points: &BTreeMap<u32, Point3>,
     inserted_nodes: &[ConstrainedCavityNode],
     boundary_triangles: &[Triangle3],
     options: ConstrainedCavityRefillOptions,
     mut diagnostic: MissingFaceLocalCapStitchDiagnostic,
 ) -> Result<MissingFaceLocalCapStitchDiagnostic, ConstrainedCavityRefillError> {
+    let MissingFaceStitchCandidates {
+        tetrahedra: mut candidate_tetrahedra,
+        cap_tetrahedron_start,
+    } = candidates;
     let cap_tetrahedron_count = candidate_tetrahedra.len() - cap_tetrahedron_start;
     let connector_points = node_points
         .iter()
@@ -57,8 +60,10 @@ pub(super) fn finish_missing_face_stitch_candidates(
         .map(|node| node.node_id)
         .collect::<BTreeSet<_>>();
     diagnostic.side_connector_candidate_count = append_cap_side_connector_tetrahedra(
-        cap_tetrahedron_start,
-        cap_tetrahedron_count,
+        CapTetrahedronRange {
+            start: cap_tetrahedron_start,
+            count: cap_tetrahedron_count,
+        },
         &mut candidate_tetrahedra,
         &mut seen_tetrahedra,
         node_points,
@@ -102,4 +107,9 @@ pub(super) fn finish_missing_face_stitch_candidates(
         options,
         diagnostic,
     ))
+}
+
+pub(super) struct MissingFaceStitchCandidates {
+    pub(super) tetrahedra: Vec<ConstrainedCavityRefillTetrahedron>,
+    pub(super) cap_tetrahedron_start: usize,
 }

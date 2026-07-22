@@ -326,9 +326,7 @@ fn source_edge_item_count_by_cad_curve_boundary_status_and_topology(
         .filter(|item| {
             item.status == status
                 && source_edge_item_has_cad_curve_boundary(item, cad_curve_source_edge_ids)
-                && item
-                    .protected_edge_topology
-                    .is_some_and(|topology| topology_matches(topology))
+                && item.protected_edge_topology.is_some_and(&topology_matches)
         })
         .count()
 }

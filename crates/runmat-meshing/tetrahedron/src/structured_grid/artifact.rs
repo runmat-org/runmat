@@ -9,12 +9,15 @@ pub(super) fn build_analysis_mesh_artifact(
     input: &BoundaryMeshInput,
     options: &VolumeMeshingOptions,
     grid: &StructuredGrid,
-    nodes: Vec<AnalysisMeshNode>,
-    volume_elements: Vec<AnalysisVolumeElement>,
-    boundary_faces: Vec<AnalysisBoundaryFace>,
-    quality: AnalysisMeshQualityReport,
-    mut sizing: MeshSizingField,
+    parts: AnalysisMeshArtifactParts,
 ) -> AnalysisMeshArtifact {
+    let AnalysisMeshArtifactParts {
+        nodes,
+        volume_elements,
+        boundary_faces,
+        quality,
+        mut sizing,
+    } = parts;
     sizing.global_target_size_m = target_size_m(input, options, grid);
     if sizing.min_size_m.is_none() {
         sizing.min_size_m = options.min_size_m;
@@ -52,6 +55,14 @@ pub(super) fn build_analysis_mesh_artifact(
             source_geometry_sha256: input.source_geometry_sha256.clone(),
         },
     })
+}
+
+pub(super) struct AnalysisMeshArtifactParts {
+    pub(super) nodes: Vec<AnalysisMeshNode>,
+    pub(super) volume_elements: Vec<AnalysisVolumeElement>,
+    pub(super) boundary_faces: Vec<AnalysisBoundaryFace>,
+    pub(super) quality: AnalysisMeshQualityReport,
+    pub(super) sizing: MeshSizingField,
 }
 
 fn compact_analysis_mesh_nodes(mut mesh: AnalysisMeshArtifact) -> AnalysisMeshArtifact {

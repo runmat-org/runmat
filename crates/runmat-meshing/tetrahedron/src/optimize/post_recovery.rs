@@ -16,7 +16,7 @@ use super::{
     TetrahedronMeshUntanglingOptions, TetrahedronMeshUntanglingReport,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct RecoveredTetrahedronMeshOptimizationOptions {
     pub local_reconnection: TetrahedronMeshLocalReconnectionOptions,
     pub untangling: TetrahedronMeshUntanglingOptions,
@@ -24,19 +24,6 @@ pub struct RecoveredTetrahedronMeshOptimizationOptions {
     pub sliver_removal: TetrahedronMeshSliverRemovalOptions,
     pub interior_smoothing: TetrahedronMeshInteriorSmoothingOptions,
     pub boundary_smoothing: TetrahedronMeshBoundarySmoothingOptions,
-}
-
-impl Default for RecoveredTetrahedronMeshOptimizationOptions {
-    fn default() -> Self {
-        Self {
-            local_reconnection: TetrahedronMeshLocalReconnectionOptions::default(),
-            untangling: TetrahedronMeshUntanglingOptions::default(),
-            exact_quality_repair: TetrahedronMeshExactQualityRepairOptions::default(),
-            sliver_removal: TetrahedronMeshSliverRemovalOptions::default(),
-            interior_smoothing: TetrahedronMeshInteriorSmoothingOptions::default(),
-            boundary_smoothing: TetrahedronMeshBoundarySmoothingOptions::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

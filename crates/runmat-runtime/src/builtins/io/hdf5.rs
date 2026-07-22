@@ -1512,7 +1512,12 @@ mod imp {
                         err,
                     )
                 })?;
-            Ok((array.into_raw_vec(), selection.count.clone()))
+            // An ndarray slice may retain a buffer that starts before the first
+            // selected element; its logical index [0, 0, ...] can therefore be at
+            // a non-zero element offset in that buffer. Consume the array in
+            // logical row-major order so the MATLAB conversion below receives
+            // exactly the selected hyperslab, never unrelated buffer elements.
+            Ok((array.into_iter().collect(), selection.count.clone()))
         } else {
             let raw = ds.read_raw::<T>().map_err(|err| {
                 io_error(
