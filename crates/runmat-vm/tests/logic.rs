@@ -203,9 +203,16 @@ fn typed_sparse_slice_indexing_preserves_uint64_storage() {
 }
 
 #[test]
-fn sparse_assignment_reports_stable_unsupported_identifier() {
-    let err = execute_source("s = sparse([1], [1], [5], 1, 1); s(1,1) = 6;").unwrap_err();
-    assert_eq!(err.identifier(), Some("RunMat:SparseAssignmentUnsupported"));
+fn sparse_scalar_assignment_updates_entries_and_keeps_slice_errors_stable() {
+    let vars = execute_source(
+        "s = sparse([1], [1], [5], 2, 2); s(2,2) = 7; s(1) = 0; f = full(s); n = nnz(s);",
+    )
+    .expect("execute scalar sparse assignment");
+    assert!(matches!(
+        &vars[1],
+        Value::Tensor(tensor) if tensor.data == vec![0.0, 0.0, 0.0, 7.0]
+    ));
+    assert!(matches!(&vars[2], Value::Num(value) if *value == 1.0));
 
     let slice_err = execute_source("s = sparse([1], [1], [5], 2, 2); s(:,1) = 0;").unwrap_err();
     assert_eq!(

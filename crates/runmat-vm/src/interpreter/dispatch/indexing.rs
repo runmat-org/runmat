@@ -1304,7 +1304,9 @@ pub async fn dispatch_indexing(
                     ca, &indices, &rhs, delete,
                 )?),
                 Value::Struct(st) => stack.push(assign_scalar_struct_index(st, &indices, rhs)?),
-                Value::SparseTensor(_) => return Err(sparse_assignment_unsupported()),
+                Value::SparseTensor(sparse) => stack.push(
+                    idx_write_linear::assign_sparse_scalar(sparse, &indices, &rhs, delete).await?,
+                ),
                 Value::GpuTensor(h) => stack
                     .push(idx_write_linear::assign_gpu_scalar(&h, &indices, &rhs, delete).await?),
                 _ => {

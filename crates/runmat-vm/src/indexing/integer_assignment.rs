@@ -47,6 +47,30 @@ fn cast_unsigned(value: &IntegerAssignmentValue, max: u64) -> u64 {
     }
 }
 
+/// Converts a scalar assignment value to the exact class of `storage`.
+///
+/// This is shared by dense and sparse integer assignment so they retain the
+/// same round-and-saturate behavior without converting wide integers through
+/// the floating compatibility view.
+pub(crate) fn scalar_value(storage: &IntegerStorage, value: &IntegerAssignmentValue) -> IntValue {
+    match storage {
+        IntegerStorage::I8(_) => {
+            IntValue::I8(cast_signed(value, i8::MIN as i64, i8::MAX as i64) as i8)
+        }
+        IntegerStorage::I16(_) => {
+            IntValue::I16(cast_signed(value, i16::MIN as i64, i16::MAX as i64) as i16)
+        }
+        IntegerStorage::I32(_) => {
+            IntValue::I32(cast_signed(value, i32::MIN as i64, i32::MAX as i64) as i32)
+        }
+        IntegerStorage::I64(_) => IntValue::I64(cast_signed(value, i64::MIN, i64::MAX)),
+        IntegerStorage::U8(_) => IntValue::U8(cast_unsigned(value, u8::MAX as u64) as u8),
+        IntegerStorage::U16(_) => IntValue::U16(cast_unsigned(value, u16::MAX as u64) as u16),
+        IntegerStorage::U32(_) => IntValue::U32(cast_unsigned(value, u32::MAX as u64) as u32),
+        IntegerStorage::U64(_) => IntValue::U64(cast_unsigned(value, u64::MAX)),
+    }
+}
+
 pub(crate) fn scatter(
     storage: &mut IntegerStorage,
     plan: &IndexPlan,

@@ -1,6 +1,7 @@
+use crate::indexing::integer_assignment::{self, IntegerAssignmentValue};
 use crate::indexing::write_slice::deleted_vector_shape;
 use crate::interpreter::errors::mex;
-use runmat_builtins::{ComplexTensor, IntValue, IntegerStorage, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
 use runmat_runtime::RuntimeError;
 
 fn map_assignment_shape_error(err: impl std::fmt::Display) -> RuntimeError {
@@ -14,11 +15,6 @@ fn map_acceleration_error(context: &str, err: impl std::fmt::Display) -> Runtime
 fn is_empty_tensor(value: &Value) -> bool {
     matches!(value, Value::Tensor(t) if t.data.is_empty() || t.rows == 0 || t.cols == 0)
         || matches!(value, Value::ComplexTensor(t) if t.data.is_empty() || t.rows == 0 || t.cols == 0)
-}
-
-enum IntegerAssignmentRhs {
-    Exact(IntValue),
-    Float(f64),
 }
 
 fn integer_storage_scalar(storage: &IntegerStorage) -> IntValue {
@@ -36,17 +32,23 @@ fn integer_storage_scalar(storage: &IntegerStorage) -> IntValue {
 
 async fn rhs_to_integer_assignment_scalar(
     rhs: &Value,
-) -> Result<IntegerAssignmentRhs, RuntimeError> {
+) -> Result<IntegerAssignmentValue, RuntimeError> {
     match rhs {
-        Value::Int(value) => Ok(IntegerAssignmentRhs::Exact(value.clone())),
-        Value::Num(value) => Ok(IntegerAssignmentRhs::Float(*value)),
-        Value::Bool(value) => Ok(IntegerAssignmentRhs::Float(if *value { 1.0 } else { 0.0 })),
+        Value::Int(value) => Ok(IntegerAssignmentValue::Exact(value.clone())),
+        Value::Num(value) => Ok(IntegerAssignmentValue::Float(*value)),
+        Value::Bool(value) => Ok(IntegerAssignmentValue::Float(if *value {
+            1.0
+        } else {
+            0.0
+        })),
         Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.integer_storage() {
-            Some(storage) => Ok(IntegerAssignmentRhs::Exact(integer_storage_scalar(storage))),
-            None => Ok(IntegerAssignmentRhs::Float(tensor.data[0])),
+            Some(storage) => Ok(IntegerAssignmentValue::Exact(integer_storage_scalar(
+                storage,
+            ))),
+            None => Ok(IntegerAssignmentValue::Float(tensor.data[0])),
         },
         Value::LogicalArray(array) if array.data.len() == 1 => {
-            Ok(IntegerAssignmentRhs::Float(if array.data[0] == 0 {
+            Ok(IntegerAssignmentValue::Float(if array.data[0] == 0 {
                 0.0
             } else {
                 1.0
@@ -54,38 +56,7 @@ async fn rhs_to_integer_assignment_scalar(
         }
         _ => rhs_to_real_scalar(rhs)
             .await
-            .map(IntegerAssignmentRhs::Float),
-    }
-}
-
-fn cast_signed_assignment(value: &IntegerAssignmentRhs, min: i64, max: i64) -> i64 {
-    match value {
-        IntegerAssignmentRhs::Exact(value) => value.to_i64().clamp(min, max),
-        IntegerAssignmentRhs::Float(value) if value.is_nan() => 0,
-        IntegerAssignmentRhs::Float(value) if value.is_infinite() => {
-            if value.is_sign_negative() {
-                min
-            } else {
-                max
-            }
-        }
-        IntegerAssignmentRhs::Float(value) => value.round().clamp(min as f64, max as f64) as i64,
-    }
-}
-
-fn unsigned_exact_value(value: &IntValue) -> u64 {
-    match value {
-        IntValue::U64(value) => *value,
-        _ => value.to_i64().max(0) as u64,
-    }
-}
-
-fn cast_unsigned_assignment(value: &IntegerAssignmentRhs, max: u64) -> u64 {
-    match value {
-        IntegerAssignmentRhs::Exact(value) => unsigned_exact_value(value).min(max),
-        IntegerAssignmentRhs::Float(value) if value.is_nan() || value.is_sign_negative() => 0,
-        IntegerAssignmentRhs::Float(value) if value.is_infinite() => max,
-        IntegerAssignmentRhs::Float(value) => value.round().clamp(0.0, max as f64) as u64,
+            .map(IntegerAssignmentValue::Float),
     }
 }
 
@@ -93,64 +64,73 @@ fn assign_integer_storage(
     storage: IntegerStorage,
     index: usize,
     target_len: usize,
-    rhs: &IntegerAssignmentRhs,
+    rhs: &IntegerAssignmentValue,
 ) -> IntegerStorage {
-    macro_rules! assign_storage {
-        ($values:expr, $variant:ident, $zero:expr, $value:expr) => {{
-            let mut values = $values;
-            values.resize(target_len, $zero);
-            values[index] = $value;
-            IntegerStorage::$variant(values)
-        }};
-    }
-
+    let value = integer_assignment::scalar_value(&storage, rhs);
     match storage {
-        IntegerStorage::I8(values) => assign_storage!(
-            values,
-            I8,
-            0,
-            cast_signed_assignment(rhs, i8::MIN as i64, i8::MAX as i64) as i8
-        ),
-        IntegerStorage::I16(values) => assign_storage!(
-            values,
-            I16,
-            0,
-            cast_signed_assignment(rhs, i16::MIN as i64, i16::MAX as i64) as i16
-        ),
-        IntegerStorage::I32(values) => assign_storage!(
-            values,
-            I32,
-            0,
-            cast_signed_assignment(rhs, i32::MIN as i64, i32::MAX as i64) as i32
-        ),
-        IntegerStorage::I64(values) => assign_storage!(
-            values,
-            I64,
-            0,
-            cast_signed_assignment(rhs, i64::MIN, i64::MAX)
-        ),
-        IntegerStorage::U8(values) => {
-            assign_storage!(
-                values,
-                U8,
-                0,
-                cast_unsigned_assignment(rhs, u8::MAX as u64) as u8
-            )
+        IntegerStorage::I8(mut values) => {
+            let IntValue::I8(value) = value else {
+                unreachable!()
+            };
+            values.resize(target_len, 0);
+            values[index] = value;
+            IntegerStorage::I8(values)
         }
-        IntegerStorage::U16(values) => assign_storage!(
-            values,
-            U16,
-            0,
-            cast_unsigned_assignment(rhs, u16::MAX as u64) as u16
-        ),
-        IntegerStorage::U32(values) => assign_storage!(
-            values,
-            U32,
-            0,
-            cast_unsigned_assignment(rhs, u32::MAX as u64) as u32
-        ),
-        IntegerStorage::U64(values) => {
-            assign_storage!(values, U64, 0, cast_unsigned_assignment(rhs, u64::MAX))
+        IntegerStorage::I16(mut values) => {
+            let IntValue::I16(value) = value else {
+                unreachable!()
+            };
+            values.resize(target_len, 0);
+            values[index] = value;
+            IntegerStorage::I16(values)
+        }
+        IntegerStorage::I32(mut values) => {
+            let IntValue::I32(value) = value else {
+                unreachable!()
+            };
+            values.resize(target_len, 0);
+            values[index] = value;
+            IntegerStorage::I32(values)
+        }
+        IntegerStorage::I64(mut values) => {
+            let IntValue::I64(value) = value else {
+                unreachable!()
+            };
+            values.resize(target_len, 0);
+            values[index] = value;
+            IntegerStorage::I64(values)
+        }
+        IntegerStorage::U8(mut values) => {
+            let IntValue::U8(value) = value else {
+                unreachable!()
+            };
+            values.resize(target_len, 0);
+            values[index] = value;
+            IntegerStorage::U8(values)
+        }
+        IntegerStorage::U16(mut values) => {
+            let IntValue::U16(value) = value else {
+                unreachable!()
+            };
+            values.resize(target_len, 0);
+            values[index] = value;
+            IntegerStorage::U16(values)
+        }
+        IntegerStorage::U32(mut values) => {
+            let IntValue::U32(value) = value else {
+                unreachable!()
+            };
+            values.resize(target_len, 0);
+            values[index] = value;
+            IntegerStorage::U32(values)
+        }
+        IntegerStorage::U64(mut values) => {
+            let IntValue::U64(value) = value else {
+                unreachable!()
+            };
+            values.resize(target_len, 0);
+            values[index] = value;
+            IntegerStorage::U64(values)
         }
     }
 }
@@ -412,6 +392,61 @@ pub async fn assign_tensor_scalar(
     }
 }
 
+/// Assigns one existing sparse matrix element without densifying its CSC
+/// representation. Structural resizing and selector assignment deliberately
+/// remain in the slice-assignment implementation.
+pub async fn assign_sparse_scalar(
+    sparse: SparseTensor,
+    indices: &[usize],
+    rhs: &Value,
+    delete: bool,
+) -> Result<Value, RuntimeError> {
+    if delete {
+        return Err(mex(
+            "UnsupportedDeletion",
+            "Sparse indexed deletion is not yet supported",
+        ));
+    }
+    let (row, col) = match indices {
+        [index] => {
+            let total = sparse
+                .rows
+                .checked_mul(sparse.cols)
+                .ok_or_else(|| mex("IndexOutOfBounds", "Index out of bounds"))?;
+            if *index == 0 || *index > total {
+                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+            }
+            ((*index - 1) % sparse.rows, (*index - 1) / sparse.rows)
+        }
+        [row, column] => {
+            if *row == 0 || *row > sparse.rows || *column == 0 || *column > sparse.cols {
+                return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
+            }
+            (*row - 1, *column - 1)
+        }
+        _ => {
+            return Err(mex(
+                "UnsupportedAssignmentRank",
+                "Only 1D/2D scalar assignment supported",
+            ))
+        }
+    };
+
+    let updated = if let Some(storage) = sparse.integer_storage() {
+        let rhs = rhs_to_integer_assignment_scalar(rhs).await?;
+        let value = integer_assignment::scalar_value(storage, &rhs);
+        sparse
+            .with_updated_integer_value(row, col, value)
+            .map_err(map_assignment_shape_error)?
+    } else {
+        let value = rhs_to_real_scalar(rhs).await?;
+        sparse
+            .with_updated_value(row, col, value)
+            .map_err(map_assignment_shape_error)?
+    };
+    Ok(Value::SparseTensor(updated))
+}
+
 async fn assign_integer_tensor_scalar(
     mut t: Tensor,
     indices: &[usize],
@@ -571,7 +606,10 @@ pub async fn assign_gpu_scalar(
 
 #[cfg(test)]
 mod tests {
-    use super::{assign_tensor_scalar, map_acceleration_error, map_assignment_shape_error};
+    use super::{
+        assign_sparse_scalar, assign_tensor_scalar, map_acceleration_error,
+        map_assignment_shape_error,
+    };
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
@@ -655,6 +693,155 @@ mod tests {
             Some(&IntegerStorage::I16(vec![7, 9]))
         );
         assert_eq!(output.shape, vec![1, 2]);
+    }
+
+    #[test]
+    fn sparse_integer_assignment_preserves_exact_uint64_and_elides_zero() {
+        let sparse = runmat_builtins::SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 0, 0],
+            vec![],
+            IntegerStorage::U64(vec![]),
+        )
+        .expect("sparse");
+        let Value::SparseTensor(inserted) = block_on(assign_sparse_scalar(
+            sparse,
+            &[2, 2],
+            &Value::Int(IntValue::U64(u64::MAX)),
+            false,
+        ))
+        .expect("insert") else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(inserted.row_indices, vec![1]);
+        assert_eq!(inserted.col_ptrs, vec![0, 0, 1]);
+        assert_eq!(
+            inserted.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX]))
+        );
+
+        let Value::SparseTensor(removed) = block_on(assign_sparse_scalar(
+            inserted,
+            &[4],
+            &Value::Num(0.0),
+            false,
+        ))
+        .expect("remove") else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(removed.col_ptrs, vec![0, 0, 0]);
+        assert_eq!(
+            removed.integer_storage(),
+            Some(&IntegerStorage::U64(vec![]))
+        );
+    }
+
+    #[test]
+    fn sparse_integer_assignment_preserves_every_integer_class() {
+        let cases = vec![
+            (IntegerStorage::I8(vec![]), IntValue::I8(i8::MIN)),
+            (IntegerStorage::I16(vec![]), IntValue::I16(i16::MIN)),
+            (IntegerStorage::I32(vec![]), IntValue::I32(i32::MIN)),
+            (IntegerStorage::I64(vec![]), IntValue::I64(i64::MIN)),
+            (IntegerStorage::U8(vec![]), IntValue::U8(u8::MAX)),
+            (IntegerStorage::U16(vec![]), IntValue::U16(u16::MAX)),
+            (IntegerStorage::U32(vec![]), IntValue::U32(u32::MAX)),
+            (IntegerStorage::U64(vec![]), IntValue::U64(u64::MAX)),
+        ];
+
+        for (storage, value) in cases {
+            let sparse =
+                runmat_builtins::SparseTensor::new_integer(1, 1, vec![0, 0], vec![], storage)
+                    .expect("sparse");
+            let Value::SparseTensor(updated) = block_on(assign_sparse_scalar(
+                sparse,
+                &[1, 1],
+                &Value::Int(value.clone()),
+                false,
+            ))
+            .expect("assignment") else {
+                panic!("expected sparse output");
+            };
+            assert_eq!(updated.integer_at(0, 0), Some(value));
+        }
+    }
+
+    #[test]
+    fn sparse_integer_assignment_rounds_and_saturates_numeric_rhs() {
+        let sparse = runmat_builtins::SparseTensor::new_integer(
+            1,
+            2,
+            vec![0, 0, 0],
+            vec![],
+            IntegerStorage::I8(vec![]),
+        )
+        .expect("sparse");
+        let Value::SparseTensor(rounded) = block_on(assign_sparse_scalar(
+            sparse,
+            &[1, 1],
+            &Value::Num(3.5),
+            false,
+        ))
+        .expect("round") else {
+            panic!("expected sparse output");
+        };
+        let Value::SparseTensor(saturated) = block_on(assign_sparse_scalar(
+            rounded,
+            &[1, 2],
+            &Value::Int(IntValue::U64(u64::MAX)),
+            false,
+        ))
+        .expect("saturate") else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(
+            saturated.integer_storage(),
+            Some(&IntegerStorage::I8(vec![4, i8::MAX]))
+        );
+    }
+
+    #[test]
+    fn sparse_scalar_assignment_reports_stable_negative_path_errors() {
+        let sparse = runmat_builtins::SparseTensor::zeros(1, 1);
+        let out_of_bounds = block_on(assign_sparse_scalar(
+            sparse.clone(),
+            &[0],
+            &Value::Num(1.0),
+            false,
+        ))
+        .expect_err("out-of-bounds assignment must fail");
+        assert_eq!(out_of_bounds.identifier(), Some("RunMat:IndexOutOfBounds"));
+
+        let subscript_out_of_bounds = block_on(assign_sparse_scalar(
+            sparse.clone(),
+            &[1, 0],
+            &Value::Num(1.0),
+            false,
+        ))
+        .expect_err("invalid sparse subscript must fail");
+        assert_eq!(
+            subscript_out_of_bounds.identifier(),
+            Some("RunMat:SubscriptOutOfBounds")
+        );
+
+        let deletion = block_on(assign_sparse_scalar(
+            sparse.clone(),
+            &[1],
+            &Value::Num(0.0),
+            true,
+        ))
+        .expect_err("sparse deletion must remain unsupported");
+        assert_eq!(deletion.identifier(), Some("RunMat:UnsupportedDeletion"));
+
+        let rank = block_on(assign_sparse_scalar(
+            sparse,
+            &[1, 1, 1],
+            &Value::Num(1.0),
+            false,
+        ))
+        .expect_err("rank-three scalar assignment must fail");
+        assert_eq!(rank.identifier(), Some("RunMat:UnsupportedAssignmentRank"));
     }
 
     #[test]
