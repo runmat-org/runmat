@@ -648,18 +648,29 @@ impl TruthTensor {
     }
 
     fn from_complex_tensor(ct: ComplexTensor) -> Self {
-        let data = ct
-            .data
-            .iter()
-            .map(|&(re, im)| TruthValue {
-                truthy: if re.is_nan() || im.is_nan() {
-                    true
-                } else {
-                    re != 0.0 || im != 0.0
-                },
-                has_nan: re.is_nan() || im.is_nan(),
-            })
-            .collect();
+        let data = if let Some(storage) = ct.integer_data.as_ref() {
+            (0..storage.len())
+                .map(|index| {
+                    TruthValue::from_bool(
+                        storage
+                            .is_nonzero_at(index)
+                            .expect("typed complex integer storage is structurally valid"),
+                    )
+                })
+                .collect()
+        } else {
+            ct.data
+                .iter()
+                .map(|&(re, im)| TruthValue {
+                    truthy: if re.is_nan() || im.is_nan() {
+                        true
+                    } else {
+                        re != 0.0 || im != 0.0
+                    },
+                    has_nan: re.is_nan() || im.is_nan(),
+                })
+                .collect()
+        };
         TruthTensor {
             shape: ct.shape.clone(),
             data,

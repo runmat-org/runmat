@@ -578,6 +578,14 @@ impl IntegerComplexStorage {
     pub fn class_name(&self) -> &'static str {
         self.real.class_name()
     }
+
+    /// Tests a paired complex integer element without consulting its lossy
+    /// floating compatibility representation.
+    pub fn is_nonzero_at(&self, index: usize) -> Option<bool> {
+        let real = self.real.value_at(index)?;
+        let imag = self.imag.value_at(index)?;
+        Some(!real.is_zero() || !imag.is_zero())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

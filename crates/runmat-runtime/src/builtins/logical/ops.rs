@@ -342,11 +342,23 @@ impl LogicalBuffer {
     }
 
     fn from_complex_tensor(tensor: &ComplexTensor) -> Self {
-        let bits: Vec<u8> = tensor
-            .data
-            .iter()
-            .map(|&(re, im)| if !complex_is_zero(re, im) { 1 } else { 0 })
-            .collect();
+        let bits: Vec<u8> = if let Some(storage) = tensor.integer_data.as_ref() {
+            (0..storage.len())
+                .map(|index| {
+                    u8::from(
+                        storage
+                            .is_nonzero_at(index)
+                            .expect("typed complex integer storage is structurally valid"),
+                    )
+                })
+                .collect()
+        } else {
+            tensor
+                .data
+                .iter()
+                .map(|&(re, im)| if !complex_is_zero(re, im) { 1 } else { 0 })
+                .collect()
+        };
         let shape = canonical_shape(&tensor.shape, bits.len());
         Self { bits, shape }
     }

@@ -260,11 +260,27 @@ fn tensor_to_logical_buffer(tensor: Tensor) -> BuiltinResult<LogicalBuffer> {
 }
 
 fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> BuiltinResult<LogicalBuffer> {
-    let ComplexTensor { data, shape, .. } = tensor;
-    let mapped = data
-        .into_iter()
-        .map(|(re, im)| logical_from_complex(re, im))
-        .collect();
+    let ComplexTensor {
+        data,
+        integer_data,
+        shape,
+        ..
+    } = tensor;
+    let mapped = if let Some(storage) = integer_data {
+        (0..storage.len())
+            .map(|index| {
+                u8::from(
+                    storage
+                        .is_nonzero_at(index)
+                        .expect("typed complex integer storage is structurally valid"),
+                )
+            })
+            .collect()
+    } else {
+        data.into_iter()
+            .map(|(re, im)| logical_from_complex(re, im))
+            .collect()
+    };
     Ok(LogicalBuffer {
         data: mapped,
         shape,

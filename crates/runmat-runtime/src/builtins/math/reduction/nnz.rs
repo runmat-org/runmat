@@ -337,6 +337,15 @@ fn count_nonzero_sparse(sparse: &SparseTensor) -> usize {
 }
 
 fn count_nonzero_complex_tensor(tensor: &ComplexTensor) -> usize {
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        return (0..storage.len())
+            .filter(|&index| {
+                storage
+                    .is_nonzero_at(index)
+                    .expect("typed complex integer storage is structurally valid")
+            })
+            .count();
+    }
     tensor
         .data
         .iter()
@@ -381,11 +390,23 @@ fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
         }
         Value::ComplexTensor(tensor) => {
             let shape = canonical_shape(&tensor.shape, tensor.data.len());
-            let bits = tensor
-                .data
-                .iter()
-                .map(|&(re, im)| if is_nonzero_complex(re, im) { 1u8 } else { 0u8 })
-                .collect();
+            let bits = if let Some(storage) = tensor.integer_data.as_ref() {
+                (0..storage.len())
+                    .map(|index| {
+                        u8::from(
+                            storage
+                                .is_nonzero_at(index)
+                                .expect("typed complex integer storage is structurally valid"),
+                        )
+                    })
+                    .collect()
+            } else {
+                tensor
+                    .data
+                    .iter()
+                    .map(|&(re, im)| if is_nonzero_complex(re, im) { 1u8 } else { 0u8 })
+                    .collect()
+            };
             Ok(Mask { bits, shape })
         }
         Value::SparseTensor(sparse) => mask_from_sparse(sparse),

@@ -644,6 +644,7 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
         DataStorage::Complex(tensor) => {
             let mut indices = Vec::new();
             let mut values = Vec::new();
+            let typed_storage = tensor.integer_data.as_ref();
 
             if matches!(limit, Some(0)) {
                 let values = find_values_for_complex_tensor(tensor, &indices, values);
@@ -654,10 +655,22 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
             match options.direction {
                 FindDirection::First => {
                     for idx in 0..len {
-                        let (re, im) = tensor.data[idx];
-                        if re != 0.0 || im != 0.0 {
+                        let nonzero = typed_storage.map_or_else(
+                            || {
+                                let (re, im) = tensor.data[idx];
+                                re != 0.0 || im != 0.0
+                            },
+                            |storage| {
+                                storage
+                                    .is_nonzero_at(idx)
+                                    .expect("typed complex integer storage is structurally valid")
+                            },
+                        );
+                        if nonzero {
                             indices.push(idx + 1);
-                            values.push((re, im));
+                            if typed_storage.is_none() {
+                                values.push(tensor.data[idx]);
+                            }
                             if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
                             }
@@ -666,10 +679,22 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                 }
                 FindDirection::Last => {
                     for idx in (0..len).rev() {
-                        let (re, im) = tensor.data[idx];
-                        if re != 0.0 || im != 0.0 {
+                        let nonzero = typed_storage.map_or_else(
+                            || {
+                                let (re, im) = tensor.data[idx];
+                                re != 0.0 || im != 0.0
+                            },
+                            |storage| {
+                                storage
+                                    .is_nonzero_at(idx)
+                                    .expect("typed complex integer storage is structurally valid")
+                            },
+                        );
+                        if nonzero {
                             indices.push(idx + 1);
-                            values.push((re, im));
+                            if typed_storage.is_none() {
+                                values.push(tensor.data[idx]);
+                            }
                             if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
                             }

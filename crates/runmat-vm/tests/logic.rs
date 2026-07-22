@@ -326,6 +326,49 @@ fn typed_complex_integer_numerical_integration_is_rejected_before_f64_coercion()
 }
 
 #[test]
+fn typed_complex_integer_truthiness_uses_exact_paired_storage() {
+    let vars = execute_source(
+        "z = complex(uint64([0 9223372036854775808 0]), uint64([0 0 1])); l = logical(z); n = ~z; a = all(z, 'all'); b = any(z, 'all'); c = nnz(z); [r, col, values] = find(z); p = z & z; q = z | 0; x = xor(z, 0);",
+    )
+    .expect("typed complex integer truthiness should execute");
+
+    for index in [1, 9, 10, 11] {
+        assert!(
+            matches!(
+                &vars[index],
+                Value::LogicalArray(array) if array.data == vec![0, 1, 1]
+            ),
+            "unexpected value at {index}: {:?}",
+            vars[index]
+        );
+    }
+    assert!(matches!(
+        &vars[2],
+        Value::LogicalArray(array) if array.data == vec![1, 0, 0]
+    ));
+    assert!(!logical_truth(&vars[3]));
+    assert!(logical_truth(&vars[4]));
+    assert_eq!(vars[5], Value::Num(2.0));
+    assert!(matches!(
+        &vars[6],
+        Value::Tensor(tensor) if tensor.data == vec![1.0, 1.0]
+    ));
+    assert!(matches!(
+        &vars[7],
+        Value::Tensor(tensor) if tensor.data == vec![2.0, 3.0]
+    ));
+    assert!(matches!(
+        &vars[8],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                == Some((
+                    &IntegerStorage::U64(vec![9_223_372_036_854_775_808, 0]),
+                    &IntegerStorage::U64(vec![0, 1]),
+                ))
+    ));
+}
+
+#[test]
 fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispatch() {
     let vars = execute_source(
         "a = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); rhs = complex(uint64([18446744073709551615 9223372036854775808]), uint64([7 8])); a(:, :) = rhs; ar = real(a); ai = imag(a); b = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); b(1:end, :) = rhs;",
