@@ -2,7 +2,7 @@
 mod test_helpers;
 
 use futures::executor::block_on;
-use runmat_builtins::{NumericDType, Tensor, Value};
+use runmat_builtins::{IntegerStorage, NumericDType, Tensor, Value};
 use test_helpers::execute_source;
 
 fn unique_path(name: &str) -> std::path::PathBuf {
@@ -54,5 +54,28 @@ fn matfile_dot_reads_properties_and_writes_whole_variables() {
     );
     let vars = execute_source(&input).expect("execute matfile source");
     assert!(vars.iter().any(|value| value == &Value::Num(42.0)));
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn save_load_roundtrip_preserves_typed_complex_uint64_components() {
+    let path = unique_path("typed_complex_uint64");
+    let source_path = path.to_string_lossy().replace('\'', "''");
+    let input = format!(
+        "z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([18446744073709551615 7])); save('{source_path}', 'z'); S = load('{source_path}'); loaded = S.z;"
+    );
+
+    let vars = execute_source(&input).expect("save/load typed complex uint64");
+    assert!(vars.iter().any(|value| {
+        matches!(
+            value,
+            Value::ComplexTensor(tensor)
+                if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                    == Some((
+                        &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                        &IntegerStorage::U64(vec![u64::MAX, 7]),
+                    ))
+        )
+    }));
     let _ = std::fs::remove_file(path);
 }

@@ -744,6 +744,7 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                     dims: vec![1, 1],
                     data: MatData::Integer {
                         storage: integer_storage_from_scalar(i),
+                        imag: None,
                     },
                 })
             }
@@ -761,7 +762,10 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                     tensor_dtype_mat_class(t.dtype)
                 };
                 let data = if let Some(storage) = t.integer_data {
-                    MatData::Integer { storage }
+                    MatData::Integer {
+                        storage,
+                        imag: None,
+                    }
                 } else if class == MatClass::Double {
                     MatData::Double {
                         real: t.data,
@@ -788,6 +792,16 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 },
             }),
             Value::ComplexTensor(t) => {
+                if let Some(storage) = t.integer_data {
+                    return Ok(MatArray {
+                        class: integer_storage_mat_class(&storage.real),
+                        dims: canonical_dims(&t.shape),
+                        data: MatData::Integer {
+                            storage: storage.real,
+                            imag: Some(storage.imag),
+                        },
+                    });
+                }
                 let mut real = Vec::with_capacity(t.data.len());
                 let mut imag = Vec::with_capacity(t.data.len());
                 for (re, im) in &t.data {
@@ -1041,7 +1055,13 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
             }
             (f0, 0u32)
         }
-        MatData::Integer { .. } => (array.class.class_code(), 0u32),
+        MatData::Integer { imag, .. } => {
+            let mut f0 = array.class.class_code();
+            if imag.is_some() {
+                f0 |= FLAG_COMPLEX;
+            }
+            (f0, 0u32)
+        }
         MatData::Logical { .. } => ((array.class.class_code()) | FLAG_LOGICAL, 0u32),
         MatData::Sparse { values, .. } => (array.class.class_code(), values.len() as u32),
         _ => (array.class.class_code(), 0u32),
@@ -1084,9 +1104,19 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
                 write_subelement(&mut buf, imag_type, &imag_bytes);
             }
         }
-        MatData::Integer { storage } => {
+        MatData::Integer { storage, imag } => {
             let (data_type, bytes) = encode_integer_payload(storage);
             write_subelement(&mut buf, data_type, &bytes);
+            if let Some(imag) = imag {
+                if imag.class_name() != storage.class_name() || imag.len() != storage.len() {
+                    return Err(save_error_with(
+                        &SAVE_ERROR_IO,
+                        "save: complex integer components must have matching class and length",
+                    ));
+                }
+                let (imag_type, imag_bytes) = encode_integer_payload(imag);
+                write_subelement(&mut buf, imag_type, &imag_bytes);
+            }
         }
         MatData::Logical { data } => {
             write_subelement(&mut buf, MI_UINT8, data);

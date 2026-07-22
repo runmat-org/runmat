@@ -112,6 +112,7 @@ pub enum MatData {
     },
     Integer {
         storage: IntegerStorage,
+        imag: Option<IntegerStorage>,
     },
     Logical {
         data: Vec<u8>,

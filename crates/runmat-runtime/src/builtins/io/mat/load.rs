@@ -9,8 +9,8 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, SparseTensor,
-    StringArray, StructValue, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+    NumericDType, SparseTensor, StringArray, StructValue, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -771,17 +771,19 @@ fn parse_numeric_array(
     let real_elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: numeric array missing real component"))?;
     if class_is_integer(class) {
-        if has_imag {
-            return Err(load_error(
-                "load: complex integer MAT arrays require typed complex integer storage",
-            ));
-        }
+        let storage = decode_integer_storage(&real_elem, class, endian)?;
+        let imag = if has_imag {
+            let imag_elem = read_tagged(cursor, false, endian)?.ok_or_else(|| {
+                load_error("load: complex integer array missing imaginary component")
+            })?;
+            Some(decode_integer_storage(&imag_elem, class, endian)?)
+        } else {
+            None
+        };
         return Ok(MatArray {
             class,
             dims,
-            data: MatData::Integer {
-                storage: decode_integer_storage(&real_elem, class, endian)?,
-            },
+            data: MatData::Integer { storage, imag },
         });
     }
 
@@ -1264,7 +1266,14 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
                 .map_err(|e| load_error(format!("load: {e}")))?;
             Ok(Value::Tensor(tensor))
         }
-        MatData::Integer { storage } => {
+        MatData::Integer { storage, imag } => {
+            if let Some(imag) = imag {
+                let storage = IntegerComplexStorage::new(storage, imag)
+                    .map_err(|err| load_error(format!("load: {err}")))?;
+                let tensor = ComplexTensor::new_integer(storage, array.dims.clone())
+                    .map_err(|err| load_error(format!("load: {err}")))?;
+                return Ok(Value::ComplexTensor(tensor));
+            }
             if storage.len() == 1 {
                 return Ok(Value::Int(integer_storage_scalar(&storage, 0)));
             }
@@ -1590,7 +1599,7 @@ pub(crate) mod tests {
     use flate2::write::ZlibEncoder;
     use flate2::Compression;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, StringArray};
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, StringArray};
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -1930,6 +1939,73 @@ pub(crate) mod tests {
             values.get("scalar_u64"),
             Some(&Value::Int(IntValue::U64(u64::MAX)))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn load_save_roundtrip_preserves_every_complex_integer_tensor_class_exactly() {
+        let cases = vec![
+            (
+                "i8",
+                IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+                IntegerStorage::I8(vec![1, -2]),
+            ),
+            (
+                "u8",
+                IntegerStorage::U8(vec![0, u8::MAX]),
+                IntegerStorage::U8(vec![3, 4]),
+            ),
+            (
+                "i16",
+                IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+                IntegerStorage::I16(vec![5, -6]),
+            ),
+            (
+                "u16",
+                IntegerStorage::U16(vec![0, u16::MAX]),
+                IntegerStorage::U16(vec![7, 8]),
+            ),
+            (
+                "i32",
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+                IntegerStorage::I32(vec![9, -10]),
+            ),
+            (
+                "u32",
+                IntegerStorage::U32(vec![0, u32::MAX]),
+                IntegerStorage::U32(vec![11, 12]),
+            ),
+            (
+                "i64",
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                IntegerStorage::I64(vec![13, i64::MIN]),
+            ),
+            (
+                "u64",
+                IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                IntegerStorage::U64(vec![u64::MAX, 14]),
+            ),
+        ];
+        let mut entries = Vec::new();
+        for (name, real, imag) in &cases {
+            let storage =
+                IntegerComplexStorage::new(real.clone(), imag.clone()).expect("components");
+            let tensor = ComplexTensor::new_integer(storage, vec![2, 1]).expect("typed complex");
+            entries.push(((*name).to_string(), Value::ComplexTensor(tensor)));
+        }
+
+        let bytes = block_on(encode_workspace_to_mat_bytes(&entries)).expect("encode MAT bytes");
+        let values: HashMap<_, _> = load_entries_from_bytes(bytes).into_iter().collect();
+
+        for (name, real, imag) in cases {
+            match values.get(name).expect("loaded typed complex tensor") {
+                Value::ComplexTensor(tensor) => assert_eq!(
+                    tensor.integer_data,
+                    Some(IntegerComplexStorage::new(real, imag).expect("components"))
+                ),
+                other => panic!("expected typed complex tensor for {name}, got {other:?}"),
+            }
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
