@@ -633,7 +633,7 @@ mod tests {
     use super::*;
     use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, NumericDType, Tensor};
+    use runmat_builtins::{CharArray, IntegerStorage, NumericDType, Tensor};
 
     fn unique_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -762,6 +762,39 @@ mod tests {
         assert_eq!(by_name.get("A"), Some(&tensor(&[9.0, 8.0], vec![1, 2])));
         assert_eq!(by_name.get("B"), Some(&Value::Num(42.0)));
         assert_eq!(by_name.get("flag"), Some(&Value::Bool(true)));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn matfile_writable_assignment_preserves_exact_integer_storage() {
+        let path = unique_path("integer_write");
+        write_sample(&path);
+        let object = block_on(matfile_builtin(
+            Value::String(path.to_string_lossy().into_owned()),
+            vec![Value::String("Writable".into()), Value::Bool(true)],
+        ))
+        .expect("matfile writable");
+        let input = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
+                .expect("integer tensor"),
+        );
+
+        let object = block_on(matfile_subsasgn(
+            object,
+            ".".to_string(),
+            Value::String("limits".into()),
+            input,
+        ))
+        .expect("write integer variable");
+        let value = block_on(matfile_subsref(
+            object,
+            ".".to_string(),
+            Value::String("limits".into()),
+        ))
+        .expect("read integer variable");
+
+        assert!(matches!(value, Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::I64(vec![i64::MIN, i64::MAX]))));
         let _ = std::fs::remove_file(path);
     }
 
