@@ -185,6 +185,7 @@ fn fftn_error_with_message(
     builtin_path = "crate::builtins::math::fft::fftn"
 )]
 async fn fftn_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "fftn")?;
     let sizes = parse_fftn_sizes(&rest)?;
     match value {
         Value::GpuTensor(handle) => fftn_gpu(handle, sizes).await,

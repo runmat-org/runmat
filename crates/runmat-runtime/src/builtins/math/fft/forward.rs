@@ -222,6 +222,7 @@ fn fft_error_with_message(
     builtin_path = "crate::builtins::math::fft::forward"
 )]
 async fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "fft")?;
     let (length, dimension) = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => fft_gpu(handle, length, dimension).await,

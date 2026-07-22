@@ -317,6 +317,7 @@ fn ifft_error_with_message(
     builtin_path = "crate::builtins::math::fft::ifft"
 )]
 async fn ifft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "ifft")?;
     let (length, dimension, symmetric) = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => ifft_gpu(handle, length, dimension, symmetric).await,

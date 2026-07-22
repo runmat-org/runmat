@@ -222,6 +222,7 @@ fn fft2_error_with_message(
     builtin_path = "crate::builtins::math::fft::fft2"
 )]
 async fn fft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "fft2")?;
     let lengths = parse_fft2_arguments(&rest)?;
     match value {
         Value::GpuTensor(handle) => fft2_gpu(handle, lengths).await,
