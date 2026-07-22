@@ -1,4 +1,4 @@
-use runmat_lexer::{tokenize, Token};
+use runmat_lexer::{tokenize, tokenize_detailed, Token};
 
 #[test]
 fn ellipsis_skips_to_end_of_line_even_with_comment() {
@@ -30,4 +30,16 @@ fn section_marker_at_line_start() {
 fn line_comment_is_ignored() {
     let src = "a + b % comment";
     assert_eq!(tokenize(src), vec![Token::Ident, Token::Plus, Token::Ident]);
+}
+
+#[test]
+fn detailed_tokens_preserve_the_full_line_comment_span() {
+    let src = "a = 1; % explain the value\nb = 2;";
+    let comment = tokenize_detailed(src)
+        .into_iter()
+        .find(|token| token.token == Token::LineComment)
+        .expect("line comment token");
+
+    assert_eq!(comment.lexeme, "% explain the value");
+    assert_eq!(&src[comment.start..comment.end], "% explain the value");
 }

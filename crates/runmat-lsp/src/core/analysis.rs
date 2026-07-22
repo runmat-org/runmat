@@ -734,6 +734,18 @@ pub fn semantic_tokens_full(
     crate::core::semantic_tokens::full(text, &analysis.tokens, hints)
 }
 
+/// Build the complete lexical semantic-token baseline for a document.
+///
+/// This deliberately uses the same lexer, legend, and encoder as the enriched
+/// semantic-token path. Callers can therefore render correct comments,
+/// keywords, strings, numbers, operators, and identifiers before parsing/HIR
+/// analysis has completed, without depending on an editor-side grammar.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn semantic_tokens_lexical(text: &str) -> Option<lsp_types::SemanticTokens> {
+    let tokens = tokenize_detailed(text);
+    crate::core::semantic_tokens::full(text, &tokens, &[])
+}
+
 pub fn formatting_edits(text: &str, _analysis: &DocumentAnalysis) -> Vec<lsp_types::TextEdit> {
     crate::core::formatting::formatting_edits(text)
 }
@@ -5374,6 +5386,29 @@ end
     }
 
     #[test]
+    fn lexical_semantic_tokens_cover_incomplete_source_before_analysis() {
+        let text = "% title\nvalue = sin(42\n";
+        let tokens = semantic_tokens_lexical(text).expect("lexical tokens");
+        let legend = semantic_tokens_legend();
+        let decoded = decode_semantic_tokens(text, &tokens);
+
+        assert_role_at(
+            text,
+            &decoded,
+            &legend,
+            text.find('%').expect("comment start"),
+            lsp_types::SemanticTokenType::COMMENT,
+        );
+        assert_role_at(
+            text,
+            &decoded,
+            &legend,
+            text.find("42").expect("number"),
+            lsp_types::SemanticTokenType::NUMBER,
+        );
+    }
+
+    #[test]
     fn source_context_symbol_discovery_reads_manifest_project_symbols() {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -5405,6 +5440,37 @@ roots = ["."]
             symbols.contains("stats.summarize"),
             "expected project symbol discovery to include package-qualified names"
         );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn source_context_symbol_discovery_exposes_class_folder_constructor_identity() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("runmat_lsp_class_symbol_{suffix}"));
+        fs::create_dir_all(root.join("src/@Report")).expect("create class folder");
+        fs::write(
+            root.join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(root.join("src/@Report/Report.m"), "classdef Report; end")
+            .expect("write class source");
+        let source = root.join("src/main.m");
+        fs::write(&source, "report = Report();").expect("write entry source");
+
+        let symbols = super::discover_known_project_symbols(source.to_str());
+        assert!(symbols.contains("Report"));
+        assert!(symbols.contains("Report.Report"));
 
         let _ = fs::remove_dir_all(&root);
     }

@@ -47,7 +47,10 @@ pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program
             });
         }
         // Skip layout-only tokens from lexing.
-        if matches!(t.token, Token::Ellipsis | Token::Section) {
+        if matches!(
+            t.token,
+            Token::Ellipsis | Token::Section | Token::LineComment | Token::BlockComment
+        ) {
             // After ellipsis, also drop any immediately following Newline tokens.
             // The lexer callback already consumed the first \n after `...`; any
             // additional blank lines should be treated as part of the continuation.

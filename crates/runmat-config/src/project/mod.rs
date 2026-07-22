@@ -163,7 +163,39 @@ pub struct ProjectSourceFile {
     pub package_path: Option<String>,
     #[serde(default)]
     pub class_name: Option<String>,
+    /// Canonical class scope contributed by `@Class` folders. This intentionally
+    /// excludes the file stem: `@Report/Report.m` and `@Report/title.m` both
+    /// belong to class `Report`, while their callable file identities remain
+    /// `Report.Report` and `Report.title` respectively.
+    #[serde(default)]
+    pub class_qualified_name: Option<String>,
     pub is_private: bool,
+}
+
+impl ProjectSourceFile {
+    /// The canonical name to apply to a parsed `classdef` source.
+    ///
+    /// Class-folder sources use their class scope rather than their member/file
+    /// name. Package classdef files outside an `@Class` folder use their normal
+    /// package-qualified file identity. Plain root classdefs retain the name
+    /// declared in the source.
+    pub fn class_definition_qualified_name(&self) -> Option<&str> {
+        self.class_qualified_name.as_deref().or_else(|| {
+            self.package_path
+                .as_ref()
+                .map(|_| self.qualified_name.as_str())
+        })
+    }
+
+    /// The callable identity for a parsed function or class-folder member file.
+    pub fn function_qualified_name(&self) -> Option<&str> {
+        if self.is_private {
+            return None;
+        }
+        (self.package_path.is_some() || self.class_name.is_some())
+            .then_some(self.qualified_name.as_str())
+            .filter(|name| name.contains('.'))
+    }
 }
 
 #[derive(Debug, Error)]
@@ -313,6 +345,29 @@ pub struct DiscoveredProjectSymbols {
     pub root_package: String,
     pub project_root: PathBuf,
     pub symbols: HashSet<String>,
+}
+
+fn extend_project_source_symbols(
+    symbols: &mut HashSet<String>,
+    source: &ProjectSourceFile,
+    package_name: &str,
+    root_dependencies: &BTreeMap<String, String>,
+) {
+    let mut names = vec![source.qualified_name.as_str()];
+    if let Some(class_name) = source.class_definition_qualified_name() {
+        if class_name != source.qualified_name {
+            names.push(class_name);
+        }
+    }
+    for name in names {
+        symbols.insert(name.to_string());
+        symbols.insert(format!("{package_name}.{name}"));
+        for (alias, dependency_package) in root_dependencies {
+            if dependency_package == package_name {
+                symbols.insert(format!("{alias}.{name}"));
+            }
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -838,16 +893,12 @@ pub fn discover_project_symbols_from(
     let mut symbols = HashSet::new();
     for package in discovered.composition.packages.values() {
         for source in &package.source_index.files {
-            symbols.insert(source.qualified_name.clone());
-            symbols.insert(format!(
-                "{}.{}",
-                package.package_name, source.qualified_name
-            ));
-            for (alias, dependency_package) in &root_dependencies {
-                if dependency_package == &package.package_name {
-                    symbols.insert(format!("{alias}.{}", source.qualified_name));
-                }
-            }
+            extend_project_source_symbols(
+                &mut symbols,
+                source,
+                &package.package_name,
+                &root_dependencies,
+            );
         }
     }
     Ok(Some(DiscoveredProjectSymbols {
@@ -893,16 +944,12 @@ pub async fn discover_project_symbols_from_async(
     let mut symbols = HashSet::new();
     for package in discovered.composition.packages.values() {
         for source in &package.source_index.files {
-            symbols.insert(source.qualified_name.clone());
-            symbols.insert(format!(
-                "{}.{}",
-                package.package_name, source.qualified_name
-            ));
-            for (alias, dependency_package) in &root_dependencies {
-                if dependency_package == &package.package_name {
-                    symbols.insert(format!("{alias}.{}", source.qualified_name));
-                }
-            }
+            extend_project_source_symbols(
+                &mut symbols,
+                source,
+                &package.package_name,
+                &root_dependencies,
+            );
         }
     }
     Ok(Some(DiscoveredProjectSymbols {
@@ -1558,6 +1605,74 @@ struct ScanState {
     in_private: bool,
 }
 
+/// Normalize one MATLAB source path into the identity used by project
+/// composition. This is shared by manifest source-root scanning and the
+/// unmanaged loose-file resolver; consumers must not derive identities from
+/// raw path components themselves.
+pub fn project_source_file_from_path(
+    source_path: &Path,
+    root_dir: &Path,
+    source_root: &Path,
+) -> Option<ProjectSourceFile> {
+    let relative_path = source_path.strip_prefix(root_dir).ok()?.to_path_buf();
+    if !source_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("m"))
+    {
+        return None;
+    }
+    let stem = source_path.file_stem()?.to_str()?.trim();
+    if stem.is_empty() {
+        return None;
+    }
+
+    let mut state = ScanState::default();
+    if let Some(parent) = relative_path.parent() {
+        for component in parent.components() {
+            let segment = component.as_os_str().to_str()?;
+            if let Some(package) = segment.strip_prefix('+') {
+                if package.is_empty() {
+                    return None;
+                }
+                state.package_segments.push(package.to_string());
+            } else if let Some(class) = segment.strip_prefix('@') {
+                if class.is_empty() {
+                    return None;
+                }
+                state.class_name = Some(class.to_string());
+            } else if segment == "private" {
+                state.in_private = true;
+            } else {
+                state.module_segments.push(segment.to_string());
+            }
+        }
+    }
+
+    let mut qualified_segments = state.package_segments.clone();
+    qualified_segments.extend(state.module_segments.iter().cloned());
+    let class_qualified_name = state.class_name.as_ref().map(|class_name| {
+        let mut class_segments = qualified_segments.clone();
+        class_segments.push(class_name.clone());
+        class_segments.join(".")
+    });
+    if let Some(class_name) = &state.class_name {
+        qualified_segments.push(class_name.clone());
+    }
+    qualified_segments.push(stem.to_string());
+    let qualified_name = qualified_segments.join(".");
+    (!qualified_name.is_empty()).then_some(ProjectSourceFile {
+        source_root: source_root.to_path_buf(),
+        relative_path,
+        qualified_name,
+        package_path: (!state.package_segments.is_empty())
+            .then(|| state.package_segments.join(".")),
+        class_name: state.class_name,
+        class_qualified_name,
+        is_private: state.in_private,
+    })
+}
+
 fn scan_source_dir(
     dir: &Path,
     root_abs: &Path,
@@ -1627,45 +1742,9 @@ fn scan_source_dir(
             continue;
         }
 
-        let relative_path = path
-            .strip_prefix(root_abs)
-            .unwrap_or(path.as_path())
-            .to_path_buf();
-        let stem = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("")
-            .trim();
-        if stem.is_empty() {
-            continue;
+        if let Some(source) = project_source_file_from_path(&path, root_abs, source_root) {
+            index.files.push(source);
         }
-
-        let mut qualified_segments = Vec::new();
-        qualified_segments.extend(state.package_segments.iter().cloned());
-        qualified_segments.extend(state.module_segments.iter().cloned());
-        if let Some(class_name) = &state.class_name {
-            qualified_segments.push(class_name.clone());
-        }
-        qualified_segments.push(stem.to_string());
-        let qualified_name = qualified_segments.join(".");
-        if qualified_name.is_empty() {
-            continue;
-        }
-
-        let package_path = if state.package_segments.is_empty() {
-            None
-        } else {
-            Some(state.package_segments.join("."))
-        };
-
-        index.files.push(ProjectSourceFile {
-            source_root: source_root.to_path_buf(),
-            relative_path,
-            qualified_name,
-            package_path,
-            class_name: state.class_name.clone(),
-            is_private: state.in_private,
-        });
     }
 
     Ok(())
@@ -1729,45 +1808,9 @@ async fn scan_source_dir_async(
                 continue;
             }
 
-            let relative_path = path
-                .strip_prefix(root_abs)
-                .unwrap_or(path.as_path())
-                .to_path_buf();
-            let stem = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("")
-                .trim();
-            if stem.is_empty() {
-                continue;
+            if let Some(source) = project_source_file_from_path(&path, root_abs, source_root) {
+                index.files.push(source);
             }
-
-            let mut qualified_segments = Vec::new();
-            qualified_segments.extend(current_state.package_segments.iter().cloned());
-            qualified_segments.extend(current_state.module_segments.iter().cloned());
-            if let Some(class_name) = &current_state.class_name {
-                qualified_segments.push(class_name.clone());
-            }
-            qualified_segments.push(stem.to_string());
-            let qualified_name = qualified_segments.join(".");
-            if qualified_name.is_empty() {
-                continue;
-            }
-
-            let package_path = if current_state.package_segments.is_empty() {
-                None
-            } else {
-                Some(current_state.package_segments.join("."))
-            };
-
-            index.files.push(ProjectSourceFile {
-                source_root: source_root.to_path_buf(),
-                relative_path,
-                qualified_name,
-                package_path,
-                class_name: current_state.class_name.clone(),
-                is_private: current_state.in_private,
-            });
         }
     }
 

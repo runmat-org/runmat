@@ -58,7 +58,14 @@ impl RunMatSession {
             source_lookup_name,
             self.compat_mode,
         )
-        .await;
+        .await
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(format!("project composition failed: {error}"))
+                    .with_identifier("RunMat:ProjectComposition")
+                    .build(),
+            )
+        })?;
         self.pending_companion_source_discovery = Some(companion);
         let previous_workspace_names = self
             .workspace_values

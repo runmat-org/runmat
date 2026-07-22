@@ -517,6 +517,11 @@ fn source_index_discovers_pkg_class_and_private_layout() {
     )
     .unwrap();
     fs::write(
+        tmp.path().join("src/+pkg/@Point/Point.m"),
+        "classdef Point; end",
+    )
+    .unwrap();
+    fs::write(
         tmp.path().join("src/+pkg/@Point/private/helper.m"),
         "function y=helper(); y=1; end",
     )
@@ -547,6 +552,7 @@ roots = ["src"]
     assert!(qualified.contains("main"));
     assert!(qualified.contains("pkg.value"));
     assert!(qualified.contains("pkg.Point.move"));
+    assert!(qualified.contains("pkg.Point.Point"));
     assert!(qualified.contains("pkg.Point.helper"));
     assert!(qualified.contains("utils.local"));
 
@@ -562,6 +568,69 @@ roots = ["src"]
         .private_dirs
         .iter()
         .any(|dir| dir == std::path::Path::new("src/+pkg/@Point/private")));
+    let constructor = index
+        .files
+        .iter()
+        .find(|file| file.relative_path == std::path::Path::new("+pkg/@Point/Point.m"))
+        .expect("class constructor should be indexed");
+    assert_eq!(constructor.qualified_name, "pkg.Point.Point");
+    assert_eq!(
+        constructor.class_qualified_name.as_deref(),
+        Some("pkg.Point")
+    );
+    assert_eq!(
+        constructor.class_definition_qualified_name(),
+        Some("pkg.Point")
+    );
+}
+
+#[test]
+fn source_index_distinguishes_root_class_constructor_from_member_identity() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src/@Report")).unwrap();
+    fs::write(
+        tmp.path().join("src/@Report/Report.m"),
+        "classdef Report; end",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("src/@Report/title.m"),
+        "function out=title(); out=1; end",
+    )
+    .unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+"#,
+    );
+    let manifest = load_project_manifest(&manifest_path).expect("manifest should validate");
+    let index = build_project_source_index(tmp.path(), &manifest).expect("source index");
+
+    let constructor = index
+        .files
+        .iter()
+        .find(|file| file.relative_path == std::path::Path::new("@Report/Report.m"))
+        .expect("class constructor should be indexed");
+    assert_eq!(constructor.qualified_name, "Report.Report");
+    assert_eq!(constructor.class_qualified_name.as_deref(), Some("Report"));
+    assert_eq!(
+        constructor.class_definition_qualified_name(),
+        Some("Report")
+    );
+
+    let member = index
+        .files
+        .iter()
+        .find(|file| file.relative_path == std::path::Path::new("@Report/title.m"))
+        .expect("class member should be indexed");
+    assert_eq!(member.qualified_name, "Report.title");
+    assert_eq!(member.class_qualified_name.as_deref(), Some("Report"));
+    assert_eq!(member.function_qualified_name(), Some("Report.title"));
 }
 
 #[test]

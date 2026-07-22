@@ -58,12 +58,14 @@ pub(crate) fn block_comment_skip(lex: &mut Lexer<Token>) -> Filter<()> {
 }
 
 pub(crate) fn line_comment_start(lex: &mut Lexer<Token>) -> Filter<()> {
-    // We just consumed a single '%'. Skip to the end of the line.
+    // Preserve the complete source span for syntax highlighting. Parser-facing
+    // consumers filter comment tokens, while the LSP uses this detailed token
+    // stream to emit the authoritative comment semantic token.
     let rest = lex.remainder();
     if let Some(pos) = rest.find('\n') {
         lex.bump(pos);
     } else {
         lex.bump(rest.len());
     }
-    Filter::Skip
+    Filter::Emit(())
 }

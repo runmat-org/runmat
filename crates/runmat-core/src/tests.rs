@@ -5677,6 +5677,67 @@ end
 }
 
 #[test]
+fn execute_manifest_project_resolves_class_folder_constructor_as_class_identity() {
+    let _guard = cwd_lock();
+    let project = tempfile::TempDir::new().expect("tempdir");
+    let root = project.path();
+    std::fs::create_dir_all(root.join("src/@Report")).expect("create class folder");
+    std::fs::write(
+        root.join("runmat.toml"),
+        r#"
+[package]
+name = "sales_report"
+
+[sources]
+roots = ["src"]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("src/@Report/Report.m"),
+        r#"
+classdef Report
+  properties
+    Name
+    Total
+  end
+  methods
+    function obj = Report(name, total)
+      obj.Name = name;
+      obj.Total = total;
+    end
+    function value = title(obj)
+      value = obj.Name;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class constructor");
+    let main = root.join("src/analyze_sales.m");
+    std::fs::write(
+        &main,
+        "report = Report(\"sales\", 42); label = report.title(); total = report.Total;",
+    )
+    .expect("write entry source");
+
+    let _cwd = push_cwd(root);
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_path_request(&mut session, "src/analyze_sales.m")
+        .expect("class-folder constructor should execute");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "label",
+        &runmat_builtins::Value::String("sales".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "total",
+        &runmat_builtins::Value::Num(42.0)
+    ));
+}
+
+#[test]
 fn execute_path_request_supports_source_class_subsref_signature() {
     let _cwd_lock = cwd_lock();
     let project = tempfile::tempdir().expect("tempdir");
