@@ -1934,6 +1934,65 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn load_save_roundtrip_preserves_nested_integer_tensors() {
+        let unsigned =
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
+                .expect("unsigned tensor");
+        let signed = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1])
+            .expect("signed tensor");
+        let cell = make_cell(
+            vec![
+                Value::Tensor(unsigned.clone()),
+                Value::Tensor(signed.clone()),
+            ],
+            1,
+            2,
+        )
+        .expect("cell");
+        let mut nested = StructValue::new();
+        nested.insert("unsigned", Value::Tensor(unsigned));
+        nested.insert("values", cell);
+
+        let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+            "nested".to_string(),
+            Value::Struct(nested),
+        )]))
+        .expect("encode MAT bytes");
+        let values: HashMap<_, _> = load_entries_from_bytes(bytes).into_iter().collect();
+
+        let Value::Struct(nested) = values.get("nested").expect("nested struct") else {
+            panic!("expected struct");
+        };
+        match nested.fields.get("unsigned") {
+            Some(Value::Tensor(tensor)) => assert_eq!(
+                tensor.integer_storage(),
+                Some(&IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]))
+            ),
+            other => panic!("expected unsigned tensor, got {other:?}"),
+        }
+        match nested.fields.get("values") {
+            Some(Value::Cell(cell)) => {
+                match cell.data[0].as_ref() {
+                    Value::Tensor(tensor) => assert_eq!(
+                        tensor.integer_storage(),
+                        Some(&IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]))
+                    ),
+                    other => panic!("expected unsigned cell tensor, got {other:?}"),
+                }
+                match cell.data[1].as_ref() {
+                    Value::Tensor(tensor) => assert_eq!(
+                        tensor.integer_storage(),
+                        Some(&IntegerStorage::I64(vec![i64::MIN, i64::MAX]))
+                    ),
+                    other => panic!("expected signed cell tensor, got {other:?}"),
+                }
+            }
+            other => panic!("expected cell, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn load_save_real_sparse_roundtrip() {
         let sparse = SparseTensor::new(3, 3, vec![0, 1, 1, 3], vec![1, 0, 2], vec![4.0, 5.0, 6.0])
             .expect("sparse");
