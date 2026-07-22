@@ -1655,7 +1655,7 @@ pub async fn dispatch_indexing(
                         idx_write_slice::assign_gpu_slice_with_plan(&handle, &plan, &rhs).await?
                     }
                 }),
-                Value::ComplexTensor(mut ct) => {
+                Value::ComplexTensor(ct) => {
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ct.shape)
                             .await
@@ -1666,16 +1666,11 @@ pub async fn dispatch_indexing(
                         stack.push(idx_write_slice::delete_complex_with_plan(ct, &plan, &rhs)?);
                         return Ok(true);
                     }
-                    if plan.indices.is_empty() {
-                        stack.push(Value::ComplexTensor(ct));
-                        return Ok(true);
-                    }
-                    let rhs_view =
-                        idx_write_slice::build_complex_rhs_view(&rhs, &plan.selection_lengths)
-                            .map_err(|e| map_slice_plan_error("slice assign", e))?;
-                    idx_write_slice::scatter_complex_with_plan(&mut ct, &plan, &rhs_view)
-                        .map_err(|e| map_slice_plan_error("slice assign", e))?;
-                    stack.push(Value::ComplexTensor(ct));
+                    stack.push(
+                        idx_write_slice::assign_complex_with_plan(ct, &plan, &rhs)
+                            .await
+                            .map_err(|e| map_slice_plan_error("slice assign", e))?,
+                    );
                 }
                 Value::Cell(ca) => {
                     let selectors =
@@ -2247,7 +2242,7 @@ pub async fn dispatch_indexing(
                 };
             }
             match base {
-                Value::ComplexTensor(mut t) => {
+                Value::ComplexTensor(t) => {
                     let vm_plan = build_expr_slice_plan(
                         ExprPlanSpec {
                             dims: *dims,
@@ -2270,14 +2265,7 @@ pub async fn dispatch_indexing(
                         )?);
                         return Ok(true);
                     }
-                    if !vm_plan.indices.is_empty() {
-                        let rhs_view = idx_write_slice::build_complex_rhs_view(
-                            &rhs,
-                            &vm_plan.selection_lengths,
-                        )?;
-                        idx_write_slice::scatter_complex_with_plan(&mut t, &vm_plan, &rhs_view)?;
-                    }
-                    stack.push(Value::ComplexTensor(t));
+                    stack.push(idx_write_slice::assign_complex_with_plan(t, &vm_plan, &rhs).await?);
                 }
                 Value::Tensor(t) => {
                     let vm_plan = build_expr_slice_plan(

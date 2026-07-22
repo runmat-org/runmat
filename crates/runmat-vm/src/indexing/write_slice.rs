@@ -1,4 +1,6 @@
-use crate::indexing::integer_assignment::{self, IntegerAssignmentValue};
+use crate::indexing::integer_assignment::{
+    self, ComplexIntegerAssignmentValue, IntegerAssignmentValue,
+};
 use crate::indexing::plan::IndexPlan;
 use crate::interpreter::errors::mex;
 use runmat_builtins::{
@@ -551,6 +553,128 @@ pub(crate) async fn materialize_integer_rhs_for_plan(
     }
 }
 
+async fn materialize_complex_integer_rhs_for_plan(
+    rhs: &Value,
+    plan: &IndexPlan,
+) -> Result<Vec<ComplexIntegerAssignmentValue>, RuntimeError> {
+    match rhs {
+        Value::Complex(real, imag) => Ok(vec![
+            ComplexIntegerAssignmentValue {
+                real: IntegerAssignmentValue::Float(*real),
+                imag: IntegerAssignmentValue::Float(*imag),
+            };
+            plan.indices.len()
+        ]),
+        Value::ComplexTensor(tensor) => {
+            let values = if let Some(storage) = &tensor.integer_data {
+                (0..storage.len())
+                    .map(|index| ComplexIntegerAssignmentValue {
+                        real: IntegerAssignmentValue::Exact(
+                            storage
+                                .real
+                                .value_at(index)
+                                .expect("typed complex storage length was validated"),
+                        ),
+                        imag: IntegerAssignmentValue::Exact(
+                            storage
+                                .imag
+                                .value_at(index)
+                                .expect("typed complex storage length was validated"),
+                        ),
+                    })
+                    .collect()
+            } else {
+                tensor
+                    .data
+                    .iter()
+                    .map(|&(real, imag)| ComplexIntegerAssignmentValue {
+                        real: IntegerAssignmentValue::Float(real),
+                        imag: IntegerAssignmentValue::Float(imag),
+                    })
+                    .collect()
+            };
+            materialize_complex_integer_values_for_plan(values, &tensor.shape, plan)
+        }
+        _ => materialize_integer_rhs_for_plan(rhs, plan)
+            .await
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|real| ComplexIntegerAssignmentValue {
+                        real,
+                        imag: IntegerAssignmentValue::Float(0.0),
+                    })
+                    .collect()
+            }),
+    }
+}
+
+fn materialize_complex_integer_values_for_plan(
+    values: Vec<ComplexIntegerAssignmentValue>,
+    rhs_shape: &[usize],
+    plan: &IndexPlan,
+) -> Result<Vec<ComplexIntegerAssignmentValue>, RuntimeError> {
+    if plan.dims == 1 {
+        if values.len() == plan.indices.len() {
+            return Ok(values);
+        }
+        if values.len() == 1 {
+            return Ok(vec![values[0].clone(); plan.indices.len()]);
+        }
+        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+    }
+
+    let dims = plan.selection_lengths.len();
+    let mut shape = rhs_shape.to_vec();
+    if shape.len() < dims {
+        shape.resize(dims, 1);
+    }
+    if shape.len() > dims {
+        if shape.iter().skip(dims).any(|&dimension| dimension != 1) {
+            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+        }
+        shape.truncate(dims);
+    }
+    for (&rhs_len, &selection_len) in shape.iter().zip(&plan.selection_lengths) {
+        if rhs_len != 1 && rhs_len != selection_len {
+            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+        }
+    }
+    let expected = shape
+        .iter()
+        .copied()
+        .fold(1usize, |acc, length| acc.saturating_mul(length.max(1)));
+    if values.len() != expected {
+        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+    }
+    let mut strides = vec![1usize; dims];
+    for dimension in 1..dims {
+        strides[dimension] = strides[dimension - 1] * shape[dimension - 1].max(1);
+    }
+    let mut output = Vec::with_capacity(plan.indices.len());
+    let mut coordinates = vec![0usize; dims];
+    for _ in 0..plan.indices.len() {
+        let mut rhs_index = 0usize;
+        for dimension in 0..dims {
+            let coordinate = if shape[dimension] == 1 {
+                0
+            } else {
+                coordinates[dimension]
+            };
+            rhs_index += coordinate * strides[dimension];
+        }
+        output.push(values[rhs_index].clone());
+        for (dimension, coordinate) in coordinates.iter_mut().enumerate() {
+            *coordinate += 1;
+            if *coordinate < plan.selection_lengths[dimension].max(1) {
+                break;
+            }
+            *coordinate = 0;
+        }
+    }
+    Ok(output)
+}
+
 pub fn scatter_real_with_plan(
     t: &mut Tensor,
     plan: &IndexPlan,
@@ -753,6 +877,38 @@ pub async fn assign_tensor_with_plan(
     let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
     scatter_real_with_plan(&mut t, plan, &rhs_values)?;
     Ok(Value::Tensor(t))
+}
+
+pub async fn assign_complex_with_plan(
+    mut tensor: ComplexTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    if plan.indices.is_empty() {
+        return Ok(Value::ComplexTensor(tensor));
+    }
+    if tensor.integer_data.is_some() {
+        let rhs_values = materialize_complex_integer_rhs_for_plan(rhs, plan).await?;
+        let storage = tensor
+            .integer_data
+            .take()
+            .expect("typed complex tensor must retain exact storage");
+        let real_values: Vec<IntegerAssignmentValue> =
+            rhs_values.iter().map(|value| value.real.clone()).collect();
+        let imag_values: Vec<IntegerAssignmentValue> =
+            rhs_values.iter().map(|value| value.imag.clone()).collect();
+        let mut real = storage.real;
+        let mut imag = storage.imag;
+        integer_assignment::scatter(&mut real, plan, &real_values)?;
+        integer_assignment::scatter(&mut imag, plan, &imag_values)?;
+        return IntegerComplexStorage::new(real, imag)
+            .and_then(|storage| ComplexTensor::new_integer(storage, tensor.shape))
+            .map(Value::ComplexTensor)
+            .map_err(|error| map_slice_shape_error("typed complex slice assign", error));
+    }
+    let rhs_view = build_complex_rhs_view(rhs, &plan.selection_lengths)?;
+    scatter_complex_with_plan(&mut tensor, plan, &rhs_view)?;
+    Ok(Value::ComplexTensor(tensor))
 }
 
 pub fn delete_tensor_with_plan(
@@ -1202,13 +1358,15 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        assign_sparse_with_plan, assign_tensor_with_plan, build_complex_rhs_view,
-        build_string_rhs_view, delete_tensor_with_plan, map_acceleration_error,
+        assign_complex_with_plan, assign_sparse_with_plan, assign_tensor_with_plan,
+        build_complex_rhs_view, build_string_rhs_view, delete_tensor_with_plan,
+        map_acceleration_error,
     };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CellArray, ComplexTensor, IntegerStorage, SparseTensor, StringArray, Tensor, Value,
+        CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, SparseTensor, StringArray,
+        Tensor, Value,
     };
 
     #[test]
@@ -1263,6 +1421,113 @@ mod tests {
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::I8(vec![i8::MAX, i8::MAX]))
+        );
+    }
+
+    #[test]
+    fn typed_complex_integer_plan_assignment_preserves_exact_components_and_broadcasts() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1, 2, 3, 4]),
+                IntegerStorage::U64(vec![10, 20, 30, 40]),
+            )
+            .expect("storage"),
+            vec![2, 2],
+        )
+        .expect("tensor");
+        let rhs = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_808]),
+                    IntegerStorage::U64(vec![7, 8]),
+                )
+                .expect("storage"),
+                vec![1, 2],
+            )
+            .expect("rhs"),
+        );
+        let plan = IndexPlan::new(vec![0, 1, 2, 3], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+        let result = block_on(assign_complex_with_plan(tensor, &plan, &rhs)).expect("assign");
+
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(
+            output
+                .integer_data
+                .as_ref()
+                .map(|storage| (&storage.real, &storage.imag)),
+            Some((
+                &IntegerStorage::U64(vec![
+                    u64::MAX,
+                    u64::MAX,
+                    9_223_372_036_854_775_808,
+                    9_223_372_036_854_775_808
+                ]),
+                &IntegerStorage::U64(vec![7, 7, 8, 8]),
+            ))
+        );
+    }
+
+    #[test]
+    fn typed_complex_integer_plan_assignment_rejects_shape_mismatch() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I8(vec![0; 4]),
+                IntegerStorage::I8(vec![0; 4]),
+            )
+            .expect("storage"),
+            vec![2, 2],
+        )
+        .expect("tensor");
+        let rhs = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I8(vec![1, 2, 3]),
+                    IntegerStorage::I8(vec![4, 5, 6]),
+                )
+                .expect("storage"),
+                vec![1, 3],
+            )
+            .expect("rhs"),
+        );
+        let plan = IndexPlan::new(vec![0, 1, 2, 3], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+        let err = block_on(assign_complex_with_plan(tensor, &plan, &rhs))
+            .expect_err("shape mismatch should fail");
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn typed_complex_integer_plan_assignment_converts_float_components_independently() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I8(vec![0; 2]),
+                IntegerStorage::I8(vec![0; 2]),
+            )
+            .expect("storage"),
+            vec![1, 2],
+        )
+        .expect("tensor");
+        let plan = IndexPlan::new(vec![0, 1], vec![1, 2], vec![2], 1, vec![1, 2]);
+        let result = block_on(assign_complex_with_plan(
+            tensor,
+            &plan,
+            &Value::Complex(300.5, -300.5),
+        ))
+        .expect("assign");
+
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(
+            output
+                .integer_data
+                .as_ref()
+                .map(|storage| (&storage.real, &storage.imag)),
+            Some((
+                &IntegerStorage::I8(vec![i8::MAX, i8::MAX]),
+                &IntegerStorage::I8(vec![i8::MIN, i8::MIN]),
+            ))
         );
     }
 

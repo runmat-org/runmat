@@ -152,6 +152,44 @@ fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
 }
 
 #[test]
+fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispatch() {
+    let vars = execute_source(
+        "a = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); rhs = complex(uint64([18446744073709551615 9223372036854775808]), uint64([7 8])); a(:, :) = rhs; ar = real(a); ai = imag(a); b = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); b(1:end, :) = rhs;",
+    )
+    .expect("typed complex slice assignment should execute");
+
+    assert!(matches!(
+        &vars[0],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                == Some((
+                    &IntegerStorage::U64(vec![u64::MAX, u64::MAX, 9_223_372_036_854_775_808, 9_223_372_036_854_775_808]),
+                    &IntegerStorage::U64(vec![7, 7, 8, 8]),
+                ))
+    ));
+    assert!(matches!(
+        &vars[2],
+        Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&IntegerStorage::U64(vec![u64::MAX, u64::MAX, 9_223_372_036_854_775_808, 9_223_372_036_854_775_808]))
+    ));
+    assert!(matches!(
+        &vars[3],
+        Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::U64(vec![7, 7, 8, 8]))
+    ));
+    assert!(matches!(
+        &vars[4],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                == Some((
+                    &IntegerStorage::U64(vec![u64::MAX, u64::MAX, 9_223_372_036_854_775_808, 9_223_372_036_854_775_808]),
+                    &IntegerStorage::U64(vec![7, 7, 8, 8]),
+                ))
+    ));
+}
+
+#[test]
 fn integer_casts_preserve_complex_storage_for_every_integer_class_through_vm_dispatch() {
     let vars = execute_source(
         "z = complex([1.5 -2.5], [0.49 -1.5]); a = int8(z); b = int16(z); c = int32(z); d = int64(z); e = uint8(z); f = uint16(z); g = uint32(z); h = uint64(z); flags = [isreal(a) isreal(b) isreal(c) isreal(d) isreal(e) isreal(f) isreal(g) isreal(h)]; q = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); q64 = int64(q);",
