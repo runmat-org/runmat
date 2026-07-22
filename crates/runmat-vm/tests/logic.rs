@@ -357,6 +357,37 @@ fn typed_complex_integer_fft_operations_are_rejected_before_f64_coercion() {
 }
 
 #[test]
+fn typed_complex_integer_fft_shifts_preserve_exact_components() {
+    let vars = execute_source(
+        "z = complex(uint64([18446744073709551615 9223372036854775808 7]), uint64([5 6 7])); shifted = fftshift(z); restored = ifftshift(shifted); shifted_real = real(shifted); shifted_imag = imag(shifted); restored_real = real(restored); restored_imag = imag(restored);",
+    )
+    .expect("FFT shifts should preserve typed complex integer storage");
+
+    assert!(matches!(
+        &vars[3],
+        Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&IntegerStorage::U64(vec![7, u64::MAX, 1_u64 << 63]))
+    ));
+    assert!(matches!(
+        &vars[4],
+        Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::U64(vec![7, 5, 6]))
+    ));
+    assert!(matches!(
+        &vars[5],
+        Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63, 7]))
+    ));
+    assert!(matches!(
+        &vars[6],
+        Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::U64(vec![5, 6, 7]))
+    ));
+}
+
+#[test]
 fn typed_complex_integer_numerical_integration_is_rejected_before_f64_coercion() {
     for operation in [
         "gradient(z)",

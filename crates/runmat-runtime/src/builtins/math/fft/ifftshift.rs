@@ -292,8 +292,32 @@ fn ifftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
 }
 
 fn ifftshift_complex_tensor(tensor: ComplexTensor, dims: &[usize]) -> BuiltinResult<ComplexTensor> {
-    let ComplexTensor { data, shape, .. } = tensor;
+    let ComplexTensor {
+        data,
+        integer_data,
+        shape,
+        ..
+    } = tensor;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
+    if let Some(storage) = integer_data {
+        let rotated = storage
+            .reorder(|values| {
+                apply_shift(BUILTIN_NAME, values, &plan.ext_shape, &plan.positive)
+                    .map_err(|error| error.to_string())
+            })
+            .map_err(|source| {
+                ifftshift_error_with_detail(
+                    &IFFTSHIFT_ERROR_INTERNAL,
+                    format!("complex integer shift failed: {source}"),
+                )
+            })?;
+        return ComplexTensor::new_integer(rotated, shape).map_err(|source| {
+            ifftshift_error_with_detail(
+                &IFFTSHIFT_ERROR_INTERNAL,
+                format!("complex integer tensor reconstruction failed: {source}"),
+            )
+        });
+    }
     if data.is_empty() || plan.is_noop() {
         return ComplexTensor::new(data, shape).map_err(|source| {
             ifftshift_error_with_detail(
