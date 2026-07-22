@@ -11,6 +11,7 @@ pub(crate) enum IntegerBinaryOp {
     Subtract,
     Multiply,
     Divide,
+    Power,
 }
 
 /// Applies a MATLAB integer binary operation when either operand is integer
@@ -136,7 +137,15 @@ fn apply_integer_scalar(
 ) -> Result<Value, String> {
     let mut values = Vec::with_capacity(integer.storage.len());
     for index in 0..integer.storage.len() {
-        let integer_value = integer.storage.value_at(index).to_f64();
+        let integer_value = integer.storage.value_at(index);
+        if matches!(operation, IntegerBinaryOp::Power)
+            && integer_is_left
+            && nonnegative_integer_exponent(scalar)
+        {
+            values.push(exact_integer_power(integer_value, scalar as u64));
+            continue;
+        }
+        let integer_value = integer_value.to_f64();
         let result = if integer_is_left {
             apply_float(integer_value, scalar, operation)
         } else {
@@ -153,12 +162,16 @@ fn apply_float(lhs: f64, rhs: f64, operation: IntegerBinaryOp) -> f64 {
         IntegerBinaryOp::Subtract => lhs - rhs,
         IntegerBinaryOp::Multiply => lhs * rhs,
         IntegerBinaryOp::Divide => lhs / rhs,
+        IntegerBinaryOp::Power => lhs.powf(rhs),
     }
 }
 
 fn apply_exact(lhs: IntValue, rhs: IntValue, operation: IntegerBinaryOp) -> IntValue {
     if matches!(operation, IntegerBinaryOp::Divide) {
         return exact_integer_divide(lhs, rhs);
+    }
+    if matches!(operation, IntegerBinaryOp::Power) {
+        return exact_integer_power_pair(lhs, rhs);
     }
     macro_rules! apply {
         ($lhs:expr, $rhs:expr, $variant:ident) => {
@@ -167,6 +180,7 @@ fn apply_exact(lhs: IntValue, rhs: IntValue, operation: IntegerBinaryOp) -> IntV
                 IntegerBinaryOp::Subtract => $lhs.saturating_sub($rhs),
                 IntegerBinaryOp::Multiply => $lhs.saturating_mul($rhs),
                 IntegerBinaryOp::Divide => unreachable!("division returns before this dispatch"),
+                IntegerBinaryOp::Power => unreachable!("power returns before this dispatch"),
             })
         };
     }
@@ -181,6 +195,133 @@ fn apply_exact(lhs: IntValue, rhs: IntValue, operation: IntegerBinaryOp) -> IntV
         (IntValue::U64(lhs), IntValue::U64(rhs)) => apply!(lhs, rhs, U64),
         _ => unreachable!("integer class compatibility was checked before applying"),
     }
+}
+
+fn nonnegative_integer_exponent(value: f64) -> bool {
+    value.is_finite()
+        && value >= 0.0
+        && value.fract() == 0.0
+        && value < 18_446_744_073_709_551_616.0
+}
+
+fn exact_integer_power_pair(base: IntValue, exponent: IntValue) -> IntValue {
+    macro_rules! signed {
+        ($base:expr, $exponent:expr, $variant:ident, $min:expr, $max:expr) => {
+            IntValue::$variant(signed_integer_power(
+                $base as i128,
+                $exponent as i128,
+                $min as i128,
+                $max as i128,
+            ) as _)
+        };
+    }
+    macro_rules! unsigned {
+        ($base:expr, $exponent:expr, $variant:ident, $max:expr) => {
+            IntValue::$variant(
+                unsigned_integer_power($base as u128, $exponent as u64, $max as u128) as _,
+            )
+        };
+    }
+    match (base, exponent) {
+        (IntValue::I8(base), IntValue::I8(exponent)) => {
+            signed!(base, exponent, I8, i8::MIN, i8::MAX)
+        }
+        (IntValue::I16(base), IntValue::I16(exponent)) => {
+            signed!(base, exponent, I16, i16::MIN, i16::MAX)
+        }
+        (IntValue::I32(base), IntValue::I32(exponent)) => {
+            signed!(base, exponent, I32, i32::MIN, i32::MAX)
+        }
+        (IntValue::I64(base), IntValue::I64(exponent)) => {
+            signed!(base, exponent, I64, i64::MIN, i64::MAX)
+        }
+        (IntValue::U8(base), IntValue::U8(exponent)) => unsigned!(base, exponent, U8, u8::MAX),
+        (IntValue::U16(base), IntValue::U16(exponent)) => {
+            unsigned!(base, exponent, U16, u16::MAX)
+        }
+        (IntValue::U32(base), IntValue::U32(exponent)) => {
+            unsigned!(base, exponent, U32, u32::MAX)
+        }
+        (IntValue::U64(base), IntValue::U64(exponent)) => {
+            unsigned!(base, exponent, U64, u64::MAX)
+        }
+        _ => unreachable!("integer class compatibility was checked before applying"),
+    }
+}
+
+fn exact_integer_power(base: IntValue, exponent: u64) -> IntValue {
+    macro_rules! signed {
+        ($base:expr, $variant:ident, $min:expr, $max:expr) => {
+            IntValue::$variant(signed_integer_power(
+                $base as i128,
+                exponent as i128,
+                $min as i128,
+                $max as i128,
+            ) as _)
+        };
+    }
+    macro_rules! unsigned {
+        ($base:expr, $variant:ident, $max:expr) => {
+            IntValue::$variant(unsigned_integer_power($base as u128, exponent, $max as u128) as _)
+        };
+    }
+    match base {
+        IntValue::I8(base) => signed!(base, I8, i8::MIN, i8::MAX),
+        IntValue::I16(base) => signed!(base, I16, i16::MIN, i16::MAX),
+        IntValue::I32(base) => signed!(base, I32, i32::MIN, i32::MAX),
+        IntValue::I64(base) => signed!(base, I64, i64::MIN, i64::MAX),
+        IntValue::U8(base) => unsigned!(base, U8, u8::MAX),
+        IntValue::U16(base) => unsigned!(base, U16, u16::MAX),
+        IntValue::U32(base) => unsigned!(base, U32, u32::MAX),
+        IntValue::U64(base) => unsigned!(base, U64, u64::MAX),
+    }
+}
+
+fn signed_integer_power(base: i128, exponent: i128, min: i128, max: i128) -> i128 {
+    if exponent < 0 {
+        return signed_negative_integer_power(base, exponent.unsigned_abs(), max);
+    }
+    saturated_signed_power(base, exponent as u128, min, max)
+}
+
+fn signed_negative_integer_power(base: i128, exponent: u128, max: i128) -> i128 {
+    match base {
+        0 => max,
+        1 => 1,
+        -1 if exponent % 2 == 0 => 1,
+        -1 => -1,
+        2 if exponent == 1 => 1,
+        -2 if exponent == 1 => -1,
+        _ => 0,
+    }
+}
+
+fn saturated_signed_power(mut base: i128, mut exponent: u128, min: i128, max: i128) -> i128 {
+    let mut result = 1_i128;
+    while exponent != 0 {
+        if exponent & 1 != 0 {
+            result = result.saturating_mul(base).clamp(min, max);
+        }
+        exponent >>= 1;
+        if exponent != 0 {
+            base = base.saturating_mul(base).clamp(min, max);
+        }
+    }
+    result
+}
+
+fn unsigned_integer_power(mut base: u128, mut exponent: u64, max: u128) -> u128 {
+    let mut result = 1_u128;
+    while exponent != 0 {
+        if exponent & 1 != 0 {
+            result = result.saturating_mul(base).min(max);
+        }
+        exponent >>= 1;
+        if exponent != 0 {
+            base = base.saturating_mul(base).min(max);
+        }
+    }
+    result
 }
 
 fn exact_integer_divide(lhs: IntValue, rhs: IntValue) -> IntValue {
@@ -388,5 +529,50 @@ mod tests {
                 vec![1, 5]
             )
         );
+    }
+
+    #[test]
+    fn exact_integer_power_preserves_uint64_and_saturates() {
+        let result = try_integer_binary(
+            &integer(IntegerStorage::U64(vec![u64::MAX, 2, 0]), vec![1, 3]),
+            &integer(IntegerStorage::U64(vec![1, 64, 0]), vec![1, 3]),
+            IntegerBinaryOp::Power,
+            "power",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(
+            result,
+            integer(IntegerStorage::U64(vec![u64::MAX, u64::MAX, 1]), vec![1, 3])
+        );
+    }
+
+    #[test]
+    fn signed_integer_power_handles_negative_exponents_and_zero_base() {
+        let result = try_integer_binary(
+            &integer(IntegerStorage::I8(vec![-2, 2, 0, -1]), vec![1, 4]),
+            &integer(IntegerStorage::I8(vec![-1, -1, -1, -3]), vec![1, 4]),
+            IntegerBinaryOp::Power,
+            "power",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(
+            result,
+            integer(IntegerStorage::I8(vec![-1, 1, i8::MAX, -1]), vec![1, 4])
+        );
+    }
+
+    #[test]
+    fn scalar_integer_exponents_do_not_round_uint64_inputs_through_f64() {
+        let result = try_integer_binary(
+            &integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]),
+            &Value::Num(1.0),
+            IntegerBinaryOp::Power,
+            "power",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(result, Value::Int(IntValue::U64(u64::MAX)));
     }
 }
