@@ -1,7 +1,8 @@
 use crate::indexing::plan::{build_index_plan, IndexPlan};
 use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
 use runmat_builtins::{
-    ComplexTensor, IntValue, IntegerStorage, SparseTensor, StringArray, Tensor, Value,
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, SparseTensor, StringArray,
+    Tensor, Value,
 };
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
@@ -735,11 +736,8 @@ pub fn read_complex_slice_from_plan(
     tensor: &ComplexTensor,
     plan: &IndexPlan,
 ) -> Result<Value, RuntimeError> {
-    if tensor.integer_data.is_some() {
-        return Err(crate::interpreter::errors::mex(
-            "UnsupportedTypedComplexInteger",
-            "typed complex integer indexing is not implemented",
-        ));
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        return read_integer_complex_slice_from_plan(storage, plan);
     }
     if plan.indices.is_empty() {
         let empty = ComplexTensor::new(Vec::new(), plan.output_shape.clone())
@@ -770,6 +768,46 @@ pub fn read_complex_slice_from_plan(
     let out_ct =
         ComplexTensor::new(out, plan.output_shape.clone()).map_err(map_slice_shape_error)?;
     Ok(Value::ComplexTensor(out_ct))
+}
+
+fn read_integer_complex_slice_from_plan(
+    storage: &IntegerComplexStorage,
+    plan: &IndexPlan,
+) -> Result<Value, RuntimeError> {
+    let mut real_values = Vec::with_capacity(plan.indices.len());
+    let mut imag_values = Vec::with_capacity(plan.indices.len());
+    for &linear_index in &plan.indices {
+        let index = linear_index as usize;
+        let real = storage.real.value_at(index).ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "IndexOutOfBounds",
+                "Slice error: complex index out of bounds",
+            )
+        })?;
+        let imag = storage.imag.value_at(index).ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "IndexOutOfBounds",
+                "Slice error: complex index out of bounds",
+            )
+        })?;
+        real_values.push(real);
+        imag_values.push(imag);
+    }
+
+    let real = storage
+        .real
+        .from_same_class_values(real_values)
+        .map_err(map_slice_shape_error)?;
+    let imag = storage
+        .imag
+        .from_same_class_values(imag_values)
+        .map_err(map_slice_shape_error)?;
+    let result = ComplexTensor::new_integer(
+        IntegerComplexStorage::new(real, imag).map_err(map_slice_shape_error)?,
+        plan.output_shape.clone(),
+    )
+    .map_err(map_slice_shape_error)?;
+    Ok(Value::ComplexTensor(result))
 }
 
 pub async fn read_gpu_slice(
@@ -862,7 +900,8 @@ mod tests {
     use crate::indexing::selectors::SliceSelector;
     use futures::executor::block_on;
     use runmat_builtins::{
-        ComplexTensor, IntValue, IntegerStorage, SparseTensor, StringArray, Tensor, Value,
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, SparseTensor, StringArray,
+        Tensor, Value,
     };
 
     #[test]
@@ -1007,6 +1046,70 @@ mod tests {
         let err =
             read_complex_slice_from_plan(&ct, &plan).expect_err("shape-mismatch plan should fail");
         assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn integer_complex_slice_preserves_exact_reordered_and_empty_components() {
+        let complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1, 9_223_372_036_854_775_809, u64::MAX]),
+                IntegerStorage::U64(vec![7, 8, 9]),
+            )
+            .unwrap(),
+            vec![1, 3],
+        )
+        .unwrap();
+        let reordered = IndexPlan::new(vec![2, 0], vec![1, 2], vec![2], 1, vec![1, 3]);
+        let Value::ComplexTensor(result) =
+            read_complex_slice_from_plan(&complex, &reordered).expect("typed complex slice")
+        else {
+            panic!("typed complex selection must remain a complex tensor");
+        };
+        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(
+            result.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX, 1]),
+                    IntegerStorage::U64(vec![9, 7]),
+                )
+                .unwrap()
+            )
+        );
+
+        let scalar = IndexPlan::new(vec![1], vec![1, 1], vec![1], 1, vec![1, 3]);
+        let Value::ComplexTensor(result) =
+            read_complex_slice_from_plan(&complex, &scalar).expect("typed scalar selection")
+        else {
+            panic!("typed complex scalar must retain exact complex storage");
+        };
+        assert_eq!(
+            result.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![9_223_372_036_854_775_809]),
+                    IntegerStorage::U64(vec![8]),
+                )
+                .unwrap()
+            )
+        );
+
+        let empty = IndexPlan::new(Vec::new(), vec![0, 1], vec![0], 1, vec![1, 3]);
+        let Value::ComplexTensor(result) =
+            read_complex_slice_from_plan(&complex, &empty).expect("empty typed selection")
+        else {
+            panic!("empty typed complex selection must retain its class");
+        };
+        assert_eq!(
+            result.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(Vec::new()),
+                    IntegerStorage::U64(Vec::new())
+                )
+                .unwrap()
+            )
+        );
     }
 
     #[test]
