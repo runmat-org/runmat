@@ -257,8 +257,12 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
                 .map_err(|e| reshape_error(format!("reshape: {e}")))
         }
         Value::ComplexTensor(ct) => {
-            let ComplexTensor { data, .. } = ct;
-            ComplexTensor::new(data, dims.to_vec())
+            if let Some(storage) = ct.integer_data {
+                return ComplexTensor::new_integer(storage, dims.to_vec())
+                    .map(Value::ComplexTensor)
+                    .map_err(|e| reshape_error(format!("reshape: {e}")));
+            }
+            ComplexTensor::new(ct.data, dims.to_vec())
                 .map(Value::ComplexTensor)
                 .map_err(|e| reshape_error(format!("reshape: {e}")))
         }
@@ -299,7 +303,7 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
             if dims.len() <= 2 && dims.iter().all(|&d| d == 1) {
                 Ok(Value::Int(i))
             } else {
-                Tensor::new(vec![i.to_f64()], dims.to_vec())
+                Tensor::new_integer(runmat_builtins::IntegerStorage::from_scalar(i), dims.to_vec())
                     .map(Value::Tensor)
                     .map_err(|e| reshape_error(format!("reshape: {e}")))
             }
