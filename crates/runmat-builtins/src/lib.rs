@@ -1591,6 +1591,85 @@ impl ComplexTensor {
             cols,
         }
     }
+
+    /// Formats one element using its exact integer components when present.
+    ///
+    /// `data` remains a floating compatibility view during the integer-dtype
+    /// migration, so it must not be used to render typed values such as
+    /// `uint64` above the exact IEEE-754 range.
+    pub fn format_element(&self, index: usize) -> String {
+        if let Some(storage) = &self.integer_data {
+            let real = storage
+                .real
+                .value_at(index)
+                .expect("complex integer real storage must match tensor shape");
+            let imag = storage
+                .imag
+                .value_at(index)
+                .expect("complex integer imaginary storage must match tensor shape");
+            return format_integer_complex_value(&real, &imag);
+        }
+
+        let (real, imag) = self.data[index];
+        Value::Complex(real, imag).to_string()
+    }
+}
+
+fn format_integer_complex_value(real: &IntValue, imag: &IntValue) -> String {
+    if imag.is_zero() {
+        return format_integer_value(real);
+    }
+    if real.is_zero() {
+        return format!("{}i", format_integer_value(imag));
+    }
+    if integer_value_is_negative(imag) {
+        return format!(
+            "{}-{}i",
+            format_integer_value(real),
+            format_integer_magnitude(imag)
+        );
+    }
+    format!(
+        "{}+{}i",
+        format_integer_value(real),
+        format_integer_value(imag)
+    )
+}
+
+fn format_integer_value(value: &IntValue) -> String {
+    match value {
+        IntValue::I8(value) => value.to_string(),
+        IntValue::I16(value) => value.to_string(),
+        IntValue::I32(value) => value.to_string(),
+        IntValue::I64(value) => value.to_string(),
+        IntValue::U8(value) => value.to_string(),
+        IntValue::U16(value) => value.to_string(),
+        IntValue::U32(value) => value.to_string(),
+        IntValue::U64(value) => value.to_string(),
+    }
+}
+
+fn integer_value_is_negative(value: &IntValue) -> bool {
+    match value {
+        IntValue::I8(value) => *value < 0,
+        IntValue::I16(value) => *value < 0,
+        IntValue::I32(value) => *value < 0,
+        IntValue::I64(value) => *value < 0,
+        IntValue::U8(_) | IntValue::U16(_) | IntValue::U32(_) | IntValue::U64(_) => false,
+    }
+}
+
+fn format_integer_magnitude(value: &IntValue) -> String {
+    match value {
+        IntValue::I8(value) => value.unsigned_abs().to_string(),
+        IntValue::I16(value) => value.unsigned_abs().to_string(),
+        IntValue::I32(value) => value.unsigned_abs().to_string(),
+        IntValue::I64(value) => value.unsigned_abs().to_string(),
+        IntValue::U8(value) => value.to_string(),
+        IntValue::U16(value) => value.to_string(),
+        IntValue::U32(value) => value.to_string(),
+        IntValue::U64(value) => value.to_string(),
+    }
 }
 
 const MAX_ND_DISPLAY_ELEMENTS: usize = 4096;
@@ -3216,11 +3295,11 @@ impl fmt::Display for ComplexTensor {
         match self.shape.len() {
             0 | 1 => {
                 write!(f, "[")?;
-                for (i, (re, im)) in self.data.iter().enumerate() {
+                for i in 0..self.data.len() {
                     if i > 0 {
                         write!(f, " ")?;
                     }
-                    let s = Value::Complex(*re, *im).to_string();
+                    let s = self.format_element(i);
                     write!(f, "{s}")?;
                 }
                 write!(f, "]")
@@ -3234,8 +3313,7 @@ impl fmt::Display for ComplexTensor {
                         if c > 0 {
                             write!(f, " ")?;
                         }
-                        let (re, im) = self.data[r + c * rows];
-                        let s = Value::Complex(re, im).to_string();
+                        let s = self.format_element(r + c * rows);
                         write!(f, "{s}")?;
                     }
                     if r + 1 < rows {
@@ -3247,8 +3325,7 @@ impl fmt::Display for ComplexTensor {
             _ => {
                 if should_expand_nd_display(&self.shape) {
                     write_nd_pages(f, &self.shape, |f, idx| {
-                        let (re, im) = self.data[idx];
-                        write!(f, "{}", Value::Complex(re, im))
+                        write!(f, "{}", self.format_element(idx))
                     })
                 } else {
                     write!(f, "ComplexTensor(shape={:?})", self.shape)
@@ -3261,8 +3338,8 @@ impl fmt::Display for ComplexTensor {
 #[cfg(test)]
 mod display_tests {
     use super::{
-        fmt_rational, format_number, set_display_format, ComplexTensor, FormatMode, LogicalArray,
-        Tensor,
+        fmt_rational, format_number, set_display_format, ComplexTensor, FormatMode,
+        IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor,
     };
 
     #[test]
@@ -3324,6 +3401,32 @@ mod display_tests {
         let rendered = complex.to_string();
         assert!(rendered.contains("(:, :, 1) ="));
         assert!(rendered.contains("(:, :, 2) ="));
+    }
+
+    #[test]
+    fn typed_complex_integer_display_uses_exact_components() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("matching components");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex");
+        assert_eq!(
+            tensor.to_string(),
+            format!("[{}+7i {}]", u64::MAX, 1_u64 << 63)
+        );
+
+        let negative_imaginary = IntegerComplexStorage::new(
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::I64(vec![i64::MIN]),
+        )
+        .expect("matching components");
+        let tensor =
+            ComplexTensor::new_integer(negative_imaginary, vec![1, 1]).expect("typed complex");
+        assert_eq!(
+            tensor.to_string(),
+            format!("[1-{}i]", i64::MIN.unsigned_abs())
+        );
     }
 
     #[test]

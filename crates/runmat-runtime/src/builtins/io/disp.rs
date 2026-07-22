@@ -374,8 +374,7 @@ fn format_complex_tensor(tensor: &ComplexTensor) -> Vec<String> {
         let rows = shape[0];
         let cols = shape.get(1).copied().unwrap_or(1);
         if tensor.data.len() == 1 {
-            let (re, im) = tensor.data[0];
-            return vec![format!("{}", Value::Complex(re, im))];
+            return vec![tensor.format_element(0)];
         }
         return format_table(
             rows,
@@ -385,8 +384,7 @@ fn format_complex_tensor(tensor: &ComplexTensor) -> Vec<String> {
             Align::Right,
             |r, c| {
                 let idx = r + c * rows;
-                let (re, im) = tensor.data[idx];
-                format!("{}", Value::Complex(re, im))
+                tensor.format_element(idx)
             },
         );
     }
@@ -415,8 +413,7 @@ fn format_complex_tensor_pages(tensor: &ComplexTensor, dims: &[usize]) -> Vec<St
             Align::Right,
             |r, c| {
                 let idx = linear_index_with_tail(dims, r, c, &current_tail);
-                let (re, im) = tensor.data[idx];
-                format!("{}", Value::Complex(re, im))
+                tensor.format_element(idx)
             },
         );
         lines.extend(table);
@@ -434,11 +431,19 @@ fn format_complex_tensor_nested(tensor: &ComplexTensor) -> Vec<String> {
         return vec!["[]".to_string()];
     }
     if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
-        return vec![format!("{}", Value::Complex(re, im))];
+        return vec![tensor.format_element(0)];
     }
     let shape = canonical_dims(&tensor.shape);
-    vec![format!("[{} complex double]", dims_to_string(&shape))]
+    let class_name = tensor
+        .integer_data
+        .as_ref()
+        .map(|storage| storage.class_name())
+        .unwrap_or("double");
+    vec![format!(
+        "[{} complex {}]",
+        dims_to_string(&shape),
+        class_name
+    )]
 }
 
 fn format_logical_array(logical: &LogicalArray) -> Vec<String> {
@@ -600,12 +605,17 @@ fn summarize_for_cell(value: &Value) -> String {
             if tensor.data.is_empty() {
                 "[]".to_string()
             } else if tensor.data.len() == 1 {
-                let (re, im) = tensor.data[0];
-                format!("[{}]", Value::Complex(re, im))
+                format!("[{}]", tensor.format_element(0))
             } else {
+                let class_name = tensor
+                    .integer_data
+                    .as_ref()
+                    .map(|storage| storage.class_name())
+                    .unwrap_or("double");
                 format!(
-                    "[{} complex double]",
-                    dims_to_string(&canonical_dims(&tensor.shape))
+                    "[{} complex {}]",
+                    dims_to_string(&canonical_dims(&tensor.shape)),
+                    class_name
                 )
             }
         }
@@ -986,6 +996,34 @@ pub(crate) mod tests {
         let lines = render_value(&Value::Struct(fields), RenderMode::TopLevel);
 
         assert_eq!(lines, vec!["    values: [1x2 int16]".to_string()]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn typed_complex_integer_display_uses_exact_components_and_class() {
+        let storage = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("matching components");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex");
+        assert_eq!(
+            format_for_disp(&Value::ComplexTensor(tensor.clone())),
+            vec![format!("{}+7i  {}", u64::MAX, 1_u64 << 63)]
+        );
+
+        let mut fields = StructValue::new();
+        fields.insert("values", Value::ComplexTensor(tensor));
+        assert_eq!(
+            render_value(&Value::Struct(fields), RenderMode::TopLevel),
+            vec!["    values: [1x2 complex uint64]".to_string()]
+        );
+
+        let cell = make_cell(vec![Value::ComplexTensor(tensor)], 1, 1).expect("cell");
+        assert_eq!(
+            format_for_disp(&cell),
+            vec!["    [1x2 complex uint64]".to_string()]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
