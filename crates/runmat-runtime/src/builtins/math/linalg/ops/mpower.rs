@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::linalg::type_resolvers::matrix_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -170,6 +171,23 @@ async fn mpower_builtin(base: Value, exponent: Value) -> BuiltinResult<Value> {
 }
 
 pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult<Value> {
+    if (contains_integer(base) || contains_integer(exponent))
+        && scalar_mpower_input(base)
+        && scalar_mpower_input(exponent)
+    {
+        let base_host = crate::dispatcher::gather_if_needed_async(base)
+            .await
+            .map_err(map_control_flow)?;
+        let exponent_host = crate::dispatcher::gather_if_needed_async(exponent)
+            .await
+            .map_err(map_control_flow)?;
+        if let Some(result) =
+            try_integer_binary(&base_host, &exponent_host, IntegerBinaryOp::Power, NAME)
+                .map_err(mpower_invalid_argument)?
+        {
+            return Ok(result);
+        }
+    }
     if let Some(result) = try_gpu_mpower(base, exponent).await? {
         return Ok(result);
     }
@@ -199,6 +217,24 @@ pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult
     }
 
     Ok(result)
+}
+
+fn contains_integer(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        _ => false,
+    }
+}
+
+fn scalar_mpower_input(value: &Value) -> bool {
+    match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
+        Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
+        Value::LogicalArray(logical) => logical.data.len() == 1,
+        Value::GpuTensor(handle) => crate::builtins::common::shape::is_scalar_shape(&handle.shape),
+        _ => false,
+    }
 }
 
 fn map_host_power_error(message: String) -> RuntimeError {
@@ -418,7 +454,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -436,6 +472,21 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn scalar_integer_mpower_preserves_exact_uint64_storage() {
+        let result =
+            mpower_builtin(Value::Int(IntValue::U64(u64::MAX)), Value::Num(1.0)).expect("mpower");
+        assert_eq!(result, Value::Int(IntValue::U64(u64::MAX)));
+
+        let base = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("integer scalar tensor");
+        let result = mpower_builtin(Value::Tensor(base), Value::Num(1.0)).expect("mpower");
+        assert_eq!(result, Value::Int(IntValue::U64(u64::MAX)));
+
+        let result = mpower_builtin(Value::Num(2.0), Value::Int(IntValue::U8(3))).expect("mpower");
+        assert_eq!(result, Value::Int(IntValue::U8(8)));
     }
 
     #[test]
