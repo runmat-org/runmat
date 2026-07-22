@@ -680,6 +680,33 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
     }
 }
 
+fn sparse_find_values(
+    integer_storage: Option<&IntegerStorage>,
+    real_values: Vec<f64>,
+    integer_value_indices: &[usize],
+) -> FindValues {
+    integer_storage.map_or_else(
+        || FindValues::Real(real_values),
+        |storage| FindValues::Integer(select_integer_values(storage, integer_value_indices)),
+    )
+}
+
+fn sparse_stored_value_is_nonzero(
+    sparse: &runmat_builtins::SparseTensor,
+    integer_storage: Option<&IntegerStorage>,
+    index: usize,
+) -> bool {
+    integer_storage.map_or_else(
+        || sparse.values[index] != 0.0,
+        |storage| {
+            !storage
+                .value_at(index)
+                .expect("SparseTensor integer storage is consistent")
+                .is_zero()
+        },
+    )
+}
+
 fn compute_find_sparse(
     sparse: &runmat_builtins::SparseTensor,
     options: &FindOptions,
@@ -689,9 +716,12 @@ fn compute_find_sparse(
 
     let mut indices = Vec::new();
     let mut values = Vec::new();
+    let integer_storage = sparse.integer_storage();
+    let mut integer_value_indices = Vec::new();
 
     if matches!(limit, Some(0)) {
-        return FindResult::new(shape, indices, FindValues::Real(values));
+        let values = sparse_find_values(integer_storage, values, &integer_value_indices);
+        return FindResult::new(shape, indices, values);
     }
 
     match options.direction {
@@ -701,13 +731,18 @@ fn compute_find_sparse(
                 let col_end = sparse.col_ptrs[col + 1];
                 for idx in col_start..col_end {
                     let row = sparse.row_indices[idx];
-                    let value = sparse.values[idx];
-                    if value != 0.0 {
+                    if sparse_stored_value_is_nonzero(sparse, integer_storage, idx) {
                         let linear_idx = row + col * sparse.rows;
                         indices.push(linear_idx + 1);
-                        values.push(value);
+                        if integer_storage.is_some() {
+                            integer_value_indices.push(idx);
+                        } else {
+                            values.push(sparse.values[idx]);
+                        }
                         if limit.is_some_and(|k| indices.len() >= k) {
-                            return FindResult::new(shape, indices, FindValues::Real(values));
+                            let values =
+                                sparse_find_values(integer_storage, values, &integer_value_indices);
+                            return FindResult::new(shape, indices, values);
                         }
                     }
                 }
@@ -719,13 +754,18 @@ fn compute_find_sparse(
                 let col_end = sparse.col_ptrs[col + 1];
                 for idx in (col_start..col_end).rev() {
                     let row = sparse.row_indices[idx];
-                    let value = sparse.values[idx];
-                    if value != 0.0 {
+                    if sparse_stored_value_is_nonzero(sparse, integer_storage, idx) {
                         let linear_idx = row + col * sparse.rows;
                         indices.push(linear_idx + 1);
-                        values.push(value);
+                        if integer_storage.is_some() {
+                            integer_value_indices.push(idx);
+                        } else {
+                            values.push(sparse.values[idx]);
+                        }
                         if limit.is_some_and(|k| indices.len() >= k) {
-                            return FindResult::new(shape, indices, FindValues::Real(values));
+                            let values =
+                                sparse_find_values(integer_storage, values, &integer_value_indices);
+                            return FindResult::new(shape, indices, values);
                         }
                     }
                 }
@@ -733,7 +773,8 @@ fn compute_find_sparse(
         }
     }
 
-    FindResult::new(shape, indices, FindValues::Real(values))
+    let values = sparse_find_values(integer_storage, values, &integer_value_indices);
+    FindResult::new(shape, indices, values)
 }
 
 impl FindResult {
@@ -1030,6 +1071,95 @@ pub(crate) mod tests {
             values.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn find_sparse_values_preserve_exact_storage_and_traversal_order() {
+        let sparse = runmat_builtins::SparseTensor::new_integer(
+            3,
+            2,
+            vec![0, 2, 3],
+            vec![0, 2, 1],
+            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63, 7]),
+        )
+        .expect("typed sparse");
+
+        let all = evaluate(Value::SparseTensor(sparse.clone()), &[]).expect("find sparse");
+        let Value::Tensor(all_values) = all.values_value().expect("all values") else {
+            panic!("expected typed sparse find values");
+        };
+        assert_eq!(
+            all_values.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63, 7]))
+        );
+
+        let first = evaluate(
+            Value::SparseTensor(sparse.clone()),
+            &[Value::Int(IntValue::I32(2))],
+        )
+        .expect("find sparse first");
+        let Value::Tensor(first_values) = first.values_value().expect("first values") else {
+            panic!("expected typed sparse first values");
+        };
+        assert_eq!(
+            first_values.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))
+        );
+
+        let last = evaluate(
+            Value::SparseTensor(sparse),
+            &[Value::Int(IntValue::I32(2)), Value::from("last")],
+        )
+        .expect("find sparse last");
+        let Value::Tensor(last_values) = last.values_value().expect("last values") else {
+            panic!("expected typed sparse last values");
+        };
+        assert_eq!(
+            last_values.integer_storage(),
+            Some(&IntegerStorage::U64(vec![7, 1_u64 << 63]))
+        );
+    }
+
+    #[test]
+    fn find_integer_selection_preserves_every_integer_class() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![-2, 0, 3]),
+                IntegerStorage::I8(vec![3, -2]),
+            ),
+            (
+                IntegerStorage::I16(vec![-2, 0, 3]),
+                IntegerStorage::I16(vec![3, -2]),
+            ),
+            (
+                IntegerStorage::I32(vec![-2, 0, 3]),
+                IntegerStorage::I32(vec![3, -2]),
+            ),
+            (
+                IntegerStorage::I64(vec![-2, 0, 3]),
+                IntegerStorage::I64(vec![3, -2]),
+            ),
+            (
+                IntegerStorage::U8(vec![2, 0, 3]),
+                IntegerStorage::U8(vec![3, 2]),
+            ),
+            (
+                IntegerStorage::U16(vec![2, 0, 3]),
+                IntegerStorage::U16(vec![3, 2]),
+            ),
+            (
+                IntegerStorage::U32(vec![2, 0, 3]),
+                IntegerStorage::U32(vec![3, 2]),
+            ),
+            (
+                IntegerStorage::U64(vec![2, 0, 3]),
+                IntegerStorage::U64(vec![3, 2]),
+            ),
+        ];
+        for (storage, expected) in cases {
+            assert_eq!(select_integer_values(&storage, &[2, 0]), expected);
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

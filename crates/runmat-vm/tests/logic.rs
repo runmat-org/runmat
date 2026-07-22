@@ -203,6 +203,33 @@ fn typed_sparse_slice_indexing_preserves_uint64_storage() {
 }
 
 #[test]
+fn typed_sparse_find_preserves_exact_values_and_directional_order() {
+    let vars = execute_source(
+        "s = sparse(uint64([0 9223372036854775808;18446744073709551615 0])); [i,j,v] = find(s); [il,jl,vl] = find(s,1,'last');",
+    )
+    .expect("execute typed sparse find");
+    assert!(matches!(
+        &vars[1],
+        Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.data == vec![2.0, 1.0]
+    ));
+    assert!(matches!(
+        &vars[2],
+        Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.data == vec![1.0, 2.0]
+    ));
+    assert!(matches!(
+        &vars[3],
+        Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_808]))
+    ));
+    assert!(matches!(&vars[4], Value::Num(value) if *value == 1.0));
+    assert!(matches!(&vars[5], Value::Num(value) if *value == 2.0));
+    assert_eq!(
+        vars[6],
+        Value::Int(IntValue::U64(9_223_372_036_854_775_808))
+    );
+}
+
+#[test]
 fn sparse_assignment_updates_scalar_and_selector_entries() {
     let vars = execute_source(
         "s = sparse([1], [1], [5], 2, 2); s(2,2) = 7; s(1) = 0; s(:,1) = [1;2]; s(1:2,2) = [3;4]; s([3 3]) = [5 6]; f = full(s); n = nnz(s); t = sparse(uint64([0 0;0 0])); t(:,1) = uint64([1;9223372036854775808]);",
