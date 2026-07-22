@@ -426,6 +426,29 @@ fn typed_complex_integer_blkdiag_rejects_mixed_representations_before_f64_coerci
 }
 
 #[test]
+fn typed_complex_integer_ndgrid_preserves_exact_components() {
+    let vars = execute_source(
+        "axis = complex(uint64([18446744073709551615 9223372036854775808]), uint64([5 6])); [x, y] = ndgrid(axis, [7 8]); real_x = real(x); imag_x = imag(x);",
+    )
+    .expect("ndgrid should preserve typed complex integer storage");
+
+    assert!(matches!(
+        &vars[3],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 2]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63, u64::MAX, 1_u64 << 63]))
+    ));
+    assert!(matches!(
+        &vars[4],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 2]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![5, 6, 5, 6]))
+    ));
+}
+
+#[test]
 fn typed_complex_integer_numerical_integration_is_rejected_before_f64_coercion() {
     for operation in [
         "gradient(z)",
