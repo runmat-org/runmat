@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, Tensor, Value,
+    CharArray, IntValue, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -153,6 +153,11 @@ enum NumericData {
         rows: usize,
         cols: usize,
     },
+    Integer {
+        storage: IntegerStorage,
+        rows: usize,
+        cols: usize,
+    },
 }
 
 async fn extract_numeric_data(value: Value) -> BuiltinResult<NumericData> {
@@ -162,8 +167,8 @@ async fn extract_numeric_data(value: Value) -> BuiltinResult<NumericData> {
             rows: 1,
             cols: 1,
         }),
-        Value::Int(i) => Ok(NumericData::Real {
-            data: vec![i.to_f64()],
+        Value::Int(i) => Ok(NumericData::Integer {
+            storage: integer_storage_from_scalar(i),
             rows: 1,
             cols: 1,
         }),
@@ -207,11 +212,18 @@ fn tensor_to_numeric_data(tensor: Tensor) -> BuiltinResult<NumericData> {
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
-    Ok(NumericData::Real {
-        data: tensor.data,
-        rows,
-        cols,
-    })
+    match tensor.integer_data {
+        Some(storage) => Ok(NumericData::Integer {
+            storage,
+            rows,
+            cols,
+        }),
+        None => Ok(NumericData::Real {
+            data: tensor.data,
+            rows,
+            cols,
+        }),
+    }
 }
 
 #[derive(Clone)]
@@ -223,6 +235,11 @@ struct CellEntry {
 fn format_numeric_data(data: NumericData) -> BuiltinResult<CharArray> {
     match data {
         NumericData::Real { data, rows, cols } => format_real_matrix(&data, rows, cols),
+        NumericData::Integer {
+            storage,
+            rows,
+            cols,
+        } => format_integer_matrix(&storage, rows, cols),
     }
 }
 
@@ -235,6 +252,46 @@ fn format_real_matrix(data: &[f64], rows: usize, cols: usize) -> BuiltinResult<C
         let idx = row + col * rows;
         format_rounded_real(data.get(idx).copied().unwrap_or(0.0))
     })
+}
+
+fn format_integer_matrix(
+    storage: &IntegerStorage,
+    rows: usize,
+    cols: usize,
+) -> BuiltinResult<CharArray> {
+    if rows == 0 || cols == 0 {
+        return char_array(Vec::new(), 0, 0);
+    }
+
+    format_entries(rows, cols, |row, col| {
+        integer_storage_string(storage, row + col * rows)
+    })
+}
+
+fn integer_storage_from_scalar(value: IntValue) -> IntegerStorage {
+    match value {
+        IntValue::I8(value) => IntegerStorage::I8(vec![value]),
+        IntValue::I16(value) => IntegerStorage::I16(vec![value]),
+        IntValue::I32(value) => IntegerStorage::I32(vec![value]),
+        IntValue::I64(value) => IntegerStorage::I64(vec![value]),
+        IntValue::U8(value) => IntegerStorage::U8(vec![value]),
+        IntValue::U16(value) => IntegerStorage::U16(vec![value]),
+        IntValue::U32(value) => IntegerStorage::U32(vec![value]),
+        IntValue::U64(value) => IntegerStorage::U64(vec![value]),
+    }
+}
+
+fn integer_storage_string(storage: &IntegerStorage, index: usize) -> String {
+    match storage {
+        IntegerStorage::I8(values) => values[index].to_string(),
+        IntegerStorage::I16(values) => values[index].to_string(),
+        IntegerStorage::I32(values) => values[index].to_string(),
+        IntegerStorage::I64(values) => values[index].to_string(),
+        IntegerStorage::U8(values) => values[index].to_string(),
+        IntegerStorage::U16(values) => values[index].to_string(),
+        IntegerStorage::U32(values) => values[index].to_string(),
+        IntegerStorage::U64(values) => values[index].to_string(),
+    }
 }
 
 fn format_entries<F>(rows: usize, cols: usize, mut value_at: F) -> BuiltinResult<CharArray>
@@ -420,6 +477,23 @@ pub(crate) mod tests {
 
         let out = int2str_builtin(Value::Num(-4.5), Vec::new()).expect("int2str");
         assert_eq!(char_rows(out), vec!["-5"]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn int2str_preserves_exact_uint64_scalars_and_arrays() {
+        let scalar = int2str_builtin(Value::Int(IntValue::U64(u64::MAX)), Vec::new())
+            .expect("uint64 scalar");
+        assert_eq!(char_rows(scalar), vec![u64::MAX.to_string()]);
+
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
+                .expect("uint64 tensor");
+        let matrix = int2str_builtin(Value::Tensor(tensor), Vec::new()).expect("uint64 array");
+        assert_eq!(
+            char_rows(matrix),
+            vec![format!("{} {}", u64::MAX, 1_u64 << 63)]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
