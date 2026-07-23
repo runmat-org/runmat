@@ -314,8 +314,14 @@ async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             let tiled = repmat_tensor(&t, &raw_reps)?;
             Ok(tensor::tensor_into_value(tiled))
         }
-        Value::Num(_) | Value::Int(_) => {
+        Value::Num(_) => {
             let tensor = tensor::value_into_tensor_for("repmat", value).map_err(repmat_internal)?;
+            let tiled = repmat_tensor(&tensor, &raw_reps)?;
+            Ok(tensor::tensor_into_value(tiled))
+        }
+        Value::Int(value) => {
+            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
+                .map_err(|e| repmat_internal(format!("repmat: {e}")))?;
             let tiled = repmat_tensor(&tensor, &raw_reps)?;
             Ok(tensor::tensor_into_value(tiled))
         }
@@ -503,6 +509,11 @@ fn coerce_rep_factor(value: f64, position: usize) -> crate::BuiltinResult<usize>
 }
 
 fn repmat_tensor(tensor: &Tensor, reps: &[usize]) -> crate::BuiltinResult<Tensor> {
+    if let Some(storage) = tensor.integer_storage() {
+        let (storage, shape) = repmat_integer_storage(storage, &tensor.shape, reps)?;
+        return Tensor::new_integer(storage, shape)
+            .map_err(|e| repmat_internal(format!("repmat: {e}")));
+    }
     let (data, shape) = repmat_column_major(&tensor.data, &tensor.shape, reps, "repmat")?;
     Tensor::new(data, shape).map_err(|e| repmat_internal(format!("repmat: {e}")))
 }
@@ -1084,6 +1095,78 @@ pub(crate) mod tests {
                 ]),
                 &IntegerStorage::U64(vec![7, 7, 8, 8, 7, 7, 8, 8]),
             ))
+        );
+    }
+
+    #[test]
+    fn repmat_preserves_all_exact_real_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![-2, 7]),
+            IntegerStorage::I16(vec![-300, 400]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let tensor = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("tensor");
+            let Value::Tensor(output) = repmat_builtin(
+                Value::Tensor(tensor),
+                vec![Value::Int(IntValue::I32(2)), Value::Int(IntValue::I32(2))],
+            )
+            .expect("repmat") else {
+                panic!("expected exact real integer tensor");
+            };
+            assert_eq!(output.shape, vec![2, 4]);
+            assert_eq!(
+                output.integer_storage(),
+                Some(
+                    &storage
+                        .from_exact_values_like(vec![
+                            values[0].clone(),
+                            values[0].clone(),
+                            values[1].clone(),
+                            values[1].clone(),
+                            values[0].clone(),
+                            values[0].clone(),
+                            values[1].clone(),
+                            values[1].clone(),
+                        ])
+                        .expect("expected tiled storage")
+                )
+            );
+        }
+
+        let Value::Tensor(scalar) = repmat_builtin(
+            Value::Int(IntValue::U64(u64::MAX)),
+            vec![Value::Int(IntValue::I32(2)), Value::Int(IntValue::I32(3))],
+        )
+        .expect("scalar repmat") else {
+            panic!("expected exact real integer scalar output");
+        };
+        assert_eq!(scalar.shape, vec![2, 3]);
+        assert_eq!(
+            scalar.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX; 6]))
+        );
+
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("tensor");
+        let Value::Tensor(empty) = repmat_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Int(IntValue::I32(0)), Value::Int(IntValue::I32(2))],
+        )
+        .expect("empty repmat") else {
+            panic!("expected exact empty integer tensor");
+        };
+        assert_eq!(empty.shape, vec![0, 2]);
+        assert_eq!(
+            empty.integer_storage(),
+            Some(&IntegerStorage::U64(Vec::new()))
         );
     }
 
