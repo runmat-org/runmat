@@ -178,24 +178,21 @@ async fn mpower_builtin(base: Value, exponent: Value) -> BuiltinResult<Value> {
 }
 
 pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult<Value> {
-    if (contains_integer(base) || contains_integer(exponent))
-        && scalar_mpower_input(base)
-        && scalar_mpower_input(exponent)
-    {
-        let base_host = crate::dispatcher::gather_if_needed_async(base)
-            .await
-            .map_err(map_control_flow)?;
-        let exponent_host = crate::dispatcher::gather_if_needed_async(exponent)
-            .await
-            .map_err(map_control_flow)?;
-        if let Some(result) =
-            try_integer_binary(&base_host, &exponent_host, IntegerBinaryOp::Power, NAME)
-                .map_err(mpower_invalid_argument)?
-        {
-            return Ok(result);
+    if contains_integer(base) {
+        if scalar_mpower_input(base) && scalar_mpower_input(exponent) {
+            let base_host = crate::dispatcher::gather_if_needed_async(base)
+                .await
+                .map_err(map_control_flow)?;
+            let exponent_host = crate::dispatcher::gather_if_needed_async(exponent)
+                .await
+                .map_err(map_control_flow)?;
+            if let Some(result) =
+                try_integer_binary(&base_host, &exponent_host, IntegerBinaryOp::Power, NAME)
+                    .map_err(mpower_invalid_argument)?
+            {
+                return Ok(result);
+            }
         }
-    }
-    if contains_integer(base) || contains_integer(exponent) {
         return Err(mpower_invalid_argument(
             "mpower: non-scalar integer matrix powers are not supported",
         ));
@@ -498,7 +495,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Int(IntValue::U64(u64::MAX)));
 
         let result = mpower_builtin(Value::Num(2.0), Value::Int(IntValue::U8(3))).expect("mpower");
-        assert_eq!(result, Value::Int(IntValue::U8(8)));
+        assert_eq!(result, Value::Num(8.0));
     }
 
     #[test]
