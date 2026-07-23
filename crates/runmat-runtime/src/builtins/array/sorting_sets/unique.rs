@@ -15,11 +15,11 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, StringArray, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use super::type_resolvers::set_values_output_type;
+use super::{integer_order, type_resolvers::set_values_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
@@ -424,7 +424,7 @@ fn unique_host(value: Value, opts: &UniqueOptions) -> crate::BuiltinResult<Uniqu
             unique_numeric_from_tensor(tensor, opts)
         }
         Value::Int(i) => {
-            let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
+            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(i), vec![1, 1])
                 .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
             unique_numeric_from_tensor(tensor, opts)
         }
@@ -464,11 +464,196 @@ pub fn unique_numeric_from_tensor(
     tensor: Tensor,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
+    if let Some(storage) = tensor.integer_storage() {
+        return unique_integer(storage, tensor.shape.clone(), opts);
+    }
     if opts.rows {
         unique_numeric_rows(tensor, opts)
     } else {
         unique_numeric_elements(tensor, opts)
     }
+}
+
+fn unique_integer(
+    storage: &IntegerStorage,
+    shape: Vec<usize>,
+    opts: &UniqueOptions,
+) -> crate::BuiltinResult<UniqueEvaluation> {
+    if opts.rows {
+        unique_integer_rows(storage, shape, opts)
+    } else {
+        unique_integer_elements(storage, shape, opts)
+    }
+}
+
+fn unique_integer_elements(
+    storage: &IntegerStorage,
+    shape: Vec<usize>,
+    opts: &UniqueOptions,
+) -> crate::BuiltinResult<UniqueEvaluation> {
+    let values = storage.exact_values();
+    if values.is_empty() {
+        let output = Tensor::new_integer(storage.zeros_like(0), vec![0, 1])
+            .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+        let empty = Tensor::new(Vec::new(), vec![0, 1])
+            .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+        return Ok(UniqueEvaluation::new(
+            Value::Tensor(output),
+            empty.clone(),
+            empty,
+        ));
+    }
+
+    let mut entries = Vec::<IntegerElementEntry>::new();
+    let mut map = HashMap::<IntValue, usize>::new();
+    let mut element_entry_index = Vec::with_capacity(values.len());
+    for (idx, value) in values.iter().enumerate() {
+        match map.get(value) {
+            Some(&entry_idx) => {
+                entries[entry_idx].last = idx;
+                element_entry_index.push(entry_idx);
+            }
+            None => {
+                let entry_idx = entries.len();
+                entries.push(IntegerElementEntry {
+                    value: value.clone(),
+                    first: idx,
+                    last: idx,
+                });
+                map.insert(value.clone(), entry_idx);
+                element_entry_index.push(entry_idx);
+            }
+        }
+    }
+    let mut order: Vec<usize> = (0..entries.len()).collect();
+    if opts.order == UniqueOrder::Sorted {
+        order.sort_by(|&a, &b| {
+            integer_order::compare(&entries[a].value, &entries[b].value, false, false)
+        });
+    }
+    let mut entry_to_position = vec![0usize; entries.len()];
+    for (pos, &entry_idx) in order.iter().enumerate() {
+        entry_to_position[entry_idx] = pos;
+    }
+    let output_values: Vec<_> = order
+        .iter()
+        .map(|&entry_idx| entries[entry_idx].value.clone())
+        .collect();
+    let ia: Vec<_> = order
+        .iter()
+        .map(|&entry_idx| {
+            let entry = &entries[entry_idx];
+            (match opts.occurrence {
+                UniqueOccurrence::First => entry.first,
+                UniqueOccurrence::Last => entry.last,
+            } + 1) as f64
+        })
+        .collect();
+    let ic: Vec<_> = element_entry_index
+        .into_iter()
+        .map(|entry_idx| (entry_to_position[entry_idx] + 1) as f64)
+        .collect();
+    let output = Tensor::new_integer(
+        storage
+            .from_exact_values_like(output_values)
+            .map_err(|e| unique_internal_error(format!("unique: {e}")))?,
+        vec![order.len(), 1],
+    )
+    .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+    let ia = Tensor::new(ia, vec![order.len(), 1])
+        .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+    let ic = Tensor::new(ic, vec![values.len(), 1])
+        .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+    Ok(UniqueEvaluation::new(Value::Tensor(output), ia, ic))
+}
+
+fn unique_integer_rows(
+    storage: &IntegerStorage,
+    shape: Vec<usize>,
+    opts: &UniqueOptions,
+) -> crate::BuiltinResult<UniqueEvaluation> {
+    if shape.len() != 2 {
+        return Err(unique_error_with(
+            &UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX,
+            UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX.message,
+        ));
+    }
+    let rows = shape[0];
+    let cols = shape[1];
+    if rows == 0 || cols == 0 {
+        let output = Tensor::new_integer(storage.zeros_like(0), vec![0, cols])
+            .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+        let ia = Tensor::new(Vec::new(), vec![0, 1])
+            .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+        let ic = Tensor::new(Vec::new(), vec![rows, 1])
+            .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+        return Ok(UniqueEvaluation::new(Value::Tensor(output), ia, ic));
+    }
+    let values = storage.exact_values();
+    let mut entries = Vec::<IntegerRowEntry>::new();
+    let mut map = HashMap::<Vec<IntValue>, usize>::new();
+    let mut row_entry_index = Vec::with_capacity(rows);
+    for row in 0..rows {
+        let row_data: Vec<_> = (0..cols)
+            .map(|col| values[row + col * rows].clone())
+            .collect();
+        match map.get(&row_data) {
+            Some(&entry_idx) => {
+                entries[entry_idx].last = row;
+                row_entry_index.push(entry_idx);
+            }
+            None => {
+                let entry_idx = entries.len();
+                entries.push(IntegerRowEntry {
+                    row_data: row_data.clone(),
+                    first: row,
+                    last: row,
+                });
+                map.insert(row_data, entry_idx);
+                row_entry_index.push(entry_idx);
+            }
+        }
+    }
+    let mut order: Vec<usize> = (0..entries.len()).collect();
+    if opts.order == UniqueOrder::Sorted {
+        order.sort_by(|&a, &b| compare_integer_rows(&entries[a].row_data, &entries[b].row_data));
+    }
+    let mut entry_to_position = vec![0usize; entries.len()];
+    for (pos, &entry_idx) in order.iter().enumerate() {
+        entry_to_position[entry_idx] = pos;
+    }
+    let mut output_values = Vec::with_capacity(order.len() * cols);
+    for col in 0..cols {
+        for &entry_idx in &order {
+            output_values.push(entries[entry_idx].row_data[col].clone());
+        }
+    }
+    let ia: Vec<_> = order
+        .iter()
+        .map(|&entry_idx| {
+            let entry = &entries[entry_idx];
+            (match opts.occurrence {
+                UniqueOccurrence::First => entry.first,
+                UniqueOccurrence::Last => entry.last,
+            } + 1) as f64
+        })
+        .collect();
+    let ic: Vec<_> = row_entry_index
+        .into_iter()
+        .map(|entry_idx| (entry_to_position[entry_idx] + 1) as f64)
+        .collect();
+    let output = Tensor::new_integer(
+        storage
+            .from_exact_values_like(output_values)
+            .map_err(|e| unique_internal_error(format!("unique: {e}")))?,
+        vec![order.len(), cols],
+    )
+    .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+    let ia = Tensor::new(ia, vec![order.len(), 1])
+        .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+    let ic = Tensor::new(ic, vec![rows, 1])
+        .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+    Ok(UniqueEvaluation::new(Value::Tensor(output), ia, ic))
 }
 
 fn unique_numeric_elements(
@@ -1260,6 +1445,20 @@ struct NumericElementEntry {
     last: usize,
 }
 
+#[derive(Debug)]
+struct IntegerElementEntry {
+    value: IntValue,
+    first: usize,
+    last: usize,
+}
+
+#[derive(Debug)]
+struct IntegerRowEntry {
+    row_data: Vec<IntValue>,
+    first: usize,
+    last: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct NumericRowKey(Vec<u64>);
 
@@ -1374,6 +1573,16 @@ fn compare_numeric_rows(a: &[f64], b: &[f64]) -> Ordering {
         let ord = compare_f64(*lhs, *rhs);
         if ord != Ordering::Equal {
             return ord;
+        }
+    }
+    Ordering::Equal
+}
+
+fn compare_integer_rows(a: &[IntValue], b: &[IntValue]) -> Ordering {
+    for (lhs, rhs) in a.iter().zip(b.iter()) {
+        let ordering = integer_order::compare(lhs, rhs, false, false);
+        if ordering != Ordering::Equal {
+            return ordering;
         }
     }
     Ordering::Equal
@@ -1513,7 +1722,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{
-        CharArray, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+        CharArray, IntValue, IntegerStorage, LogicalArray, ResolveContext, StringArray, Tensor,
+        Type, Value,
     };
 
     fn evaluate_sync(value: Value, rest: &[Value]) -> crate::BuiltinResult<UniqueEvaluation> {
@@ -1980,8 +2190,106 @@ pub(crate) mod tests {
         let eval = evaluate_sync(Value::Int(IntValue::I32(42)), &[]).expect("unique");
         let values = eval.into_values_value();
         match values {
-            Value::Num(n) => assert_eq!(n, 42.0),
+            Value::Tensor(t) => {
+                assert_eq!(t.integer_storage(), Some(&IntegerStorage::I32(vec![42])))
+            }
             other => panic!("unexpected values {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unique_preserves_exact_integer_elements_rows_and_indices() {
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993, u64::MAX]),
+            vec![4, 1],
+        )
+        .expect("input");
+        let (values, ia, ic) = evaluate_sync(Value::Tensor(input), &[])
+            .expect("unique")
+            .into_triple();
+        let Value::Tensor(values) = values else {
+            panic!("expected exact integer values");
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                0,
+                9_007_199_254_740_993,
+                u64::MAX
+            ]))
+        );
+        let Value::Tensor(ia) = ia else {
+            panic!("expected indices");
+        };
+        assert_eq!(ia.data, vec![2.0, 3.0, 1.0]);
+        let Value::Tensor(ic) = ic else {
+            panic!("expected indices");
+        };
+        assert_eq!(ic.data, vec![3.0, 1.0, 2.0, 3.0]);
+
+        let rows = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MAX, i64::MIN, i64::MAX, 1, 2, 1]),
+            vec![3, 2],
+        )
+        .expect("input");
+        let (values, ia, ic) = evaluate_sync(
+            Value::Tensor(rows),
+            &[
+                Value::from("rows"),
+                Value::from("stable"),
+                Value::from("last"),
+            ],
+        )
+        .expect("unique rows")
+        .into_triple();
+        let Value::Tensor(values) = values else {
+            panic!("expected exact integer rows");
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&IntegerStorage::I64(vec![i64::MAX, i64::MIN, 1, 2]))
+        );
+        let Value::Tensor(ia) = ia else {
+            panic!("expected indices");
+        };
+        assert_eq!(ia.data, vec![3.0, 2.0]);
+        let Value::Tensor(ic) = ic else {
+            panic!("expected indices");
+        };
+        assert_eq!(ic.data, vec![1.0, 2.0, 1.0]);
+    }
+
+    #[test]
+    fn unique_preserves_every_exact_integer_class() {
+        let cases = [
+            IntegerStorage::I8(vec![i8::MAX, i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MAX, i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MAX, i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MAX, i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![u8::MAX, 0, u8::MAX]),
+            IntegerStorage::U16(vec![u16::MAX, 0, u16::MAX]),
+            IntegerStorage::U32(vec![u32::MAX, 0, u32::MAX]),
+            IntegerStorage::U64(vec![u64::MAX, 0, u64::MAX]),
+        ];
+        for storage in cases {
+            let expected = storage.clone();
+            let tensor = Tensor::new_integer(storage, vec![3, 1]).expect("input");
+            let values = evaluate_sync(Value::Tensor(tensor), &[Value::from("stable")])
+                .expect("unique")
+                .into_values_value();
+            let Value::Tensor(values) = values else {
+                panic!("expected exact integer values");
+            };
+            let mut expected_values = expected.exact_values();
+            expected_values.truncate(2);
+            assert_eq!(
+                values.integer_storage(),
+                Some(
+                    &expected
+                        .from_exact_values_like(expected_values)
+                        .expect("expected")
+                )
+            );
         }
     }
 }

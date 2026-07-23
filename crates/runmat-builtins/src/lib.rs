@@ -118,7 +118,7 @@ pub enum Value {
     ClassRef(String),
     MException(MException),
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IntValue {
     I8(i8),
     I16(i16),
