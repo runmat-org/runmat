@@ -14,11 +14,11 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, StringArray, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use super::type_resolvers::set_values_output_type;
+use super::{integer_order, type_resolvers::set_values_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
@@ -474,6 +474,15 @@ fn union_numeric(
     b: Tensor,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
+    if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
+        if a_storage.class_name() == b_storage.class_name() {
+            return if opts.rows {
+                union_integer_rows(a_storage, a.shape.clone(), b_storage, b.shape.clone(), opts)
+            } else {
+                union_integer_elements(a_storage, b_storage, opts)
+            };
+        }
+    }
     if opts.rows {
         union_numeric_rows(a, b, opts)
     } else {
@@ -488,6 +497,97 @@ pub fn union_numeric_from_tensors(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     union_numeric(a, b, opts)
+}
+
+fn union_integer_elements(
+    a: &IntegerStorage,
+    b: &IntegerStorage,
+    opts: &UnionOptions,
+) -> crate::BuiltinResult<UnionEvaluation> {
+    let mut entries = Vec::<IntegerUnionEntry>::new();
+    let mut map = HashMap::<IntValue, usize>::new();
+    for (index, value) in a.exact_values().into_iter().enumerate() {
+        if map.contains_key(&value) {
+            continue;
+        }
+        let entry_index = entries.len();
+        entries.push(IntegerUnionEntry {
+            value: value.clone(),
+            a_index: Some(index),
+            b_index: None,
+            order_rank: entry_index,
+        });
+        map.insert(value, entry_index);
+    }
+    for (index, value) in b.exact_values().into_iter().enumerate() {
+        if map.contains_key(&value) {
+            continue;
+        }
+        let entry_index = entries.len();
+        entries.push(IntegerUnionEntry {
+            value: value.clone(),
+            a_index: None,
+            b_index: Some(index),
+            order_rank: entry_index,
+        });
+        map.insert(value, entry_index);
+    }
+    assemble_integer_union(entries, a, opts)
+}
+
+fn union_integer_rows(
+    a_storage: &IntegerStorage,
+    a_shape: Vec<usize>,
+    b_storage: &IntegerStorage,
+    b_shape: Vec<usize>,
+    opts: &UnionOptions,
+) -> crate::BuiltinResult<UnionEvaluation> {
+    if a_shape.len() != 2 || b_shape.len() != 2 {
+        return Err(union_internal_error(
+            "union: 'rows' option requires 2-D numeric matrices",
+        ));
+    }
+    if a_shape[1] != b_shape[1] {
+        return Err(union_error(&UNION_ERROR_ROWS_COLUMN_MISMATCH));
+    }
+    let (rows_a, rows_b, cols) = (a_shape[0], b_shape[0], a_shape[1]);
+    let a_values = a_storage.exact_values();
+    let b_values = b_storage.exact_values();
+    let mut entries = Vec::<IntegerRowUnionEntry>::new();
+    let mut map = HashMap::<Vec<IntValue>, usize>::new();
+    for row in 0..rows_a {
+        let row_data: Vec<_> = (0..cols)
+            .map(|col| a_values[row + col * rows_a].clone())
+            .collect();
+        if map.contains_key(&row_data) {
+            continue;
+        }
+        let entry_index = entries.len();
+        entries.push(IntegerRowUnionEntry {
+            row_data: row_data.clone(),
+            a_row: Some(row),
+            b_row: None,
+            order_rank: entry_index,
+        });
+        map.insert(row_data, entry_index);
+    }
+    for row in 0..rows_b {
+        let row_data: Vec<_> = (0..cols)
+            .map(|col| b_values[row + col * rows_b].clone())
+            .collect();
+        if map.contains_key(&row_data) {
+            continue;
+        }
+        let entry_index = entries.len();
+        entries.push(IntegerRowUnionEntry {
+            row_data: row_data.clone(),
+            a_row: None,
+            b_row: Some(row),
+            order_rank: entry_index,
+        });
+        map.insert(row_data, entry_index);
+    }
+    assemble_integer_row_union(entries, a_storage, opts, cols)
 }
 
 fn union_numeric_elements(
@@ -1146,8 +1246,24 @@ struct NumericUnionEntry {
 }
 
 #[derive(Debug)]
+struct IntegerUnionEntry {
+    value: IntValue,
+    a_index: Option<usize>,
+    b_index: Option<usize>,
+    order_rank: usize,
+}
+
+#[derive(Debug)]
 struct NumericRowUnionEntry {
     row_data: Vec<f64>,
+    a_row: Option<usize>,
+    b_row: Option<usize>,
+    order_rank: usize,
+}
+
+#[derive(Debug)]
+struct IntegerRowUnionEntry {
+    row_data: Vec<IntValue>,
     a_row: Option<usize>,
     b_row: Option<usize>,
     order_rank: usize,
@@ -1280,6 +1396,48 @@ fn assemble_numeric_union(
     ))
 }
 
+fn assemble_integer_union(
+    entries: Vec<IntegerUnionEntry>,
+    storage: &IntegerStorage,
+    opts: &UnionOptions,
+) -> crate::BuiltinResult<UnionEvaluation> {
+    let mut order: Vec<_> = (0..entries.len()).collect();
+    match opts.order {
+        UnionOrder::Sorted => order.sort_by(|&a, &b| {
+            integer_order::compare(&entries[a].value, &entries[b].value, false, false)
+        }),
+        UnionOrder::Stable => order.sort_by_key(|&index| entries[index].order_rank),
+    }
+    let values: Vec<_> = order
+        .iter()
+        .map(|&index| entries[index].value.clone())
+        .collect();
+    let mut ia = Vec::new();
+    let mut ib = Vec::new();
+    for &index in &order {
+        let entry = &entries[index];
+        if let Some(a_index) = entry.a_index {
+            ia.push((a_index + 1) as f64);
+        } else if let Some(b_index) = entry.b_index {
+            ib.push((b_index + 1) as f64);
+        }
+    }
+    let values = Tensor::new_integer(
+        storage
+            .from_exact_values_like(values)
+            .map_err(|e| union_internal_error(format!("union: {e}")))?,
+        vec![order.len(), 1],
+    )
+    .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let ia_len = ia.len();
+    let ib_len = ib.len();
+    let ia = Tensor::new(ia, vec![ia_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let ib = Tensor::new(ib, vec![ib_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    Ok(UnionEvaluation::new(Value::Tensor(values), ia, ib))
+}
+
 fn assemble_numeric_row_union(
     entries: Vec<NumericRowUnionEntry>,
     opts: &UnionOptions,
@@ -1329,6 +1487,58 @@ fn assemble_numeric_row_union(
         ia_tensor,
         ib_tensor,
     ))
+}
+
+fn assemble_integer_row_union(
+    entries: Vec<IntegerRowUnionEntry>,
+    storage: &IntegerStorage,
+    opts: &UnionOptions,
+    cols: usize,
+) -> crate::BuiltinResult<UnionEvaluation> {
+    let mut order: Vec<_> = (0..entries.len()).collect();
+    match opts.order {
+        UnionOrder::Sorted => order.sort_by(|&a, &b| {
+            for (left, right) in entries[a].row_data.iter().zip(&entries[b].row_data) {
+                let ordering = integer_order::compare(left, right, false, false);
+                if ordering != Ordering::Equal {
+                    return ordering;
+                }
+            }
+            Ordering::Equal
+        }),
+        UnionOrder::Stable => order.sort_by_key(|&index| entries[index].order_rank),
+    }
+    let rows = order.len();
+    let mut values = Vec::with_capacity(rows * cols);
+    for col in 0..cols {
+        for &index in &order {
+            values.push(entries[index].row_data[col].clone());
+        }
+    }
+    let mut ia = Vec::new();
+    let mut ib = Vec::new();
+    for &index in &order {
+        let entry = &entries[index];
+        if let Some(a_row) = entry.a_row {
+            ia.push((a_row + 1) as f64);
+        } else if let Some(b_row) = entry.b_row {
+            ib.push((b_row + 1) as f64);
+        }
+    }
+    let values = Tensor::new_integer(
+        storage
+            .from_exact_values_like(values)
+            .map_err(|e| union_internal_error(format!("union: {e}")))?,
+        vec![rows, cols],
+    )
+    .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let ia_len = ia.len();
+    let ib_len = ib.len();
+    let ia = Tensor::new(ia, vec![ia_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let ib = Tensor::new(ib, vec![ib_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    Ok(UnionEvaluation::new(Value::Tensor(values), ia, ib))
 }
 
 fn assemble_complex_union(
@@ -1732,6 +1942,96 @@ pub(crate) mod tests {
         let ib = tensor::value_into_tensor_for("union", eval.ib_value()).expect("ib tensor");
         assert_eq!(ib.data, vec![1.0]);
         assert_eq!(ib.shape, vec![1, 1]);
+    }
+
+    #[test]
+    fn union_preserves_exact_integer_elements_and_rows() {
+        let a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            vec![3, 1],
+        )
+        .expect("input");
+        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![0, 7]), vec![2, 1])
+            .expect("input");
+        let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect("union")
+            .into_triple();
+        let Value::Tensor(values) = values else {
+            panic!("exact values");
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::U64(vec![
+                0,
+                7,
+                9_007_199_254_740_993,
+                u64::MAX
+            ]))
+        );
+        let ia = tensor::value_into_tensor_for("union", ia).expect("indices");
+        assert_eq!(ia.data, vec![2.0, 3.0, 1.0]);
+        let ib = tensor::value_into_tensor_for("union", ib).expect("indices");
+        assert_eq!(ib.data, vec![2.0]);
+
+        let a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 0, 1]),
+            vec![2, 2],
+        )
+        .expect("rows input");
+        let b = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, 4, 1, 2]),
+            vec![2, 2],
+        )
+        .expect("rows input");
+        let (values, ia, ib) =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+                .expect("union rows")
+                .into_triple();
+        let Value::Tensor(values) = values else {
+            panic!("exact row values");
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::U64(vec![
+                4,
+                9_007_199_254_740_993,
+                u64::MAX,
+                2,
+                1,
+                0,
+            ]))
+        );
+        let ia = tensor::value_into_tensor_for("union", ia).expect("row indices");
+        assert_eq!(ia.data, vec![2.0, 1.0]);
+        let ib = tensor::value_into_tensor_for("union", ib).expect("row indices");
+        assert_eq!(ib.data, vec![2.0]);
+    }
+
+    #[test]
+    fn union_preserves_every_exact_integer_class() {
+        let cases = [
+            runmat_builtins::IntegerStorage::I8(vec![i8::MAX, 0]),
+            runmat_builtins::IntegerStorage::I16(vec![i16::MAX, 0]),
+            runmat_builtins::IntegerStorage::I32(vec![i32::MAX, 0]),
+            runmat_builtins::IntegerStorage::I64(vec![i64::MAX, 0]),
+            runmat_builtins::IntegerStorage::U8(vec![u8::MAX, 0]),
+            runmat_builtins::IntegerStorage::U16(vec![u16::MAX, 0]),
+            runmat_builtins::IntegerStorage::U32(vec![u32::MAX, 0]),
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0]),
+        ];
+        for storage in cases {
+            let expected = storage.clone();
+            let a = Tensor::new_integer(storage, vec![2, 1]).expect("input");
+            let b = Tensor::new_integer(expected.zeros_like(1), vec![1, 1]).expect("input");
+            let values =
+                evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("stable")])
+                    .expect("union")
+                    .into_values_value();
+            let Value::Tensor(values) = values else {
+                panic!("exact values");
+            };
+            assert_eq!(values.integer_storage(), Some(&expected));
+        }
     }
 
     #[test]

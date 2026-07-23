@@ -14,11 +14,11 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, StringArray, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use super::type_resolvers::set_values_output_type;
+use super::{integer_order, type_resolvers::set_values_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
@@ -446,11 +446,86 @@ fn setdiff_numeric(
     b: Tensor,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
+    if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
+        if a_storage.class_name() == b_storage.class_name() {
+            return if opts.rows {
+                setdiff_integer_rows(a_storage, a.shape.clone(), b_storage, b.shape.clone(), opts)
+            } else {
+                setdiff_integer_elements(a_storage, b_storage, opts)
+            };
+        }
+    }
     if opts.rows {
         setdiff_numeric_rows(a, b, opts)
     } else {
         setdiff_numeric_elements(a, b, opts)
     }
+}
+
+fn setdiff_integer_elements(
+    a: &IntegerStorage,
+    b: &IntegerStorage,
+    opts: &SetdiffOptions,
+) -> crate::BuiltinResult<SetdiffEvaluation> {
+    let b_values: HashSet<_> = b.exact_values().into_iter().collect();
+    let mut seen = HashSet::new();
+    let mut entries = Vec::<IntegerDiffEntry>::new();
+    for (index, value) in a.exact_values().into_iter().enumerate() {
+        if b_values.contains(&value) || !seen.insert(value.clone()) {
+            continue;
+        }
+        let order_rank = entries.len();
+        entries.push(IntegerDiffEntry {
+            value,
+            index,
+            order_rank,
+        });
+    }
+    assemble_integer_setdiff(entries, a, opts)
+}
+
+fn setdiff_integer_rows(
+    a_storage: &IntegerStorage,
+    a_shape: Vec<usize>,
+    b_storage: &IntegerStorage,
+    b_shape: Vec<usize>,
+    opts: &SetdiffOptions,
+) -> crate::BuiltinResult<SetdiffEvaluation> {
+    if a_shape.len() != 2 || b_shape.len() != 2 {
+        return Err(setdiff_internal_error(
+            "setdiff: 'rows' option requires 2-D numeric matrices",
+        ));
+    }
+    if a_shape[1] != b_shape[1] {
+        return Err(setdiff_error(&SETDIFF_ERROR_ROWS_COLUMN_MISMATCH));
+    }
+    let (rows_a, rows_b, cols) = (a_shape[0], b_shape[0], a_shape[1]);
+    let a_values = a_storage.exact_values();
+    let b_values = b_storage.exact_values();
+    let b_rows: HashSet<Vec<IntValue>> = (0..rows_b)
+        .map(|row| {
+            (0..cols)
+                .map(|col| b_values[row + col * rows_b].clone())
+                .collect()
+        })
+        .collect();
+    let mut seen = HashSet::new();
+    let mut entries = Vec::<IntegerRowDiffEntry>::new();
+    for row in 0..rows_a {
+        let row_data: Vec<_> = (0..cols)
+            .map(|col| a_values[row + col * rows_a].clone())
+            .collect();
+        if b_rows.contains(&row_data) || !seen.insert(row_data.clone()) {
+            continue;
+        }
+        let order_rank = entries.len();
+        entries.push(IntegerRowDiffEntry {
+            row_data,
+            row_index: row,
+            order_rank,
+        });
+    }
+    assemble_integer_row_setdiff(entries, a_storage, opts, cols)
 }
 
 /// Helper exposed for acceleration providers handling numeric tensors entirely on the host.
@@ -890,6 +965,38 @@ fn assemble_numeric_setdiff(
     ))
 }
 
+fn assemble_integer_setdiff(
+    entries: Vec<IntegerDiffEntry>,
+    storage: &IntegerStorage,
+    opts: &SetdiffOptions,
+) -> crate::BuiltinResult<SetdiffEvaluation> {
+    let mut order: Vec<_> = (0..entries.len()).collect();
+    match opts.order {
+        SetdiffOrder::Sorted => order.sort_by(|&a, &b| {
+            integer_order::compare(&entries[a].value, &entries[b].value, false, false)
+        }),
+        SetdiffOrder::Stable => order.sort_by_key(|&index| entries[index].order_rank),
+    }
+    let values: Vec<_> = order
+        .iter()
+        .map(|&index| entries[index].value.clone())
+        .collect();
+    let ia: Vec<_> = order
+        .iter()
+        .map(|&index| (entries[index].index + 1) as f64)
+        .collect();
+    let values = Tensor::new_integer(
+        storage
+            .from_exact_values_like(values)
+            .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?,
+        vec![order.len(), 1],
+    )
+    .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    let ia = Tensor::new(ia, vec![order.len(), 1])
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    Ok(SetdiffEvaluation::new(Value::Tensor(values), ia))
+}
+
 fn assemble_numeric_row_setdiff(
     entries: Vec<NumericRowDiffEntry>,
     opts: &SetdiffOptions,
@@ -929,6 +1036,48 @@ fn assemble_numeric_row_setdiff(
         Value::Tensor(value_tensor),
         ia_tensor,
     ))
+}
+
+fn assemble_integer_row_setdiff(
+    entries: Vec<IntegerRowDiffEntry>,
+    storage: &IntegerStorage,
+    opts: &SetdiffOptions,
+    cols: usize,
+) -> crate::BuiltinResult<SetdiffEvaluation> {
+    let mut order: Vec<_> = (0..entries.len()).collect();
+    match opts.order {
+        SetdiffOrder::Sorted => order.sort_by(|&a, &b| {
+            for (left, right) in entries[a].row_data.iter().zip(&entries[b].row_data) {
+                let ordering = integer_order::compare(left, right, false, false);
+                if ordering != Ordering::Equal {
+                    return ordering;
+                }
+            }
+            Ordering::Equal
+        }),
+        SetdiffOrder::Stable => order.sort_by_key(|&index| entries[index].order_rank),
+    }
+    let rows = order.len();
+    let mut values = Vec::with_capacity(rows * cols);
+    for col in 0..cols {
+        for &index in &order {
+            values.push(entries[index].row_data[col].clone());
+        }
+    }
+    let ia: Vec<_> = order
+        .iter()
+        .map(|&index| (entries[index].row_index + 1) as f64)
+        .collect();
+    let values = Tensor::new_integer(
+        storage
+            .from_exact_values_like(values)
+            .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?,
+        vec![rows, cols],
+    )
+    .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    let ia = Tensor::new(ia, vec![rows, 1])
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    Ok(SetdiffEvaluation::new(Value::Tensor(values), ia))
 }
 
 fn assemble_complex_setdiff(
@@ -1161,8 +1310,22 @@ struct NumericDiffEntry {
 }
 
 #[derive(Clone, Debug)]
+struct IntegerDiffEntry {
+    value: IntValue,
+    index: usize,
+    order_rank: usize,
+}
+
+#[derive(Clone, Debug)]
 struct NumericRowDiffEntry {
     row_data: Vec<f64>,
+    row_index: usize,
+    order_rank: usize,
+}
+
+#[derive(Clone, Debug)]
+struct IntegerRowDiffEntry {
+    row_data: Vec<IntValue>,
     row_index: usize,
     order_rank: usize,
 }
@@ -1423,6 +1586,56 @@ pub(crate) mod tests {
         }
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
         assert_eq!(ia.data, vec![1.0]);
+    }
+
+    #[test]
+    fn setdiff_preserves_exact_integer_elements_and_rows() {
+        let a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            vec![3, 1],
+        )
+        .expect("input");
+        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![0]), vec![1, 1])
+            .expect("input");
+        let (values, ia) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect("setdiff")
+            .into_pair();
+        let Value::Tensor(values) = values else {
+            panic!("exact values");
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                u64::MAX
+            ]))
+        );
+        let ia = tensor::value_into_tensor_for("setdiff", ia).expect("indices");
+        assert_eq!(ia.data, vec![3.0, 1.0]);
+
+        let a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![i64::MAX, 4, 0, 2]),
+            vec![2, 2],
+        )
+        .expect("rows input");
+        let b = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![i64::MAX, 0]),
+            vec![1, 2],
+        )
+        .expect("rows input");
+        let (values, ia) =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+                .expect("setdiff rows")
+                .into_pair();
+        let Value::Tensor(values) = values else {
+            panic!("exact row values");
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::I64(vec![4, 2]))
+        );
+        let ia = tensor::value_into_tensor_for("setdiff", ia).expect("row indices");
+        assert_eq!(ia.data, vec![2.0]);
     }
 
     #[test]
