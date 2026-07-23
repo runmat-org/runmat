@@ -217,6 +217,9 @@ async fn vecnorm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
     match value {
         Value::GpuTensor(handle) => vecnorm_gpu(handle, args).await,
         Value::ComplexTensor(tensor) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(
+                &tensor, NAME,
+            )?;
             let result = vecnorm_complex_tensor(&tensor, args)?;
             Ok(tensor::tensor_into_value(result))
         }
@@ -564,7 +567,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, ResolveContext, Type};
 
     fn assert_close(actual: f64, expected: f64) {
         if actual.is_nan() && expected.is_nan() {
@@ -739,6 +742,22 @@ mod tests {
             Value::Num(value) => assert_close(value, (25.0f64 + 169.0 + 289.0).sqrt()),
             other => panic!("expected scalar, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn vecnorm_rejects_typed_complex_integer_inputs() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1]),
+            )
+            .expect("storage"),
+            vec![1, 1],
+        )
+        .expect("tensor");
+        let err = call(Value::ComplexTensor(tensor), Vec::new())
+            .expect_err("typed complex integer input must reject");
+        assert!(err.message().contains("complex numbers with integer types"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
