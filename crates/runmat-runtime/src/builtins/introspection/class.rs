@@ -85,7 +85,11 @@ fn class_builtin(value: Value) -> crate::BuiltinResult<String> {
 /// Return the canonical MATLAB class name for a runtime value.
 pub(crate) fn class_name_for_value(value: &Value) -> String {
     match value {
-        Value::Num(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => "double".to_string(),
+        Value::Num(_) | Value::Complex(_, _) => "double".to_string(),
+        Value::ComplexTensor(tensor) => tensor.integer_data.as_ref().map_or_else(
+            || "double".to_string(),
+            |storage| storage.class_name().to_string(),
+        ),
         Value::Tensor(tensor) => tensor.integer_storage().map_or_else(
             || tensor.dtype.class_name().to_string(),
             |storage| storage.class_name().to_string(),
@@ -125,8 +129,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, Listener, LogicalArray,
-        MException, ObjectInstance, StringArray, StructValue, SymbolicExpr, Tensor,
+        CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
+        IntegerStorage, Listener, LogicalArray, MException, ObjectInstance, StringArray,
+        StructValue, SymbolicExpr, Tensor,
     };
 
     fn test_handle_target() -> runmat_gc::GcHandle {
@@ -156,6 +161,61 @@ pub(crate) mod tests {
         .expect("uint64 tensor");
 
         assert_eq!(class_name_for_value(&Value::Tensor(tensor)), "uint64");
+    }
+
+    #[test]
+    fn class_reports_exact_integer_type_for_every_typed_complex_class() {
+        let cases = [
+            (
+                "int8",
+                IntegerStorage::I8(vec![-1]),
+                IntegerStorage::I8(vec![2]),
+            ),
+            (
+                "int16",
+                IntegerStorage::I16(vec![-3]),
+                IntegerStorage::I16(vec![4]),
+            ),
+            (
+                "int32",
+                IntegerStorage::I32(vec![-5]),
+                IntegerStorage::I32(vec![6]),
+            ),
+            (
+                "int64",
+                IntegerStorage::I64(vec![-7]),
+                IntegerStorage::I64(vec![8]),
+            ),
+            (
+                "uint8",
+                IntegerStorage::U8(vec![1]),
+                IntegerStorage::U8(vec![2]),
+            ),
+            (
+                "uint16",
+                IntegerStorage::U16(vec![3]),
+                IntegerStorage::U16(vec![4]),
+            ),
+            (
+                "uint32",
+                IntegerStorage::U32(vec![5]),
+                IntegerStorage::U32(vec![6]),
+            ),
+            (
+                "uint64",
+                IntegerStorage::U64(vec![7]),
+                IntegerStorage::U64(vec![8]),
+            ),
+        ];
+
+        for (expected, real, imag) in cases {
+            let storage = IntegerComplexStorage::new(real, imag).expect("matching components");
+            let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
+            assert_eq!(
+                class_name_for_value(&Value::ComplexTensor(tensor)),
+                expected
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

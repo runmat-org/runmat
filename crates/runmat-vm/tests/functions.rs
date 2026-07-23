@@ -4120,6 +4120,27 @@ fn underlying_type_script_surface() {
 }
 
 #[test]
+fn typed_complex_integer_metadata_script_surface() {
+    let vars = execute_source(
+        "z = complex(uint64(9223372036854775808), uint64(1)); c = class(z); t = underlyingType(z); ok = isUnderlyingType(z, 'uint64');",
+    );
+    assert!(
+        vars.iter()
+            .filter(
+                |value| matches!(value, runmat_builtins::Value::String(name) if name == "uint64")
+            )
+            .count()
+            >= 2,
+        "class and underlyingType must preserve typed complex integer class: {vars:?}"
+    );
+    assert!(
+        vars.iter()
+            .any(|value| matches!(value, runmat_builtins::Value::Bool(true))),
+        "isUnderlyingType must recognize typed complex integer class: {vars:?}"
+    );
+}
+
+#[test]
 fn num_arguments_from_subscript_script_surface() {
     let program = r#"
         C = {"one", 2, "three"};
