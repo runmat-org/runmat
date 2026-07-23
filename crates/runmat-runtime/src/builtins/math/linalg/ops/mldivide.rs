@@ -638,8 +638,11 @@ pub(crate) mod tests {
         assert_eq!(
             result,
             Value::Tensor(
-                Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, 2]), vec![1, 2])
-                    .expect("integer result")
+                Tensor::new_integer(
+                    IntegerStorage::U64(vec![1_u64 << 63, 1_u64 << 62]),
+                    vec![1, 2],
+                )
+                .expect("integer result")
             )
         );
     }
