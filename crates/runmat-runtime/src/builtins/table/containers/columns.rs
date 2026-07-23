@@ -37,13 +37,47 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
         Value::ComplexTensor(tensor) => {
             let mut out = Vec::with_capacity(tensor.cols);
             for col in 0..tensor.cols {
-                let mut data = Vec::with_capacity(tensor.rows);
-                for row in 0..tensor.rows {
-                    data.push(tensor.data[row + col * tensor.rows]);
-                }
-                out.push(Value::ComplexTensor(
-                    ComplexTensor::new(data, vec![tensor.rows, 1]).map_err(invalid_variable)?,
-                ));
+                let value = if let Some(storage) = &tensor.integer_data {
+                    let mut real = Vec::with_capacity(tensor.rows);
+                    let mut imag = Vec::with_capacity(tensor.rows);
+                    for row in 0..tensor.rows {
+                        let index = row + col * tensor.rows;
+                        real.push(
+                            storage
+                                .real
+                                .value_at(index)
+                                .expect("integer tensor storage matches tensor shape"),
+                        );
+                        imag.push(
+                            storage
+                                .imag
+                                .value_at(index)
+                                .expect("integer tensor storage matches tensor shape"),
+                        );
+                    }
+                    ComplexTensor::new_integer(
+                        runmat_builtins::IntegerComplexStorage::new(
+                            storage
+                                .real
+                                .from_exact_values_like(real)
+                                .map_err(invalid_variable)?,
+                            storage
+                                .imag
+                                .from_exact_values_like(imag)
+                                .map_err(invalid_variable)?,
+                        )
+                        .map_err(invalid_variable)?,
+                        vec![tensor.rows, 1],
+                    )
+                    .map_err(invalid_variable)?
+                } else {
+                    let mut data = Vec::with_capacity(tensor.rows);
+                    for row in 0..tensor.rows {
+                        data.push(tensor.data[row + col * tensor.rows]);
+                    }
+                    ComplexTensor::new(data, vec![tensor.rows, 1]).map_err(invalid_variable)?
+                };
+                out.push(Value::ComplexTensor(value));
             }
             Ok(out)
         }
@@ -124,6 +158,51 @@ mod tests {
         assert_eq!(
             second.integer_storage(),
             Some(&IntegerStorage::U64(vec![7, 0]))
+        );
+    }
+
+    #[test]
+    fn split_value_columns_preserves_exact_complex_integer_storage() {
+        let large = 9_007_199_254_740_993_i64;
+        let columns = split_value_columns(Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                runmat_builtins::IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![large, i64::MIN, 7, 0]),
+                    IntegerStorage::I64(vec![0, 5, i64::MIN, large]),
+                )
+                .unwrap(),
+                vec![2, 2],
+            )
+            .unwrap(),
+        ))
+        .unwrap();
+
+        assert_eq!(columns.len(), 2);
+        let Value::ComplexTensor(first) = &columns[0] else {
+            panic!("expected first complex tensor column");
+        };
+        let Value::ComplexTensor(second) = &columns[1] else {
+            panic!("expected second complex tensor column");
+        };
+        assert_eq!(
+            first.integer_data,
+            Some(
+                runmat_builtins::IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![large, i64::MIN]),
+                    IntegerStorage::I64(vec![0, 5]),
+                )
+                .unwrap(),
+            )
+        );
+        assert_eq!(
+            second.integer_data,
+            Some(
+                runmat_builtins::IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![7, 0]),
+                    IntegerStorage::I64(vec![i64::MIN, large]),
+                )
+                .unwrap(),
+            )
         );
     }
 }
