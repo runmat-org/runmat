@@ -465,6 +465,15 @@ fn repelem_tensor(
     factors: &[RepFactor],
     single_arg: bool,
 ) -> crate::BuiltinResult<Tensor> {
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        let (values, shape) =
+            repelem_column_major(&storage.exact_values(), &tensor.shape, factors, single_arg)?;
+        let storage = storage
+            .from_exact_values_like(values)
+            .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
+        return Tensor::new_integer(storage, shape)
+            .map_err(|e| repelem_internal(format!("repelem: {e}")));
+    }
     let (data, shape) = repelem_column_major(&tensor.data, &tensor.shape, factors, single_arg)?;
     let mut out = Tensor::new_with_dtype(data, shape, tensor.dtype)
         .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
@@ -857,7 +866,7 @@ fn checked_total(shape: &[usize]) -> crate::BuiltinResult<usize> {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, NumericDType};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, NumericDType};
 
     fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::repelem_builtin(value, rest))
@@ -1292,6 +1301,86 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn repelem_preserves_all_exact_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let tensor = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("integer tensor");
+            let Value::Tensor(output) =
+                repelem_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))])
+                    .expect("repelem")
+            else {
+                panic!("expected exact integer tensor");
+            };
+
+            assert_eq!(output.shape, vec![1, 4]);
+            assert_eq!(
+                output.integer_storage(),
+                Some(
+                    &storage
+                        .from_exact_values_like(vec![
+                            values[0].clone(),
+                            values[0].clone(),
+                            values[1].clone(),
+                            values[1].clone(),
+                        ])
+                        .expect("expected repeated storage")
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn repelem_preserves_exact_typed_complex_integer_components() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+        )
+        .expect("typed complex storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex tensor");
+
+        let Value::ComplexTensor(output) = repelem_builtin(
+            Value::ComplexTensor(tensor),
+            vec![Value::Int(IntValue::I32(2))],
+        )
+        .expect("repelem") else {
+            panic!("expected typed complex integer tensor");
+        };
+
+        assert_eq!(output.shape, vec![1, 4]);
+        assert_eq!(
+            output.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![
+                        9_007_199_254_740_993,
+                        9_007_199_254_740_993,
+                        u64::MAX,
+                        u64::MAX,
+                    ]),
+                    IntegerStorage::U64(vec![
+                        u64::MAX,
+                        u64::MAX,
+                        9_007_199_254_740_993,
+                        9_007_199_254_740_993,
+                    ]),
+                )
+                .expect("expected typed complex storage")
+            )
+        );
     }
 
     #[test]
