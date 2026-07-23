@@ -300,6 +300,19 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
 }
 
 fn triu_tensor(mut tensor: Tensor, offset: isize) -> crate::BuiltinResult<Tensor> {
+    if let Some(storage) = tensor.integer_data.take() {
+        let zero = storage
+            .zeros_like(1)
+            .value_at(0)
+            .expect("one typed integer zero");
+        let mut values = storage.exact_values();
+        apply_triu_inplace(&mut values, &tensor.shape, offset, zero)?;
+        let storage = storage
+            .from_exact_values_like(values)
+            .map_err(|e| triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL))?;
+        return Tensor::new_integer(storage, tensor.shape)
+            .map_err(|e| triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL));
+    }
     apply_triu_inplace(&mut tensor.data, &tensor.shape, offset, 0.0)?;
     Ok(tensor)
 }
@@ -432,7 +445,7 @@ pub(crate) mod tests {
         block_on(super::triu_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, LogicalArray, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Type};
 
     #[test]
     fn triu_type_preserves_matrix_shape() {
@@ -462,6 +475,23 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn triu_masks_exact_integer_storage() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 7, 0]),
+            vec![2, 2],
+        )
+        .expect("input");
+        let Value::Tensor(result) = triu_builtin(Value::Tensor(tensor), Vec::new()).expect("triu")
+        else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 0, 7, 0]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
