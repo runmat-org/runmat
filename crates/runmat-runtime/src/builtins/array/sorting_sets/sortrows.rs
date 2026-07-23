@@ -9,11 +9,11 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use super::type_resolvers::tensor_output_type;
+use super::{integer_order, type_resolvers::tensor_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -487,6 +487,15 @@ fn sortrows_real_tensor_with_args(
     let rows = tensor.rows();
     let cols = tensor.cols();
 
+    if let Some(storage) = tensor.integer_storage() {
+        return sortrows_integer_tensor(
+            storage.exact_values(),
+            storage,
+            tensor.shape.clone(),
+            args,
+        );
+    }
+
     if rows <= 1 || cols == 0 || tensor.data.is_empty() || args.columns.is_empty() {
         let indices = identity_indices(rows)?;
         return Ok(SortRowsEvaluation {
@@ -503,6 +512,46 @@ fn sortrows_real_tensor_with_args(
     Ok(SortRowsEvaluation {
         sorted: tensor::tensor_into_value(sorted_tensor),
         indices,
+    })
+}
+
+fn sortrows_integer_tensor(
+    values: Vec<IntValue>,
+    storage: &runmat_builtins::IntegerStorage,
+    shape: Vec<usize>,
+    args: &SortRowsArgs,
+) -> crate::BuiltinResult<SortRowsEvaluation> {
+    let (rows, cols) = rows_cols_from_shape(&shape);
+    if rows <= 1 || cols == 0 || values.is_empty() || args.columns.is_empty() {
+        let tensor = Tensor::new_integer(
+            storage
+                .from_exact_values_like(values)
+                .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))?,
+            shape,
+        )
+        .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))?;
+        return Ok(SortRowsEvaluation {
+            sorted: Value::Tensor(tensor),
+            indices: identity_indices(rows)?,
+        });
+    }
+
+    let mut order: Vec<usize> = (0..rows).collect();
+    order.sort_by(|&a, &b| compare_integer_rows(&values, rows, args, a, b));
+    let mut sorted = values.clone();
+    for col in 0..cols {
+        for (dest_row, &src_row) in order.iter().enumerate() {
+            sorted[dest_row + col * rows] = values[src_row + col * rows].clone();
+        }
+    }
+    let sorted_storage = storage
+        .from_exact_values_like(sorted)
+        .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))?;
+    let sorted = Tensor::new_integer(sorted_storage, shape)
+        .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))?;
+    Ok(SortRowsEvaluation {
+        sorted: Value::Tensor(sorted),
+        indices: permutation_indices(&order)?,
     })
 }
 
@@ -609,6 +658,29 @@ fn compare_real_rows(
         let ord = compare_real_scalars(va, vb, spec.direction, args.comparison, missing);
         if ord != Ordering::Equal {
             return ord;
+        }
+    }
+    Ordering::Equal
+}
+
+fn compare_integer_rows(
+    values: &[IntValue],
+    rows: usize,
+    args: &SortRowsArgs,
+    a: usize,
+    b: usize,
+) -> Ordering {
+    for spec in &args.columns {
+        let idx_a = a + spec.index * rows;
+        let idx_b = b + spec.index * rows;
+        let ordering = integer_order::compare(
+            &values[idx_a],
+            &values[idx_b],
+            matches!(spec.direction, SortDirection::Descend),
+            matches!(args.comparison, ComparisonMethod::Abs),
+        );
+        if ordering != Ordering::Equal {
+            return ordering;
         }
     }
     Ordering::Equal
@@ -1227,7 +1299,7 @@ impl SortRowsEvaluation {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, ResolveContext, Type, Value};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type, Value};
 
     fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
         futures::executor::block_on(super::evaluate(value, rest))
@@ -1250,6 +1322,105 @@ pub(crate) mod tests {
             Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 3.0, 1.0]),
             Value::Num(_) => panic!("expected tensor indices"),
             other => panic!("unexpected indices {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sortrows_preserves_exact_integer_values_and_ordering() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 0, 1, 9_007_199_254_740_993]),
+            vec![2, 2],
+        )
+        .expect("input");
+        let (sorted, indices) = evaluate(Value::Tensor(tensor), &[])
+            .expect("sortrows")
+            .into_values();
+        let Value::Tensor(sorted) = sorted else {
+            panic!("expected exact integer output");
+        };
+        assert_eq!(
+            sorted.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                0,
+                u64::MAX,
+                9_007_199_254_740_993,
+                1
+            ]))
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_eq!(indices.data, vec![2.0, 1.0]);
+
+        let tensor = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, -1, 2, i64::MAX]),
+            vec![4, 1],
+        )
+        .expect("input");
+        let (sorted, _) = evaluate(
+            Value::Tensor(tensor),
+            &[Value::from("ComparisonMethod"), Value::from("abs")],
+        )
+        .expect("absolute sortrows")
+        .into_values();
+        let Value::Tensor(sorted) = sorted else {
+            panic!("expected exact integer output");
+        };
+        assert_eq!(
+            sorted.integer_storage(),
+            Some(&IntegerStorage::I64(vec![-1, 2, i64::MAX, i64::MIN]))
+        );
+    }
+
+    #[test]
+    fn sortrows_preserves_every_exact_integer_storage_class() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![i8::MAX, i8::MIN, 1, 2]),
+                IntegerStorage::I8(vec![i8::MIN, i8::MAX, 2, 1]),
+            ),
+            (
+                IntegerStorage::I16(vec![i16::MAX, i16::MIN, 1, 2]),
+                IntegerStorage::I16(vec![i16::MIN, i16::MAX, 2, 1]),
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MAX, i32::MIN, 1, 2]),
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX, 2, 1]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MAX, i64::MIN, 1, 2]),
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX, 2, 1]),
+            ),
+            (
+                IntegerStorage::U8(vec![u8::MAX, 0, 1, 2]),
+                IntegerStorage::U8(vec![0, u8::MAX, 2, 1]),
+            ),
+            (
+                IntegerStorage::U16(vec![u16::MAX, 0, 1, 2]),
+                IntegerStorage::U16(vec![0, u16::MAX, 2, 1]),
+            ),
+            (
+                IntegerStorage::U32(vec![u32::MAX, 0, 1, 2]),
+                IntegerStorage::U32(vec![0, u32::MAX, 2, 1]),
+            ),
+            (
+                IntegerStorage::U64(vec![u64::MAX, 0, 1, 9_007_199_254_740_993]),
+                IntegerStorage::U64(vec![0, u64::MAX, 9_007_199_254_740_993, 1]),
+            ),
+        ];
+        for (input, expected) in cases {
+            let tensor = Tensor::new_integer(input, vec![2, 2]).expect("input");
+            let (sorted, indices) = evaluate(Value::Tensor(tensor), &[])
+                .expect("sortrows")
+                .into_values();
+            let Value::Tensor(sorted) = sorted else {
+                panic!("expected exact integer output");
+            };
+            assert_eq!(sorted.integer_storage(), Some(&expected));
+            let Value::Tensor(indices) = indices else {
+                panic!("expected index tensor");
+            };
+            assert_eq!(indices.data, vec![2.0, 1.0]);
         }
     }
 

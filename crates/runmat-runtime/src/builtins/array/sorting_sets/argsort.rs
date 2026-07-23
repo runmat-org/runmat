@@ -270,7 +270,9 @@ pub(crate) mod tests {
         block_on(super::argsort_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ComplexTensor, IntValue, ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value,
+    };
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -284,6 +286,20 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn argsort_preserves_exact_uint64_ordering_from_sort() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            vec![3, 1],
+        )
+        .expect("input");
+        let indices = argsort_builtin(Value::Tensor(tensor), Vec::new()).expect("argsort");
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_eq!(indices.data, vec![2.0, 3.0, 1.0]);
     }
 
     #[test]

@@ -12,7 +12,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use super::type_resolvers::tensor_output_type;
+use super::{integer_order, type_resolvers::tensor_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::gpu_helpers;
@@ -497,7 +497,14 @@ fn sort_integer_tensor(
                 let idx = before + k * stride_before + after * stride_before * dim_len;
                 buffer.push((k, sorted[idx].clone()));
             }
-            buffer.sort_by(|a, b| compare_integer_values(&a.1, &b.1, args));
+            buffer.sort_by(|a, b| {
+                integer_order::compare(
+                    &a.1,
+                    &b.1,
+                    matches!(args.direction, SortDirection::Descend),
+                    matches!(args.comparison, ComparisonMethod::Abs),
+                )
+            });
             for (pos, (original_index, value)) in buffer.iter().enumerate() {
                 let target = before + pos * stride_before + after * stride_before * dim_len;
                 sorted[target] = value.clone();
@@ -599,49 +606,6 @@ fn compare_real_values(a: f64, b: f64, args: &SortArgs) -> Ordering {
             SortDirection::Descend => Ordering::Greater,
         },
         (false, false) => compare_real_finite(a, b, args),
-    }
-}
-
-fn compare_integer_values(a: &IntValue, b: &IntValue, args: &SortArgs) -> Ordering {
-    let primary = match args.comparison {
-        ComparisonMethod::Abs => integer_abs(a).cmp(&integer_abs(b)),
-        ComparisonMethod::Auto | ComparisonMethod::Real => Ordering::Equal,
-    };
-    let ordering = if primary == Ordering::Equal {
-        compare_integer_raw(a, b)
-    } else {
-        primary
-    };
-    match args.direction {
-        SortDirection::Ascend => ordering,
-        SortDirection::Descend => ordering.reverse(),
-    }
-}
-
-fn compare_integer_raw(a: &IntValue, b: &IntValue) -> Ordering {
-    match (a, b) {
-        (IntValue::I8(a), IntValue::I8(b)) => a.cmp(b),
-        (IntValue::I16(a), IntValue::I16(b)) => a.cmp(b),
-        (IntValue::I32(a), IntValue::I32(b)) => a.cmp(b),
-        (IntValue::I64(a), IntValue::I64(b)) => a.cmp(b),
-        (IntValue::U8(a), IntValue::U8(b)) => a.cmp(b),
-        (IntValue::U16(a), IntValue::U16(b)) => a.cmp(b),
-        (IntValue::U32(a), IntValue::U32(b)) => a.cmp(b),
-        (IntValue::U64(a), IntValue::U64(b)) => a.cmp(b),
-        _ => unreachable!("integer storage is homogeneous"),
-    }
-}
-
-fn integer_abs(value: &IntValue) -> u128 {
-    match value {
-        IntValue::I8(value) => i128::from(*value).unsigned_abs(),
-        IntValue::I16(value) => i128::from(*value).unsigned_abs(),
-        IntValue::I32(value) => i128::from(*value).unsigned_abs(),
-        IntValue::I64(value) => i128::from(*value).unsigned_abs(),
-        IntValue::U8(value) => u128::from(*value),
-        IntValue::U16(value) => u128::from(*value),
-        IntValue::U32(value) => u128::from(*value),
-        IntValue::U64(value) => u128::from(*value),
     }
 }
 

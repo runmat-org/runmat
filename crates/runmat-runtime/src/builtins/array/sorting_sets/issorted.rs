@@ -5,11 +5,11 @@ use std::cmp::Ordering;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, StringArray, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use super::type_resolvers::bool_output_type;
+use super::{integer_order, type_resolvers::bool_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -592,10 +592,130 @@ fn issorted_real(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult<b
     if tensor.data.is_empty() {
         return Ok(true);
     }
+    if let Some(storage) = tensor.integer_storage() {
+        return issorted_integer(&storage.exact_values(), &tensor.shape, args);
+    }
     match args.mode {
         CheckMode::Dimension(dim) => Ok(check_real_dimension(tensor, dim, args)),
         CheckMode::Rows => check_real_rows(tensor, args),
     }
+}
+
+fn issorted_integer(
+    values: &[IntValue],
+    shape: &[usize],
+    args: &IssortedArgs,
+) -> crate::BuiltinResult<bool> {
+    match args.mode {
+        CheckMode::Dimension(dim) => Ok(check_integer_dimension(values, shape, dim, args)),
+        CheckMode::Rows => check_integer_rows(values, shape, args),
+    }
+}
+
+fn check_integer_dimension(
+    values: &[IntValue],
+    shape: &[usize],
+    dim: usize,
+    args: &IssortedArgs,
+) -> bool {
+    let dim_index = dim.saturating_sub(1);
+    if dim_index >= shape.len() {
+        return true;
+    }
+    let len_dim = shape[dim_index];
+    if len_dim <= 1 {
+        return true;
+    }
+
+    let before = product(&shape[..dim_index]);
+    let after = product(&shape[dim_index + 1..]);
+    let mut slice = Vec::with_capacity(len_dim);
+    for after_idx in 0..after {
+        for before_idx in 0..before {
+            slice.clear();
+            for k in 0..len_dim {
+                let idx = before_idx + k * before + after_idx * before * len_dim;
+                slice.push(values[idx].clone());
+            }
+            if !check_integer_slice(&slice, args.direction, args.comparison) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn check_integer_rows(
+    values: &[IntValue],
+    shape: &[usize],
+    args: &IssortedArgs,
+) -> crate::BuiltinResult<bool> {
+    if shape.len() > 2 {
+        return Err(issorted_error(
+            &ISSORTED_ERROR_ROWS_REQUIRES_2D,
+            ISSORTED_ERROR_ROWS_REQUIRES_2D.message,
+        ));
+    }
+    let rows = shape.first().copied().unwrap_or(1);
+    let cols = shape.get(1).copied().unwrap_or(1);
+    if rows <= 1 || cols == 0 {
+        return Ok(true);
+    }
+    for &order in direction_orders(args.direction) {
+        if integer_rows_in_order(values, rows, cols, order, args.comparison) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn integer_rows_in_order(
+    values: &[IntValue],
+    rows: usize,
+    cols: usize,
+    order: OrderSpec,
+    comparison: ComparisonMethod,
+) -> bool {
+    for row in 0..rows - 1 {
+        let mut row_order = Ordering::Equal;
+        for col in 0..cols {
+            let idx_a = row + col * rows;
+            let idx_b = row + 1 + col * rows;
+            row_order = integer_order::compare(
+                &values[idx_a],
+                &values[idx_b],
+                matches!(order.direction, SortDirection::Descend),
+                matches!(comparison, ComparisonMethod::Abs),
+            );
+            if row_order != Ordering::Equal {
+                break;
+            }
+        }
+        if !order_satisfied(row_order, order) {
+            return false;
+        }
+    }
+    true
+}
+
+fn check_integer_slice(
+    slice: &[IntValue],
+    direction: Direction,
+    comparison: ComparisonMethod,
+) -> bool {
+    direction_orders(direction).iter().copied().any(|order| {
+        slice.windows(2).all(|pair| {
+            order_satisfied(
+                integer_order::compare(
+                    &pair[0],
+                    &pair[1],
+                    matches!(order.direction, SortDirection::Descend),
+                    matches!(comparison, ComparisonMethod::Abs),
+                ),
+                order,
+            )
+        })
+    })
 }
 
 fn issorted_complex(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
@@ -1297,7 +1417,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type, Value};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, ResolveContext, Type, Value};
 
     fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::issorted_builtin(value, rest))
@@ -1325,6 +1445,62 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![3.0, 2.0, 1.0], vec![3, 1]).unwrap();
         let result = issorted_builtin(Value::Tensor(tensor), vec![]).expect("issorted");
         assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn issorted_uses_exact_integer_values_for_dimensions_rows_and_abs() {
+        let descending = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 0]),
+            vec![3, 1],
+        )
+        .expect("input");
+        assert_eq!(
+            issorted_builtin(Value::Tensor(descending), vec![Value::from("descend")])
+                .expect("issorted"),
+            Value::Bool(true)
+        );
+
+        let rows = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 0, 1]),
+            vec![2, 2],
+        )
+        .expect("input");
+        assert_eq!(
+            issorted_builtin(Value::Tensor(rows), vec![Value::from("rows")]).expect("issorted"),
+            Value::Bool(false)
+        );
+
+        let absolute = Tensor::new_integer(
+            IntegerStorage::I64(vec![-1, 2, i64::MAX, i64::MIN]),
+            vec![4, 1],
+        )
+        .expect("input");
+        assert_eq!(
+            issorted_builtin(
+                Value::Tensor(absolute),
+                vec![Value::from("ComparisonMethod"), Value::from("abs")],
+            )
+            .expect("issorted"),
+            Value::Bool(true)
+        );
+
+        let ascending_cases = [
+            IntegerStorage::I8(vec![i8::MIN, 0, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, 0, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, 0, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, 0, i64::MAX]),
+            IntegerStorage::U8(vec![0, 1, u8::MAX]),
+            IntegerStorage::U16(vec![0, 1, u16::MAX]),
+            IntegerStorage::U32(vec![0, 1, u32::MAX]),
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+        ];
+        for storage in ascending_cases {
+            let tensor = Tensor::new_integer(storage, vec![3, 1]).expect("input");
+            assert_eq!(
+                issorted_builtin(Value::Tensor(tensor), Vec::new()).expect("issorted"),
+                Value::Bool(true)
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
