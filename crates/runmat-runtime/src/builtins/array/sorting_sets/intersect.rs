@@ -12,11 +12,11 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, StringArray, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use super::type_resolvers::set_values_output_type;
+use super::{integer_order, type_resolvers::set_values_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
@@ -503,11 +503,97 @@ fn intersect_numeric(
     b: Tensor,
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
+    if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
+        if a_storage.class_name() == b_storage.class_name() {
+            return if opts.rows {
+                intersect_integer_rows(a_storage, a.shape.clone(), b_storage, b.shape.clone(), opts)
+            } else {
+                intersect_integer_elements(a_storage, b_storage, opts)
+            };
+        }
+    }
     if opts.rows {
         intersect_numeric_rows(a, b, opts)
     } else {
         intersect_numeric_elements(a, b, opts)
     }
+}
+
+fn intersect_integer_elements(
+    a: &IntegerStorage,
+    b: &IntegerStorage,
+    opts: &IntersectOptions,
+) -> crate::BuiltinResult<IntersectEvaluation> {
+    let mut b_map = HashMap::<IntValue, usize>::new();
+    for (index, value) in b.exact_values().into_iter().enumerate() {
+        b_map.entry(value).or_insert(index);
+    }
+    let mut seen = HashSet::<IntValue>::new();
+    let mut entries = Vec::<IntegerIntersectEntry>::new();
+    for (a_index, value) in a.exact_values().into_iter().enumerate() {
+        if seen.contains(&value) {
+            continue;
+        }
+        if let Some(&b_index) = b_map.get(&value) {
+            let order_rank = entries.len();
+            entries.push(IntegerIntersectEntry {
+                value: value.clone(),
+                a_index,
+                b_index,
+                order_rank,
+            });
+            seen.insert(value);
+        }
+    }
+    assemble_integer_intersect(entries, a, opts)
+}
+
+fn intersect_integer_rows(
+    a_storage: &IntegerStorage,
+    a_shape: Vec<usize>,
+    b_storage: &IntegerStorage,
+    b_shape: Vec<usize>,
+    opts: &IntersectOptions,
+) -> crate::BuiltinResult<IntersectEvaluation> {
+    if a_shape.len() != 2 || b_shape.len() != 2 {
+        return Err(intersect_internal_error(
+            "intersect: 'rows' option requires 2-D numeric matrices",
+        ));
+    }
+    if a_shape[1] != b_shape[1] {
+        return Err(intersect_error(&INTERSECT_ERROR_ROWS_COLUMN_MISMATCH));
+    }
+    let (rows_a, rows_b, cols) = (a_shape[0], b_shape[0], a_shape[1]);
+    let a_values = a_storage.exact_values();
+    let b_values = b_storage.exact_values();
+    let mut b_map = HashMap::<Vec<IntValue>, usize>::new();
+    for row in 0..rows_b {
+        let key: Vec<_> = (0..cols)
+            .map(|col| b_values[row + col * rows_b].clone())
+            .collect();
+        b_map.entry(key).or_insert(row);
+    }
+    let mut seen = HashSet::<Vec<IntValue>>::new();
+    let mut entries = Vec::<IntegerRowIntersectEntry>::new();
+    for row in 0..rows_a {
+        let values: Vec<_> = (0..cols)
+            .map(|col| a_values[row + col * rows_a].clone())
+            .collect();
+        if seen.contains(&values) {
+            continue;
+        }
+        if let Some(&b_row) = b_map.get(&values) {
+            let order_rank = entries.len();
+            entries.push(IntegerRowIntersectEntry {
+                row_data: values.clone(),
+                a_row: row,
+                b_row,
+                order_rank,
+            });
+            seen.insert(values);
+        }
+    }
+    assemble_integer_row_intersect(entries, a_storage, opts, cols)
 }
 
 fn intersect_numeric_elements(
@@ -968,8 +1054,24 @@ struct NumericIntersectEntry {
 }
 
 #[derive(Debug)]
+struct IntegerIntersectEntry {
+    value: IntValue,
+    a_index: usize,
+    b_index: usize,
+    order_rank: usize,
+}
+
+#[derive(Debug)]
 struct NumericRowIntersectEntry {
     row_data: Vec<f64>,
+    a_row: usize,
+    b_row: usize,
+    order_rank: usize,
+}
+
+#[derive(Debug)]
+struct IntegerRowIntersectEntry {
+    row_data: Vec<IntValue>,
     a_row: usize,
     b_row: usize,
     order_rank: usize,
@@ -1061,6 +1163,44 @@ fn assemble_numeric_intersect(
     ))
 }
 
+fn assemble_integer_intersect(
+    entries: Vec<IntegerIntersectEntry>,
+    storage: &IntegerStorage,
+    opts: &IntersectOptions,
+) -> crate::BuiltinResult<IntersectEvaluation> {
+    let mut order: Vec<_> = (0..entries.len()).collect();
+    match opts.order {
+        IntersectOrder::Sorted => order.sort_by(|&a, &b| {
+            integer_order::compare(&entries[a].value, &entries[b].value, false, false)
+        }),
+        IntersectOrder::Stable => order.sort_by_key(|&index| entries[index].order_rank),
+    }
+    let values: Vec<_> = order
+        .iter()
+        .map(|&index| entries[index].value.clone())
+        .collect();
+    let ia: Vec<_> = order
+        .iter()
+        .map(|&index| (entries[index].a_index + 1) as f64)
+        .collect();
+    let ib: Vec<_> = order
+        .iter()
+        .map(|&index| (entries[index].b_index + 1) as f64)
+        .collect();
+    let values = Tensor::new_integer(
+        storage
+            .from_exact_values_like(values)
+            .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?,
+        vec![order.len(), 1],
+    )
+    .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
+    let ia = Tensor::new(ia, vec![order.len(), 1])
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
+    let ib = Tensor::new(ib, vec![order.len(), 1])
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
+    Ok(IntersectEvaluation::new(Value::Tensor(values), ia, ib))
+}
+
 fn assemble_numeric_row_intersect(
     entries: Vec<NumericRowIntersectEntry>,
     opts: &IntersectOptions,
@@ -1105,6 +1245,54 @@ fn assemble_numeric_row_intersect(
         ia_tensor,
         ib_tensor,
     ))
+}
+
+fn assemble_integer_row_intersect(
+    entries: Vec<IntegerRowIntersectEntry>,
+    storage: &IntegerStorage,
+    opts: &IntersectOptions,
+    cols: usize,
+) -> crate::BuiltinResult<IntersectEvaluation> {
+    let mut order: Vec<_> = (0..entries.len()).collect();
+    match opts.order {
+        IntersectOrder::Sorted => order.sort_by(|&a, &b| {
+            for (left, right) in entries[a].row_data.iter().zip(&entries[b].row_data) {
+                let ordering = integer_order::compare(left, right, false, false);
+                if ordering != Ordering::Equal {
+                    return ordering;
+                }
+            }
+            Ordering::Equal
+        }),
+        IntersectOrder::Stable => order.sort_by_key(|&index| entries[index].order_rank),
+    }
+    let rows = order.len();
+    let mut values = Vec::with_capacity(rows * cols);
+    for col in 0..cols {
+        for &index in &order {
+            values.push(entries[index].row_data[col].clone());
+        }
+    }
+    let ia: Vec<_> = order
+        .iter()
+        .map(|&index| (entries[index].a_row + 1) as f64)
+        .collect();
+    let ib: Vec<_> = order
+        .iter()
+        .map(|&index| (entries[index].b_row + 1) as f64)
+        .collect();
+    let values = Tensor::new_integer(
+        storage
+            .from_exact_values_like(values)
+            .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?,
+        vec![rows, cols],
+    )
+    .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
+    let ia = Tensor::new(ia, vec![rows, 1])
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
+    let ib = Tensor::new(ib, vec![rows, 1])
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
+    Ok(IntersectEvaluation::new(Value::Tensor(values), ia, ib))
 }
 
 fn assemble_complex_intersect(
@@ -1550,6 +1738,38 @@ pub(crate) mod tests {
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
         assert_eq!(ia.data, vec![4.0, 2.0]);
         assert_eq!(ib.data, vec![2.0, 1.0]);
+    }
+
+    #[test]
+    fn intersect_preserves_exact_integer_elements_and_rows() {
+        let a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            vec![3, 1],
+        )
+        .expect("input");
+        let b = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![0, u64::MAX]),
+            vec![2, 1],
+        )
+        .expect("input");
+        let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect("intersect")
+            .into_triple();
+        let Value::Tensor(values) = values else {
+            panic!("exact values");
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::U64(vec![0, u64::MAX]))
+        );
+        let Value::Tensor(ia) = ia else {
+            panic!("indices");
+        };
+        assert_eq!(ia.data, vec![2.0, 1.0]);
+        let Value::Tensor(ib) = ib else {
+            panic!("indices");
+        };
+        assert_eq!(ib.data, vec![1.0, 2.0]);
     }
 
     #[test]
