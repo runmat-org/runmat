@@ -90,7 +90,7 @@ async fn issortedrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinR
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntegerStorage, Tensor};
 
     #[test]
     fn issortedrows_detects_sorted_and_unsorted_numeric_rows() {
@@ -107,6 +107,29 @@ mod tests {
         assert_eq!(
             block_on(issortedrows_builtin(Value::Num(1.0), Vec::new())).unwrap(),
             Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn issortedrows_uses_exact_integer_row_ordering() {
+        let sorted = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX, 0, 1, 2]),
+            vec![3, 2],
+        )
+        .expect("input");
+        assert_eq!(
+            block_on(issortedrows_builtin(Value::Tensor(sorted), Vec::new())).unwrap(),
+            Value::Bool(true)
+        );
+
+        let unsorted = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 0, 2, 1, 0]),
+            vec![3, 2],
+        )
+        .expect("input");
+        assert_eq!(
+            block_on(issortedrows_builtin(Value::Tensor(unsorted), Vec::new())).unwrap(),
+            Value::Bool(false)
         );
     }
 }
