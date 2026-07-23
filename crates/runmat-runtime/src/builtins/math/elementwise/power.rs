@@ -1011,12 +1011,8 @@ pub(crate) mod tests {
     #[test]
     fn power_char_array() {
         let chars = CharArray::new("AZ".chars().collect(), 1, 2).unwrap();
-        let result = power_builtin(
-            Value::CharArray(chars),
-            Value::Int(IntValue::I32(2)),
-            Vec::new(),
-        )
-        .expect("power");
+        let result =
+            power_builtin(Value::CharArray(chars), Value::Num(2.0), Vec::new()).expect("power");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
