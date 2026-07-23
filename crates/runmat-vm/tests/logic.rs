@@ -242,6 +242,23 @@ fn typed_complex_integer_cross_is_rejected_before_f64_coercion() {
 }
 
 #[test]
+fn typed_complex_integer_pagemtimes_is_rejected_before_f64_coercion() {
+    for operation in ["pagemtimes(z, z)", "pagemtimes(z, 1)", "pagemtimes(1, z)"] {
+        let source = format!(
+            "z = complex(uint64([9223372036854775808 2; 3 4]), uint64([1 2; 3 4])); out = {operation};"
+        );
+        let err =
+            execute_source(&source).expect_err("pagemtimes must reject typed complex integers");
+        assert!(
+            err.to_string().contains(
+                "operations involving complex numbers with integer types are not supported"
+            ),
+            "unexpected pagemtimes error: {err}"
+        );
+    }
+}
+
+#[test]
 fn typed_complex_integer_gpuarray_is_rejected_before_provider_dispatch() {
     let err = execute_source(
         "z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); g = gpuArray(z);",

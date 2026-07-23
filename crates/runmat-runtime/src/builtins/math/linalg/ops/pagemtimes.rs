@@ -233,6 +233,8 @@ fn pagemtimes_type(args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Typ
 )]
 async fn pagemtimes_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let call = PagemtimesCall::parse(first, rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&call.lhs, NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&call.rhs, NAME)?;
     pagemtimes_eval(call).await
 }
 
