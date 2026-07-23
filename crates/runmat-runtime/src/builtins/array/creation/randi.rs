@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, Tensor, Value,
+    IntValue, IntegerStorage, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{random, tensor};
+use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 use runmat_builtins::{ResolveContext, Type};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randi")]
@@ -403,24 +404,26 @@ struct ParsedRandi {
 #[derive(Clone)]
 enum OutputTemplate {
     Double,
+    Single,
     Logical,
+    Integer(IntegerTarget),
     Like(Value),
 }
 
 #[derive(Clone, Copy)]
 struct Bounds {
-    lower: i64,
-    upper: i64,
+    lower: i128,
+    upper: i128,
     span: u64,
 }
 
 impl Bounds {
-    fn new(lower: i64, upper: i64) -> crate::BuiltinResult<Self> {
+    fn new(lower: i128, upper: i128) -> crate::BuiltinResult<Self> {
         if lower > upper {
             return Err(builtin_error("randi: lower bound must be <= upper bound"));
         }
-        let span = (upper as i128)
-            .checked_sub(lower as i128)
+        let span = upper
+            .checked_sub(lower)
             .and_then(|delta| delta.checked_add(1))
             .ok_or_else(|| builtin_error("randi: range width overflows 64-bit arithmetic"))?;
         if span <= 0 {
@@ -461,6 +464,25 @@ impl ParsedRandi {
         while idx < rest.len() {
             let arg = rest[idx].clone();
             if let Some(keyword) = keyword_of(&arg) {
+                if matches!(
+                    keyword.as_str(),
+                    "double"
+                        | "single"
+                        | "logical"
+                        | "int8"
+                        | "int16"
+                        | "int32"
+                        | "int64"
+                        | "uint8"
+                        | "uint16"
+                        | "uint32"
+                        | "uint64"
+                ) && like_proto.is_some()
+                {
+                    return Err(builtin_error(format!(
+                        "randi: cannot combine 'like' with '{keyword}'"
+                    )));
+                }
                 match keyword.as_str() {
                     "like" => {
                         if like_proto.is_some() {
@@ -472,6 +494,8 @@ impl ParsedRandi {
                             let keyword = match spec {
                                 OutputTemplate::Logical => "'logical'",
                                 OutputTemplate::Double => "'double'",
+                                OutputTemplate::Single => "'single'",
+                                OutputTemplate::Integer(_) => "an integer class specifier",
                                 OutputTemplate::Like(_) => "another class specifier",
                             };
                             return Err(builtin_error(format!(
@@ -509,23 +533,26 @@ impl ParsedRandi {
                         continue;
                     }
                     "single" => {
-                        return Err(builtin_error(
-                            "randi: single precision output is not implemented yet",
-                        ));
+                        class_override = Some(OutputTemplate::Single);
+                        idx += 1;
+                        continue;
                     }
-                    "int8" | "uint8" | "int16" | "uint16" | "int32" | "uint32" | "int64"
-                    | "uint64" => {
-                        return Err(builtin_error(format!(
-                            "randi: output class '{}' is not implemented yet",
-                            keyword
-                        )));
-                    }
+                    "int8" => class_override = Some(OutputTemplate::Integer(IntegerTarget::I8)),
+                    "int16" => class_override = Some(OutputTemplate::Integer(IntegerTarget::I16)),
+                    "int32" => class_override = Some(OutputTemplate::Integer(IntegerTarget::I32)),
+                    "int64" => class_override = Some(OutputTemplate::Integer(IntegerTarget::I64)),
+                    "uint8" => class_override = Some(OutputTemplate::Integer(IntegerTarget::U8)),
+                    "uint16" => class_override = Some(OutputTemplate::Integer(IntegerTarget::U16)),
+                    "uint32" => class_override = Some(OutputTemplate::Integer(IntegerTarget::U32)),
+                    "uint64" => class_override = Some(OutputTemplate::Integer(IntegerTarget::U64)),
                     other => {
                         return Err(builtin_error(format!(
                             "randi: unrecognised option '{other}'"
                         )));
                     }
                 }
+                idx += 1;
+                continue;
             }
 
             if let Some(parsed_dims) = extract_dims(&arg).await? {
@@ -583,7 +610,9 @@ impl ParsedRandi {
 async fn build_output(parsed: ParsedRandi) -> crate::BuiltinResult<Value> {
     match parsed.template {
         OutputTemplate::Double => randi_double(&parsed.bounds, &parsed.shape),
+        OutputTemplate::Single => randi_single(&parsed.bounds, &parsed.shape),
         OutputTemplate::Logical => randi_logical(&parsed.bounds, &parsed.shape),
+        OutputTemplate::Integer(target) => randi_integer(&parsed.bounds, &parsed.shape, target),
         OutputTemplate::Like(proto) => randi_like(&proto, &parsed.bounds, &parsed.shape).await,
     }
 }
@@ -591,6 +620,29 @@ async fn build_output(parsed: ParsedRandi) -> crate::BuiltinResult<Value> {
 fn randi_double(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value> {
     let tensor = integer_tensor(bounds, shape)?;
     Ok(tensor::tensor_into_value(tensor))
+}
+
+fn randi_single(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value> {
+    let data = generate_integer_values(bounds, tensor::element_count(shape))?
+        .into_iter()
+        .map(|value| value as f64)
+        .collect();
+    Tensor::new_with_dtype(data, shape.to_vec(), runmat_builtins::NumericDType::F32)
+        .map(tensor::tensor_into_value)
+        .map_err(|error| builtin_error(format!("randi: {error}")))
+}
+
+fn randi_integer(
+    bounds: &Bounds,
+    shape: &[usize],
+    target: IntegerTarget,
+) -> crate::BuiltinResult<Value> {
+    validate_integer_bounds(bounds, target)?;
+    let values = generate_integer_values(bounds, tensor::element_count(shape))?;
+    let storage = integer_storage_from_values(target, values)?;
+    Tensor::new_integer(storage, shape.to_vec())
+        .map(tensor::tensor_into_value)
+        .map_err(|error| builtin_error(format!("randi: {error}")))
 }
 
 fn randi_logical(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value> {
@@ -612,10 +664,10 @@ fn randi_logical(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value
         let byte = if bounds.lower == 0 { 0u8 } else { 1u8 };
         data.resize(len, byte);
     } else {
-        let samples = generate_integer_data(bounds, len)?;
+        let samples = generate_integer_values(bounds, len)?;
         data = samples
             .into_iter()
-            .map(|value| if value != 0.0 { 1u8 } else { 0u8 })
+            .map(|value| if value != 0 { 1u8 } else { 0u8 })
             .collect();
     }
 
@@ -633,7 +685,15 @@ async fn randi_like(
     match proto {
         Value::GpuTensor(handle) => randi_like_gpu(handle, bounds, shape).await,
         Value::LogicalArray(_) | Value::Bool(_) => randi_logical(bounds, shape),
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => randi_double(bounds, shape),
+        Value::Tensor(tensor) => match tensor.integer_storage() {
+            Some(storage) => randi_integer(bounds, shape, IntegerTarget::from_storage(storage)),
+            None if tensor.dtype == runmat_builtins::NumericDType::F32 => {
+                randi_single(bounds, shape)
+            }
+            None => randi_double(bounds, shape),
+        },
+        Value::Int(value) => randi_integer(bounds, shape, IntegerTarget::from_int_value(value)),
+        Value::Num(_) => randi_double(bounds, shape),
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
             randi_double(bounds, shape)
         }
@@ -654,10 +714,20 @@ async fn randi_like_gpu(
     shape: &[usize],
 ) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
+        let lower = i64::try_from(bounds.lower).map_err(|_| {
+            builtin_error(
+                "randi: GPU integer generation currently requires int64-representable bounds",
+            )
+        })?;
+        let upper = i64::try_from(bounds.upper).map_err(|_| {
+            builtin_error(
+                "randi: GPU integer generation currently requires int64-representable bounds",
+            )
+        })?;
         let attempt = if handle.shape == shape {
-            provider.random_integer_like(handle, bounds.lower, bounds.upper)
+            provider.random_integer_like(handle, lower, upper)
         } else {
-            provider.random_integer_range(bounds.lower, bounds.upper, shape)
+            provider.random_integer_range(lower, upper, shape)
         };
         if let Ok(gpu) = attempt {
             return Ok(Value::GpuTensor(gpu));
@@ -682,37 +752,75 @@ async fn randi_like_gpu(
 
 fn integer_tensor(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Tensor> {
     let len = tensor::element_count(shape);
-    let data = generate_integer_data(bounds, len)?;
+    let data = generate_integer_values(bounds, len)?
+        .into_iter()
+        .map(|value| value as f64)
+        .collect();
     Tensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("randi: {e}")))
 }
 
-fn generate_integer_data(bounds: &Bounds, len: usize) -> crate::BuiltinResult<Vec<f64>> {
+fn generate_integer_values(bounds: &Bounds, len: usize) -> crate::BuiltinResult<Vec<i128>> {
     if len == 0 {
         return Ok(Vec::new());
     }
     if bounds.span == 1 {
-        return Ok(vec![bounds.lower as f64; len]);
+        return Ok(vec![bounds.lower; len]);
     }
 
     let uniforms = random::generate_uniform(len, "randi")?;
     let span = bounds.span as f64;
-    let lower = bounds.lower as i128;
-    let upper = bounds.upper as i128;
     let mut out = Vec::with_capacity(len);
     for u in uniforms {
         let mut offset = (u * span).floor() as u64;
         if offset >= bounds.span {
             offset = bounds.span - 1;
         }
-        let mut value = lower
+        let mut value = bounds
+            .lower
             .checked_add(offset as i128)
             .ok_or_else(|| builtin_error("randi: integer overflow while sampling"))?;
-        if value > upper {
-            value = upper;
+        if value > bounds.upper {
+            value = bounds.upper;
         }
-        out.push(value as f64);
+        out.push(value);
     }
     Ok(out)
+}
+
+fn validate_integer_bounds(bounds: &Bounds, target: IntegerTarget) -> crate::BuiltinResult<()> {
+    let (min, max) = match target {
+        IntegerTarget::I8 => (i8::MIN as i128, i8::MAX as i128),
+        IntegerTarget::I16 => (i16::MIN as i128, i16::MAX as i128),
+        IntegerTarget::I32 => (i32::MIN as i128, i32::MAX as i128),
+        IntegerTarget::I64 => (i64::MIN as i128, i64::MAX as i128),
+        IntegerTarget::U8 => (0, u8::MAX as i128),
+        IntegerTarget::U16 => (0, u16::MAX as i128),
+        IntegerTarget::U32 => (0, u32::MAX as i128),
+        IntegerTarget::U64 => (0, u64::MAX as i128),
+    };
+    if bounds.lower < min || bounds.upper > max {
+        return Err(builtin_error(
+            "randi: bounds must be representable in the requested output class",
+        ));
+    }
+    Ok(())
+}
+
+fn integer_storage_from_values(
+    target: IntegerTarget,
+    values: Vec<i128>,
+) -> crate::BuiltinResult<IntegerStorage> {
+    let storage = match target {
+        IntegerTarget::I8 => IntegerStorage::I8(values.into_iter().map(|v| v as i8).collect()),
+        IntegerTarget::I16 => IntegerStorage::I16(values.into_iter().map(|v| v as i16).collect()),
+        IntegerTarget::I32 => IntegerStorage::I32(values.into_iter().map(|v| v as i32).collect()),
+        IntegerTarget::I64 => IntegerStorage::I64(values.into_iter().map(|v| v as i64).collect()),
+        IntegerTarget::U8 => IntegerStorage::U8(values.into_iter().map(|v| v as u8).collect()),
+        IntegerTarget::U16 => IntegerStorage::U16(values.into_iter().map(|v| v as u16).collect()),
+        IntegerTarget::U32 => IntegerStorage::U32(values.into_iter().map(|v| v as u32).collect()),
+        IntegerTarget::U64 => IntegerStorage::U64(values.into_iter().map(|v| v as u64).collect()),
+    };
+    Ok(storage)
 }
 
 async fn parse_bounds(value: Value) -> crate::BuiltinResult<Bounds> {
@@ -723,6 +831,7 @@ async fn parse_bounds(value: Value) -> crate::BuiltinResult<Bounds> {
         other => other,
     };
     match value {
+        Value::Int(value) => parse_upper_integer(int_value_to_i128(value)),
         Value::Tensor(t) => parse_bounds_tensor(&t),
         Value::LogicalArray(_) | Value::Bool(_) => Err(builtin_error(
             "randi: bounds must be numeric scalars or vectors",
@@ -751,7 +860,7 @@ async fn parse_bounds(value: Value) -> crate::BuiltinResult<Bounds> {
     }
 }
 
-fn parse_upper_scalar(upper: i64) -> crate::BuiltinResult<Bounds> {
+fn parse_upper_integer(upper: i128) -> crate::BuiltinResult<Bounds> {
     if upper < 1 {
         return Err(builtin_error("randi: upper bound must be >= 1"));
     }
@@ -766,14 +875,35 @@ fn parse_upper_num(n: f64) -> crate::BuiltinResult<Bounds> {
     if (rounded - n).abs() > f64::EPSILON {
         return Err(builtin_error("randi: bounds must be integers"));
     }
-    let upper = rounded as i64;
-    parse_upper_scalar(upper)
+    parse_upper_integer(rounded as i128)
 }
 
 fn parse_bounds_tensor(tensor: &Tensor) -> crate::BuiltinResult<Bounds> {
     let len = tensor.data.len();
     if len == 0 {
         return Err(builtin_error("randi: empty bound vector is not allowed"));
+    }
+    if let Some(storage) = tensor.integer_storage() {
+        if len == 1 {
+            return parse_upper_integer(int_value_to_i128(
+                storage
+                    .value_at(0)
+                    .expect("integer storage length matches tensor"),
+            ));
+        }
+        if len == 2 && is_vector_like(tensor) {
+            let lower = int_value_to_i128(
+                storage
+                    .value_at(0)
+                    .expect("integer storage length matches tensor"),
+            );
+            let upper = int_value_to_i128(
+                storage
+                    .value_at(1)
+                    .expect("integer storage length matches tensor"),
+            );
+            return Bounds::new(lower, upper);
+        }
     }
     if len == 1 {
         return parse_upper_num(tensor.data[0]);
@@ -789,7 +919,7 @@ fn parse_bounds_tensor(tensor: &Tensor) -> crate::BuiltinResult<Bounds> {
     }
 }
 
-fn parse_integer_component(value: f64) -> crate::BuiltinResult<i64> {
+fn parse_integer_component(value: f64) -> crate::BuiltinResult<i128> {
     if !value.is_finite() {
         return Err(builtin_error("randi: bounds must be finite"));
     }
@@ -797,7 +927,20 @@ fn parse_integer_component(value: f64) -> crate::BuiltinResult<i64> {
     if (rounded - value).abs() > f64::EPSILON {
         return Err(builtin_error("randi: bounds must be integers"));
     }
-    Ok(rounded as i64)
+    Ok(rounded as i128)
+}
+
+fn int_value_to_i128(value: IntValue) -> i128 {
+    match value {
+        IntValue::I8(value) => value as i128,
+        IntValue::I16(value) => value as i128,
+        IntValue::I32(value) => value as i128,
+        IntValue::I64(value) => value as i128,
+        IntValue::U8(value) => value as i128,
+        IntValue::U16(value) => value as i128,
+        IntValue::U32(value) => value as i128,
+        IntValue::U64(value) => value as i128,
+    }
 }
 
 fn is_vector_like(tensor: &Tensor) -> bool {
@@ -867,7 +1010,7 @@ pub(crate) mod tests {
         random::reset_rng();
     }
 
-    fn expected_sequence(bounds: &Bounds, count: usize) -> Vec<i64> {
+    fn expected_sequence(bounds: &Bounds, count: usize) -> Vec<i128> {
         let uniforms = random::expected_uniform_sequence(count);
         let span = bounds.span as f64;
         uniforms
@@ -877,7 +1020,7 @@ pub(crate) mod tests {
                 if offset >= bounds.span {
                     offset = bounds.span - 1;
                 }
-                bounds.lower + offset as i64
+                bounds.lower + offset as i128
             })
             .collect()
     }
@@ -954,6 +1097,102 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn randi_preserves_every_explicit_integer_class_and_integer_like_prototype() {
+        let _guard = random::test_lock().lock().unwrap();
+        let cases = [
+            ("int8", IntegerTarget::I8),
+            ("int16", IntegerTarget::I16),
+            ("int32", IntegerTarget::I32),
+            ("int64", IntegerTarget::I64),
+            ("uint8", IntegerTarget::U8),
+            ("uint16", IntegerTarget::U16),
+            ("uint32", IntegerTarget::U32),
+            ("uint64", IntegerTarget::U64),
+        ];
+
+        for (class, target) in cases {
+            reset_rng_clean();
+            let result = block_on(randi_builtin(vec![
+                Value::Num(5.0),
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::from(class),
+            ]))
+            .expect("explicit integer randi");
+            let Value::Tensor(tensor) = result else {
+                panic!("expected integer tensor");
+            };
+            assert_eq!(tensor.shape, vec![2, 3]);
+            let storage = tensor.integer_storage().expect("exact integer storage");
+            assert!(IntegerTarget::from_storage(storage) == target);
+            assert!(storage
+                .exact_values()
+                .iter()
+                .all(|value| (1..=5).contains(&value.to_i64())));
+        }
+
+        let prototype = Tensor::new_integer(IntegerStorage::U64(vec![0; 4]), vec![2, 2])
+            .expect("uint64 prototype");
+        let result = block_on(randi_builtin(vec![
+            Value::Num(5.0),
+            Value::from("like"),
+            Value::Tensor(prototype),
+        ]))
+        .expect("integer like randi");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(tensor.shape, vec![2, 2]);
+        assert!(matches!(
+            tensor.integer_storage(),
+            Some(IntegerStorage::U64(_))
+        ));
+
+        let result = block_on(randi_builtin(vec![
+            Value::Num(5.0),
+            Value::Num(2.0),
+            Value::from("single"),
+        ]))
+        .expect("single randi");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(tensor.dtype, runmat_builtins::NumericDType::F32);
+        assert!(tensor.integer_storage().is_none());
+    }
+
+    #[test]
+    fn randi_preserves_exact_high_uint64_bounds_and_rejects_out_of_class_bounds() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset_rng_clean();
+        let lower = u64::MAX - 4;
+        let bounds = Tensor::new_integer(IntegerStorage::U64(vec![lower, u64::MAX]), vec![1, 2])
+            .expect("uint64 bounds");
+        let result = block_on(randi_builtin(vec![
+            Value::Tensor(bounds),
+            Value::Num(1.0),
+            Value::Num(8.0),
+            Value::from("uint64"),
+        ]))
+        .expect("high uint64 randi");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected uint64 tensor");
+        };
+        let IntegerStorage::U64(values) = tensor.integer_storage().expect("uint64 storage") else {
+            panic!("expected uint64 storage");
+        };
+        assert!(values
+            .iter()
+            .all(|&value| (lower..=u64::MAX).contains(&value)));
+
+        let err = block_on(randi_builtin(vec![Value::Num(300.0), Value::from("uint8")]))
+            .expect_err("out-of-class bounds must fail");
+        assert!(err
+            .to_string()
+            .contains("representable in the requested output class"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1050,6 +1289,22 @@ pub(crate) mod tests {
         let err = block_on(randi_builtin(args)).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("cannot combine 'like' with 'logical'"));
+    }
+
+    #[test]
+    fn randi_like_integer_class_conflict_is_error() {
+        let proto = Tensor::new_integer(IntegerStorage::I64(vec![0]), vec![1, 1])
+            .expect("integer prototype");
+        let err = block_on(randi_builtin(vec![
+            Value::Num(5.0),
+            Value::from("like"),
+            Value::Tensor(proto),
+            Value::from("int64"),
+        ]))
+        .expect_err("like and integer class must conflict");
+        assert!(err
+            .to_string()
+            .contains("cannot combine 'like' with 'int64'"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

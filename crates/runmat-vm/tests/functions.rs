@@ -4184,6 +4184,31 @@ fn primes_script_surface_preserves_signed_and_unsigned_integer_classes() {
 }
 
 #[test]
+fn randi_script_surface_preserves_explicit_and_like_integer_classes() {
+    let vars = execute_source(
+        "signed = randi(5, 2, 2, 'int64'); prototype = uint64(zeros(2, 2)); unsigned = randi(5, 'like', prototype); signed_class = class(signed); unsigned_class = class(unsigned);",
+    );
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if matches!(tensor.integer_storage(), Some(runmat_builtins::IntegerStorage::I64(_)))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if matches!(tensor.integer_storage(), Some(runmat_builtins::IntegerStorage::U64(_)))
+    )));
+    for expected in ["int64", "uint64"] {
+        assert!(
+            vars.iter().any(
+                |value| matches!(value, runmat_builtins::Value::String(class) if class == expected)
+            ),
+            "expected class {expected:?}; vars={vars:?}"
+        );
+    }
+}
+
+#[test]
 fn num_arguments_from_subscript_script_surface() {
     let program = r#"
         C = {"one", 2, "three"};
