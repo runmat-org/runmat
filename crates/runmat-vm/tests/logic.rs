@@ -226,6 +226,22 @@ fn typed_complex_integer_dot_is_rejected_before_f64_coercion() {
 }
 
 #[test]
+fn typed_complex_integer_cross_is_rejected_before_f64_coercion() {
+    for operation in ["cross(z, z)", "cross(z, [1 2 3])", "cross([1 2 3], z)"] {
+        let source = format!(
+            "z = complex(uint64([9223372036854775808 2 3]), uint64([1 2 3])); out = {operation};"
+        );
+        let err = execute_source(&source).expect_err("cross must reject typed complex integers");
+        assert!(
+            err.to_string().contains(
+                "operations involving complex numbers with integer types are not supported"
+            ),
+            "unexpected cross error: {err}"
+        );
+    }
+}
+
+#[test]
 fn typed_complex_integer_gpuarray_is_rejected_before_provider_dispatch() {
     let err = execute_source(
         "z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); g = gpuArray(z);",

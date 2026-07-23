@@ -228,6 +228,8 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
     if rest.len() > 1 {
         return Err(cross_invalid_argument("cross: too many input arguments"));
     }
+    crate::builtins::common::validation::reject_typed_complex_integer(&lhs, CROSS_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&rhs, CROSS_NAME)?;
     let dim = match rest.first() {
         Some(value) => Some(parse_dimension_arg(value).await?),
         None => None,
