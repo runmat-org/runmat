@@ -146,6 +146,8 @@ pub const BSXFUN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 )]
 async fn bsxfun_builtin(function: Value, left: Value, right: Value) -> BuiltinResult<Value> {
     validate_function(&function)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&left, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&right, BUILTIN_NAME)?;
     let output_hint = CallbackOutputHint::for_function(&function);
     let left = gather_if_needed_async(&left)
         .await
@@ -849,6 +851,27 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![2, 1]);
         assert_eq!(tensor.data, vec![(11.0, 2.0), (13.0, -1.0)]);
+    }
+
+    #[test]
+    fn bsxfun_rejects_typed_complex_integer_inputs_before_callback_dispatch() {
+        let complex = ComplexTensor::new_integer(
+            runmat_builtins::IntegerComplexStorage::new(
+                runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+                runmat_builtins::IntegerStorage::U64(vec![1]),
+            )
+            .expect("storage"),
+            vec![1, 1],
+        )
+        .expect("tensor");
+
+        let err = call(
+            Value::FunctionHandle("plus".to_string()),
+            Value::ComplexTensor(complex),
+            Value::Num(1.0),
+        )
+        .expect_err("typed complex integer input must reject");
+        assert!(err.message().contains("complex numbers with integer types"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
