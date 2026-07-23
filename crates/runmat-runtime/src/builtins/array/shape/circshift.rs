@@ -687,9 +687,18 @@ fn circshift_tensor(
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<Tensor> {
-    let Tensor { data, shape, .. } = tensor;
+    let Tensor {
+        data,
+        integer_data,
+        shape,
+        ..
+    } = tensor;
     let plan = build_shift_plan(&shape, dims, shifts)?;
     if data.is_empty() || plan.is_noop() {
+        if let Some(storage) = integer_data {
+            return Tensor::new_integer(storage, shape)
+                .map_err(|e| circshift_internal(format!("circshift: {e}")));
+        }
         return Tensor::new(data, shape).map_err(|e| circshift_internal(format!("circshift: {e}")));
     }
     let ShiftPlan {
@@ -697,6 +706,14 @@ fn circshift_tensor(
         positive,
         ..
     } = plan;
+    if let Some(storage) = integer_data {
+        let values = circshift_generic(&storage.exact_values(), &ext_shape, &positive)?;
+        let storage = storage
+            .from_exact_values_like(values)
+            .map_err(|e| circshift_internal(format!("circshift: {e}")))?;
+        return Tensor::new_integer(storage, ext_shape)
+            .map_err(|e| circshift_internal(format!("circshift: {e}")));
+    }
     let rotated = circshift_generic(&data, &ext_shape, &positive)?;
     Tensor::new(rotated, ext_shape).map_err(|e| circshift_internal(format!("circshift: {e}")))
 }
@@ -963,7 +980,7 @@ pub(crate) mod tests {
         block_on(super::circshift_builtin(value, shift, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor};
 
     #[test]
     fn circshift_type_preserves_tensor_shape() {
@@ -979,6 +996,47 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(3), Some(2)])
             }
         );
+    }
+
+    #[test]
+    fn circshift_preserves_all_exact_real_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![-2, 7, 9, 11]),
+            IntegerStorage::I16(vec![-300, 400, 900, 1_200]),
+            IntegerStorage::I32(vec![i32::MIN, 0, 7, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, -1, 1, i64::MAX]),
+            IntegerStorage::U8(vec![0, 7, 9, u8::MAX]),
+            IntegerStorage::U16(vec![0, 700, 900, u16::MAX]),
+            IntegerStorage::U32(vec![0, 9_007_199, 42, u32::MAX]),
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, 42, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let input = Tensor::new_integer(storage.clone(), vec![2, 2]).expect("input");
+            let Value::Tensor(output) = circshift_builtin(
+                Value::Tensor(input),
+                Value::Int(IntValue::I32(1)),
+                vec![Value::Int(IntValue::I32(2))],
+            )
+            .expect("circshift") else {
+                panic!("expected exact real integer output");
+            };
+            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(
+                output.integer_storage(),
+                Some(
+                    &storage
+                        .from_exact_values_like(vec![
+                            values[2].clone(),
+                            values[3].clone(),
+                            values[0].clone(),
+                            values[1].clone(),
+                        ])
+                        .expect("expected shifted storage")
+                )
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

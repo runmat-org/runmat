@@ -357,6 +357,14 @@ fn rot90_tensor(tensor: Tensor, steps: usize) -> crate::BuiltinResult<Tensor> {
     if steps == 0 {
         return Ok(tensor);
     }
+    if let Some(storage) = tensor.integer_storage() {
+        let (values, shape) = rot90_generic(&storage.exact_values(), &tensor.shape, steps)?;
+        let storage = storage
+            .from_exact_values_like(values)
+            .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))?;
+        return Tensor::new_integer(storage, shape)
+            .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL));
+    }
     let (data, shape) = rot90_generic(&tensor.data, &tensor.shape, steps)?;
     Tensor::new(data, shape)
         .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
@@ -627,7 +635,7 @@ pub(crate) mod tests {
         block_on(super::rot90_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, Tensor, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Type};
 
     #[test]
     fn rot90_type_preserves_matrix_shape() {
@@ -643,6 +651,44 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(2), Some(3)])
             }
         );
+    }
+
+    #[test]
+    fn rot90_preserves_all_exact_real_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![-2, 7, 9, 11]),
+            IntegerStorage::I16(vec![-300, 400, 900, 1_200]),
+            IntegerStorage::I32(vec![i32::MIN, 0, 7, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, -1, 1, i64::MAX]),
+            IntegerStorage::U8(vec![0, 7, 9, u8::MAX]),
+            IntegerStorage::U16(vec![0, 700, 900, u16::MAX]),
+            IntegerStorage::U32(vec![0, 9_007_199, 42, u32::MAX]),
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, 42, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let input = Tensor::new_integer(storage.clone(), vec![2, 2]).expect("input");
+            let Value::Tensor(output) =
+                rot90_builtin(Value::Tensor(input), Vec::new()).expect("rot90")
+            else {
+                panic!("expected exact real integer output");
+            };
+            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(
+                output.integer_storage(),
+                Some(
+                    &storage
+                        .from_exact_values_like(vec![
+                            values[2].clone(),
+                            values[0].clone(),
+                            values[3].clone(),
+                            values[1].clone(),
+                        ])
+                        .expect("expected rotated storage")
+                )
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
