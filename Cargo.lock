@@ -5585,6 +5585,7 @@ dependencies = [
  "runmat-runtime",
  "runmat-server-client",
  "runmat-snapshot",
+ "runmat-static-analysis",
  "runmat-telemetry",
  "runmat-time",
  "runmat-vm",
@@ -5736,6 +5737,7 @@ dependencies = [
  "runmat-parser",
  "runmat-runtime",
  "runmat-snapshot",
+ "runmat-static-analysis",
  "runmat-telemetry",
  "runmat-time",
  "runmat-turbine",
@@ -6231,10 +6233,13 @@ name = "runmat-static-analysis"
 version = "0.5.3"
 dependencies = [
  "runmat-builtins",
+ "runmat-config",
  "runmat-hir",
  "runmat-mir",
  "runmat-parser",
  "runmat-runtime",
+ "runmat-vm",
+ "serde",
 ]
 
 [[package]]

@@ -174,10 +174,11 @@ fn string_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
 }
 
 fn html_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(fn_name)
-        .with_identifier("RunMat:html:InvalidInput")
-        .build()
+    let mut builder = build_runtime_error(message).with_builtin(fn_name);
+    if let Some(identifier) = ERROR_INVALID_INPUT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(

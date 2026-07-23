@@ -26,8 +26,10 @@ fn mir_local_fact_count_for_entrypoint(
         .count()
 }
 
-fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
-    use runmat_config::project::discover_known_project_symbols_from_source_name;
+fn discover_source_catalog(
+    source_name: &str,
+) -> Option<runmat_config::project::DiscoveredSourceSymbols> {
+    use runmat_config::project::discover_source_symbols_from_source_name;
 
     let source_path = PathBuf::from(source_name);
     let cwd = if source_path.is_absolute() {
@@ -38,7 +40,9 @@ fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
     } else {
         runmat_filesystem::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     };
-    discover_known_project_symbols_from_source_name(Some(source_name), &cwd)
+    discover_source_symbols_from_source_name(source_name, &cwd)
+        .ok()
+        .flatten()
 }
 
 fn function_output_arities(
@@ -152,23 +156,13 @@ fn qualify_companion_functions(stmts: &mut [runmat_parser::Stmt], qualified_name
 fn source_index_qualified_function_name(
     source: &runmat_config::project::ProjectSourceFile,
 ) -> Option<&str> {
-    if source.is_private {
-        return None;
-    }
-    (source.package_path.is_some() || source.class_name.is_some())
-        .then_some(source.qualified_name.as_str())
-        .filter(|name| name.contains('.'))
+    source.function_qualified_name()
 }
 
 fn source_index_qualified_class_name(
     source: &runmat_config::project::ProjectSourceFile,
 ) -> Option<&str> {
-    source.package_path.as_ref().and_then(|_| {
-        source
-            .qualified_name
-            .contains('.')
-            .then_some(source.qualified_name.as_str())
-    })
+    source.class_definition_qualified_name()
 }
 
 fn is_private_dir(path: &Path) -> bool {
@@ -249,32 +243,6 @@ fn synthetic_private_function_name(owner_scope: &str, leaf_name: &str) -> String
     } else {
         format!("{owner_scope}.__private__.{leaf_name}")
     }
-}
-
-fn owner_scope_from_path_skipping_private(source_path: &Path, root_dir: &Path) -> Option<String> {
-    let relative = source_path.strip_prefix(root_dir).ok()?;
-    let parent = relative.parent()?;
-    let mut segments = Vec::new();
-    for component in parent.components() {
-        let segment = component.as_os_str().to_str()?;
-        if segment.eq_ignore_ascii_case("private") {
-            continue;
-        }
-        if let Some(pkg) = segment.strip_prefix('+') {
-            if pkg.is_empty() {
-                return None;
-            }
-            segments.push(pkg.to_string());
-        } else if let Some(class) = segment.strip_prefix('@') {
-            if class.is_empty() {
-                return None;
-            }
-            segments.push(class.to_string());
-        } else {
-            segments.push(segment.to_string());
-        }
-    }
-    Some(segments.join("."))
 }
 
 fn qualify_private_companion_functions(
@@ -549,6 +517,16 @@ pub(super) async fn discover_companion_source_statements_async(
         return Ok(CompanionSourceDiscovery::default());
     };
     let primary_source_path = resolved_source_path(source_name, &cwd);
+    let primary_is_local_file = runmat_filesystem::metadata_async(&primary_source_path)
+        .await
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false);
+    if !primary_is_local_file {
+        // Text/REPL source labels are not paths and must not inherit whatever
+        // manifest happens to be visible through the process-global cwd. Path
+        // executions resolve to a real primary file before reaching here.
+        return Ok(CompanionSourceDiscovery::default());
+    }
     let Some(parent) = primary_source_path.parent() else {
         return Ok(CompanionSourceDiscovery::default());
     };
@@ -564,88 +542,58 @@ pub(super) async fn discover_companion_source_statements_async(
     }
     let mut out = CompanionSourceDiscovery::default();
     let options = ParserOptions::new(compat_mode);
-    let mut stack = vec![parent.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = runmat_filesystem::read_dir_async(&dir).await else {
+    let source_index = runmat_config::project::build_loose_source_index_async(parent)
+        .await
+        .map_err(|error| error.to_string())?;
+    for source in source_index.files {
+        let path = parent.join(&source.source_root).join(&source.relative_path);
+        if source_paths_equivalent(&path, &primary_source_path) {
+            continue;
+        }
+        let Ok(contents) = runmat_filesystem::read_to_string_async(&path).await else {
             continue;
         };
-        for entry in entries {
-            let path = entry.path().to_path_buf();
-            if source_paths_equivalent(&path, &primary_source_path) {
-                continue;
-            }
-            if entry.is_dir() {
-                let is_package_dir = entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|name| name.starts_with('+'));
-                let is_class_dir = entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|name| name.starts_with('@'));
-                if is_package_dir || is_class_dir || is_private_dir(&path) {
-                    stack.push(path);
-                }
-                continue;
-            }
-            if !path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("m"))
-            {
-                continue;
-            }
-            let Ok(contents) = runmat_filesystem::read_to_string_async(&path).await else {
-                continue;
-            };
-            if !contents.contains("classdef") && !contents.contains("function") {
-                continue;
-            }
-            let Ok(program) = parse_with_options(&contents, options) else {
-                continue;
-            };
-            let is_class_source = is_class_source_body(&program.body);
-            let is_function_source = is_function_source_body(&program.body);
-            if !is_class_source && !is_function_source {
-                continue;
-            }
-            let Some(source) = runmat_config::project::project_source_file_from_path(
-                &path,
-                parent,
-                Path::new("."),
-            ) else {
-                continue;
-            };
-            let mut body = program.body;
-            let private_owner_scope = private_parent_dir_for_source(&path)
-                .and_then(|_| owner_scope_from_path_skipping_private(&path, parent));
-            let primary_visible_private = private_owner_scope.is_some()
-                && private_source_visible_to(&primary_source_path, &path);
-            let private_aliases = if let Some(owner_scope) = private_owner_scope.as_deref() {
-                qualify_private_companion_functions(&mut body, owner_scope, primary_visible_private)
-            } else {
-                HashMap::new()
-            };
-            if is_class_source {
-                if let Some(qualified) = source.class_definition_qualified_name() {
-                    qualify_companion_classdefs(&mut body, qualified);
-                }
-            } else if private_owner_scope.is_none() {
-                if let Some(qualified) = source.function_qualified_name() {
-                    qualify_companion_functions(&mut body, qualified);
-                }
-            }
-            out.extend_body(
-                body,
-                private_owner_scope.as_deref(),
-                private_aliases,
-                Some(SourceContextData {
-                    display_name: crate::diagnostic_path::display_path_from_base(&path, &cwd),
-                    fullpath_name: Some(path_to_source_name(&path)),
-                    text: contents,
-                }),
-            );
+        if !contents.contains("classdef") && !contents.contains("function") {
+            continue;
         }
+        let Ok(program) = parse_with_options(&contents, options) else {
+            continue;
+        };
+        let is_class_source = is_class_source_body(&program.body);
+        let is_function_source = is_function_source_body(&program.body);
+        if !is_class_source && !is_function_source {
+            continue;
+        }
+        let mut body = program.body;
+        let private_owner_scope = source
+            .is_private
+            .then(|| function_owner_scope_from_qualified_name(&source.qualified_name));
+        let primary_visible_private =
+            private_owner_scope.is_some() && private_source_visible_to(&primary_source_path, &path);
+        let private_aliases = if let Some(owner_scope) = private_owner_scope.as_deref() {
+            qualify_private_companion_functions(&mut body, owner_scope, primary_visible_private)
+        } else {
+            HashMap::new()
+        };
+        if is_class_source {
+            if let Some(qualified) = source.class_definition_qualified_name() {
+                qualify_companion_classdefs(&mut body, qualified);
+            }
+        } else if private_owner_scope.is_none() {
+            if let Some(qualified) = source.function_qualified_name() {
+                qualify_companion_functions(&mut body, qualified);
+            }
+        }
+        out.extend_body(
+            body,
+            private_owner_scope.as_deref(),
+            private_aliases,
+            Some(SourceContextData {
+                display_name: crate::diagnostic_path::display_path_from_base(&path, &cwd),
+                fullpath_name: Some(path_to_source_name(&path)),
+                text: contents,
+            }),
+        );
     }
     Ok(out)
 }
@@ -726,14 +674,19 @@ impl RunMatSession {
                 companion_function_source_ids,
             )
         };
-        let lowering = {
+        let (lowering, analysis, mut bytecode) = {
             let _span = info_span!("runtime.lower").entered();
             let function_names = self.function_registry.names.clone();
             let function_output_arities = function_output_arities(&self.function_registry);
             let workspace_bindings = self.lowering_workspace_bindings();
             let source_lookup_name = source_fullpath_name.as_deref().unwrap_or(&source_name);
-            let known_project_symbols = discover_known_project_symbols(source_lookup_name);
-            runmat_hir::lower(
+            let source_catalog = discover_source_catalog(source_lookup_name);
+            let known_project_symbols = source_catalog
+                .as_ref()
+                .map(|catalog| &catalog.symbols)
+                .cloned()
+                .unwrap_or_default();
+            let frontend = runmat_static_analysis::frontend::analyze_program_with_catalog(
                 &ast,
                 &LoweringContext::new(&workspace_bindings)
                     .with_bound_functions(&function_names)
@@ -745,19 +698,25 @@ impl RunMatSession {
                     )
                     .with_runmat_extensions_enabled(self.compat_mode.allows_runmat_extensions())
                     .with_top_level_await_enabled(self.top_level_await_enabled),
-            )?
-        };
-        let mir = {
-            let _span = info_span!("runtime.compile.mir").entered();
-            runmat_mir::lowering::lower_assembly(&lowering.assembly)?
-        };
-        let analysis = {
-            let _span = info_span!("runtime.analyze").entered();
-            runmat_mir::analysis::analyze_assembly(&mir)
-        };
-        let mut bytecode = {
-            let _span = info_span!("runtime.compile.bytecode").entered();
-            self.compile_semantic_bytecode_from_mir(&lowering.assembly, &mir)?
+                source_catalog.as_ref(),
+            );
+            if let Some(error) = frontend.lowering_failure {
+                return Err(error.into());
+            }
+            if let Some(error) = frontend.compile_failure {
+                return Err(error.into());
+            }
+            (
+                frontend
+                    .lowering
+                    .expect("canonical frontend returned no lowering without an error"),
+                frontend
+                    .facts
+                    .expect("canonical frontend returned no facts without an error"),
+                frontend
+                    .bytecode
+                    .expect("canonical frontend returned no bytecode without an error"),
+            )
         };
         bytecode.source_id = Some(source_id);
         for function in bytecode.function_registry.functions.values_mut() {
@@ -804,22 +763,6 @@ impl RunMatSession {
             rendered.push(line);
         }
         error.context.call_stack = rendered;
-    }
-
-    fn compile_semantic_bytecode_from_mir(
-        &self,
-        assembly: &runmat_hir::HirAssembly,
-        mir: &runmat_mir::MirAssembly,
-    ) -> std::result::Result<runmat_vm::Bytecode, RunError> {
-        let Some(entrypoint) = assembly.entrypoints.first() else {
-            let bound_functions = runmat_vm::compile_semantic_function_registry(assembly, mir)?;
-            let function_registry = runmat_vm::FunctionRegistry::new(bound_functions.clone());
-            let mut bytecode = runmat_vm::Bytecode::empty();
-            bytecode.bound_functions = bound_functions;
-            bytecode.function_registry = function_registry;
-            return Ok(bytecode);
-        };
-        Ok(runmat_vm::compile(assembly, mir, entrypoint.id)?)
     }
 
     fn prepare_session_semantic_function_registry(
@@ -1294,5 +1237,63 @@ fn remap_semantic_function_end_expr(
         | runmat_vm::EndExpr::Round(inner)
         | runmat_vm::EndExpr::Fix(inner) => remap_semantic_function_end_expr(inner, remap),
         runmat_vm::EndExpr::End | runmat_vm::EndExpr::Const(_) | runmat_vm::EndExpr::Var(_) => {}
+    }
+}
+
+#[cfg(test)]
+mod source_discovery_tests {
+    use super::*;
+    use std::fs;
+
+    fn discovered_function_names(discovery: &CompanionSourceDiscovery) -> HashSet<String> {
+        discovery
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                runmat_parser::Stmt::Function { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn loose_runtime_companions_use_the_shared_matlab_source_index() {
+        let temp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(temp.path().join("+pkg")).unwrap();
+        fs::create_dir_all(temp.path().join("private")).unwrap();
+        fs::create_dir_all(temp.path().join("ordinary-nested")).unwrap();
+        let main = temp.path().join("main.m");
+        fs::write(&main, "value = helper(1);").unwrap();
+        fs::write(
+            temp.path().join("helper.m"),
+            "function y = helper(x)\ny = x;\nend",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("+pkg/tool.m"),
+            "function y = tool(x)\ny = x;\nend",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("private/secret.m"),
+            "function y = secret(x)\ny = x;\nend",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("ordinary-nested/hidden.m"),
+            "function y = hidden(x)\ny = x;\nend",
+        )
+        .unwrap();
+
+        let discovery = futures::executor::block_on(discover_companion_source_statements_async(
+            main.to_str().unwrap(),
+            runmat_parser::CompatMode::RunMat,
+        ))
+        .expect("discover loose companion sources");
+        let names = discovered_function_names(&discovery);
+        assert!(names.contains("helper"));
+        assert!(names.contains("pkg.tool"));
+        assert!(names.contains("secret"));
+        assert!(!names.iter().any(|name| name.ends_with("hidden")));
     }
 }

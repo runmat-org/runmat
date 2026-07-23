@@ -499,6 +499,7 @@ pub async fn vm_dynamic_workspace_builtin(
             let source_context = DynamicSourceContext {
                 source_id: dynamic_source_id,
                 name: source.display_name.clone(),
+                fullpath_name: Some(source.path.to_string_lossy().to_string()),
                 text: source.text.clone(),
             };
             eval_workspace_source(
@@ -572,6 +573,7 @@ async fn execute_runtests_case(
     let source_context = DynamicSourceContext {
         source_id: dynamic_source_id,
         name: case.display_name.clone(),
+        fullpath_name: None,
         text: case.source.clone(),
     };
     let eval_result = eval_workspace_source(
@@ -811,6 +813,7 @@ async fn eval_workspace_source(
 struct DynamicSourceContext {
     source_id: runmat_hir::SourceId,
     name: String,
+    fullpath_name: Option<String>,
     text: String,
 }
 
@@ -822,16 +825,25 @@ fn install_dynamic_source_context(
     entries.push((
         context.source_id,
         context.name.clone(),
-        None,
+        context.fullpath_name.clone(),
         context.text.clone(),
     ));
     runmat_runtime::source_context::replace_source_catalog_with_fullpaths(entries)
 }
 
 fn dynamic_source_context(name: impl Into<String>, text: &str) -> DynamicSourceContext {
+    let fallback_name = name.into();
+    let current = runmat_runtime::source_context::current_source_info();
     DynamicSourceContext {
         source_id: next_dynamic_source_id(),
-        name: name.into(),
+        name: current
+            .as_ref()
+            .map(|source| source.name.to_string())
+            .filter(|name| !name.is_empty())
+            .unwrap_or(fallback_name),
+        fullpath_name: current
+            .as_ref()
+            .and_then(|source| source.fullpath_name.as_ref().map(ToString::to_string)),
         text: text.to_string(),
     }
 }
@@ -1477,7 +1489,9 @@ pub fn rethrow_without_explicit_exception(
 
 #[cfg(test)]
 mod tests {
-    use super::{imported_builtin_qualified_name, rethrow_without_explicit_exception};
+    use super::{
+        dynamic_source_context, imported_builtin_qualified_name, rethrow_without_explicit_exception,
+    };
 
     #[test]
     fn imported_builtin_qualified_name_uses_typed_segments() {
@@ -1511,6 +1525,27 @@ mod tests {
         .expect("rethrow should preserve prior exception");
         assert_eq!(err.identifier(), Some("RunMat:Original"));
         assert_eq!(err.message(), "boom");
+    }
+
+    #[test]
+    fn dynamic_eval_inherits_the_calling_file_identity() {
+        let source_id = runmat_hir::SourceId(41);
+        let _catalog =
+            runmat_runtime::source_context::replace_source_catalog_with_fullpaths(vec![(
+                source_id,
+                "analysis.m".to_string(),
+                Some("/project/analysis.m".to_string()),
+                "value = eval('mfilename()');".to_string(),
+            )]);
+        let _current = runmat_runtime::source_context::replace_current_source_id(Some(source_id));
+        let dynamic = dynamic_source_context("<eval>", "mfilename()");
+        assert_eq!(dynamic.name, "analysis.m");
+        assert_eq!(
+            dynamic.fullpath_name.as_deref(),
+            Some("/project/analysis.m")
+        );
+        assert_eq!(dynamic.text, "mfilename()");
+        assert_ne!(dynamic.source_id, source_id);
     }
 
     #[cfg(feature = "native-accel")]

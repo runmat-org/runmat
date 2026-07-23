@@ -3286,11 +3286,10 @@ end
         "g",
         &runmat_builtins::Value::Num(1.0)
     ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "v",
-        &runmat_builtins::Value::Bool(false)
-    ));
+    assert!(
+        outcome_has_named_upsert(&outcome, "v", &runmat_builtins::Value::Bool(false)),
+        "delete should invalidate the original handle; outcome={outcome:?}"
+    );
 }
 
 #[test]
@@ -5743,11 +5742,14 @@ end
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let outcome = execute_path_request(&mut session, "src/analyze_sales.m")
         .expect("class-folder constructor should execute");
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "label",
-        &runmat_builtins::Value::String("sales".into())
-    ));
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "label",
+            &runmat_builtins::Value::String("sales".into())
+        ),
+        "class-folder method should return the constructed property; outcome={outcome:?}"
+    );
     assert!(outcome_has_named_upsert(
         &outcome,
         "total",
@@ -8178,7 +8180,7 @@ roots = ["."]
 }
 
 #[test]
-fn execute_outcome_wildcard_import_without_manifest_reports_unresolved_function() {
+fn execute_outcome_wildcard_import_resolves_from_loose_package_folder() {
     let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
@@ -8187,7 +8189,8 @@ fn execute_outcome_wildcard_import_without_manifest_reports_unresolved_function(
         "function y = foo(); y = 42; end",
     )
     .expect("write package function");
-    std::fs::write(tmp.path().join("main.m"), "import pkg.*; foo()").expect("write main source");
+    std::fs::write(tmp.path().join("main.m"), "import pkg.*; value = foo();")
+        .expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let _cwd = push_cwd(tmp.path());
@@ -8195,13 +8198,15 @@ fn execute_outcome_wildcard_import_without_manifest_reports_unresolved_function(
     let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
 
     assert!(
-        outcome
-            .diagnostics
-            .iter()
-            .any(|d| d.code == "RunMat:UndefinedFunction" && d.message.contains("foo")),
-        "wildcard import without manifest should not resolve package symbols; diagnostics={:?}",
+        outcome.diagnostics.is_empty(),
+        "MATLAB package folders are valid loose-folder lookup roots; diagnostics={:?}",
         outcome.diagnostics
     );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "value",
+        &runmat_builtins::Value::Num(42.0)
+    ));
 }
 
 #[test]
@@ -10361,11 +10366,14 @@ fn dynamic_workspace_eval_preserves_source_context_in_path_source() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute path source");
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "eval_name",
-        &runmat_builtins::Value::String("dynamic_workspace_mfilename".into())
-    ));
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "eval_name",
+            &runmat_builtins::Value::String("dynamic_workspace_mfilename".into())
+        ),
+        "eval should inherit the active file identity; outcome={outcome:?}"
+    );
 
     let assert_named_path = |name: &str, expected: PathBuf| {
         let actual = outcome_named_upsert_value(&outcome, name)

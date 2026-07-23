@@ -81,15 +81,6 @@ fn gather_if_needed_async_impl<'a>(
     Box::pin(async move {
         match value {
             Value::GpuTensor(handle) => {
-                // In parallel test runs, ensure the WGPU provider is reasserted for WGPU handles.
-                #[cfg(all(test, feature = "wgpu"))]
-                {
-                    if handle.device_id != 0 {
-                        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-                    );
-                    }
-                }
                 let provider =
                     runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
                         build_runtime_error("gather: no acceleration provider registered")
@@ -285,17 +276,7 @@ async fn call_builtin_async_impl(
     {
         let f = builtin.implementation;
         match (f)(args).await {
-            Ok(mut result) => {
-                // Normalize certain logical scalar results to numeric 0/1 for
-                // compatibility with legacy expectations in dispatcher tests
-                // and VM shims.
-                if matches!(name, "eq" | "ne" | "gt" | "ge" | "lt" | "le") {
-                    if let Value::Bool(flag) = result {
-                        result = Value::Num(if flag { 1.0 } else { 0.0 });
-                    }
-                }
-                return Ok(result);
-            }
+            Ok(result) => return Ok(result),
             Err(err) => {
                 if should_retry_with_gpu_gather(&err, args) {
                     match gather_args_for_retry_async(args).await {
@@ -378,14 +359,13 @@ pub(crate) async fn try_call_registered_instance_method(
     )
     .await
     {
-        return result.map(Some);
+        return finalize_instance_method_result(method_name, receiver, result).map(Some);
     }
     if runmat_builtins::builtin_function_by_name(&method.function_name).is_some()
         && method.function_name != method_name
     {
-        return call_builtin_async_impl(&method.function_name, args, output_count)
-            .await
-            .map(Some);
+        let result = call_builtin_async_impl(&method.function_name, args, output_count).await;
+        return finalize_instance_method_result(method_name, receiver, result).map(Some);
     }
     let owner_qualified = format!("{owner}.{method_name}");
     if owner_qualified != method.function_name {
@@ -396,17 +376,37 @@ pub(crate) async fn try_call_registered_instance_method(
         )
         .await
         {
-            return result.map(Some);
+            return finalize_instance_method_result(method_name, receiver, result).map(Some);
         }
         if runmat_builtins::builtin_function_by_name(&owner_qualified).is_some()
             && owner_qualified != method_name
         {
-            return call_builtin_async_impl(&owner_qualified, args, output_count)
-                .await
-                .map(Some);
+            let result = call_builtin_async_impl(&owner_qualified, args, output_count).await;
+            return finalize_instance_method_result(method_name, receiver, result).map(Some);
         }
     }
     Ok(None)
+}
+
+fn finalize_instance_method_result(
+    method_name: &str,
+    receiver: &Value,
+    result: Result<Value, RuntimeError>,
+) -> Result<Value, RuntimeError> {
+    let result = result?;
+    if method_name == "delete" {
+        if let Value::HandleObject(handle) = receiver {
+            if !crate::set_handle_valid(handle, false) {
+                return Err(build_runtime_error(format!(
+                    "delete: failed to invalidate handle object '{}' after its destructor completed",
+                    handle.class_name
+                ))
+                .with_identifier("RunMat:delete:InvalidHandle")
+                .build());
+            }
+        }
+    }
+    Ok(result)
 }
 
 async fn try_call_registered_static_method(

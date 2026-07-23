@@ -227,6 +227,15 @@ pub enum Commands {
         /// Emit structured JSON
         #[arg(long)]
         json: bool,
+        /// Print completed analysis domains as well as diagnostics
+        #[arg(short, long)]
+        verbose: bool,
+        /// Treat a diagnostic level as an error (currently: warnings)
+        #[arg(short = 'D', value_name = "LEVEL")]
+        deny: Vec<String>,
+        /// Add a MATLAB lookup root while checking this source
+        #[arg(long = "path", value_name = "DIRECTORY")]
+        search_paths: Vec<PathBuf>,
     },
     /// Show version information
     Version {

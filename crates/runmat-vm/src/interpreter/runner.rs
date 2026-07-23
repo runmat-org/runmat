@@ -25,6 +25,9 @@ use std::sync::Arc;
 use std::sync::Once;
 use tracing::{debug, info_span};
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::future::Future;
+
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
     activate_fusion_plan, active_group_plan_clone, deactivate_fusion_plan, set_current_pc,
@@ -87,11 +90,12 @@ pub async fn invoke_semantic_function_value(
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
 ) -> Result<Value, RuntimeError> {
-    let (value, _) = invoke_semantic_function_value_with_capture_updates(
+    let (value, _) = invoke_semantic_function_value_with_input_residency(
         function,
         args,
         requested_outputs,
         function_registry,
+        InputResidency::Transferred,
     )
     .await?;
     Ok(value)
@@ -102,6 +106,32 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
     args: &[Value],
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
+) -> Result<(Value, Vec<Value>), RuntimeError> {
+    invoke_semantic_function_value_with_input_residency(
+        function,
+        args,
+        requested_outputs,
+        function_registry,
+        InputResidency::Borrowed,
+    )
+    .await
+}
+
+#[derive(Clone, Copy)]
+enum InputResidency {
+    /// The caller retains the argument values as live workspace roots.
+    Borrowed,
+    /// The invocation owns the argument values and may release inputs the
+    /// function neither returns nor stores in another live root.
+    Transferred,
+}
+
+async fn invoke_semantic_function_value_with_input_residency(
+    function: usize,
+    args: &[Value],
+    requested_outputs: usize,
+    function_registry: &FunctionRegistry,
+    input_residency: InputResidency,
 ) -> Result<(Value, Vec<Value>), RuntimeError> {
     let function_id = runmat_hir::FunctionId(function);
     let func = function_registry.get(function_id).ok_or_else(|| {
@@ -254,15 +284,36 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
     bytecode.initially_unassigned_slots = initially_unassigned_slots;
     bytecode.bound_functions = function_registry.functions.clone();
     bytecode.function_registry = function_registry.clone();
-    let result_vars = interpret_function_with_counts(
-        &bytecode,
-        vars,
-        &func.display_name,
-        requested_outputs,
-        runtime_arg_count,
-        missing_input_slots,
-    )
-    .await?;
+    let result_vars = {
+        let future = interpret_function_with_counts(
+            &bytecode,
+            vars,
+            &func.display_name,
+            requested_outputs,
+            runtime_arg_count,
+            missing_input_slots,
+        );
+        #[cfg(target_arch = "wasm32")]
+        {
+            future.await?
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // A semantic call recursively drives another async interpreter.
+            // Polling it on the caller's small executor/test-thread stack makes
+            // ordinary class method chains consume the full native stack long
+            // before reaching a meaningful language recursion depth. Grow the
+            // stack only while polling the nested interpreter; values remain on
+            // the same thread and therefore retain their thread-confined GC
+            // semantics.
+            const SEMANTIC_CALL_STACK_BYTES: usize = 16 * 1024 * 1024;
+            let mut future = Box::pin(future);
+            futures::future::poll_fn(move |context| {
+                stacker::grow(SEMANTIC_CALL_STACK_BYTES, || future.as_mut().poll(context))
+            })
+            .await?
+        }
+    };
     let output_values = collect_semantic_outputs(func, &result_vars, requested_outputs)?;
     let updated_captures = func
         .capture_slots
@@ -270,7 +321,13 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
         .map(|slot| result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)))
         .collect::<Vec<_>>();
     #[cfg(feature = "native-accel")]
-    clear_semantic_function_temp_residency(&result_vars, args, &output_values, &updated_captures);
+    clear_semantic_function_temp_residency(
+        &result_vars,
+        args,
+        &output_values,
+        &updated_captures,
+        input_residency,
+    );
     Ok((
         output_value(output_values, requested_outputs),
         updated_captures,
@@ -823,11 +880,15 @@ fn clear_semantic_function_temp_residency(
     args: &[Value],
     output_values: &[Value],
     updated_captures: &[Value],
+    input_residency: InputResidency,
 ) {
     let mut keep_values = output_values.to_vec();
-    // Function input slots are borrowed aliases of caller values. Releasing them
-    // here can invalidate handles still live in the caller expression.
-    keep_values.extend(args.iter().cloned());
+    if matches!(input_residency, InputResidency::Borrowed) {
+        // Interpreter-to-interpreter calls borrow arguments from the caller's
+        // workspace. Those values remain live after the callee returns even if
+        // the callee overwrites its input slots.
+        keep_values.extend(args.iter().cloned());
+    }
     keep_values.extend(updated_captures.iter().cloned());
     keep_values.extend(runtime_globals::collect_thread_roots());
     let keep = Value::OutputList(keep_values);
@@ -952,13 +1013,14 @@ async fn run_interpreter_inner(
                             return invoker(function, &args, requested_outputs).await;
                         }
                     }
-                    invoke_semantic_function_value(
+                    invoke_semantic_function_value_with_capture_updates(
                         function,
                         &args,
                         requested_outputs,
                         &function_registry,
                     )
                     .await
+                    .map(|(value, _)| value)
                 })
             },
         )));

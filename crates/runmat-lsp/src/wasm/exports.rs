@@ -181,10 +181,10 @@ pub fn completion(_uri: String, _line: u32, _character: u32) -> Result<JsValue, 
     };
     let position = Position::new(_line, _character);
     let Some(analysis) = doc.analysis.as_ref() else {
-        return Ok(to_js(&CompletionList {
+        return to_js(&CompletionList {
             is_incomplete: true,
             items: Vec::new(),
-        })?);
+        });
     };
     let items = completion_at(&doc.text, analysis, &position);
     let list = CompletionList {

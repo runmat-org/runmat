@@ -1031,6 +1031,7 @@ pub struct HirIndex {
     pub imports: Vec<ImportResolution>,
     pub references: Vec<ReferenceResolution>,
     pub calls: Vec<CallResolution>,
+    pub function_handles: Vec<FunctionHandleResolution>,
     pub mutations: Vec<PlaceMutation>,
 }
 
@@ -1074,7 +1075,15 @@ pub struct CallResolution {
     pub name: QualifiedName,
     pub callee: HirCallableRef,
     pub kind: CallKind,
+    pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
+    pub span: Span,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct FunctionHandleResolution {
+    pub name: QualifiedName,
+    pub target: FunctionHandleTarget,
     pub span: Span,
 }
 

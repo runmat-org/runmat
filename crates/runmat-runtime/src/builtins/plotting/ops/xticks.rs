@@ -132,6 +132,7 @@ mod tests {
             cols: data.len(),
             shape: vec![1, data.len()],
             data,
+            integer_data: None,
             dtype: runmat_builtins::NumericDType::F64,
         })
     }

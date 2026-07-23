@@ -25,13 +25,15 @@ fn mir_local_fact_count_for_entrypoint(
         .count()
 }
 
-fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
-    use runmat_config::project::discover_known_project_symbols_from_source_name;
+fn discover_source_catalog(
+    source_name: Option<&str>,
+) -> Option<runmat_config::project::DiscoveredSourceSymbols> {
+    use runmat_config::project::discover_source_symbols_from_source_name;
     use std::path::{Path, PathBuf};
 
     let Ok(cwd) = runmat_filesystem::current_dir() else {
         let Some(source_name) = source_name else {
-            return HashSet::new();
+            return None;
         };
         let source_path = PathBuf::from(source_name);
         if source_path.is_absolute() {
@@ -39,11 +41,23 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
                 .parent()
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| PathBuf::from("/"));
-            return discover_known_project_symbols_from_source_name(Some(source_name), &source_cwd);
+            return discover_source_symbols_from_source_name(source_name, &source_cwd)
+                .ok()
+                .flatten();
         }
-        return HashSet::new();
+        return None;
     };
-    discover_known_project_symbols_from_source_name(source_name, &cwd)
+    let source_name = source_name?;
+    discover_source_symbols_from_source_name(source_name, &cwd)
+        .ok()
+        .flatten()
+}
+
+#[cfg(test)]
+fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
+    discover_source_catalog(source_name)
+        .map(|catalog| catalog.symbols)
+        .unwrap_or_default()
 }
 
 impl RunMatSession {
@@ -296,7 +310,7 @@ impl RunMatSession {
         #[cfg(target_arch = "wasm32")]
         let top_level_await_enabled = self.top_level_await_enabled;
         let source_name_for_eval_hook = self.current_source_name().to_string();
-        let known_project_symbols_for_eval_hook = Arc::new(discover_known_project_symbols(Some(
+        let source_catalog_for_eval_hook = Arc::new(discover_source_catalog(Some(
             source_name_for_eval_hook.as_str(),
         )));
         let _eval_hook_guard =
@@ -308,7 +322,9 @@ impl RunMatSession {
                         expr: String,
                         compat: runmat_parser::CompatMode,
                         top_level_await_enabled: bool,
-                        known_project_symbols: Arc<HashSet<String>>,
+                        source_catalog: Arc<
+                            Option<runmat_config::project::DiscoveredSourceSymbols>,
+                        >,
                     ) -> Result<Value, RuntimeError> {
                         let wrapped = format!("__runmat_input_result__ = ({expr});");
                         let ast = parse_with_options(&wrapped, ParserOptions::new(compat))
@@ -317,20 +333,36 @@ impl RunMatSession {
                                     .with_identifier("RunMat:input:ParseError")
                                     .build()
                             })?;
-                        let lowering = runmat_hir::lower(
-                            &ast,
-                            &LoweringContext::new(&HashMap::new())
-                                .with_known_project_symbols(&known_project_symbols)
-                                .with_runmat_extensions_enabled(compat.allows_runmat_extensions())
-                                .with_top_level_await_enabled(top_level_await_enabled),
-                        )
-                        .map_err(|e| {
-                            build_runtime_error(format!("input: lowering error: {e}"))
+                        let known_project_symbols = source_catalog
+                            .as_ref()
+                            .as_ref()
+                            .map(|catalog| &catalog.symbols)
+                            .cloned()
+                            .unwrap_or_default();
+                        let frontend =
+                            runmat_static_analysis::frontend::analyze_program_with_catalog(
+                                &ast,
+                                &LoweringContext::new(&HashMap::new())
+                                    .with_known_project_symbols(&known_project_symbols)
+                                    .with_runmat_extensions_enabled(
+                                        compat.allows_runmat_extensions(),
+                                    )
+                                    .with_top_level_await_enabled(top_level_await_enabled),
+                                source_catalog.as_ref().as_ref(),
+                            );
+                        if let Some(e) = frontend.lowering_failure {
+                            return Err(build_runtime_error(format!("input: lowering error: {e}"))
                                 .with_identifier("RunMat:input:LowerError")
+                                .build());
+                        }
+                        if let Some(e) = frontend.compile_failure {
+                            return Err(RuntimeError::from(e));
+                        }
+                        let bc = frontend.bytecode.ok_or_else(|| {
+                            build_runtime_error("input: canonical frontend produced no bytecode")
+                                .with_identifier("RunMat:input:CompileError")
                                 .build()
                         })?;
-                        let bc =
-                            compile_eval_hook_bytecode(&lowering).map_err(RuntimeError::from)?;
                         let result_idx = bc.var_names.iter().find_map(|(idx, name)| {
                             (name == "__runmat_input_result__").then_some(*idx)
                         });
@@ -344,21 +376,21 @@ impl RunMatSession {
                             })
                     }
 
-                    let known_project_symbols = Arc::clone(&known_project_symbols_for_eval_hook);
+                    let source_catalog = Arc::clone(&source_catalog_for_eval_hook);
                     #[cfg(target_arch = "wasm32")]
                     {
                         Box::pin(eval_expr(
                             expr,
                             compat,
                             top_level_await_enabled,
-                            known_project_symbols,
+                            source_catalog,
                         ))
                     }
                     #[cfg(not(target_arch = "wasm32"))]
                     {
                         const INPUT_EVAL_STACK_BYTES: usize = 16 * 1024 * 1024;
                         let mut eval_future =
-                            Box::pin(eval_expr(expr, compat, false, known_project_symbols));
+                            Box::pin(eval_expr(expr, compat, false, source_catalog));
                         Box::pin(futures::future::poll_fn(move |cx| {
                             stacker::grow(INPUT_EVAL_STACK_BYTES, || {
                                 let _dynamic_eval_guard = runmat_vm::push_dynamic_eval_options(
@@ -1297,18 +1329,6 @@ fn runtime_error_span(error: &runmat_runtime::RuntimeError) -> Option<runmat_hir
             end: start + span.len().max(1),
         }
     })
-}
-
-fn compile_eval_hook_bytecode(
-    lowering: &runmat_hir::LoweringResult,
-) -> Result<runmat_vm::Bytecode, runmat_vm::CompileError> {
-    let entrypoint = lowering.assembly.entrypoints.first().ok_or_else(|| {
-        runmat_vm::CompileError::new("semantic eval hook compile requires an entrypoint")
-    })?;
-    let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)
-        .map_err(runmat_vm::CompileError::from)?;
-    let _analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)
 }
 
 fn execution_workspace_mapping(bytecode: &runmat_vm::Bytecode) -> HashMap<String, usize> {

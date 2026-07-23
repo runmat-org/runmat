@@ -291,7 +291,7 @@ where
 pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Value>, RuntimeError> {
     fn is_colon_selector(value: &Value) -> bool {
         matches!(value, Value::String(text) if text == ":")
-            || matches!(value, Value::CharArray(chars) if chars.to_string() == ":")
+            || matches!(value, Value::CharArray(chars) if chars.row_string().as_deref() == Some(":"))
     }
 
     match indices.len() {

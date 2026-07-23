@@ -1731,7 +1731,6 @@ pub(crate) mod tests {
 
         let Tensor {
             data: state_data,
-            integer_data: None,
             shape: state_shape,
             ..
         } = match zf {

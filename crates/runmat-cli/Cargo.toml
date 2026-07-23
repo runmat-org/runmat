@@ -59,6 +59,7 @@ runmat-config = { version = "=0.5.3", path = "../runmat-config", features = ["ac
 runmat-time = { version = "=0.5.3", path = "../runmat-time" }
 runmat-filesystem = { version = "=0.5.3", path = "../runmat-filesystem" }
 runmat-telemetry = { version = "=0.5.3", path = "../runmat-telemetry" }
+runmat-static-analysis = { version = "=0.5.3", path = "../runmat-static-analysis" }
 runmat-server-client = { workspace = true }
 
 [features]

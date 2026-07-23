@@ -3,7 +3,7 @@ use runmat_hir::{
     HirCall, HirCallableRef, HirExprKind, HirPlace, HirStmtKind, IndexKind, LoweringContext,
 };
 use runmat_parser::parse;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 fn lower_assembly(src: &str) -> HirAssembly {
     let ast = parse(src).unwrap();
@@ -194,9 +194,8 @@ fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
         HirStmtKind::ExprStmt(expr, _)
             if matches!(
                 &expr.kind,
-                HirExprKind::FunctionHandle(FunctionHandleTarget::DefPath(path))
-                    if path.module.display_name().as_deref() == Some("Point.origin")
-                        && matches!(path.item.as_slice(), [DefPathSegment::Function(_)])
+                HirExprKind::FunctionHandle(FunctionHandleTarget::DynamicName(name))
+                    if name.0 == "origin"
             )
     )));
 
@@ -206,9 +205,8 @@ fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
         HirStmtKind::ExprStmt(expr, _)
             if matches!(
                 &expr.kind,
-                HirExprKind::FunctionHandle(FunctionHandleTarget::DefPath(path))
-                    if path.module.display_name().as_deref() == Some("pkg.remote_inc")
-                        && matches!(path.item.as_slice(), [DefPathSegment::Function(_)])
+                HirExprKind::FunctionHandle(FunctionHandleTarget::DynamicName(name))
+                    if name.0 == "pkg.remote_inc"
             )
     )));
 
@@ -220,9 +218,8 @@ fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
             HirStmtKind::ExprStmt(expr, _)
                 if matches!(
                     &expr.kind,
-                    HirExprKind::FunctionHandle(FunctionHandleTarget::DefPath(path))
-                        if path.module.display_name().as_deref() == Some("Point.origin")
-                            && matches!(path.item.as_slice(), [DefPathSegment::Function(_)])
+                    HirExprKind::FunctionHandle(FunctionHandleTarget::DynamicName(name))
+                        if name.0 == "Point.origin"
                 )
         )));
 
@@ -282,12 +279,60 @@ fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
 fn imported_call_lowers_to_package_function_identity() {
     let src = "import Point.origin; __register_test_classes(); o = origin();";
     let ast = parse(src).unwrap();
-    let result = lower(&ast, &LoweringContext::empty()).unwrap();
+    let known_symbols = HashSet::from(["Point.origin".to_string()]);
+    let result = lower(
+        &ast,
+        &LoweringContext::empty().with_known_project_symbols(&known_symbols),
+    )
+    .unwrap();
     assert!(result.hir_index.calls.iter().any(|call| matches!(
         &call.kind,
         CallKind::PackageFunction(path)
             if path.module.display_name().as_deref() == Some("Point.origin")
                 && matches!(path.item.as_slice(), [DefPathSegment::Function(_)])
+    )));
+}
+
+#[test]
+fn an_import_does_not_prove_that_its_target_exists() {
+    let src = "import Point.origin; o = origin(); h = @origin;";
+    let ast = parse(src).unwrap();
+    let result = lower(&ast, &LoweringContext::empty()).unwrap();
+    assert!(result
+        .hir_index
+        .calls
+        .iter()
+        .any(|call| matches!(call.kind, CallKind::Dynamic)));
+    assert!(entry_body(&result.assembly).iter().any(|stmt| matches!(
+        &stmt.kind,
+        HirStmtKind::Assign(_, expr, _)
+            if matches!(
+                &expr.kind,
+                HirExprKind::FunctionHandle(FunctionHandleTarget::DynamicName(name))
+                    if name.0 == "origin"
+            )
+    )));
+}
+
+#[test]
+fn verified_project_function_handles_use_static_identity() {
+    let src = "h = @pkg.remote_inc;";
+    let ast = parse(src).unwrap();
+    let known_symbols = HashSet::from(["pkg.remote_inc".to_string()]);
+    let result = lower(
+        &ast,
+        &LoweringContext::empty().with_known_project_symbols(&known_symbols),
+    )
+    .unwrap();
+    assert!(entry_body(&result.assembly).iter().any(|stmt| matches!(
+        &stmt.kind,
+        HirStmtKind::Assign(_, expr, _)
+            if matches!(
+                &expr.kind,
+                HirExprKind::FunctionHandle(FunctionHandleTarget::DefPath(path))
+                    if path.module.display_name().as_deref() == Some("pkg.remote_inc")
+                        && matches!(path.item.as_slice(), [DefPathSegment::Function(_)])
+            )
     )));
 }
 

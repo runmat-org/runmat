@@ -625,7 +625,9 @@ const DATA_TRANSACTION_NOT_FOUND_IDENTIFIER: &str = "RunMat:data:TransactionNotF
 pub fn parse_string(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) => Ok(ca.to_string()),
+        Value::CharArray(chars) => chars
+            .row_string()
+            .ok_or_else(|| data_error(format!("{context}: expected character row vector"))),
         _ => Err(data_error(format!("{context}: expected string value"))),
     }
 }

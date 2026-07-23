@@ -9,9 +9,16 @@ pub fn lint_shapes(result: &runmat_hir::LoweringResult) -> Vec<HirDiagnostic> {
         Err(err) => return vec![mir_lowering_diagnostic(err)],
     };
     let store = runmat_mir::analysis::analyze_assembly(&mir);
+    lint_shapes_from_mir(&mir, &store)
+}
+
+pub fn lint_shapes_from_mir(
+    mir: &runmat_mir::MirAssembly,
+    store: &AnalysisStore,
+) -> Vec<HirDiagnostic> {
     let mut ctx = ShapeLintContext::default();
-    ctx.seed_from_analysis(&mir, &store);
-    ctx.walk_mir_assembly(&mir);
+    ctx.seed_from_analysis(mir, store);
+    ctx.walk_mir_assembly(mir);
     ctx.diagnostics
 }
 
@@ -22,9 +29,16 @@ pub fn infer_binding_shapes(
         return HashMap::new();
     };
     let store = runmat_mir::analysis::analyze_assembly(&mir);
+    infer_binding_shapes_from_mir(&mir, &store)
+}
+
+pub fn infer_binding_shapes_from_mir(
+    mir: &runmat_mir::MirAssembly,
+    store: &AnalysisStore,
+) -> HashMap<BindingId, Vec<Option<usize>>> {
     let mut ctx = ShapeLintContext::default();
-    ctx.seed_from_analysis(&mir, &store);
-    ctx.walk_mir_assembly(&mir);
+    ctx.seed_from_analysis(mir, store);
+    ctx.walk_mir_assembly(mir);
     ctx.env
         .into_iter()
         .map(|(binding, shape)| (binding, shape.0))

@@ -3044,7 +3044,7 @@ fn attrs_to_struct(attrs: &BTreeMap<String, serde_json::Value>) -> Value {
 fn value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::String(s) => serde_json::Value::String(s.clone()),
-        Value::CharArray(ca) => serde_json::Value::String(ca.to_string()),
+        Value::CharArray(chars) => serde_json::Value::String(chars.data.iter().collect::<String>()),
         Value::Num(n) => serde_json::json!(n),
         Value::Int(i) => serde_json::json!(i.to_i64()),
         Value::Bool(b) => serde_json::json!(b),

@@ -42,13 +42,13 @@ pub struct HirDiagnostic {
 
 impl HirDiagnostic {
     pub fn new(
-        code: &'static str,
+        code: impl Into<String>,
         severity: HirDiagnosticSeverity,
         message: impl Into<String>,
         span: Span,
     ) -> Self {
         Self {
-            code: code.to_string(),
+            code: code.into(),
             severity,
             message: message.into(),
             primary: HirDiagnosticSpan { span, label: None },

@@ -12,10 +12,7 @@ fn integer_scalar_variants_arithmetic() {
     assert!(runmat_runtime::call_builtin("plus", &[i8v.clone(), i16v.clone()]).is_err());
     assert!(runmat_runtime::call_builtin("minus", &[u32v.clone(), u64v.clone()]).is_err());
     assert!(runmat_runtime::call_builtin("times", &[i8v.clone(), u32v.clone()]).is_err());
-    assert_eq!(
-        runmat_runtime::call_builtin("rdivide", &[u32v.clone(), i16v.clone()]).unwrap(),
-        Value::Num(7.0 / (-2.0))
-    );
+    assert!(runmat_runtime::call_builtin("rdivide", &[u32v.clone(), i16v.clone()]).is_err());
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

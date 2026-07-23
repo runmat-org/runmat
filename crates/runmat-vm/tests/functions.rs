@@ -478,7 +478,7 @@ fn unresolved_qualified_external_function_handle_uses_external_handle_instructio
     let bytecode = compile_source("h = @pkg.remote_inc; y = feval(h, 1);")
         .expect("qualified handle source should compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 1)
@@ -498,7 +498,7 @@ fn unresolved_qualified_external_handle_zero_output_feval_uses_typed_instruction
     let bytecode = compile_source(source)
         .expect("qualified external handle zero-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0)
@@ -518,7 +518,7 @@ fn unresolved_qualified_external_handle_multi_output_feval_uses_typed_instructio
     let bytecode = compile_source(source)
         .expect("qualified external handle multi-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
@@ -539,7 +539,7 @@ fn unresolved_qualified_external_handle_expand_zero_output_feval_uses_typed_inst
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded zero-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -562,7 +562,7 @@ fn unresolved_qualified_external_handle_expand_feval_uses_typed_instruction() {
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded feval source should compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -584,7 +584,7 @@ fn unresolved_qualified_external_handle_expand_multi_output_feval_uses_typed_ins
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded multi-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -606,7 +606,7 @@ fn unresolved_nested_qualified_external_handle_feval_uses_external_handle_instru
     let source = "h = @pkg.sub.remote; y = feval(h, 1);";
     let bytecode = compile_source(source).expect("nested qualified external handle feval compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 1)
@@ -627,7 +627,7 @@ fn unresolved_nested_qualified_external_handle_zero_output_feval_uses_typed_inst
     let bytecode = compile_source(source)
         .expect("nested qualified external handle zero-output feval compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0)
@@ -648,7 +648,7 @@ fn unresolved_nested_qualified_external_handle_multi_output_feval_uses_typed_ins
     let bytecode = compile_source(source)
         .expect("nested qualified external handle multi-output feval compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
@@ -669,7 +669,7 @@ fn unresolved_nested_qualified_external_handle_expand_zero_output_feval_uses_typ
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded zero-output feval compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -693,7 +693,7 @@ fn unresolved_nested_qualified_external_handle_expand_single_output_feval_uses_t
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded single-output feval compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -717,7 +717,7 @@ fn unresolved_nested_qualified_external_handle_expand_feval_uses_typed_instructi
     let bytecode =
         compile_source(source).expect("nested qualified external handle expanded feval compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -739,7 +739,7 @@ fn unresolved_qualified_external_handle_direct_call_uses_external_handle_instruc
     let source = "h = @pkg.remote_inc; y = h(1);";
     let bytecode = compile_source(source).expect("qualified external handle direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(
         bytecode
@@ -764,7 +764,7 @@ fn unresolved_qualified_external_handle_zero_output_direct_call_uses_typed_instr
     let bytecode =
         compile_source(source).expect("qualified external handle zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0)
@@ -785,7 +785,7 @@ fn unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_inst
     let bytecode = compile_source(source)
         .expect("qualified external handle multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
@@ -806,7 +806,7 @@ fn unresolved_qualified_external_handle_expand_zero_output_direct_call_uses_type
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -829,7 +829,7 @@ fn unresolved_qualified_external_handle_expand_direct_call_uses_typed_instructio
     let bytecode =
         compile_source(source).expect("qualified external handle expanded direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -852,7 +852,7 @@ fn unresolved_qualified_external_handle_expand_multi_output_direct_call_uses_typ
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -875,7 +875,7 @@ fn unresolved_nested_qualified_external_handle_direct_call_uses_external_handle_
     let bytecode =
         compile_source(source).expect("nested qualified external handle direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(
         bytecode
@@ -900,7 +900,7 @@ fn unresolved_nested_qualified_external_handle_zero_output_direct_call_uses_type
     let bytecode = compile_source(source)
         .expect("nested qualified external handle zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0)
@@ -922,7 +922,7 @@ fn unresolved_nested_qualified_external_handle_multi_output_direct_call_uses_typ
     let bytecode = compile_source(source)
         .expect("nested qualified external handle multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
@@ -945,7 +945,7 @@ fn unresolved_nested_qualified_external_handle_expand_zero_output_direct_call_us
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -969,7 +969,7 @@ fn unresolved_nested_qualified_external_handle_expand_direct_call_uses_typed_ins
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -993,7 +993,7 @@ fn unresolved_nested_qualified_external_handle_expand_multi_output_direct_call_u
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -3209,7 +3209,7 @@ fn unresolved_external_function_handle_index_call_errors_with_identifier() {
     let bytecode = compile_source(source).expect("compile unresolved external handle index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+        runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
     assert!(
         bytecode
@@ -3235,7 +3235,7 @@ fn unresolved_external_function_handle_index_zero_output_errors_with_identifier(
         compile_source(source).expect("compile unresolved external handle zero-output index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+        runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -3259,7 +3259,7 @@ fn unresolved_external_function_handle_index_multi_output_errors_with_identifier
         compile_source(source).expect("compile unresolved external handle multi-output index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+        runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -3283,7 +3283,7 @@ fn unresolved_external_function_handle_expand_index_call_errors_with_identifier(
         compile_source(source).expect("compile unresolved external expanded-handle index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+        runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -3308,7 +3308,7 @@ fn unresolved_external_function_handle_expand_index_zero_output_errors_with_iden
         .expect("compile unresolved external expanded-handle zero-output index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+        runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -3333,7 +3333,7 @@ fn unresolved_external_function_handle_expand_index_multi_output_errors_with_ide
         .expect("compile unresolved external expanded-handle multi-output index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+        runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,

@@ -528,6 +528,14 @@ impl CharArray {
         }
         Ok(CharArray { data, rows, cols })
     }
+
+    /// Return the character contents when this value is a MATLAB character
+    /// row vector. `Display` intentionally renders arrays for the console and
+    /// therefore includes layout whitespace; semantic string conversions must
+    /// use this method instead.
+    pub fn row_string(&self) -> Option<String> {
+        (self.rows == 1).then(|| self.data.iter().collect())
+    }
 }
 
 impl StringArray {

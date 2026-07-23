@@ -220,7 +220,12 @@ pub fn build_string_rhs_view(
 ) -> Result<StringRhsView, RuntimeError> {
     let scalar = match rhs {
         Value::String(s) => Some(s.clone()),
-        Value::CharArray(ca) => Some(ca.to_string()),
+        Value::CharArray(chars) => Some(chars.row_string().ok_or_else(|| {
+            mex(
+                "InvalidSliceAssignmentRhs",
+                "rhs character array must be a row vector",
+            )
+        })?),
         _ => None,
     };
     if let Some(s) = scalar {
@@ -272,7 +277,12 @@ pub fn build_string_rhs_view(
             let value = handle;
             match value {
                 Value::String(text) => data.push(text.clone()),
-                Value::CharArray(chars) => data.push(chars.to_string()),
+                Value::CharArray(chars) => data.push(chars.row_string().ok_or_else(|| {
+                    mex(
+                        "InvalidSliceAssignmentRhs",
+                        "rhs cell character arrays must be row vectors",
+                    )
+                })?),
                 Value::StringArray(strings) if strings.data.len() == 1 => {
                     data.push(strings.data[0].clone())
                 }
@@ -1007,7 +1017,7 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
 mod tests {
     use super::{
         assign_tensor_with_plan, build_complex_rhs_view, build_string_rhs_view,
-        delete_tensor_with_plan, map_acceleration_error,
+        delete_tensor_with_plan, map_acceleration_error, StringRhsView,
     };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
@@ -1142,6 +1152,24 @@ mod tests {
             Err(err) => err,
         };
         assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn string_cell_rhs_uses_character_contents_not_display_layout() {
+        let rhs = Value::Cell(CellArray {
+            data: vec![
+                Value::CharArray(runmat_builtins::CharArray::new_row("AvgOrders")),
+                Value::CharArray(runmat_builtins::CharArray::new_row("AvgRevenue")),
+            ],
+            shape: vec![1, 2],
+            rows: 1,
+            cols: 2,
+        });
+        let view = build_string_rhs_view(&rhs, &[2]).expect("build string RHS view");
+        let StringRhsView::Tensor { data, .. } = view else {
+            panic!("cellstr RHS should materialize as a string tensor");
+        };
+        assert_eq!(data, vec!["AvgOrders", "AvgRevenue"]);
     }
 
     #[test]

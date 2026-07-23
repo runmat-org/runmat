@@ -75,17 +75,6 @@ where
 
 /// Gather a value (recursively) so assertions can operate on host tensors.
 pub fn gather(value: Value) -> Result<Tensor, crate::RuntimeError> {
-    // Ensure the correct provider is active for GPU handles created by the WGPU backend.
-    #[cfg(feature = "wgpu")]
-    {
-        if let Value::GpuTensor(ref h) = value {
-            if h.device_id != 0 {
-                let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                    runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-                );
-            }
-        }
-    }
     #[cfg(not(target_arch = "wasm32"))]
     let provider = match &value {
         Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle)

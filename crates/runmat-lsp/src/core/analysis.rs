@@ -13,7 +13,6 @@ use runmat_hir::{
 };
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
-use runmat_parser::{parse_with_options, ParserOptions};
 use runmat_vm::CompileError;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -28,6 +27,12 @@ pub struct DocumentAnalysis {
     pub compile_error: Option<CompileError>,
     pub lowering: Option<LoweringResult>,
     pub semantic: Option<AnalysisModel>,
+    /// Diagnostics produced by the canonical frontend, including failures
+    /// before a semantic model can be constructed.
+    pub diagnostics: Vec<HirDiagnostic>,
+    /// Machine-readable name-resolution decisions, including the indexed
+    /// project source that justified a successful resolution.
+    pub resolution: Vec<runmat_static_analysis::frontend::ResolutionEvidence>,
 }
 
 impl DocumentAnalysis {
@@ -84,63 +89,27 @@ pub fn analyze_document_with_compat_and_source(
     source_name: Option<&str>,
 ) -> DocumentAnalysis {
     let tokens = tokenize_detailed(text);
-    let known_project_symbols = discover_known_project_symbols(source_name);
-    match parse_with_options(text, ParserOptions::new(compat)) {
-        Ok(ast) => {
-            let mut lowering_context = LoweringContext::empty()
-                .with_runmat_extensions_enabled(compat.allows_runmat_extensions());
-            if !known_project_symbols.is_empty() {
-                lowering_context =
-                    lowering_context.with_known_project_symbols(&known_project_symbols);
-            }
-            let lowering = match runmat_hir::lower(&ast, &lowering_context) {
-                Ok(result) => result,
-                Err(err) => {
-                    return DocumentAnalysis {
-                        tokens,
-                        syntax_error: None,
-                        lowering_error: Some(err),
-                        compile_error: None,
-                        lowering: None,
-                        semantic: None,
-                    };
-                }
-            };
-            let compile_error = compile_error_for_lowering(&lowering);
-
-            let semantic = build_semantic_model(&lowering, &tokens, text);
-
-            DocumentAnalysis {
-                tokens,
-                syntax_error: None,
-                lowering_error: None,
-                compile_error,
-                lowering: Some(lowering),
-                semantic: Some(semantic),
-            }
-        }
-        Err(err) => {
-            let mut message = err.message.clone();
-            if let Some(expected) = &err.expected {
-                message = format!("{message} (expected {expected})");
-            }
-            if let Some(found) = &err.found_token {
-                message = format!("{message} (found '{found}')");
-            }
-
-            DocumentAnalysis {
-                tokens,
-                syntax_error: Some(SyntaxErrorInfo {
-                    message,
-                    position: err.position,
-                }),
-                lowering_error: None,
-                compile_error: None,
-                lowering: None,
-                semantic: None,
-            }
-        }
+    let (source_catalog, catalog_diagnostic) = discover_source_context(source_name);
+    let known_project_symbols = source_catalog
+        .as_ref()
+        .map(|catalog| &catalog.symbols)
+        .cloned()
+        .unwrap_or_default();
+    let mut lowering_context =
+        LoweringContext::empty().with_runmat_extensions_enabled(compat.allows_runmat_extensions());
+    if !known_project_symbols.is_empty() {
+        lowering_context = lowering_context.with_known_project_symbols(&known_project_symbols);
     }
+    let mut frontend = runmat_static_analysis::frontend::analyze_source_with_catalog(
+        text,
+        compat,
+        &lowering_context,
+        source_catalog.as_ref(),
+    );
+    if let Some(diagnostic) = catalog_diagnostic {
+        frontend.diagnostics.push(diagnostic);
+    }
+    document_analysis_from_frontend(text, tokens, frontend)
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -150,65 +119,77 @@ pub async fn analyze_document_with_compat_and_source_async(
     source_name: Option<&str>,
 ) -> DocumentAnalysis {
     let tokens = tokenize_detailed(text);
-    let known_project_symbols = discover_known_project_symbols_async(source_name).await;
-    match parse_with_options(text, ParserOptions::new(compat)) {
-        Ok(ast) => {
-            let mut lowering_context = LoweringContext::empty()
-                .with_runmat_extensions_enabled(compat.allows_runmat_extensions());
-            if !known_project_symbols.is_empty() {
-                lowering_context =
-                    lowering_context.with_known_project_symbols(&known_project_symbols);
-            }
-            let lowering = match runmat_hir::lower(&ast, &lowering_context) {
-                Ok(result) => result,
-                Err(err) => {
-                    return DocumentAnalysis {
-                        tokens,
-                        syntax_error: None,
-                        lowering_error: Some(err),
-                        compile_error: None,
-                        lowering: None,
-                        semantic: None,
-                    };
-                }
-            };
-            let compile_error = compile_error_for_lowering(&lowering);
-            let semantic = build_semantic_model(&lowering, &tokens, text);
+    let (source_catalog, catalog_diagnostic) = discover_source_context_async(source_name).await;
+    let known_project_symbols = source_catalog
+        .as_ref()
+        .map(|catalog| &catalog.symbols)
+        .cloned()
+        .unwrap_or_default();
+    let mut lowering_context =
+        LoweringContext::empty().with_runmat_extensions_enabled(compat.allows_runmat_extensions());
+    if !known_project_symbols.is_empty() {
+        lowering_context = lowering_context.with_known_project_symbols(&known_project_symbols);
+    }
+    let mut frontend = runmat_static_analysis::frontend::analyze_source_with_catalog(
+        text,
+        compat,
+        &lowering_context,
+        source_catalog.as_ref(),
+    );
+    if let Some(diagnostic) = catalog_diagnostic {
+        frontend.diagnostics.push(diagnostic);
+    }
+    document_analysis_from_frontend(text, tokens, frontend)
+}
 
-            DocumentAnalysis {
-                tokens,
-                syntax_error: None,
-                lowering_error: None,
-                compile_error,
-                lowering: Some(lowering),
-                semantic: Some(semantic),
-            }
-        }
-        Err(err) => {
-            let mut message = err.message.clone();
-            if let Some(expected) = &err.expected {
-                message = format!("{message} (expected {expected})");
-            }
-            if let Some(found) = &err.found_token {
-                message = format!("{message} (found '{found}')");
-            }
-
-            DocumentAnalysis {
-                tokens,
-                syntax_error: Some(SyntaxErrorInfo {
-                    message,
-                    position: err.position,
-                }),
-                lowering_error: None,
-                compile_error: None,
-                lowering: None,
-                semantic: None,
-            }
-        }
+fn document_analysis_from_frontend(
+    text: &str,
+    tokens: Vec<SpannedToken>,
+    frontend: runmat_static_analysis::frontend::FrontendAnalysis,
+) -> DocumentAnalysis {
+    let syntax_error = frontend
+        .parse_failure
+        .as_ref()
+        .map(|failure| SyntaxErrorInfo {
+            message: frontend
+                .diagnostics
+                .first()
+                .map(|diagnostic| diagnostic.message.clone())
+                .unwrap_or_else(|| failure.message.clone()),
+            position: failure.position,
+        });
+    let semantic = frontend
+        .lowering
+        .as_ref()
+        .map(|_| build_semantic_model(&frontend, &tokens, text));
+    let diagnostics = frontend.diagnostics.clone();
+    let resolution = frontend.resolution.clone();
+    DocumentAnalysis {
+        tokens,
+        syntax_error,
+        lowering_error: frontend.lowering_failure,
+        compile_error: frontend.compile_failure,
+        lowering: frontend.lowering,
+        semantic,
+        diagnostics,
+        resolution,
     }
 }
 
+#[cfg(test)]
 fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
+    discover_source_context(source_name)
+        .0
+        .map(|catalog| catalog.symbols)
+        .unwrap_or_default()
+}
+
+fn discover_source_context(
+    source_name: Option<&str>,
+) -> (
+    Option<runmat_config::project::DiscoveredSourceSymbols>,
+    Option<HirDiagnostic>,
+) {
     let cwd = source_name
         .and_then(|name| {
             let path = PathBuf::from(name);
@@ -221,27 +202,38 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
         .or_else(|| runmat_filesystem::current_dir().ok());
 
     let Some(cwd) = cwd else {
-        return HashSet::new();
+        return (None, None);
     };
     #[cfg(not(target_arch = "wasm32"))]
     {
-        futures::executor::block_on(
-            runmat_config::project::discover_known_project_symbols_from_source_name_async(
+        let Some(source_name) = source_name else {
+            return (None, None);
+        };
+        match futures::executor::block_on(
+            runmat_config::project::discover_source_symbols_from_source_name_async(
                 source_name,
                 &cwd,
             ),
-        )
+        ) {
+            Ok(Some(discovered)) => (Some(discovered), None),
+            Ok(None) => (None, None),
+            Err(error) => (None, Some(source_catalog_diagnostic(error.to_string()))),
+        }
     }
     #[cfg(target_arch = "wasm32")]
     {
         let _ = source_name;
         let _ = cwd;
-        HashSet::new()
+        (None, None)
     }
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-async fn discover_known_project_symbols_async(source_name: Option<&str>) -> HashSet<String> {
+async fn discover_source_context_async(
+    source_name: Option<&str>,
+) -> (
+    Option<runmat_config::project::DiscoveredSourceSymbols>,
+    Option<HirDiagnostic>,
+) {
     let cwd = source_name
         .and_then(|name| {
             let path = PathBuf::from(name);
@@ -254,31 +246,47 @@ async fn discover_known_project_symbols_async(source_name: Option<&str>) -> Hash
         .or_else(|| runmat_filesystem::current_dir().ok());
 
     let Some(cwd) = cwd else {
-        return HashSet::new();
+        return (None, None);
     };
-    runmat_config::project::discover_known_project_symbols_from_source_name_async(source_name, &cwd)
+    let Some(source_name) = source_name else {
+        return (None, None);
+    };
+    match runmat_config::project::discover_source_symbols_from_source_name_async(source_name, &cwd)
         .await
+    {
+        Ok(Some(discovered)) => (Some(discovered), None),
+        Ok(None) => (None, None),
+        Err(error) => (None, Some(source_catalog_diagnostic(error.to_string()))),
+    }
 }
 
-fn compile_error_for_lowering(lowering: &LoweringResult) -> Option<CompileError> {
-    let entrypoint = lowering
-        .assembly
-        .entrypoints
-        .first()
-        .ok_or_else(|| CompileError::new("semantic bytecode compile requires an entrypoint"));
-    let entrypoint = match entrypoint {
-        Ok(entrypoint) => entrypoint,
-        Err(err) => return Some(err),
-    };
-    let mir = match runmat_mir::lowering::lower_assembly(&lowering.assembly) {
-        Ok(mir) => mir,
-        Err(err) => return Some(CompileError::from(err)),
-    };
-    let _analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id).err()
+fn source_catalog_diagnostic(message: String) -> HirDiagnostic {
+    HirDiagnostic::new(
+        runmat_static_analysis::frontend::DIAGNOSTIC_SOURCE_CATALOG,
+        HirDiagnosticSeverity::Error,
+        message,
+        runmat_hir::Span { start: 0, end: 0 },
+    )
+    .with_primary_label("source lookup could not be constructed")
+    .with_category("source-catalog")
 }
 
 pub fn diagnostics_for_document(text: &str, analysis: &DocumentAnalysis) -> Vec<Diagnostic> {
+    if !analysis.diagnostics.is_empty() {
+        return analysis
+            .diagnostics
+            .iter()
+            .map(|diagnostic| {
+                let mut rendered = diagnostic_for_hir_lint(diagnostic, text);
+                rendered.data = analysis
+                    .resolution
+                    .iter()
+                    .find(|evidence| evidence.span == diagnostic.primary.span)
+                    .and_then(|evidence| serde_json::to_value(evidence).ok());
+                rendered
+            })
+            .collect();
+    }
     if let Some(syntax_err) = &analysis.syntax_error {
         return vec![Diagnostic {
             range: diagnostic_range_for_parse_error(syntax_err, &analysis.tokens, text),
@@ -1438,15 +1446,24 @@ fn format_variable_hover(name: &str, symbol: &VariableSymbol) -> String {
 }
 
 fn build_semantic_model(
-    lowering: &LoweringResult,
+    frontend: &runmat_static_analysis::frontend::FrontendAnalysis,
     tokens: &[SpannedToken],
     text: &str,
 ) -> AnalysisModel {
+    let lowering = frontend
+        .lowering
+        .as_ref()
+        .expect("semantic model requires successful HIR lowering");
     let mut functions = Vec::new();
     let mut function_lookup: HashMap<String, Vec<usize>> = HashMap::new();
     let mut globals = HashMap::new();
 
-    let binding_shapes = runmat_static_analysis::infer_binding_shapes(lowering);
+    let binding_shapes = match (&frontend.mir, &frontend.facts) {
+        (Some(mir), Some(facts)) => {
+            runmat_static_analysis::infer_binding_shapes_from_mir(mir, facts)
+        }
+        _ => HashMap::new(),
+    };
 
     for binding in &lowering.assembly.bindings {
         if matches!(
@@ -1598,8 +1615,7 @@ fn build_semantic_model(
             .push(idx);
     }
 
-    let mut diagnostics = runmat_static_analysis::lint_shapes(lowering);
-    diagnostics.extend(runmat_static_analysis::lint_mir_analysis(lowering));
+    let diagnostics = frontend.diagnostics.clone();
     let token_hints = build_semantic_hints(lowering, tokens, &functions);
     let exported_symbols = build_exported_symbol_set(&functions);
     let referenced_symbols = build_referenced_symbol_set(lowering);
@@ -5290,6 +5306,45 @@ end
     }
 
     #[test]
+    fn diagnostics_include_shared_missing_function_resolution() {
+        let text = "value = missing_project_function(1);";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let diagnostics = diagnostics_for_document(text, &analysis);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| {
+                matches!(
+                    &diagnostic.code,
+                    Some(lsp_types::NumberOrString::String(code)) if code == "RM-RES0001"
+                )
+            })
+            .expect("shared resolution diagnostic");
+        assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(diagnostic.range.start, Position::new(0, 8));
+        assert_eq!(
+            diagnostic
+                .data
+                .as_ref()
+                .and_then(|data| data.get("state"))
+                .and_then(serde_json::Value::as_str),
+            Some("unresolved")
+        );
+    }
+
+    #[test]
+    fn parse_failures_keep_the_shared_frontend_code() {
+        let text = "value = ;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let diagnostics = diagnostics_for_document(text, &analysis);
+        assert!(diagnostics.iter().any(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(lsp_types::NumberOrString::String(code)) if code == "RunMat:ParseError"
+            )
+        }));
+    }
+
+    #[test]
     fn diagnostics_do_not_report_logical_index_lint_for_numeric_indexing() {
         let text = "a = 0:pi/100:2*pi; b = sin(a); c = a(1:10);";
         let analysis = analyze_document_with_compat(text, CompatMode::default());
@@ -5489,6 +5544,41 @@ roots = ["src"]
         let symbols = super::discover_known_project_symbols(source.to_str());
         assert!(symbols.contains("Report"));
         assert!(symbols.contains("Report.Report"));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn source_catalog_failures_are_not_silently_dropped() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("runmat_lsp_catalog_error_{suffix}"));
+        fs::create_dir_all(&root).expect("create project");
+        fs::write(
+            root.join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["missing-source-root"]
+"#,
+        )
+        .expect("write manifest");
+        let source = root.join("main.m");
+        fs::write(&source, "value = 1;").expect("write source");
+
+        let analysis = analyze_document_with_compat_and_source(
+            "value = 1;",
+            CompatMode::RunMat,
+            source.to_str(),
+        );
+        assert!(analysis
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CAT0001"));
 
         let _ = fs::remove_dir_all(&root);
     }

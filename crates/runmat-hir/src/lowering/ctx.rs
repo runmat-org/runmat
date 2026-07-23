@@ -195,11 +195,6 @@ impl LoweringCtx {
         QualifiedName(segments)
     }
 
-    fn is_well_formed_qualified_name(name: &str) -> bool {
-        let segments = name.split('.').collect::<Vec<_>>();
-        segments.len() > 1 && segments.iter().all(|segment| !segment.is_empty())
-    }
-
     fn validate_rectangular_aggregate(
         &self,
         kind: &str,
@@ -2466,7 +2461,17 @@ impl LoweringCtx {
                 args: args.iter().map(command_argument).collect(),
             }),
             AstExpr::FuncHandle(name, _) => {
-                HirExprKind::FunctionHandle(self.resolve_function_handle_target(name, span)?)
+                let target = self.resolve_function_handle_target(name, span)?;
+                self.hir_index
+                    .function_handles
+                    .push(crate::FunctionHandleResolution {
+                        name: qualified_name(
+                            &name.split('.').map(ToString::to_string).collect::<Vec<_>>(),
+                        ),
+                        target: target.clone(),
+                        span,
+                    });
+                HirExprKind::FunctionHandle(target)
             }
             AstExpr::AnonFunc { params, body, span } => {
                 let function_id = self.take_function_id();
@@ -2975,6 +2980,12 @@ impl LoweringCtx {
                 HirCallableRef::Builtin(builtin.clone()),
                 CallKind::Builtin(builtin),
             )
+        } else if self.known_project_symbols.contains(name) {
+            let path = def_path_for_import_path(&qualified_call_name);
+            (
+                HirCallableRef::Imported(path.clone()),
+                CallKind::PackageFunction(path),
+            )
         } else if let Some(def_path) = self.resolve_imported_call_target(name, span)? {
             (
                 HirCallableRef::Imported(def_path.clone()),
@@ -2990,6 +3001,7 @@ impl LoweringCtx {
             name: qualified_call_name,
             callee: callee.clone(),
             kind,
+            syntax: syntax.clone(),
             requested_outputs: requested_outputs.clone(),
             span,
         });
@@ -3133,6 +3145,7 @@ impl LoweringCtx {
             .filter(|import| {
                 !import.wildcard && import.path.0.last().map(|part| part.0.as_str()) == Some(name)
             })
+            .filter(|import| self.wildcard_candidate_is_resolvable(&import.path))
             .collect();
         if specific_matches.len() == 1 {
             return Ok(Some(def_path_for_import_path(&specific_matches[0].path)));
@@ -3207,6 +3220,13 @@ impl LoweringCtx {
                 name.to_string(),
             )));
         }
+        if self.known_project_symbols.contains(name) {
+            return Ok(crate::FunctionHandleTarget::DefPath(
+                def_path_for_import_path(&qualified_name(
+                    &name.split('.').map(ToString::to_string).collect::<Vec<_>>(),
+                )),
+            ));
+        }
         if let Some((qualified_constructor, _)) =
             self.resolve_imported_constructor_target(name, span)?
         {
@@ -3240,13 +3260,6 @@ impl LoweringCtx {
                     }
                 }
             }
-            if Self::is_well_formed_qualified_name(name) {
-                return Ok(crate::FunctionHandleTarget::DefPath(
-                    def_path_for_import_path(&qualified_name(
-                        &name.split('.').map(ToString::to_string).collect::<Vec<_>>(),
-                    )),
-                ));
-            }
             return Ok(crate::FunctionHandleTarget::DynamicName(SymbolName(
                 name.to_string(),
             )));
@@ -3257,6 +3270,7 @@ impl LoweringCtx {
             .filter(|import| {
                 !import.wildcard && import.path.0.last().map(|part| part.0.as_str()) == Some(name)
             })
+            .filter(|import| self.wildcard_candidate_is_resolvable(&import.path))
             .collect();
         if specific_matches.len() > 1 {
             return Err(HirError::new(format!(

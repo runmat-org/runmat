@@ -54,7 +54,13 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             )
             .await
         }
-        Commands::Check { file, json } => check::execute_check(file, cli, config, json).await,
+        Commands::Check {
+            file,
+            json,
+            verbose,
+            deny,
+            search_paths,
+        } => check::execute_check(file, cli, config, json, verbose, deny, search_paths).await,
         Commands::Version { detailed } => {
             version::show_version(detailed);
             Ok(())

@@ -236,7 +236,7 @@ fn ratio_value(ratio: [f64; 3]) -> Value {
 fn value_as_string(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.clone()),
-        Value::CharArray(chars) => Some(chars.to_string()),
+        Value::CharArray(chars) => chars.row_string(),
         _ => None,
     }
 }

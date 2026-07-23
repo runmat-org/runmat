@@ -108,13 +108,22 @@ Use `runmat check` before running a `.m` script or `.fea` study:
 
 ```bash
 runmat check analysis.m
+runmat check --path ./toolbox analysis.m
+runmat check -D warnings analysis.m
+runmat check --json analysis.m
 runmat check studies/bracket_static.fea
 runmat check --json studies/bracket_static.fea
 ```
 
-For `.m` files, check parses and compiles the script without executing it. For `.fea` files, check loads geometry, resolves selectors, validates the study or sweep, and builds the solve plan without running the solver.
+For `.m` files, check runs the same parser, HIR and MIR lowering, static analysis, source lookup, and compile validation used by editor tooling without executing the script. It reports syntax and semantic errors, proven type or shape incompatibilities, and function calls that cannot be resolved from builtins, the file, or the configured project sources. `--path DIRECTORY` adds an explicit MATLAB lookup root for the check and may be repeated.
 
-The default output is human-readable. JSON mode returns structured validation and plan payloads for CI and tooling.
+Dynamic MATLAB behavior is reported without being rejected by default. For example, a function that is not present in the static source catalog produces a warning, and a call after `addpath` identifies that path mutation as the reason the final target must be selected at runtime. Warnings leave the command successful, while errors return a nonzero exit code. Use `-D warnings` (or `-D warning`) when CI should also return nonzero for any warning.
+
+The default output is human-readable and includes diagnostic codes, source locations, related causal locations, notes, and help. For `.m` files, `--json` emits the stable `schema_version: 1` envelope with an explicit `outcome` (`clean`, `warnings`, or `failed`), per-domain analysis completeness, structured diagnostics with byte and line/column spans, and summary counts. A failed check still emits that JSON payload before returning nonzero.
+
+For `.fea` files, check loads geometry, resolves selectors, validates the study or sweep, and builds the solve plan without running the solver.
+
+FEA JSON mode returns structured validation and plan payloads for CI and tooling.
 
 ## Pass Runtime Options
 

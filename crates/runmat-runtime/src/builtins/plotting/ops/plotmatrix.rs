@@ -574,6 +574,7 @@ mod tests {
     fn matrix(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor {
             data,
+            integer_data: None,
             rows,
             cols,
             shape: vec![rows, cols],
