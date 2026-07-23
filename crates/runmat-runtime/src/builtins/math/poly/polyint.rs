@@ -162,6 +162,10 @@ async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResul
     if rest.len() > 1 {
         return Err(polyint_argument_error("polyint: too many input arguments"));
     }
+    crate::builtins::common::validation::reject_typed_complex_integer(&coeffs, BUILTIN_NAME)?;
+    for value in &rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    }
 
     let constant = match rest.into_iter().next() {
         Some(value) => parse_constant(value).await?,

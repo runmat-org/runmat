@@ -223,6 +223,8 @@ fn conv_error_with_source(
 )]
 async fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mode = parse_mode(&rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&b, BUILTIN_NAME)?;
     if let Some(device_value) = try_conv_gpu(&a, &b, mode)? {
         return Ok(device_value);
     }

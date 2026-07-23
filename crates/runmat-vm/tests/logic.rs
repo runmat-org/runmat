@@ -322,6 +322,44 @@ fn typed_complex_integer_factorization_and_solve_operations_are_rejected_before_
 }
 
 #[test]
+fn typed_complex_integer_polynomial_and_convolution_operations_are_rejected_before_f64_coercion() {
+    let operations = [
+        ("roots", "roots(z(1, :))"),
+        ("polyder coefficients", "polyder(z(1, :))"),
+        ("polyder product", "polyder([1 2], z(1, :))"),
+        ("polyint coefficients", "polyint(z(1, :))"),
+        ("polyint constant", "polyint([1 2], z)"),
+        (
+            "polyint scalar constant",
+            "polyint([1 2], complex(uint64(9223372036854775808), uint64(1)))",
+        ),
+        ("polyint indexed scalar constant", "polyint([1 2], z(1, 1))"),
+        ("polyval coefficients", "polyval(z(1, :), [1 2])"),
+        ("polyval points", "polyval([1 2], z(1, :))"),
+        ("conv left", "conv(z(1, :), [1 2])"),
+        ("conv right", "conv([1 2], z(1, :))"),
+        ("conv2 left", "conv2(z, [1 2; 3 4])"),
+        ("conv2 right", "conv2([1 2; 3 4], z)"),
+        ("conv2 separable signal", "conv2([1 2], [3 4], z)"),
+        ("deconv numerator", "deconv(z(1, :), [1 2])"),
+        ("deconv denominator", "deconv([1 2], z(1, :))"),
+    ];
+
+    for (name, operation) in operations {
+        let source = format!(
+            "z = complex(uint64([9223372036854775808 2; 3 4]), uint64([1 2; 3 4])); out = {operation};"
+        );
+        let err = execute_source(&source).expect_err(name);
+        assert!(
+            err.to_string().contains(
+                "operations involving complex numbers with integer types are not supported"
+            ),
+            "{name} returned an unexpected error: {err}"
+        );
+    }
+}
+
+#[test]
 fn typed_complex_integer_gpuarray_is_rejected_before_provider_dispatch() {
     let err = execute_source(
         "z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); g = gpuArray(z);",

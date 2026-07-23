@@ -128,6 +128,7 @@ async fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
 }
 
 pub(crate) async fn roots_value(coefficients: Value) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&coefficients, BUILTIN_NAME)?;
     let coeffs = coefficients_to_complex(coefficients).await?;
     let trimmed = trim_leading_zeros(coeffs);
     if trimmed.is_empty() || trimmed.len() == 1 {

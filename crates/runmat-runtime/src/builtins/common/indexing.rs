@@ -4,7 +4,7 @@
 
 use crate::builtins::common::shape::normalize_scalar_shape;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{SparseTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntegerComplexStorage, SparseTensor, Tensor, Value};
 
 fn indexing_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
@@ -34,6 +34,74 @@ fn positive_integer_index(value: f64, identifier: &str) -> Result<usize, Runtime
         ));
     }
     Ok(value as usize)
+}
+
+fn tensor_scalar_value(tensor: &Tensor, index: usize) -> Result<Value, RuntimeError> {
+    if let Some(storage) = tensor.integer_storage() {
+        let value = storage.value_at(index).ok_or_else(|| {
+            indexing_error_with_identifier(
+                "Integer scalar index out of bounds",
+                "RunMat:IndexOutOfBounds",
+            )
+        })?;
+        return Ok(Value::Int(value));
+    }
+    tensor
+        .data
+        .get(index)
+        .copied()
+        .map(Value::Num)
+        .ok_or_else(|| {
+            indexing_error_with_identifier(
+                "Tensor scalar index out of bounds",
+                "RunMat:IndexOutOfBounds",
+            )
+        })
+}
+
+fn complex_tensor_scalar_value(
+    tensor: &ComplexTensor,
+    index: usize,
+) -> Result<Value, RuntimeError> {
+    if let Some(storage) = &tensor.integer_data {
+        let real = storage.real.value_at(index).ok_or_else(|| {
+            indexing_error_with_identifier(
+                "Complex integer scalar index out of bounds",
+                "RunMat:IndexOutOfBounds",
+            )
+        })?;
+        let imag = storage.imag.value_at(index).ok_or_else(|| {
+            indexing_error_with_identifier(
+                "Complex integer scalar index out of bounds",
+                "RunMat:IndexOutOfBounds",
+            )
+        })?;
+        let real = storage
+            .real
+            .from_same_class_values(vec![real])
+            .map_err(indexing_error)?;
+        let imag = storage
+            .imag
+            .from_same_class_values(vec![imag])
+            .map_err(indexing_error)?;
+        let scalar = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(real, imag).map_err(indexing_error)?,
+            vec![1, 1],
+        )
+        .map_err(indexing_error)?;
+        return Ok(Value::ComplexTensor(scalar));
+    }
+    tensor
+        .data
+        .get(index)
+        .copied()
+        .map(|(re, im)| Value::Complex(re, im))
+        .ok_or_else(|| {
+            indexing_error_with_identifier(
+                "Complex scalar index out of bounds",
+                "RunMat:IndexOutOfBounds",
+            )
+        })
 }
 
 fn sparse_scalar_index(sparse: &SparseTensor, indices: &[f64]) -> Result<Value, RuntimeError> {
@@ -253,7 +321,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                         "RunMat:IndexOutOfBounds",
                     ));
                 }
-                Ok(Value::Num(tensor.data[idx - 1])) // Convert to 0-based
+                tensor_scalar_value(tensor, idx - 1)
             } else if indices.len() == 2 {
                 // Row-column indexing (1-based)
                 let row = indices[0] as usize;
@@ -276,7 +344,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 }
 
                 let linear_idx = (row - 1) + (col - 1) * rows; // Convert to 0-based, column-major
-                Ok(Value::Num(tensor.data[linear_idx]))
+                tensor_scalar_value(tensor, linear_idx)
             } else {
                 Err(indexing_error(format!(
                     "Tensors support 1 or 2 indices, got {}",
@@ -340,8 +408,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                         "RunMat:IndexOutOfBounds",
                     ));
                 }
-                let (re, im) = tensor.data[idx - 1];
-                Ok(Value::Complex(re, im))
+                complex_tensor_scalar_value(tensor, idx - 1)
             } else if indices.len() == 2 {
                 let row = indices[0] as usize;
                 let col = indices[1] as usize;
@@ -363,8 +430,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 }
 
                 let linear_idx = (row - 1) + (col - 1) * rows;
-                let (re, im) = tensor.data[linear_idx];
-                Ok(Value::Complex(re, im))
+                complex_tensor_scalar_value(tensor, linear_idx)
             } else {
                 Err(indexing_error(format!(
                     "Complex tensors support 1 or 2 indices, got {}",
@@ -501,7 +567,10 @@ async fn gpu_index_scalar(
 mod tests {
     use super::perform_indexing;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, IntegerStorage, LogicalArray, SparseTensor, Value};
+    use runmat_builtins::{
+        CellArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+        SparseTensor, Tensor, Value,
+    };
 
     fn sparse_scalar_value(value: Value) -> f64 {
         match value {
@@ -606,6 +675,49 @@ mod tests {
                 assert_eq!(result.integer_storage(), Some(&expected));
             }
         }
+    }
+
+    #[test]
+    fn dense_integer_scalar_indexing_preserves_the_exact_value() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("tensor");
+
+        assert_eq!(
+            block_on(perform_indexing(&Value::Tensor(tensor), &[2.0])).expect("scalar index"),
+            Value::Int(IntValue::U64(u64::MAX))
+        );
+    }
+
+    #[test]
+    fn typed_complex_integer_scalar_indexing_preserves_exact_components() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
+                IntegerStorage::U64(vec![7, 8]),
+            )
+            .expect("storage"),
+            vec![1, 2],
+        )
+        .expect("tensor");
+
+        let result = block_on(perform_indexing(&Value::ComplexTensor(tensor), &[2.0]))
+            .expect("scalar index");
+        let Value::ComplexTensor(result) = result else {
+            panic!("typed complex integer scalar must retain exact storage");
+        };
+        assert_eq!(
+            result.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX]),
+                    IntegerStorage::U64(vec![8]),
+                )
+                .expect("expected storage")
+            )
+        );
     }
 
     #[test]

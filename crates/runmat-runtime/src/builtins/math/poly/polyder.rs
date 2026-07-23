@@ -184,12 +184,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::poly::polyder"
 )]
 async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if rest.len() > 1 {
+        return Err(polyder_argument_error("polyder: too many input arguments"));
+    }
+    crate::builtins::common::validation::reject_typed_complex_integer(&first, BUILTIN_NAME)?;
+    for value in &rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    }
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count <= 1 {
             let result = match rest.len() {
                 0 => derivative_single(first).await,
                 1 => derivative_product(first, rest.into_iter().next().unwrap()).await,
-                _ => Err(polyder_argument_error("polyder: too many input arguments")),
+                _ => unreachable!("input count validated above"),
             }?;
             if out_count == 0 {
                 return Ok(Value::OutputList(Vec::new()));
@@ -210,7 +217,7 @@ async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult
     match rest.len() {
         0 => derivative_single(first).await,
         1 => derivative_product(first, rest.into_iter().next().unwrap()).await,
-        _ => Err(polyder_argument_error("polyder: too many input arguments")),
+        _ => unreachable!("input count validated above"),
     }
 }
 

@@ -226,6 +226,8 @@ async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinR
 
 /// Evaluate `deconv` and retain both outputs for multi-value contexts.
 pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<DeconvEval> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&numerator, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&denominator, BUILTIN_NAME)?;
     let (num_input, mut prefer_gpu) = convert_value(numerator).await?;
     let (den_input, den_gpu) = convert_value(denominator).await?;
     prefer_gpu |= den_gpu;

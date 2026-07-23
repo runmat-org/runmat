@@ -269,6 +269,8 @@ pub async fn evaluate(
     want_delta: bool,
 ) -> BuiltinResult<PolyvalEval> {
     let options = parse_option_values(rest).await?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&coefficients, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&points, BUILTIN_NAME)?;
 
     let coeff_clone = coefficients.clone();
     let points_clone = points.clone();
