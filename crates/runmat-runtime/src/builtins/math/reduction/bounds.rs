@@ -235,7 +235,7 @@ fn bounds_internal(detail: impl AsRef<str>) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -276,6 +276,38 @@ mod tests {
         let result = evaluate_bounds(input, &[Value::from("all")]).await.unwrap();
         assert_eq!(result.smallest, Value::Num(-1.0));
         assert_eq!(result.largest, Value::Num(5.0));
+    }
+
+    #[tokio::test]
+    async fn bounds_preserves_exact_integer_extrema_for_dimensions_and_all() {
+        let large = 9_007_199_254_740_992_u64;
+        let input = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![large + 1, large, u64::MAX, 7]),
+                vec![2, 2],
+            )
+            .unwrap(),
+        );
+
+        let reduced = evaluate_bounds(input.clone(), &[]).await.unwrap();
+        let Value::Tensor(minima) = reduced.smallest else {
+            panic!("expected integer minima tensor");
+        };
+        let Value::Tensor(maxima) = reduced.largest else {
+            panic!("expected integer maxima tensor");
+        };
+        assert_eq!(
+            minima.integer_storage(),
+            Some(&IntegerStorage::U64(vec![large, 7]))
+        );
+        assert_eq!(
+            maxima.integer_storage(),
+            Some(&IntegerStorage::U64(vec![large + 1, u64::MAX]))
+        );
+
+        let all = evaluate_bounds(input, &[Value::from("all")]).await.unwrap();
+        assert_eq!(all.smallest, Value::Int(IntValue::U64(7)));
+        assert_eq!(all.largest, Value::Int(IntValue::U64(u64::MAX)));
     }
 
     #[tokio::test]
