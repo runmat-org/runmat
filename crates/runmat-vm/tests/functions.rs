@@ -4157,6 +4157,33 @@ fn typed_complex_integer_jsonencode_script_surface_preserves_exact_components() 
 }
 
 #[test]
+fn primes_script_surface_preserves_signed_and_unsigned_integer_classes() {
+    let vars = execute_source(
+        "signed = primes(int64(12)); unsigned = primes(uint64(12)); signed_class = class(signed); unsigned_class = class(unsigned);",
+    );
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_builtins::IntegerStorage::I64(vec![2, 3, 5, 7, 11]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_builtins::IntegerStorage::U64(vec![2, 3, 5, 7, 11]))
+    )));
+    for expected in ["int64", "uint64"] {
+        assert!(
+            vars.iter().any(
+                |value| matches!(value, runmat_builtins::Value::String(class) if class == expected)
+            ),
+            "expected class {expected:?}; vars={vars:?}"
+        );
+    }
+}
+
+#[test]
 fn num_arguments_from_subscript_script_surface() {
     let program = r#"
         C = {"one", 2, "three"};

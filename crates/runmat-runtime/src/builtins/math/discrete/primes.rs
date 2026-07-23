@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, Tensor, Type, Value,
+    IntValue, IntegerStorage, NumericDType, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -74,9 +74,14 @@ fn primes_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
 enum OutputKind {
     F64,
     F32,
+    I8,
+    I16,
+    I32,
+    I64,
     U8,
     U16,
     U32,
+    U64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -156,6 +161,12 @@ fn scalar_from_tensor(tensor: Tensor) -> BuiltinResult<PrimeRequest> {
             "n must be a scalar value",
         ));
     }
+    if let Some(storage) = tensor.integer_storage() {
+        let value = storage
+            .value_at(0)
+            .expect("integer storage length matches tensor data length");
+        return scalar_from_int(value);
+    }
     let output = match tensor.dtype {
         NumericDType::F32 => OutputKind::F32,
         NumericDType::U8 => OutputKind::U8,
@@ -168,14 +179,14 @@ fn scalar_from_tensor(tensor: Tensor) -> BuiltinResult<PrimeRequest> {
 
 fn scalar_from_int(value: IntValue) -> BuiltinResult<PrimeRequest> {
     let (limit, output) = match value {
-        IntValue::I8(v) => (signed_limit(i64::from(v)), OutputKind::F64),
-        IntValue::I16(v) => (signed_limit(i64::from(v)), OutputKind::F64),
-        IntValue::I32(v) => (signed_limit(i64::from(v)), OutputKind::F64),
-        IntValue::I64(v) => (signed_limit(v), OutputKind::F64),
+        IntValue::I8(v) => (signed_limit(i64::from(v)), OutputKind::I8),
+        IntValue::I16(v) => (signed_limit(i64::from(v)), OutputKind::I16),
+        IntValue::I32(v) => (signed_limit(i64::from(v)), OutputKind::I32),
+        IntValue::I64(v) => (signed_limit(v), OutputKind::I64),
         IntValue::U8(v) => (u64::from(v), OutputKind::U8),
         IntValue::U16(v) => (u64::from(v), OutputKind::U16),
         IntValue::U32(v) => (u64::from(v), OutputKind::U32),
-        IntValue::U64(v) => (v, OutputKind::F64),
+        IntValue::U64(v) => (v, OutputKind::U64),
     };
     Ok(PrimeRequest { limit, output })
 }
@@ -211,16 +222,49 @@ fn scalar_from_f64(value: f64, output: OutputKind) -> BuiltinResult<PrimeRequest
 
 fn primes_value(request: PrimeRequest) -> BuiltinResult<Value> {
     let primes = sieve_primes(request.limit);
-    let data = primes.iter().map(|&p| p as f64).collect::<Vec<_>>();
-    let shape = vec![1, data.len()];
-    let dtype = match request.output {
-        OutputKind::F64 => NumericDType::F64,
-        OutputKind::F32 => NumericDType::F32,
-        OutputKind::U8 => NumericDType::U8,
-        OutputKind::U16 => NumericDType::U16,
-        OutputKind::U32 => NumericDType::U32,
+    let shape = vec![1, primes.len()];
+    let tensor = match request.output {
+        OutputKind::F64 => Tensor::new_with_dtype(
+            primes.iter().map(|&prime| prime as f64).collect(),
+            shape,
+            NumericDType::F64,
+        ),
+        OutputKind::F32 => Tensor::new_with_dtype(
+            primes.iter().map(|&prime| prime as f64).collect(),
+            shape,
+            NumericDType::F32,
+        ),
+        OutputKind::I8 => Tensor::new_integer(
+            IntegerStorage::I8(primes.iter().map(|&prime| prime as i8).collect()),
+            shape,
+        ),
+        OutputKind::I16 => Tensor::new_integer(
+            IntegerStorage::I16(primes.iter().map(|&prime| prime as i16).collect()),
+            shape,
+        ),
+        OutputKind::I32 => Tensor::new_integer(
+            IntegerStorage::I32(primes.iter().map(|&prime| prime as i32).collect()),
+            shape,
+        ),
+        OutputKind::I64 => Tensor::new_integer(
+            IntegerStorage::I64(primes.iter().map(|&prime| prime as i64).collect()),
+            shape,
+        ),
+        OutputKind::U8 => Tensor::new_integer(
+            IntegerStorage::U8(primes.iter().map(|&prime| prime as u8).collect()),
+            shape,
+        ),
+        OutputKind::U16 => Tensor::new_integer(
+            IntegerStorage::U16(primes.iter().map(|&prime| prime as u16).collect()),
+            shape,
+        ),
+        OutputKind::U32 => Tensor::new_integer(
+            IntegerStorage::U32(primes.iter().map(|&prime| prime as u32).collect()),
+            shape,
+        ),
+        OutputKind::U64 => Tensor::new_integer(IntegerStorage::U64(primes), shape),
     };
-    Tensor::new_with_dtype(data, shape, dtype)
+    tensor
         .map(Value::Tensor)
         .map_err(|err| error_with_detail(&ERROR_INTERNAL, err))
 }
@@ -293,34 +337,65 @@ mod tests {
     }
 
     #[test]
-    fn primes_preserves_supported_numeric_array_dtype() {
+    fn primes_preserves_floating_and_exact_integer_output_classes() {
         let single = Tensor::new_with_dtype(vec![12.0], vec![1, 1], NumericDType::F32).unwrap();
         let out = call(Value::Tensor(single)).expect("single primes");
         assert_eq!(out.dtype, NumericDType::F32);
         assert_eq!(out.data, vec![2.0, 3.0, 5.0, 7.0, 11.0]);
 
-        let out = call(Value::Int(IntValue::U16(12))).expect("uint16 primes");
-        assert_eq!(out.dtype, NumericDType::U16);
-        assert_eq!(out.shape, vec![1, 5]);
-        assert_eq!(out.data, vec![2.0, 3.0, 5.0, 7.0, 11.0]);
-    }
+        let expected_primes = vec![2, 3, 5, 7, 11];
+        let cases = [
+            (
+                IntValue::I8(12),
+                IntegerStorage::I8(expected_primes.iter().map(|&v| v as i8).collect()),
+            ),
+            (
+                IntValue::I16(12),
+                IntegerStorage::I16(expected_primes.iter().map(|&v| v as i16).collect()),
+            ),
+            (
+                IntValue::I32(12),
+                IntegerStorage::I32(expected_primes.iter().map(|&v| v as i32).collect()),
+            ),
+            (
+                IntValue::I64(12),
+                IntegerStorage::I64(expected_primes.iter().map(|&v| v as i64).collect()),
+            ),
+            (
+                IntValue::U8(12),
+                IntegerStorage::U8(expected_primes.iter().map(|&v| v as u8).collect()),
+            ),
+            (
+                IntValue::U16(12),
+                IntegerStorage::U16(expected_primes.iter().map(|&v| v as u16).collect()),
+            ),
+            (
+                IntValue::U32(12),
+                IntegerStorage::U32(expected_primes.iter().map(|&v| v as u32).collect()),
+            ),
+            (IntValue::U64(12), IntegerStorage::U64(expected_primes)),
+        ];
 
-    #[test]
-    fn primes_accepts_signed_integer_and_uint64_scalar_bounds() {
-        let signed = call(Value::Int(IntValue::I32(12))).expect("signed integer primes");
-        assert_eq!(signed.dtype, NumericDType::F64);
-        assert_eq!(signed.shape, vec![1, 5]);
-        assert_eq!(signed.data, vec![2.0, 3.0, 5.0, 7.0, 11.0]);
+        for (input, expected) in cases {
+            let out = call(Value::Int(input)).expect("integer primes");
+            assert_eq!(out.shape, vec![1, 5]);
+            assert_eq!(out.integer_storage(), Some(&expected));
+        }
+
+        let input = Tensor::new_integer(IntegerStorage::I64(vec![12]), vec![1, 1])
+            .expect("exact int64 tensor");
+        let out = call(Value::Tensor(input)).expect("integer tensor primes");
+        assert_eq!(
+            out.integer_storage(),
+            Some(&IntegerStorage::I64(vec![2, 3, 5, 7, 11]))
+        );
 
         let negative = call(Value::Int(IntValue::I16(-4))).expect("negative integer primes");
-        assert_eq!(negative.dtype, NumericDType::F64);
         assert_eq!(negative.shape, vec![1, 0]);
-        assert!(negative.data.is_empty());
-
-        let unsigned = call(Value::Int(IntValue::U64(12))).expect("uint64 primes");
-        assert_eq!(unsigned.dtype, NumericDType::F64);
-        assert_eq!(unsigned.shape, vec![1, 5]);
-        assert_eq!(unsigned.data, vec![2.0, 3.0, 5.0, 7.0, 11.0]);
+        assert_eq!(
+            negative.integer_storage(),
+            Some(&IntegerStorage::I16(Vec::new()))
+        );
     }
 
     #[test]
