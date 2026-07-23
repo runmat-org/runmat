@@ -223,6 +223,12 @@ fn apply_exact(lhs: IntValue, rhs: IntValue, operation: IntegerBinaryOp) -> IntV
     }
 }
 
+/// Subtracts two values from the same MATLAB integer class with the
+/// saturating semantics used by integer array arithmetic.
+pub(crate) fn same_class_saturating_subtract(lhs: IntValue, rhs: IntValue) -> IntValue {
+    apply_exact(lhs, rhs, IntegerBinaryOp::Subtract)
+}
+
 fn nonnegative_integer_exponent(value: f64) -> bool {
     value.is_finite()
         && value >= 0.0

@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, ResolveContext, Tensor, Type, Value,
+    CharArray, ComplexTensor, IntegerStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::elementwise::integer_arithmetic::same_class_saturating_subtract;
 use crate::builtins::math::reduction::type_resolvers::diff_numeric_type;
 use crate::builtins::math::symbolic::{
     symbolic_expr_to_value, symbolic_variable_name_from_value, value_to_symbolic_scalar,
@@ -479,6 +480,9 @@ fn diff_complex_tensor(
 }
 
 fn diff_tensor_once(tensor: Tensor, dim: usize) -> BuiltinResult<Tensor> {
+    if let Some(storage) = tensor.integer_storage().cloned() {
+        return diff_integer_tensor_once(tensor, storage, dim);
+    }
     let Tensor {
         data, mut shape, ..
     } = tensor;
@@ -511,6 +515,51 @@ fn diff_tensor_once(tensor: Tensor, dim: usize) -> BuiltinResult<Tensor> {
     }
 
     Tensor::new(out, output_shape).map_err(|e| diff_internal_error(format!("diff: {e}")))
+}
+
+fn diff_integer_tensor_once(
+    tensor: Tensor,
+    storage: IntegerStorage,
+    dim: usize,
+) -> BuiltinResult<Tensor> {
+    let mut shape = tensor.shape;
+    let dim_index = dim.saturating_sub(1);
+    while shape.len() <= dim_index {
+        shape.push(1);
+    }
+    let len_dim = shape[dim_index];
+    let mut output_shape = shape.clone();
+    if len_dim <= 1 || storage.is_empty() {
+        output_shape[dim_index] = output_shape[dim_index].saturating_sub(1);
+        return Tensor::new_integer(storage.zeros_like(0), output_shape)
+            .map_err(|e| diff_internal_error(format!("diff: {e}")));
+    }
+
+    output_shape[dim_index] = len_dim - 1;
+    let stride_before = product(&shape[..dim_index]);
+    let stride_after = product(&shape[dim_index + 1..]);
+    let mut values = Vec::with_capacity(stride_before * (len_dim - 1) * stride_after);
+    let exact = storage.exact_values();
+    for after in 0..stride_after {
+        let after_base = after * stride_before * len_dim;
+        for before in 0..stride_before {
+            for k in 0..(len_dim - 1) {
+                let idx0 = before + after_base + k * stride_before;
+                let idx1 = idx0 + stride_before;
+                values.push(same_class_saturating_subtract(
+                    exact[idx1].clone(),
+                    exact[idx0].clone(),
+                ));
+            }
+        }
+    }
+    Tensor::new_integer(
+        storage
+            .from_same_class_values(values)
+            .map_err(diff_internal_error)?,
+        output_shape,
+    )
+    .map_err(|e| diff_internal_error(format!("diff: {e}")))
 }
 
 fn diff_complex_tensor_once(tensor: ComplexTensor, dim: usize) -> BuiltinResult<ComplexTensor> {
@@ -577,7 +626,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, SymbolicExpr, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, SymbolicExpr, Tensor};
 
     fn diff_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::diff_builtin(value, rest))
@@ -751,6 +800,84 @@ pub(crate) mod tests {
         let args = vec![Value::Int(IntValue::I32(0))];
         let result = diff_builtin(Value::Tensor(tensor.clone()), args).expect("diff");
         assert_eq!(result, Value::Tensor(tensor));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn diff_preserves_all_exact_integer_classes_and_saturates() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![i8::MIN, i8::MAX, i8::MAX]),
+                IntegerStorage::I8(vec![i8::MAX, 0]),
+            ),
+            (
+                IntegerStorage::I16(vec![i16::MAX, i16::MIN, i16::MIN]),
+                IntegerStorage::I16(vec![i16::MIN, 0]),
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX, i32::MAX]),
+                IntegerStorage::I32(vec![i32::MAX, 0]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MAX, i64::MIN, i64::MIN]),
+                IntegerStorage::I64(vec![i64::MIN, 0]),
+            ),
+            (
+                IntegerStorage::U8(vec![5, 0, 0]),
+                IntegerStorage::U8(vec![0, 0]),
+            ),
+            (
+                IntegerStorage::U16(vec![0, u16::MAX, u16::MAX]),
+                IntegerStorage::U16(vec![u16::MAX, 0]),
+            ),
+            (
+                IntegerStorage::U32(vec![4, 0, 0]),
+                IntegerStorage::U32(vec![0, 0]),
+            ),
+            (
+                IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX, u64::MAX - 2]),
+                IntegerStorage::U64(vec![1, 0]),
+            ),
+        ];
+
+        for (storage, expected) in cases {
+            let input = Tensor::new_integer(storage, vec![1, expected.len() + 1]).unwrap();
+            let result = diff_builtin(Value::Tensor(input), Vec::new()).expect("diff");
+            match result {
+                Value::Tensor(output) => assert_eq!(output.integer_storage(), Some(&expected)),
+                other => panic!("expected exact integer tensor, got {other:?}"),
+            }
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn diff_exact_integer_order_dimension_and_empty_output_preserve_storage() {
+        let input = Tensor::new_integer(IntegerStorage::I64(vec![1, 4, 10]), vec![3, 1]).unwrap();
+        let result = diff_builtin(Value::Tensor(input), vec![Value::Int(IntValue::I32(2))])
+            .expect("second order diff");
+        assert_eq!(result, Value::Int(IntValue::I64(3)));
+
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, u64::MAX - 1]),
+            vec![2, 1],
+        )
+        .unwrap();
+        let result = diff_builtin(
+            Value::Tensor(input),
+            vec![Value::Int(IntValue::I32(1)), Value::Int(IntValue::I32(5))],
+        )
+        .expect("trailing dimension diff");
+        match result {
+            Value::Tensor(output) => {
+                assert_eq!(output.shape, vec![2, 1, 1, 1, 0]);
+                assert_eq!(
+                    output.integer_storage(),
+                    Some(&IntegerStorage::U64(Vec::new()))
+                );
+            }
+            other => panic!("expected typed empty tensor, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
