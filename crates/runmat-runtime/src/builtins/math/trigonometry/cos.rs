@@ -199,6 +199,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "cos")?;
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Cos) {
         return apply_output_template(symbolic, &template).await;
     }

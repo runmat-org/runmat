@@ -104,6 +104,7 @@ pub const SINPI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::math::trigonometry::sinpi"
 )]
 async fn sinpi_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "sinpi")?;
     match value {
         Value::GpuTensor(handle) => sinpi_gpu(handle).await,
         Value::Complex(re, im) => {

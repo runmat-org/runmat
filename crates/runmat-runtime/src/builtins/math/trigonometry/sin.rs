@@ -199,6 +199,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let output = parse_output_template(&rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "sin")?;
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Sin) {
         return apply_output_template(symbolic, &output).await;
     }

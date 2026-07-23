@@ -134,6 +134,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::trigonometry::atanh"
 )]
 async fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "atanh")?;
     match value {
         Value::GpuTensor(handle) => atanh_gpu(handle).await,
         Value::Complex(re, im) => Ok(atanh_complex_scalar(re, im)),

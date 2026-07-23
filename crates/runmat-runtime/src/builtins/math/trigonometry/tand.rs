@@ -135,6 +135,7 @@ fn tand_complex(re: f64, im: f64) -> (f64, f64) {
     builtin_path = "crate::builtins::math::trigonometry::tand"
 )]
 async fn tand_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "tand")?;
     match value {
         Value::GpuTensor(handle) => tand_gpu(handle).await,
         Value::Complex(re, im) => {

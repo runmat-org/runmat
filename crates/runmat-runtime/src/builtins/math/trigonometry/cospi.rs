@@ -104,6 +104,7 @@ pub const COSPI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::math::trigonometry::cospi"
 )]
 async fn cospi_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "cospi")?;
     match value {
         Value::GpuTensor(handle) => cospi_gpu(handle).await,
         Value::Complex(re, im) => {

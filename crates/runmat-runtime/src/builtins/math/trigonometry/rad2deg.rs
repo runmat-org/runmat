@@ -120,6 +120,7 @@ fn rad2deg_error_with_detail(
     builtin_path = "crate::builtins::math::trigonometry::rad2deg"
 )]
 async fn rad2deg_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "rad2deg")?;
     match value {
         Value::GpuTensor(handle) => rad2deg_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(re * RAD_TO_DEG, im * RAD_TO_DEG)),

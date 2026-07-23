@@ -135,6 +135,7 @@ fn sind_complex(re: f64, im: f64) -> (f64, f64) {
     builtin_path = "crate::builtins::math::trigonometry::sind"
 )]
 async fn sind_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "sind")?;
     match value {
         Value::GpuTensor(handle) => sind_gpu(handle).await,
         Value::Complex(re, im) => {

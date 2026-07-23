@@ -129,6 +129,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::trigonometry::cosh"
 )]
 async fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "cosh")?;
     match value {
         Value::GpuTensor(handle) => cosh_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(

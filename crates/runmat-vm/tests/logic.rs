@@ -441,6 +441,8 @@ fn typed_complex_integer_gpuarray_is_rejected_before_provider_dispatch() {
 fn typed_complex_integer_analytic_operations_are_rejected_before_f64_coercion() {
     for builtin in [
         "abs", "angle", "exp", "expm1", "gamma", "log", "log10", "log1p", "log2", "sign", "sqrt",
+        "acos", "acosh", "asin", "asinh", "atan", "atanh", "cos", "cosd", "cosh", "cospi",
+        "deg2rad", "rad2deg", "sin", "sind", "sinh", "sinpi", "tan", "tand", "tanh",
     ] {
         let source =
             format!("z = complex(uint64(9223372036854775808), uint64(1)); out = {builtin}(z);");

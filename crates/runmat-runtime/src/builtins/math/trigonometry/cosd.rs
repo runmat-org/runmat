@@ -135,6 +135,7 @@ fn cosd_complex(re: f64, im: f64) -> (f64, f64) {
     builtin_path = "crate::builtins::math::trigonometry::cosd"
 )]
 async fn cosd_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "cosd")?;
     match value {
         Value::GpuTensor(handle) => cosd_gpu(handle).await,
         Value::Complex(re, im) => {

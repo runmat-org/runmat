@@ -199,6 +199,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "tan")?;
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Tan) {
         return apply_output_template(symbolic, &template).await;
     }
