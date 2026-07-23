@@ -123,6 +123,7 @@ fn builtin_error_with_detail(
     builtin_path = "crate::builtins::math::rounding::fix"
 )]
 async fn fix_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => fix_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(fix_scalar(re), fix_scalar(im))),

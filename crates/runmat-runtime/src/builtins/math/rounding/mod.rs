@@ -165,6 +165,8 @@ fn mod_error_with_message(
     builtin_path = "crate::builtins::math::rounding"
 )]
 async fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&lhs, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&rhs, BUILTIN_NAME)?;
     match (lhs, rhs) {
         (Value::GpuTensor(a), Value::GpuTensor(b)) => mod_gpu_pair(a, b).await,
         (Value::GpuTensor(a), other) => {

@@ -229,6 +229,7 @@ fn builtin_error_with_detail(
 )]
 async fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = parse_arguments(&rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     let base = match value {
         Value::GpuTensor(handle) => floor_gpu(handle, &args).await?,
         Value::Complex(re, im) => Value::Complex(

@@ -212,6 +212,7 @@ impl RoundStrategy {
 )]
 async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let strategy = parse_arguments(&rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => round_gpu(handle, strategy).await,
         Value::Complex(re, im) => Ok(Value::Complex(
