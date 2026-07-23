@@ -488,7 +488,7 @@ fn unique_integer(
 
 fn unique_integer_elements(
     storage: &IntegerStorage,
-    shape: Vec<usize>,
+    _shape: Vec<usize>,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
     let values = storage.exact_values();

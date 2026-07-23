@@ -9,7 +9,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -395,11 +395,79 @@ fn ismember_numeric_tensors(
     b: Tensor,
     opts: &IsMemberOptions,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
+    if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
+        if a_storage.class_name() == b_storage.class_name() {
+            return if opts.rows {
+                ismember_integer_rows(&a, &b)
+            } else {
+                ismember_integer_elements(&a, &b)
+            };
+        }
+    }
     if opts.rows {
         ismember_numeric_rows(a, b)
     } else {
         ismember_numeric_elements(a, b)
     }
+}
+
+fn ismember_integer_elements(a: &Tensor, b: &Tensor) -> crate::BuiltinResult<IsMemberEvaluation> {
+    let a_values = a.integer_storage().expect("integer path").exact_values();
+    let b_values = b.integer_storage().expect("integer path").exact_values();
+    let mut map = HashMap::<IntValue, usize>::new();
+    for (index, value) in b_values.into_iter().enumerate() {
+        map.entry(value).or_insert(index + 1);
+    }
+    let mut mask = Vec::with_capacity(a_values.len());
+    let mut locations = Vec::with_capacity(a_values.len());
+    for value in a_values {
+        if let Some(&index) = map.get(&value) {
+            mask.push(1);
+            locations.push(index as f64);
+        } else {
+            mask.push(0);
+            locations.push(0.0);
+        }
+    }
+    let logical = LogicalArray::new(mask, a.shape.clone())
+        .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
+    let locations = Tensor::new(locations, a.shape.clone())
+        .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
+    Ok(IsMemberEvaluation::new(logical, locations))
+}
+
+fn ismember_integer_rows(a: &Tensor, b: &Tensor) -> crate::BuiltinResult<IsMemberEvaluation> {
+    let (rows_a, cols_a) = tensor_rows_cols(a, "ismember")?;
+    let (rows_b, cols_b) = tensor_rows_cols(b, "ismember")?;
+    if cols_a != cols_b {
+        return Err(ismember_error(&ISMEMBER_ERROR_ROWS_COLUMN_MISMATCH));
+    }
+    let a_values = a.integer_storage().expect("integer path").exact_values();
+    let b_values = b.integer_storage().expect("integer path").exact_values();
+    let mut map = HashMap::<Vec<IntValue>, usize>::new();
+    for row in 0..rows_b {
+        let key: Vec<_> = (0..cols_b)
+            .map(|col| b_values[row + col * rows_b].clone())
+            .collect();
+        map.entry(key).or_insert(row + 1);
+    }
+    let mut mask = vec![0; rows_a];
+    let mut locations = vec![0.0; rows_a];
+    for row in 0..rows_a {
+        let key: Vec<_> = (0..cols_a)
+            .map(|col| a_values[row + col * rows_a].clone())
+            .collect();
+        if let Some(&index) = map.get(&key) {
+            mask[row] = 1;
+            locations[row] = index as f64;
+        }
+    }
+    let shape = vec![rows_a, 1];
+    let logical = LogicalArray::new(mask, shape.clone())
+        .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
+    let locations = Tensor::new(locations, shape)
+        .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
+    Ok(IsMemberEvaluation::new(logical, locations))
 }
 
 /// Helper exposed for acceleration providers handling numeric tensors on the host.
@@ -909,6 +977,38 @@ pub(crate) mod tests {
         let eval = ismember_numeric_elements(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1, 0, 1]);
         assert_eq!(eval.loc.data, vec![3.0, 1.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn integer_membership_uses_exact_values_for_elements_and_rows() {
+        let a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            vec![3, 1],
+        )
+        .expect("input");
+        let b = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![0, u64::MAX]),
+            vec![2, 1],
+        )
+        .expect("input");
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("ismember");
+        assert_eq!(eval.mask.data, vec![1, 1, 0]);
+        assert_eq!(eval.loc.data, vec![2.0, 1.0, 0.0]);
+
+        let a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![i64::MAX, i64::MIN, 1, 2]),
+            vec![2, 2],
+        )
+        .expect("input");
+        let b = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![i64::MIN, 7, 2, 8]),
+            vec![2, 2],
+        )
+        .expect("input");
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+            .expect("ismember rows");
+        assert_eq!(eval.mask.data, vec![0, 1]);
+        assert_eq!(eval.loc.data, vec![0.0, 1.0]);
     }
 
     #[test]
