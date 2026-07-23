@@ -141,6 +141,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::linalg::solve::rcond"
 )]
 async fn rcond_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     let estimate = match value {
         Value::GpuTensor(handle) => return rcond_gpu(handle).await,
         Value::ComplexTensor(matrix) => rcond_complex_tensor(&matrix)?,

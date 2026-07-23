@@ -184,6 +184,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     match value {
         Value::GpuTensor(handle) => rank_gpu(handle, tol).await,
         Value::ComplexTensor(tensor) => rank_complex_tensor_value(tensor, tol),

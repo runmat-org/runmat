@@ -227,6 +227,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn rref_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     let eval = match value {
         Value::GpuTensor(handle) => rref_gpu(handle, tol).await?,
         other => rref_eval_from_value(other, tol)?,

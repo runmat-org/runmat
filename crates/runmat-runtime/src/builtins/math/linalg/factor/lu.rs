@@ -355,6 +355,7 @@ impl Default for PivotMode {
 /// Evaluate `lu` while preserving all output forms for later extraction.
 pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
     let pivot_mode = parse_pivot_mode(args)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => {
             if let Some(eval) = evaluate_gpu(&handle, pivot_mode).await? {

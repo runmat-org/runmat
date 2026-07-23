@@ -140,6 +140,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::linalg::solve::inv"
 )]
 async fn inv_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     match value {
         Value::GpuTensor(handle) => inv_gpu(handle).await,
         Value::ComplexTensor(tensor) => inv_complex_value(tensor),

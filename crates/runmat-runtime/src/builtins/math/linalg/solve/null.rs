@@ -222,6 +222,7 @@ enum NullMode {
 )]
 async fn null_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let mode = parse_null_mode(&rest).map_err(argument_error)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     match value {
         Value::GpuTensor(handle) => null_gpu(handle, mode).await,
         Value::ComplexTensor(tensor) => null_complex_value(tensor, mode),

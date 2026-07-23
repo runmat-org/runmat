@@ -288,6 +288,40 @@ fn typed_complex_integer_det_is_rejected_before_f64_coercion() {
 }
 
 #[test]
+fn typed_complex_integer_factorization_and_solve_operations_are_rejected_before_f64_coercion() {
+    let operations = [
+        ("chol", "chol(z)"),
+        ("lu", "lu(z)"),
+        ("qr", "qr(z)"),
+        ("svd", "svd(z)"),
+        ("eig", "eig(z)"),
+        ("generalized eig", "eig(z, z)"),
+        ("inv", "inv(z)"),
+        ("cond", "cond(z)"),
+        ("rcond", "rcond(z)"),
+        ("pinv", "pinv(z)"),
+        ("rank", "rank(z)"),
+        ("rref", "rref(z)"),
+        ("null", "null(z)"),
+        ("linsolve matrix", "linsolve(z, [1; 2])"),
+        ("linsolve rhs", "linsolve(eye(2), z)"),
+    ];
+
+    for (name, operation) in operations {
+        let source = format!(
+            "z = complex(uint64([9223372036854775808 2; 3 4]), uint64([1 2; 3 4])); out = {operation};"
+        );
+        let err = execute_source(&source).expect_err(name);
+        assert!(
+            err.to_string().contains(
+                "operations involving complex numbers with integer types are not supported"
+            ),
+            "{name} returned an unexpected error: {err}"
+        );
+    }
+}
+
+#[test]
 fn typed_complex_integer_gpuarray_is_rejected_before_provider_dispatch() {
     let err = execute_source(
         "z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); g = gpuArray(z);",

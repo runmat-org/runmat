@@ -305,6 +305,7 @@ pub enum CholTriangle {
 /// Compute the Cholesky factorization for the given value and option list.
 pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<CholEval> {
     let triangle = parse_triangle(args)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => {
             if let Some(eval) = evaluate_gpu(&handle, triangle).await? {

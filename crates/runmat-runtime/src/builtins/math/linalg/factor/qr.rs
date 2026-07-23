@@ -395,6 +395,7 @@ struct QrOptions {
 /// Evaluate the builtin with full access to multiple outputs.
 pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<QrEval> {
     let options = parse_options(args).await?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => {
             if let Some(eval) = evaluate_gpu(&handle, &options).await? {

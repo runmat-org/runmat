@@ -415,7 +415,9 @@ struct EigRequest {
 
 pub async fn evaluate(value: Value, args: &[Value], require_left: bool) -> BuiltinResult<EigEval> {
     let request = parse_request(args)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     if let Some(b) = request.b {
+        crate::builtins::common::validation::reject_typed_complex_integer(&b, BUILTIN_NAME)?;
         return evaluate_generalized(value, b, request.options, require_left).await;
     }
     let options = request.options;

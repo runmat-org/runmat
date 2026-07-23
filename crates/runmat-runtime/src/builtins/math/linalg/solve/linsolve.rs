@@ -371,6 +371,8 @@ fn options_from_rest(rest: &[Value]) -> BuiltinResult<SolveOptions> {
 /// Public helper for the VM multi-output surface.
 pub async fn evaluate_args(lhs: Value, rhs: Value, rest: &[Value]) -> BuiltinResult<LinsolveEval> {
     let options = options_from_rest(rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&lhs, NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&rhs, NAME)?;
     evaluate(lhs, rhs, options).await
 }
 

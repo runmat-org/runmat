@@ -359,6 +359,7 @@ enum SigmaFormat {
 
 pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<SvdEval> {
     let options = parse_options(args)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     evaluate_value(value, options).await
 }
 
