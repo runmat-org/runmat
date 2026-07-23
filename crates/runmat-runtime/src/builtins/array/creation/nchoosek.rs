@@ -205,6 +205,15 @@ fn scalar_coefficient_mode(value: &Value) -> Option<CoefficientMode> {
             class: int_class(int),
         }),
         Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return parse_nonnegative_integer_int(&value).map(|n| CoefficientMode {
+                    n,
+                    class: int_class(&value),
+                });
+            }
             parse_nonnegative_integer_f64(tensor.data[0]).map(|n| CoefficientMode {
                 n,
                 class: tensor_class(tensor.dtype),
@@ -349,6 +358,14 @@ fn combinations_value(value: Value, k: usize) -> BuiltinResult<Value> {
 fn combinations_tensor(tensor: Tensor, k: usize) -> BuiltinResult<Value> {
     let n = vector_len(&tensor.shape)?;
     let rows = checked_rows(n, k)?;
+    if let Some(storage) = tensor.integer_data {
+        let storage = storage
+            .from_exact_values_like(combination_columns(&storage.exact_values(), rows, k)?)
+            .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")))?;
+        return Tensor::new_integer(storage, vec![rows, k])
+            .map(Value::Tensor)
+            .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")));
+    }
     let data = combination_columns(&tensor.data, rows, k)?;
     Tensor::new_with_dtype(data, vec![rows, k], tensor.dtype)
         .map(Value::Tensor)
@@ -491,6 +508,15 @@ fn parse_k(value: &Value) -> BuiltinResult<ParsedK> {
             })
             .ok_or_else(invalid_k),
         Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                let class = int_class(&value);
+                return parse_nonnegative_integer_int(&value)
+                    .map(|value| ParsedK { value, class })
+                    .ok_or_else(invalid_k);
+            }
             parse_nonnegative_integer_f64(tensor.data[0])
                 .map(|value| ParsedK {
                     value,
@@ -613,6 +639,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn call(first: Value, k: Value) -> BuiltinResult<Value> {
         block_on(evaluate(first, k))
@@ -705,6 +732,89 @@ mod tests {
         assert_eq!(out.dtype, NumericDType::U32);
         assert_eq!(out.shape, vec![3, 2]);
         assert_eq!(out.data, vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]);
+    }
+
+    #[test]
+    fn exact_integer_scalars_and_vector_combinations_preserve_all_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![4, 7, 9]),
+            IntegerStorage::I16(vec![4, 700, 900]),
+            IntegerStorage::I32(vec![4, i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![4, i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![4, 7, u8::MAX]),
+            IntegerStorage::U16(vec![4, 700, u16::MAX]),
+            IntegerStorage::U32(vec![4, 9_007_199, u32::MAX]),
+            IntegerStorage::U64(vec![4, 9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let scalar = Tensor::new_integer(
+                storage
+                    .from_exact_values_like(vec![values[0].clone()])
+                    .expect("scalar storage"),
+                vec![1, 1],
+            )
+            .expect("scalar tensor");
+            let k = Tensor::new_integer(
+                storage
+                    .from_exact_values_like(vec![one_like(&values[0])])
+                    .expect("k storage"),
+                vec![1, 1],
+            )
+            .expect("k tensor");
+            assert_eq!(
+                call(Value::Tensor(scalar), Value::Tensor(k)).expect("scalar coefficient"),
+                Value::Int(values[0].clone())
+            );
+
+            let expected = storage
+                .from_exact_values_like(vec![
+                    values[0].clone(),
+                    values[0].clone(),
+                    values[1].clone(),
+                    values[1].clone(),
+                    values[2].clone(),
+                    values[2].clone(),
+                ])
+                .expect("expected combinations");
+            let input = Tensor::new_integer(storage.clone(), vec![1, 3]).expect("integer vector");
+            let Value::Tensor(output) =
+                call(Value::Tensor(input), Value::Num(2.0)).expect("combinations")
+            else {
+                panic!("expected exact integer combinations");
+            };
+            assert_eq!(output.shape, vec![3, 2]);
+            assert_eq!(output.integer_storage(), Some(&expected));
+
+            let empty = storage
+                .from_exact_values_like(Vec::new())
+                .expect("empty expected storage");
+            for (k, shape) in [(0.0, vec![1, 0]), (4.0, vec![0, 4])] {
+                let input =
+                    Tensor::new_integer(storage.clone(), vec![1, 3]).expect("integer vector");
+                let Value::Tensor(output) =
+                    call(Value::Tensor(input), Value::Num(k)).expect("empty combinations")
+                else {
+                    panic!("expected exact empty combinations");
+                };
+                assert_eq!(output.shape, shape);
+                assert_eq!(output.integer_storage(), Some(&empty));
+            }
+        }
+    }
+
+    fn one_like(value: &IntValue) -> IntValue {
+        match value {
+            IntValue::I8(_) => IntValue::I8(1),
+            IntValue::I16(_) => IntValue::I16(1),
+            IntValue::I32(_) => IntValue::I32(1),
+            IntValue::I64(_) => IntValue::I64(1),
+            IntValue::U8(_) => IntValue::U8(1),
+            IntValue::U16(_) => IntValue::U16(1),
+            IntValue::U32(_) => IntValue::U32(1),
+            IntValue::U64(_) => IntValue::U64(1),
+        }
     }
 
     #[test]
