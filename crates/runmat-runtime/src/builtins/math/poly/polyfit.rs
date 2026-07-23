@@ -289,6 +289,12 @@ pub async fn evaluate(
     degree: Value,
     rest: &[Value],
 ) -> BuiltinResult<PolyfitEval> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&x, "polyfit")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&y, "polyfit")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&degree, "polyfit")?;
+    for value in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, "polyfit")?;
+    }
     let deg = parse_degree(&degree)?;
 
     if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest).await? {
@@ -1019,6 +1025,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -1026,6 +1033,29 @@ pub(crate) mod tests {
             "expected error containing '{needle}', got '{}'",
             err.message()
         );
+    }
+
+    #[test]
+    fn polyfit_rejects_typed_complex_integer_inputs() {
+        let typed_complex = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![i64::MAX]),
+                    IntegerStorage::I64(vec![-1]),
+                )
+                .expect("storage"),
+                vec![1, 1],
+            )
+            .expect("tensor"),
+        );
+        let err = evaluate(
+            typed_complex,
+            Value::Num(1.0),
+            Value::Int(IntValue::I32(0)),
+            &[],
+        )
+        .expect_err("typed complex integer input must reject");
+        assert_error_contains(err, "complex numbers with integer types");
     }
 
     fn evaluate(

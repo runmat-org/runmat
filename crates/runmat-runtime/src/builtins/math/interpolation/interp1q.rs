@@ -133,6 +133,9 @@ fn interp1q_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     builtin_path = "crate::builtins::math::interpolation::interp1q"
 )]
 async fn interp1q_builtin(x: Value, v: Value, xq: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&x, "interp1q")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&v, "interp1q")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&xq, "interp1q")?;
     let x = gather_interp_input(x).await?;
     let v = gather_interp_input(v).await?;
     let xq = gather_interp_input(xq).await?;
@@ -463,7 +466,7 @@ fn error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, Tensor};
+    use runmat_builtins::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).expect("tensor"))
@@ -482,6 +485,33 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![1, 2]);
         assert_eq!(tensor.data, vec![15.0, 30.0]);
+    }
+
+    #[test]
+    fn interp1q_rejects_typed_complex_integer_inputs() {
+        let typed_complex = || {
+            Value::ComplexTensor(
+                ComplexTensor::new_integer(
+                    IntegerComplexStorage::new(
+                        IntegerStorage::U64(vec![u64::MAX]),
+                        IntegerStorage::U64(vec![1]),
+                    )
+                    .expect("storage"),
+                    vec![1, 1],
+                )
+                .expect("tensor"),
+            )
+        };
+
+        for (x, v, xq) in [
+            (typed_complex(), row(&[1.0]), row(&[1.0])),
+            (row(&[1.0]), typed_complex(), row(&[1.0])),
+            (row(&[1.0]), row(&[1.0]), typed_complex()),
+        ] {
+            let err = block_on(interp1q_builtin(x, v, xq))
+                .expect_err("typed complex integer input must reject");
+            assert!(err.message().contains("complex numbers with integer types"));
+        }
     }
 
     #[test]

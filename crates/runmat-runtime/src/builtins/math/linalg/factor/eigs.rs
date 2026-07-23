@@ -225,6 +225,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::linalg::factor::eigs"
 )]
 async fn eigs_builtin(a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, "eigs")?;
+    for value in &rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, "eigs")?;
+    }
     let request = Request::parse(a, rest).await?;
     let eval = compute_subset(request).await?;
 
@@ -1177,10 +1181,28 @@ fn with_context(mut error: RuntimeError) -> RuntimeError {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, SparseTensor};
+    use runmat_builtins::{
+        CharArray, IntValue, IntegerComplexStorage, IntegerStorage, SparseTensor,
+    };
 
     fn real_matrix(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new_2d(data, rows, cols).unwrap())
+    }
+
+    #[test]
+    fn eigs_rejects_typed_complex_integer_inputs() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1]),
+            )
+            .expect("storage"),
+            vec![1, 1],
+        )
+        .expect("tensor");
+        let err = block_on(eigs_builtin(Value::ComplexTensor(tensor), Vec::new()))
+            .expect_err("typed complex integer input must reject");
+        assert!(err.message().contains("complex numbers with integer types"));
     }
 
     fn tensor(value: Value) -> Tensor {
