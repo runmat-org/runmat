@@ -614,6 +614,11 @@ async fn moving_builtin(
     let value = iter.next().expect("checked");
     let k = iter.next().expect("checked");
     let rest: Vec<Value> = iter.collect();
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, name)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&k, name)?;
+    for argument in &rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(argument, name)?;
+    }
     let parsed = parse_moving_args(name, op, &k, &rest).await?;
     match value {
         Value::GpuTensor(handle) => moving_gpu(name, op, handle, &parsed).await,
@@ -2018,6 +2023,7 @@ fn identifier_suffix(descriptor: &'static BuiltinErrorDescriptor) -> &'static st
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
     fn call(name: &'static str, op: MovingOp, args: Vec<Value>) -> BuiltinResult<Value> {
         block_on(moving_builtin(name, op, args))
@@ -2025,6 +2031,24 @@ mod tests {
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    #[test]
+    fn moving_operations_reject_typed_complex_integer_inputs() {
+        let input = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX]),
+                    IntegerStorage::U64(vec![1]),
+                )
+                .expect("storage"),
+                vec![1, 1],
+            )
+            .expect("tensor"),
+        );
+        let err = call("movmean", MovingOp::Mean, vec![input, Value::Num(1.0)])
+            .expect_err("typed complex integer input must reject");
+        assert!(err.message().contains("complex numbers with integer types"));
     }
 
     fn expect_tensor(value: Value) -> Tensor {

@@ -367,6 +367,10 @@ async fn evaluate_topk(
     value: Value,
     rest: &[Value],
 ) -> BuiltinResult<TopKEvaluation> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, kind.name())?;
+    for argument in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(argument, kind.name())?;
+    }
     let args = parse_topk_args(kind, rest).await?;
     let input = gather_topk_input(kind, value).await?;
     match input {
@@ -824,9 +828,29 @@ fn topk_internal(kind: TopKKind, detail: impl AsRef<str>) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    #[tokio::test]
+    async fn topk_rejects_typed_complex_integer_inputs() {
+        let input = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![i64::MAX]),
+                    IntegerStorage::I64(vec![-1]),
+                )
+                .expect("storage"),
+                vec![1, 1],
+            )
+            .expect("tensor"),
+        );
+        let err = evaluate_topk(TopKKind::Max, input, &[Value::Num(1.0)])
+            .await
+            .expect_err("typed complex integer input must reject");
+        assert!(err.message().contains("complex numbers with integer types"));
     }
 
     fn outputs(value: Value) -> Vec<Value> {
