@@ -185,6 +185,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let order = parse_order(&rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     match value {
         Value::GpuTensor(handle) => norm_gpu(handle, order).await,
         Value::ComplexTensor(tensor) => {
