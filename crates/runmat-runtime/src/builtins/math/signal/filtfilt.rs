@@ -169,6 +169,9 @@ async fn filtfilt_builtin(b: Value, a: Value, x: Value) -> BuiltinResult<Value> 
 }
 
 pub async fn evaluate(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&b, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
     let b_input = value_to_complex_vector(BUILTIN_NAME, "numerator", b)
         .await
         .map_err(|err| {

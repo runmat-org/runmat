@@ -202,6 +202,7 @@ fn provider_error(err: anyhow::Error) -> RuntimeError {
     builtin_path = "crate::builtins::math::signal::sinc"
 )]
 async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => sinc_gpu(handle).await,
         Value::Complex(re, im) => {

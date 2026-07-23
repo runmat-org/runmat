@@ -266,6 +266,11 @@ pub async fn evaluate(b: Value, a: Value, rest: &[Value]) -> BuiltinResult<Value
     if rest.len() > 2 {
         return Err(freqz_error(&FREQZ_ERROR_ARG_COUNT));
     }
+    crate::builtins::common::validation::reject_typed_complex_integer(&b, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, BUILTIN_NAME)?;
+    for value in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    }
     let b = value_to_complex_vector(BUILTIN_NAME, "numerator", b)
         .await
         .map_err(|err| freqz_error_with_detail(&FREQZ_ERROR_INVALID_COEFFICIENTS, err.message()))?

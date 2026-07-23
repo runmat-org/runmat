@@ -401,6 +401,12 @@ pub async fn evaluate(
     x: Value,
     rest: &[Value],
 ) -> BuiltinResult<FilterEvaluation> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&b, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
+    for value in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    }
     let args = FilterArgs::parse(b, a, x, rest).await?;
     if let Some(eval) = try_filter_gpu(&args).await? {
         return Ok(eval);

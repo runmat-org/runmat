@@ -360,6 +360,39 @@ fn typed_complex_integer_polynomial_and_convolution_operations_are_rejected_befo
 }
 
 #[test]
+fn typed_complex_integer_signal_operations_are_rejected_before_f64_coercion() {
+    let operations = [
+        ("filter numerator", "filter(z(1, :), [1], [1 2])"),
+        ("filter denominator", "filter([1], z(1, :), [1 2])"),
+        ("filter signal", "filter([1], [1], z(1, :))"),
+        ("filter initial state", "filter([1], [1], [1 2], z(1, :))"),
+        ("filtfilt numerator", "filtfilt(z(1, :), [1], [1 2 3 4])"),
+        ("filtfilt denominator", "filtfilt([1], z(1, :), [1 2 3 4])"),
+        ("filtfilt signal", "filtfilt([1], [1], z(1, :))"),
+        ("freqz numerator", "freqz(z(1, :), [1])"),
+        ("freqz denominator", "freqz([1], z(1, :))"),
+        ("freqz count", "freqz([1], [1], z(1, 1))"),
+        ("pwelch signal", "pwelch(z(1, :))"),
+        ("periodogram signal", "periodogram(z(1, :))"),
+        ("spectrogram signal", "spectrogram(z(1, :))"),
+        ("sinc", "sinc(z(1, :))"),
+    ];
+
+    for (name, operation) in operations {
+        let source = format!(
+            "z = complex(uint64([9223372036854775808 2; 3 4]), uint64([1 2; 3 4])); out = {operation};"
+        );
+        let err = execute_source(&source).expect_err(name);
+        assert!(
+            err.to_string().contains(
+                "operations involving complex numbers with integer types are not supported"
+            ),
+            "{name} returned an unexpected error: {err}"
+        );
+    }
+}
+
+#[test]
 fn typed_complex_integer_gpuarray_is_rejected_before_provider_dispatch() {
     let err = execute_source(
         "z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); g = gpuArray(z);",
