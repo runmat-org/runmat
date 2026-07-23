@@ -422,6 +422,12 @@ fn data_values_from_value(value: &Value) -> BuiltinResult<(Vec<usize>, DataArray
         Value::Int(IntValue::U16(value)) => Ok((vec![1, 1], DataArrayValues::U16(vec![*value]))),
         Value::Int(IntValue::U32(value)) => Ok((vec![1, 1], DataArrayValues::U32(vec![*value]))),
         Value::Int(IntValue::U64(value)) => Ok((vec![1, 1], DataArrayValues::U64(vec![*value]))),
+        Value::ComplexTensor(tensor) if tensor.integer_data.is_some() => Err(data_error(
+            "data arrays do not support typed complex integer values; refusing lossy serialization",
+        )),
+        Value::ComplexTensor(_) | Value::Complex(_, _) => Err(data_error(
+            "data arrays do not support complex numeric values",
+        )),
         _ => Err(data_error(
             "DataArray.write supports tensor or numeric scalar values",
         )),
@@ -1562,6 +1568,24 @@ mod tests {
             payload.values,
             DataArrayValues::U64(vec![1_u64 << 63, u64::MAX])
         );
+    }
+
+    #[test]
+    fn payload_rejects_typed_complex_integers_without_float_coercion() {
+        let storage = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
+        )
+        .expect("matching typed complex components");
+        let complex = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 2])
+            .expect("typed complex tensor");
+
+        let error =
+            DataArrayPayload::from_value("uint64".to_string(), &Value::ComplexTensor(complex))
+                .expect_err("data persistence must not coerce typed complex integers through f64");
+        assert!(error
+            .to_string()
+            .contains("typed complex integer values; refusing lossy serialization"));
     }
 
     #[test]
