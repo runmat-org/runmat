@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, LogicalArray, NumericDType, ResolveContext, Tensor, Type, Value,
+    IntValue, IntegerStorage, LogicalArray, NumericDType, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -329,11 +329,17 @@ pub struct ModeEvaluation {
     /// Frequency of the mode per slice; 0.0 when the slice was entirely NaN/empty.
     freq: Tensor,
     /// One sorted tied-set column vector per slice, flattened in column-major order.
-    ties: Vec<Vec<f64>>,
+    ties: ModeTies,
     /// Shape of the M / F tensors (also the cell array shape for C).
     output_shape: Vec<usize>,
     /// MATLAB class to preserve for `M` and the tied values in `C`.
     output_class: OutputClass,
+}
+
+#[derive(Debug)]
+enum ModeTies {
+    Floating(Vec<Vec<f64>>),
+    Integer(Vec<IntegerStorage>),
 }
 
 impl ModeEvaluation {
@@ -343,7 +349,7 @@ impl ModeEvaluation {
             .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
         let freq = Tensor::new(vec![0.0; len], output_shape.clone())
             .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
-        let ties = vec![Vec::new(); len];
+        let ties = ModeTies::Floating(vec![Vec::new(); len]);
         Ok(Self {
             values,
             freq,
@@ -388,7 +394,7 @@ impl ModeEvaluation {
 }
 
 fn ties_to_cell(
-    ties: Vec<Vec<f64>>,
+    ties: ModeTies,
     output_shape: &[usize],
     output_class: OutputClass,
 ) -> BuiltinResult<Value> {
@@ -397,13 +403,30 @@ fn ties_to_cell(
     } else {
         output_shape.to_vec()
     };
-    let mut cell_values: Vec<Value> = Vec::with_capacity(ties.len());
-    for entry in ties {
-        let rows = entry.len();
-        let tensor = Tensor::new(entry, vec![rows, 1])
-            .map_err(|e| mode_internal_error(format!("mode: cell construction failed: {e}")))?;
-        cell_values.push(tensor_into_class_array_value(tensor, output_class)?);
-    }
+    let cell_values = match ties {
+        ModeTies::Floating(ties) => {
+            let mut cell_values = Vec::with_capacity(ties.len());
+            for entry in ties {
+                let rows = entry.len();
+                let tensor = Tensor::new(entry, vec![rows, 1]).map_err(|e| {
+                    mode_internal_error(format!("mode: cell construction failed: {e}"))
+                })?;
+                cell_values.push(tensor_into_class_array_value(tensor, output_class)?);
+            }
+            cell_values
+        }
+        ModeTies::Integer(ties) => ties
+            .into_iter()
+            .map(|storage| {
+                let rows = storage.len();
+                Tensor::new_integer(storage, vec![rows, 1])
+                    .map(Value::Tensor)
+                    .map_err(|e| {
+                        mode_internal_error(format!("mode: cell construction failed: {e}"))
+                    })
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?,
+    };
     crate::make_cell_with_shape(cell_values, cell_shape).map_err(mode_internal_error)
 }
 
@@ -413,6 +436,16 @@ fn mode_evaluate(
     output_class: OutputClass,
 ) -> BuiltinResult<ModeEvaluation> {
     let tensor = materialize_tensor(value)?;
+    if let Some(storage) = tensor.integer_storage().cloned() {
+        return match args.axes {
+            ModeAxes::Default => {
+                let dim = default_dimension_from_shape(&tensor.shape);
+                reduce_integer_along_dim(tensor, storage, dim)
+            }
+            ModeAxes::Dim(dim) => reduce_integer_along_dim(tensor, storage, dim),
+            ModeAxes::All => reduce_integer_all(tensor, storage),
+        };
+    }
     match args.axes {
         ModeAxes::Default => {
             let dim = default_dimension_from_shape(&tensor.shape);
@@ -462,7 +495,7 @@ fn finalize_single_slice(
         .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
     let freq = Tensor::new(vec![scalar.frequency], output_shape.clone())
         .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
-    let ties = vec![scalar.ties];
+    let ties = ModeTies::Floating(vec![scalar.ties]);
     Ok(ModeEvaluation {
         values,
         freq,
@@ -520,7 +553,7 @@ fn reduce_along_dim(
         return Ok(ModeEvaluation {
             values: values_tensor,
             freq: freq_tensor,
-            ties,
+            ties: ModeTies::Floating(ties),
             output_shape,
             output_class,
         });
@@ -569,10 +602,183 @@ fn reduce_along_dim(
     Ok(ModeEvaluation {
         values: values_tensor,
         freq: freq_tensor,
-        ties,
+        ties: ModeTies::Floating(ties),
         output_shape,
         output_class,
     })
+}
+
+fn reduce_integer_all(_tensor: Tensor, storage: IntegerStorage) -> BuiltinResult<ModeEvaluation> {
+    let output_shape = vec![1usize, 1];
+    if storage.is_empty() {
+        return ModeEvaluation::empty(output_shape, OutputClass::Double);
+    }
+    let scalar = integer_scalar_mode(&storage.exact_values());
+    integer_single_slice(scalar, output_shape, &storage)
+}
+
+fn reduce_integer_along_dim(
+    tensor: Tensor,
+    storage: IntegerStorage,
+    dim: usize,
+) -> BuiltinResult<ModeEvaluation> {
+    if dim == 0 {
+        return Err(mode_error(&MODE_ERROR_INVALID_DIMENSION));
+    }
+    if tensor.shape.is_empty() || dim > tensor.shape.len() {
+        return integer_identity_mode(tensor, storage);
+    }
+
+    let dim_index = dim - 1;
+    let reduce_len = tensor.shape[dim_index];
+    let mut output_shape = tensor.shape.clone();
+    output_shape[dim_index] = 1;
+    if reduce_len == 0 || storage.is_empty() {
+        return ModeEvaluation::empty(output_shape, OutputClass::Double);
+    }
+
+    let stride_before = dim_product(&tensor.shape[..dim_index])?;
+    let stride_after = dim_product(&tensor.shape[dim_index + 1..])?;
+    let output_len = stride_before
+        .checked_mul(stride_after)
+        .ok_or_else(|| mode_internal_error("mode: output size overflow"))?;
+    let exact = storage.exact_values();
+    let mut values = Vec::with_capacity(output_len);
+    let mut freq = Vec::with_capacity(output_len);
+    let mut ties = Vec::with_capacity(output_len);
+
+    for after in 0..stride_after {
+        for before in 0..stride_before {
+            let mut slice = Vec::with_capacity(reduce_len);
+            for k in 0..reduce_len {
+                let index = before + k * stride_before + after * stride_before * reduce_len;
+                slice.push(exact[index].clone());
+            }
+            let scalar = integer_scalar_mode(&slice);
+            values.push(scalar.value);
+            freq.push(scalar.frequency);
+            ties.push(
+                storage
+                    .from_same_class_values(scalar.ties)
+                    .map_err(mode_internal_error)?,
+            );
+        }
+    }
+
+    let values = Tensor::new_integer(
+        storage
+            .from_same_class_values(values)
+            .map_err(mode_internal_error)?,
+        output_shape.clone(),
+    )
+    .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
+    let freq = Tensor::new(freq, output_shape.clone())
+        .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
+    Ok(ModeEvaluation {
+        values,
+        freq,
+        ties: ModeTies::Integer(ties),
+        output_shape,
+        output_class: OutputClass::Double,
+    })
+}
+
+fn integer_identity_mode(tensor: Tensor, storage: IntegerStorage) -> BuiltinResult<ModeEvaluation> {
+    let output_shape = tensor.shape.clone();
+    let values = Tensor::new_integer(storage.clone(), output_shape.clone())
+        .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
+    let freq = Tensor::new(vec![1.0; storage.len()], output_shape.clone())
+        .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
+    let ties = storage
+        .exact_values()
+        .into_iter()
+        .map(|value| storage.from_same_class_values(vec![value]))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(mode_internal_error)?;
+    Ok(ModeEvaluation {
+        values,
+        freq,
+        ties: ModeTies::Integer(ties),
+        output_shape,
+        output_class: OutputClass::Double,
+    })
+}
+
+fn integer_single_slice(
+    scalar: IntegerScalarMode,
+    output_shape: Vec<usize>,
+    prototype: &IntegerStorage,
+) -> BuiltinResult<ModeEvaluation> {
+    let values = Tensor::new_integer(
+        prototype
+            .from_same_class_values(vec![scalar.value])
+            .map_err(mode_internal_error)?,
+        output_shape.clone(),
+    )
+    .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
+    let freq = Tensor::new(vec![scalar.frequency], output_shape.clone())
+        .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
+    let ties = prototype
+        .from_same_class_values(scalar.ties)
+        .map_err(mode_internal_error)?;
+    Ok(ModeEvaluation {
+        values,
+        freq,
+        ties: ModeTies::Integer(vec![ties]),
+        output_shape,
+        output_class: OutputClass::Double,
+    })
+}
+
+#[derive(Debug)]
+struct IntegerScalarMode {
+    value: IntValue,
+    frequency: f64,
+    ties: Vec<IntValue>,
+}
+
+fn integer_scalar_mode(values: &[IntValue]) -> IntegerScalarMode {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(compare_same_class_integer);
+    let mut highest_count = 0usize;
+    let mut ties = Vec::new();
+    let mut start = 0usize;
+    while start < sorted.len() {
+        let mut end = start + 1;
+        while end < sorted.len()
+            && compare_same_class_integer(&sorted[start], &sorted[end]) == Ordering::Equal
+        {
+            end += 1;
+        }
+        let count = end - start;
+        if count > highest_count {
+            highest_count = count;
+            ties.clear();
+            ties.push(sorted[start].clone());
+        } else if count == highest_count {
+            ties.push(sorted[start].clone());
+        }
+        start = end;
+    }
+    IntegerScalarMode {
+        value: ties[0].clone(),
+        frequency: highest_count as f64,
+        ties,
+    }
+}
+
+fn compare_same_class_integer(left: &IntValue, right: &IntValue) -> Ordering {
+    match (left, right) {
+        (IntValue::I8(a), IntValue::I8(b)) => a.cmp(b),
+        (IntValue::I16(a), IntValue::I16(b)) => a.cmp(b),
+        (IntValue::I32(a), IntValue::I32(b)) => a.cmp(b),
+        (IntValue::I64(a), IntValue::I64(b)) => a.cmp(b),
+        (IntValue::U8(a), IntValue::U8(b)) => a.cmp(b),
+        (IntValue::U16(a), IntValue::U16(b)) => a.cmp(b),
+        (IntValue::U32(a), IntValue::U32(b)) => a.cmp(b),
+        (IntValue::U64(a), IntValue::U64(b)) => a.cmp(b),
+        _ => unreachable!("integer storage supplies one homogeneous class"),
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -871,6 +1077,13 @@ pub(crate) mod tests {
         }
     }
 
+    fn expect_tensor(value: &Value) -> &Tensor {
+        match value {
+            Value::Tensor(tensor) => tensor,
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
     #[test]
     fn mode_type_resolver_reduces_first_dim() {
         let ty = Type::Tensor {
@@ -1047,6 +1260,123 @@ pub(crate) mod tests {
                 }
             }
             other => panic!("expected cell array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mode_preserves_all_exact_integer_classes_without_float_rounding() {
+        let cases = [
+            (IntegerStorage::I8(vec![-4, -4, 3]), IntValue::I8(-4)),
+            (
+                IntegerStorage::I16(vec![-400, -400, 3]),
+                IntValue::I16(-400),
+            ),
+            (
+                IntegerStorage::I32(vec![-40_000, -40_000, 3]),
+                IntValue::I32(-40_000),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MIN + 1, i64::MIN + 1, 3]),
+                IntValue::I64(i64::MIN + 1),
+            ),
+            (IntegerStorage::U8(vec![4, 4, 3]), IntValue::U8(4)),
+            (IntegerStorage::U16(vec![400, 400, 3]), IntValue::U16(400)),
+            (
+                IntegerStorage::U32(vec![40_000, 40_000, 3]),
+                IntValue::U32(40_000),
+            ),
+            (
+                IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX - 1, 3]),
+                IntValue::U64(u64::MAX - 1),
+            ),
+        ];
+
+        for (storage, expected) in cases {
+            let input = Tensor::new_integer(storage, vec![1, 3]).unwrap();
+            let result = mode_call(Value::Tensor(input), Vec::new()).expect("mode");
+            assert_eq!(result, Value::Int(expected));
+        }
+    }
+
+    #[test]
+    fn mode_exact_integer_dimension_all_and_ties_preserve_storage() {
+        let wide = u64::MAX - 3;
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![wide, wide - 1, wide, wide, wide - 1, wide - 1]),
+            vec![2, 3],
+        )
+        .unwrap();
+        let outputs = mode_outputs(Value::Tensor(input), vec![Value::Int(IntValue::I32(2))], 3)
+            .expect("mode");
+        match &outputs[0] {
+            Value::Tensor(values) => {
+                assert_eq!(values.shape, vec![2, 1]);
+                assert_eq!(
+                    values.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![wide, wide - 1]))
+                );
+            }
+            other => panic!("expected exact integer tensor, got {other:?}"),
+        }
+        assert_eq!(
+            outputs[1],
+            Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![2, 1]).unwrap())
+        );
+        match &outputs[2] {
+            Value::Cell(cell) => {
+                assert_eq!(cell.shape, vec![2, 1]);
+                assert_eq!(
+                    expect_tensor(&cell.data[0]).integer_storage(),
+                    Some(&IntegerStorage::U64(vec![wide]))
+                );
+                assert_eq!(
+                    expect_tensor(&cell.data[1]).integer_storage(),
+                    Some(&IntegerStorage::U64(vec![wide - 1]))
+                );
+            }
+            other => panic!("expected tied-value cell array, got {other:?}"),
+        }
+
+        let all_input = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN + 2, i64::MIN + 2, 8, 8]),
+            vec![2, 2],
+        )
+        .unwrap();
+        let all_outputs =
+            mode_outputs(Value::Tensor(all_input), vec![Value::from("all")], 3).expect("mode all");
+        assert_eq!(all_outputs[0], Value::Int(IntValue::I64(i64::MIN + 2)));
+        assert_eq!(all_outputs[1], Value::Num(2.0));
+        match &all_outputs[2] {
+            Value::Cell(cell) => assert_eq!(
+                expect_tensor(&cell.data[0]).integer_storage(),
+                Some(&IntegerStorage::I64(vec![i64::MIN + 2, 8]))
+            ),
+            other => panic!("expected tied-value cell array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mode_exact_integer_trailing_dimension_preserves_each_value() {
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, u64::MAX - 1]),
+            vec![2, 1],
+        )
+        .unwrap();
+        let outputs = mode_outputs(Value::Tensor(input), vec![Value::Int(IntValue::I32(5))], 3)
+            .expect("mode");
+        match &outputs[0] {
+            Value::Tensor(values) => assert_eq!(
+                values.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX, u64::MAX - 1]))
+            ),
+            other => panic!("expected exact integer tensor, got {other:?}"),
+        }
+        match &outputs[2] {
+            Value::Cell(cell) => assert_eq!(
+                expect_tensor(&cell.data[1]).integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX - 1]))
+            ),
+            other => panic!("expected tied-value cell array, got {other:?}"),
         }
     }
 
