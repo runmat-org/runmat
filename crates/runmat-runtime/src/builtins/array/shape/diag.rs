@@ -12,8 +12,8 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView, P
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LiteralValue, LogicalArray, NumericDType, ResolveContext, Tensor,
-    Type, Value,
+    CharArray, ComplexTensor, IntegerStorage, LiteralValue, LogicalArray, NumericDType,
+    ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -781,7 +781,7 @@ fn coerce_diag_input(value: Value) -> BuiltinResult<DiagInput> {
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?,
         )),
         Value::Int(i) => Ok(DiagInput::Tensor(
-            Tensor::new(vec![i.to_f64()], vec![1, 1])
+            Tensor::new_integer(IntegerStorage::from_scalar(i), vec![1, 1])
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?,
         )),
         Value::Bool(flag) => Ok(DiagInput::Logical(
@@ -800,6 +800,20 @@ fn coerce_diag_input(value: Value) -> BuiltinResult<DiagInput> {
 }
 
 fn evaluate_tensor(tensor: Tensor, args: &ParsedDiagArgs) -> BuiltinResult<Value> {
+    if let Some(storage) = tensor.integer_storage() {
+        let zero = storage
+            .zeros_like(1)
+            .value_at(0)
+            .expect("one typed integer zero");
+        let (values, shape) =
+            evaluate_column_major_diag(&storage.exact_values(), &tensor.shape, args, zero)?;
+        let storage = storage
+            .from_exact_values_like(values)
+            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
+        return Tensor::new_integer(storage, shape)
+            .map(Value::Tensor)
+            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")));
+    }
     let (data, shape) = evaluate_column_major_diag(&tensor.data, &tensor.shape, args, 0.0)?;
     Tensor::new(data, shape)
         .map(Value::Tensor)
@@ -1374,6 +1388,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::IntValue;
 
     fn run_diag(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(diag_builtin(value, rest))
@@ -1459,6 +1474,63 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![2, 1]);
         assert_eq!(tensor.data, vec![4.0, 8.0]);
+    }
+
+    #[test]
+    fn diag_preserves_all_exact_integer_classes_for_construction_and_extraction() {
+        let storages = [
+            IntegerStorage::I8(vec![-2, 7, 9]),
+            IntegerStorage::I16(vec![-300, 400, 900]),
+            IntegerStorage::I32(vec![i32::MIN, 0, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, 0, i64::MAX]),
+            IntegerStorage::U8(vec![0, 7, u8::MAX]),
+            IntegerStorage::U16(vec![0, 700, u16::MAX]),
+            IntegerStorage::U32(vec![0, 9_007_199, u32::MAX]),
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let zero = storage.zeros_like(1).value_at(0).expect("integer zero");
+            let expected = storage
+                .from_exact_values_like(vec![
+                    values[0].clone(),
+                    zero.clone(),
+                    zero.clone(),
+                    zero.clone(),
+                    values[1].clone(),
+                    zero.clone(),
+                    zero.clone(),
+                    zero,
+                    values[2].clone(),
+                ])
+                .expect("expected diagonal storage");
+            let input = Tensor::new_integer(storage.clone(), vec![1, 3]).expect("integer vector");
+            let Value::Tensor(matrix) = run_diag(Value::Tensor(input), Vec::new()).expect("diag")
+            else {
+                panic!("expected exact integer matrix");
+            };
+            assert_eq!(matrix.shape, vec![3, 3]);
+            assert_eq!(matrix.integer_storage(), Some(&expected));
+
+            let Value::Tensor(extracted) =
+                run_diag(Value::Tensor(matrix), Vec::new()).expect("diag extract")
+            else {
+                panic!("expected exact integer vector");
+            };
+            assert_eq!(extracted.shape, vec![3, 1]);
+            assert_eq!(extracted.integer_storage(), Some(&storage));
+        }
+
+        let Value::Tensor(scalar) =
+            run_diag(Value::Int(IntValue::U64(u64::MAX)), Vec::new()).expect("scalar diag")
+        else {
+            panic!("expected exact scalar matrix");
+        };
+        assert_eq!(
+            scalar.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX]))
+        );
     }
 
     #[test]
