@@ -7,8 +7,8 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, NumericDType, ResolveContext,
-    SparseTensor, Tensor, Type, Value,
+    CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
+    ResolveContext, SparseTensor, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -216,12 +216,91 @@ fn blkdiag_host(args: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(result) = assemble_typed_complex_integer_blocks(&args) {
         return result;
     }
+    if let Some(result) = assemble_typed_integer_blocks(&args) {
+        return result;
+    }
 
     let mut blocks = Vec::with_capacity(args.len());
     for value in args {
         blocks.push(Block::from_value(value)?);
     }
     assemble_blocks(blocks)
+}
+
+/// Assemble same-class real integer blocks without consulting their lossy f64 mirrors.
+///
+/// MATLAB integer matrices retain their class through structural block assembly. Mixed
+/// integer classes and mixed integer/non-integer inputs retain the legacy promotion path
+/// until that cross-class conversion policy has been differentially validated.
+fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>> {
+    let mut blocks = Vec::with_capacity(args.len());
+    let mut prototype: Option<IntegerStorage> = None;
+    for value in args {
+        let (storage, shape) = match value {
+            Value::Tensor(tensor) => {
+                let Some(storage) = tensor.integer_storage() else {
+                    return None;
+                };
+                (storage.clone(), tensor.shape.clone())
+            }
+            Value::Int(value) => (IntegerStorage::from_scalar(value.clone()), vec![1, 1]),
+            _ => return None,
+        };
+        if let Some(existing) = prototype.as_ref() {
+            if existing.class_name() != storage.class_name() {
+                return None;
+            }
+        } else {
+            prototype = Some(storage.clone());
+        }
+        if let Err(error) = validate_matrix_shape(&shape) {
+            return Some(Err(error));
+        }
+        blocks.push((storage, shape));
+    }
+
+    let prototype = prototype?;
+    let (rows, cols) = match blocks
+        .iter()
+        .try_fold((0usize, 0usize), |(rows, cols), (_, shape)| {
+            let Some((block_rows, block_cols)) = matrix_dims_from_shape(shape) else {
+                return None;
+            };
+            Some((rows.checked_add(block_rows)?, cols.checked_add(block_cols)?))
+        }) {
+        Some(dims) => dims,
+        None => return Some(Err(size_overflow())),
+    };
+    let len = match checked_len(rows, cols) {
+        Ok(len) => len,
+        Err(error) => return Some(Err(error)),
+    };
+    let mut values = prototype.zeros_like(len).exact_values();
+    let mut row_offset = 0usize;
+    let mut col_offset = 0usize;
+    for (storage, shape) in blocks {
+        let (block_rows, block_cols) =
+            matrix_dims_from_shape(&shape).expect("typed integer block shape was checked above");
+        let source = storage.exact_values();
+        for col in 0..block_cols {
+            for row in 0..block_rows {
+                let src = row + col * block_rows;
+                let dst = (row_offset + row) + (col_offset + col) * rows;
+                values[dst] = source[src].clone();
+            }
+        }
+        row_offset += block_rows;
+        col_offset += block_cols;
+    }
+    let storage = match prototype.from_exact_values_like(values) {
+        Ok(storage) => storage,
+        Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
+    };
+    Some(
+        Tensor::new_integer(storage, vec![rows, cols])
+            .map(Value::Tensor)
+            .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail)),
+    )
 }
 
 /// Assemble same-class complex integer blocks without consulting the lossy f64 mirror.
@@ -1032,6 +1111,46 @@ mod tests {
                 assert!(tensor.data.is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blkdiag_preserves_all_exact_real_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![-2, 7]),
+            IntegerStorage::I16(vec![-300, 400]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let column = Tensor::new_integer(storage.clone(), vec![2, 1]).expect("column");
+            let scalar = Value::Int(storage.value_at(1).expect("scalar"));
+            let Value::Tensor(output) = call(vec![Value::Tensor(column), scalar]).expect("blkdiag")
+            else {
+                panic!("expected real integer blkdiag output");
+            };
+            assert_eq!(output.shape, vec![3, 2]);
+            assert_eq!(
+                output.integer_storage(),
+                Some(
+                    &storage
+                        .from_exact_values_like(vec![
+                            values[0].clone(),
+                            values[1].clone(),
+                            storage.zeros_like(1).value_at(0).unwrap(),
+                            storage.zeros_like(1).value_at(0).unwrap(),
+                            storage.zeros_like(1).value_at(0).unwrap(),
+                            values[1].clone(),
+                        ])
+                        .expect("expected block diagonal")
+                )
+            );
         }
     }
 
