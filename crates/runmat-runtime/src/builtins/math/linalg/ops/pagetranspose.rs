@@ -325,8 +325,8 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CellArray, CharArray, ComplexTensor, LogicalArray, ResolveContext, SparseTensor,
-        StringArray, StructValue, Tensor, Type,
+        CellArray, CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray,
+        ResolveContext, SparseTensor, StringArray, StructValue, Tensor, Type,
     };
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -335,6 +335,35 @@ mod tests {
 
     fn call_one(value: Value) -> BuiltinResult<Value> {
         call(vec![value])
+    }
+
+    #[test]
+    fn pagetranspose_preserves_typed_complex_integer_components_exactly() {
+        let input = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 1_u64 << 63]),
+                IntegerStorage::U64((1..=12).collect()),
+            )
+            .expect("storage"),
+            vec![2, 3, 2],
+        )
+        .expect("tensor");
+
+        let Value::ComplexTensor(result) =
+            call_one(Value::ComplexTensor(input)).expect("pagetranspose")
+        else {
+            panic!("expected complex tensor");
+        };
+        let storage = result.integer_data.expect("exact integer storage");
+        assert_eq!(result.shape, vec![3, 2, 2]);
+        assert_eq!(
+            storage.real,
+            IntegerStorage::U64(vec![u64::MAX, 3, 5, 2, 4, 6, 7, 9, 11, 8, 10, 1_u64 << 63,])
+        );
+        assert_eq!(
+            storage.imag,
+            IntegerStorage::U64(vec![1, 3, 5, 2, 4, 6, 7, 9, 11, 8, 10, 12])
+        );
     }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {

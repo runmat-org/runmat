@@ -453,7 +453,9 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{
+        IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type,
+    };
 
     fn call_transpose(value: Value) -> BuiltinResult<Value> {
         block_on(super::transpose_builtin(vec![value]))
@@ -461,6 +463,32 @@ pub(crate) mod tests {
 
     fn call_transpose_args(args: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::transpose_builtin(args))
+    }
+
+    #[test]
+    fn transpose_preserves_typed_complex_integer_components_exactly() {
+        let input = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX, 2, 3, 4, 5, 1_u64 << 63]),
+                IntegerStorage::U64(vec![1, 2, 3, 4, 5, 6]),
+            )
+            .expect("storage"),
+            vec![2, 3],
+        )
+        .expect("tensor");
+
+        let Value::ComplexTensor(result) =
+            call_transpose(Value::ComplexTensor(input)).expect("transpose")
+        else {
+            panic!("expected complex tensor");
+        };
+        let storage = result.integer_data.expect("exact integer storage");
+        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(
+            storage.real,
+            IntegerStorage::U64(vec![u64::MAX, 3, 5, 2, 4, 1_u64 << 63])
+        );
+        assert_eq!(storage.imag, IntegerStorage::U64(vec![1, 3, 5, 2, 4, 6]));
     }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {
