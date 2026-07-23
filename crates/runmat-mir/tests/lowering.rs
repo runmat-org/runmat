@@ -1288,7 +1288,7 @@ fn feval_lowers_to_dynamic_mir_callee() {
 }
 
 #[test]
-fn qualified_static_method_function_handle_lowers_to_imported_identity_operand() {
+fn unverified_qualified_function_handle_preserves_dynamic_identity_operand() {
     let mir = lower_mir("h = @Point.origin; y = feval(h);");
     let body = mir.bodies.values().next().expect("body");
     assert!(body
@@ -1300,11 +1300,10 @@ fn qualified_static_method_function_handle_lowers_to_imported_identity_operand()
             MirStmtKind::Assign {
                 value:
                     MirRvalue::Use(MirOperand::FunctionHandle(
-                        CallableIdentity::Imported(path)
+                        CallableIdentity::DynamicName(name)
                     )),
                 ..
-            } if path.module.display_name().as_deref() == Some("Point.origin")
-                && matches!(path.item.as_slice(), [runmat_hir::DefPathSegment::Function(_)])
+            } if name.0 == "Point.origin"
         )));
 }
 

@@ -4184,6 +4184,7 @@ fn object_saveobj_loadobj_script_surface() {
 #[test]
 fn findobj_script_surface_finds_graphics_handles() {
     let program = r#"
+        figure('Visible', 'off');
         h = plot([1 2 3], 'DisplayName', 'series-a');
         fig = gcf();
         by_type = findobj('Type', 'line');

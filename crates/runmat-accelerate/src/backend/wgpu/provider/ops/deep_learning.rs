@@ -99,35 +99,12 @@ impl WgpuProvider {
                     contents: bytes_of(&0u32),
                     usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                 });
-        let shader = crossentropy_terms_shader(self.precision);
-        let shader_module = self
-            .device_ref()
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("runmat-crossentropy-shader"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-            });
         let bind_layout =
             self.device_ref()
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("runmat-crossentropy-layout"),
                     entries: &crossentropy_terms_bind_layout_entries(),
                 });
-        let pipeline_layout =
-            self.device_ref()
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("runmat-crossentropy-pipeline-layout"),
-                    bind_group_layouts: &[&bind_layout],
-                    push_constant_ranges: &[],
-                });
-        let pipeline = self.device_ref().create_compute_pipeline(
-            &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
-                label: Some("runmat-crossentropy-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: &shader_module,
-                entry_point: "main",
-            },
-        );
-
         let mode = match request.mode {
             ProviderCrossentropyMode::SingleLabel => 0,
             ProviderCrossentropyMode::MultiLabel => 1,
@@ -145,19 +122,17 @@ impl WgpuProvider {
         let mut offset = 0usize;
         while offset < predictions_entry.len {
             let chunk_len = (predictions_entry.len - offset).min(chunk_capacity);
-            let params_buffer = self.uniform_buffer(
-                &CrossentropyParams {
-                    total: predictions_entry.len as u32,
-                    offset: offset as u32,
-                    chunk: chunk_len as u32,
-                    mode,
-                    weights_enabled: u32::from(weights_entry.is_some()),
-                    mask_enabled: u32::from(mask_entry.is_some()),
-                    _pad0: 0,
-                    _pad1: 0,
-                },
-                "runmat-crossentropy-params",
-            );
+            let params = CrossentropyParams {
+                total: predictions_entry.len as u32,
+                offset: offset as u32,
+                chunk: chunk_len as u32,
+                mode,
+                weights_enabled: u32::from(weights_entry.is_some()),
+                mask_enabled: u32::from(mask_entry.is_some()),
+                _pad0: 0,
+                _pad1: 0,
+            };
+            let params_buffer = self.uniform_buffer(&params, "runmat-crossentropy-params");
             let bind_group = self
                 .device_ref()
                 .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -198,14 +173,52 @@ impl WgpuProvider {
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
             );
+            let positive_pipeline = create_crossentropy_pipeline(
+                self.device_ref(),
+                &bind_layout,
+                "runmat-crossentropy-positive",
+                crossentropy_positive_shader(self.precision, &params),
+            );
             crate::backend::wgpu::dispatch::creation::run(
                 self.device_ref(),
                 self.queue_ref(),
-                &pipeline,
+                &positive_pipeline,
                 &bind_group,
                 workgroups,
-                "runmat-crossentropy-encoder",
-                "runmat-crossentropy-pass",
+                "runmat-crossentropy-positive-encoder",
+                "runmat-crossentropy-positive-pass",
+            );
+            if mode == 1 {
+                let complementary_pipeline = create_crossentropy_pipeline(
+                    self.device_ref(),
+                    &bind_layout,
+                    "runmat-crossentropy-complementary",
+                    crossentropy_complementary_shader(self.precision, &params),
+                );
+                crate::backend::wgpu::dispatch::creation::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &complementary_pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-crossentropy-complementary-encoder",
+                    "runmat-crossentropy-complementary-pass",
+                );
+            }
+            let validation_pipeline = create_crossentropy_pipeline(
+                self.device_ref(),
+                &bind_layout,
+                "runmat-crossentropy-validation",
+                crossentropy_validation_shader(self.precision, &params),
+            );
+            crate::backend::wgpu::dispatch::creation::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &validation_pipeline,
+                &bind_group,
+                workgroups,
+                "runmat-crossentropy-validation-encoder",
+                "runmat-crossentropy-validation-pass",
             );
             offset += chunk_len;
         }
@@ -591,7 +604,132 @@ fn crossentropy_terms_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 7] {
     })
 }
 
-fn crossentropy_terms_shader(precision: NumericPrecision) -> String {
+fn create_crossentropy_pipeline(
+    device: &wgpu::Device,
+    bind_layout: &wgpu::BindGroupLayout,
+    label: &str,
+    shader: String,
+) -> wgpu::ComputePipeline {
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(label),
+        source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some(label),
+        bind_group_layouts: &[bind_layout],
+        push_constant_ranges: &[],
+    });
+    device.create_compute_pipeline(
+        &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+            label: Some(label),
+            layout: Some(&layout),
+            module: &module,
+            entry_point: "main",
+        },
+    )
+}
+
+fn crossentropy_positive_shader(
+    precision: NumericPrecision,
+    params: &CrossentropyParams,
+) -> String {
+    let ty = precision.as_str();
+    let (eps, one_minus_eps) = match precision {
+        NumericPrecision::F64 => ("1.0e-12", "0.999999999999"),
+        NumericPrecision::F32 => ("1.0e-7", "0.9999999"),
+    };
+    let weight = if params.weights_enabled != 0 {
+        " * weights_in.data[idx]"
+    } else {
+        ""
+    };
+    let mask = if params.mask_enabled != 0 {
+        " * mask_in.data[idx]"
+    } else {
+        ""
+    };
+    let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
+    format!(
+        r#"
+struct Tensor {{ data: array<{ty}>, }};
+@group(0) @binding(0) var<storage, read> predictions_in: Tensor;
+@group(0) @binding(1) var<storage, read> targets_in: Tensor;
+@group(0) @binding(2) var<storage, read> weights_in: Tensor;
+@group(0) @binding(3) var<storage, read> mask_in: Tensor;
+@group(0) @binding(4) var<storage, read_write> losses_out: Tensor;
+@compute @workgroup_size({workgroup})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+  if (gid.x < {chunk}u) {{
+    let idx = gid.x + {offset}u;
+    let prediction = clamp(predictions_in.data[idx], {ty}({eps}), {ty}({one_minus_eps}));
+    losses_out.data[idx] = (-targets_in.data[idx] * log(prediction)){weight}{mask};
+  }}
+}}
+"#,
+        ty = ty,
+        workgroup = workgroup,
+        chunk = params.chunk,
+        offset = params.offset,
+        eps = eps,
+        one_minus_eps = one_minus_eps,
+        weight = weight,
+        mask = mask
+    )
+}
+
+fn crossentropy_complementary_shader(
+    precision: NumericPrecision,
+    params: &CrossentropyParams,
+) -> String {
+    let ty = precision.as_str();
+    let (eps, one_minus_eps) = match precision {
+        NumericPrecision::F64 => ("1.0e-12", "0.999999999999"),
+        NumericPrecision::F32 => ("1.0e-7", "0.9999999"),
+    };
+    let weight = if params.weights_enabled != 0 {
+        " * weights_in.data[idx]"
+    } else {
+        ""
+    };
+    let mask = if params.mask_enabled != 0 {
+        " * mask_in.data[idx]"
+    } else {
+        ""
+    };
+    let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
+    format!(
+        r#"
+struct Tensor {{ data: array<{ty}>, }};
+@group(0) @binding(0) var<storage, read> predictions_in: Tensor;
+@group(0) @binding(1) var<storage, read> targets_in: Tensor;
+@group(0) @binding(2) var<storage, read> weights_in: Tensor;
+@group(0) @binding(3) var<storage, read> mask_in: Tensor;
+@group(0) @binding(4) var<storage, read_write> losses_out: Tensor;
+@compute @workgroup_size({workgroup})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+  if (gid.x < {chunk}u) {{
+    let idx = gid.x + {offset}u;
+    let prediction = clamp(predictions_in.data[idx], {ty}({eps}), {ty}({one_minus_eps}));
+    let complement = -({ty}(1.0) - targets_in.data[idx]) * log({ty}(1.0) - prediction){weight}{mask};
+    losses_out.data[idx] = losses_out.data[idx] + complement;
+  }}
+}}
+"#,
+        ty = ty,
+        workgroup = workgroup,
+        chunk = params.chunk,
+        offset = params.offset,
+        eps = eps,
+        one_minus_eps = one_minus_eps,
+        weight = weight,
+        mask = mask
+    )
+}
+
+fn crossentropy_validation_shader(
+    precision: NumericPrecision,
+    params: &CrossentropyParams,
+) -> String {
     let ty = precision.as_str();
     let (max_finite, eps, one_minus_eps) = match precision {
         NumericPrecision::F64 => ("1.7976931348623157e308", "1.0e-12", "0.999999999999"),
@@ -628,7 +766,6 @@ struct ErrorState {{
 @group(0) @binding(2) var<storage, read> weights_in: Tensor;
 @group(0) @binding(3) var<storage, read> mask_in: Tensor;
 @group(0) @binding(4) var<storage, read_write> losses_out: Tensor;
-@group(0) @binding(5) var<uniform> params: Params;
 @group(0) @binding(6) var<storage, read_write> errors: ErrorState;
 
 fn is_finite_crossentropy(x: {ty}) -> bool {{
@@ -641,11 +778,11 @@ fn flag_error(code: u32) {{
 
 @compute @workgroup_size({workgroup})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
-  if (gid.x >= params.chunk) {{
+  if (gid.x >= {chunk}u) {{
     return;
   }}
-  let idx = gid.x + params.offset;
-  if (idx >= params.total) {{
+  let idx = gid.x + {offset}u;
+  if (idx >= {total}u) {{
     return;
   }}
 
@@ -662,10 +799,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 
   let clipped = clamp(prediction, EPS_CROSSENTROPY, ONE_MINUS_EPS_CROSSENTROPY);
   var loss = -target * log(clipped);
-  if (params.mode == 1u) {{
+  if ({multi_label}) {{
     loss = loss - ({ty}(1.0) - target) * log({ty}(1.0) - clipped);
   }}
-  if (params.weights_enabled != 0u) {{
+  if ({weights_enabled}) {{
     let weight = weights_in.data[idx];
     if (!(is_finite_crossentropy(weight) && weight >= {ty}(0.0))) {{
       flag_error(4u);
@@ -673,7 +810,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     }}
     loss = loss * weight;
   }}
-  if (params.mask_enabled != 0u) {{
+  if ({mask_enabled}) {{
     let mask = mask_in.data[idx];
     if (!(is_finite_crossentropy(mask) && (mask == {ty}(0.0) || mask == {ty}(1.0)))) {{
       flag_error(5u);
@@ -685,13 +822,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     flag_error(3u);
     return;
   }}
-  losses_out.data[idx] = loss;
+  let computed = losses_out.data[idx];
+  if (!is_finite_crossentropy(computed)) {{
+    flag_error(3u);
+  }}
 }}
 "#,
         ty = ty,
         max_finite = max_finite,
         eps = eps,
         one_minus_eps = one_minus_eps,
+        total = params.total,
+        offset = params.offset,
+        chunk = params.chunk,
+        multi_label = params.mode == 1,
+        weights_enabled = params.weights_enabled != 0,
+        mask_enabled = params.mask_enabled != 0,
         workgroup = workgroup,
     )
 }

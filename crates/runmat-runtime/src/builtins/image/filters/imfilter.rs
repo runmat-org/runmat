@@ -1119,6 +1119,43 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn imfilter_wgpu_preserves_higher_rank_inputs_through_host_fallback() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
+
+        let shape = vec![1; runmat_accelerate::backend::wgpu::params::IMFILTER_MAX_RANK + 1];
+        let image = Tensor::new(vec![2.0], shape.clone()).expect("higher-rank image");
+        let kernel = Tensor::new(vec![3.0], shape.clone()).expect("higher-rank kernel");
+        let image_handle = provider
+            .upload(&HostTensorView {
+                data: &image.data,
+                shape: &image.shape,
+            })
+            .expect("upload image");
+        let kernel_handle = provider
+            .upload(&HostTensorView {
+                data: &kernel.data,
+                shape: &kernel.shape,
+            })
+            .expect("upload kernel");
+
+        let filtered = block_on(imfilter_builtin(
+            Value::GpuTensor(image_handle),
+            Value::GpuTensor(kernel_handle),
+            Vec::new(),
+        ))
+        .expect("higher-rank imfilter");
+        let gathered = test_support::gather(filtered).expect("gather higher-rank output");
+
+        assert_eq!(gathered.shape, shape);
+        assert_eq!(gathered.data, vec![6.0]);
+    }
+
     #[test]
     fn imfilter_descriptor_signatures_cover_surface() {
         let labels: Vec<&str> = IMFILTER_DESCRIPTOR

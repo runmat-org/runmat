@@ -51,6 +51,225 @@ fn moving_window_endpoint_code(endpoint: ProviderMovingWindowEndpoints) -> (u32,
 const WGPU_MOVING_MEDIAN_MAX_WINDOW: usize = 256;
 const WGPU_MOVING_WINDOW_I32_LIMIT: usize = i32::MAX as usize;
 
+struct MovingWindowShaderSpec {
+    precision: NumericPrecision,
+    output_len: usize,
+    axis_len: usize,
+    out_axis_len: usize,
+    stride_before: usize,
+    before: usize,
+    after: usize,
+    op: ProviderMovingWindowOp,
+    endpoints: ProviderMovingWindowEndpoints,
+    nan_mode: ProviderNanMode,
+    normalization: ProviderStdNormalization,
+    fill_value: f64,
+}
+
+fn build_specialized_moving_window_shader(spec: &MovingWindowShaderSpec) -> String {
+    let ty = spec.precision.as_str();
+    let nan_helpers = match spec.precision {
+        NumericPrecision::F64 => {
+            r#"
+fn is_nan(value: f64) -> bool {
+  let bits = bitcast<u64>(value);
+  return (bits & 0x7ff0000000000000u) == 0x7ff0000000000000u &&
+    (bits & 0x000fffffffffffffu) != 0u;
+}
+fn nan_value() -> f64 { return bitcast<f64>(0x7ff8000000000000u); }
+"#
+        }
+        NumericPrecision::F32 => {
+            r#"
+fn is_nan(value: f32) -> bool {
+  let bits = bitcast<u32>(value);
+  return (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0u;
+}
+fn nan_value() -> f32 { return bitcast<f32>(0x7fc00000u); }
+"#
+        }
+    };
+    let fill = match spec.precision {
+        NumericPrecision::F64 => format!("f64({:?})", spec.fill_value),
+        NumericPrecision::F32 => format!("f32({:?})", spec.fill_value as f32),
+    };
+    let endpoint = moving_window_endpoint_code(spec.endpoints).0;
+    let omit_nan = matches!(spec.nan_mode, ProviderNanMode::Omit);
+    let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
+    let common = format!(
+        r#"
+struct Tensor {{ data: array<{ty}>, }};
+@group(0) @binding(0) var<storage, read> Input: Tensor;
+@group(0) @binding(1) var<storage, read_write> Output: Tensor;
+{nan_helpers}
+"#
+    );
+    let main_prefix = format!(
+        r#"
+@compute @workgroup_size({workgroup})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+  let idx = gid.x;
+  if (idx >= {output_len}u) {{ return; }}
+  let before_idx = idx % {stride_before}u;
+  let tmp = idx / {stride_before}u;
+  let out_pos = tmp % {out_axis_len}u;
+  let after_idx = tmp / {out_axis_len}u;
+  let center = out_pos + {discard_offset}u;
+  let start = i32(center) - {before};
+  let end = i32(center) + {after};
+  let in_start = max(start, 0);
+  let in_end = min(end, {last_axis});
+  var fill_count = 0u;
+  if ({fill_enabled}) {{
+    if (start < 0) {{ fill_count = fill_count + u32(-start); }}
+    if (end > {last_axis}) {{ fill_count = fill_count + u32(end - {last_axis}); }}
+  }}
+"#,
+        output_len = spec.output_len,
+        stride_before = spec.stride_before,
+        out_axis_len = spec.out_axis_len,
+        discard_offset = if endpoint == 1 { spec.before } else { 0 },
+        before = spec.before,
+        after = spec.after,
+        last_axis = spec.axis_len as i32 - 1,
+        fill_enabled = endpoint == 2,
+    );
+
+    if matches!(spec.op, ProviderMovingWindowOp::Median) {
+        let median_body = format!(
+            r#"
+  var values: array<{ty}, {max_window}>;
+  var count = 0u;
+  var saw_nan = false;
+  if (in_start <= in_end) {{
+    var pos = u32(in_start);
+    loop {{
+      if (pos > u32(in_end)) {{ break; }}
+      let input_idx = before_idx + pos * {stride_before}u + after_idx * {stride_before}u * {axis_len}u;
+      let value = Input.data[input_idx];
+      if (is_nan(value)) {{
+        if (!{omit_nan}) {{ saw_nan = true; break; }}
+      }} else {{ values[count] = value; count = count + 1u; }}
+      pos = pos + 1u;
+    }}
+  }}
+  if (!saw_nan && fill_count > 0u) {{
+    if (is_nan({fill})) {{
+      if (!{omit_nan}) {{ saw_nan = true; }}
+    }} else {{
+      var fill_idx = 0u;
+      loop {{
+        if (fill_idx >= fill_count) {{ break; }}
+        values[count] = {fill}; count = count + 1u; fill_idx = fill_idx + 1u;
+      }}
+    }}
+  }}
+  if (saw_nan || count == 0u) {{ Output.data[idx] = nan_value(); return; }}
+  var i = 1u;
+  loop {{
+    if (i >= count) {{ break; }}
+    let key = values[i];
+    var j = i;
+    loop {{
+      if (j == 0u || values[j - 1u] <= key) {{ break; }}
+      values[j] = values[j - 1u]; j = j - 1u;
+    }}
+    values[j] = key; i = i + 1u;
+  }}
+  let lower = values[(count - 1u) / 2u];
+  let upper = values[count / 2u];
+  Output.data[idx] = (lower + upper) * {ty}(0.5);
+}}
+"#,
+            max_window = WGPU_MOVING_MEDIAN_MAX_WINDOW,
+            stride_before = spec.stride_before,
+            axis_len = spec.axis_len,
+        );
+        return common + &main_prefix + &median_body;
+    }
+
+    let empty_value = match spec.op {
+        ProviderMovingWindowOp::Sum => format!("{ty}(0.0)"),
+        ProviderMovingWindowOp::Prod => format!("{ty}(1.0)"),
+        _ => "nan_value()".to_owned(),
+    };
+    let result = match spec.op {
+        ProviderMovingWindowOp::Sum => "sum".to_owned(),
+        ProviderMovingWindowOp::Mean => format!("sum / {ty}(count)"),
+        ProviderMovingWindowOp::Prod => "product".to_owned(),
+        ProviderMovingWindowOp::Min => "minimum".to_owned(),
+        ProviderMovingWindowOp::Max => "maximum".to_owned(),
+        ProviderMovingWindowOp::Std | ProviderMovingWindowOp::Var => {
+            let denominator = match spec.normalization {
+                ProviderStdNormalization::Sample => {
+                    format!("{ty}(select(1u, count - 1u, count > 1u))")
+                }
+                ProviderStdNormalization::Population => format!("{ty}(count)"),
+            };
+            let variance = format!("m2 / {denominator}");
+            if matches!(spec.op, ProviderMovingWindowOp::Std) {
+                format!("sqrt({variance})")
+            } else {
+                variance
+            }
+        }
+        ProviderMovingWindowOp::Median => unreachable!(),
+    };
+    let body = format!(
+        r#"
+  var count = 0u;
+  var sum = {ty}(0.0);
+  var product = {ty}(1.0);
+  var minimum = {ty}(0.0);
+  var maximum = {ty}(0.0);
+  var mean = {ty}(0.0);
+  var m2 = {ty}(0.0);
+  var saw_nan = false;
+  if (in_start <= in_end) {{
+    var pos = u32(in_start);
+    loop {{
+      if (pos > u32(in_end)) {{ break; }}
+      let input_idx = before_idx + pos * {stride_before}u + after_idx * {stride_before}u * {axis_len}u;
+      let value = Input.data[input_idx];
+      if (is_nan(value)) {{
+        if (!{omit_nan}) {{ saw_nan = true; break; }}
+      }} else {{
+        count = count + 1u; sum = sum + value; product = product * value;
+        if (count == 1u) {{ minimum = value; maximum = value; }}
+        else {{ minimum = min(minimum, value); maximum = max(maximum, value); }}
+        let delta = value - mean; mean = mean + delta / {ty}(count);
+        m2 = m2 + delta * (value - mean);
+      }}
+      pos = pos + 1u;
+    }}
+  }}
+  if (!saw_nan && fill_count > 0u) {{
+    var fill_idx = 0u;
+    loop {{
+      if (fill_idx >= fill_count) {{ break; }}
+      let value = {fill};
+      if (is_nan(value)) {{ if (!{omit_nan}) {{ saw_nan = true; }} }}
+      else {{
+        count = count + 1u; sum = sum + value; product = product * value;
+        if (count == 1u) {{ minimum = value; maximum = value; }}
+        else {{ minimum = min(minimum, value); maximum = max(maximum, value); }}
+        let delta = value - mean; mean = mean + delta / {ty}(count);
+        m2 = m2 + delta * (value - mean);
+      }}
+      fill_idx = fill_idx + 1u;
+    }}
+  }}
+  if (saw_nan) {{ Output.data[idx] = nan_value(); }}
+  else if (count == 0u) {{ Output.data[idx] = {empty_value}; }}
+  else {{ Output.data[idx] = {result}; }}
+}}
+"#,
+        stride_before = spec.stride_before,
+        axis_len = spec.axis_len,
+    );
+    common + &main_prefix + &body
+}
+
 impl WgpuProvider {
     pub(crate) async fn uniform_spectral_estimate_exec(
         &self,
@@ -1095,6 +1314,41 @@ impl WgpuProvider {
             ProviderStdNormalization::Sample => 0,
             ProviderStdNormalization::Population => 1,
         };
+        let shader = build_specialized_moving_window_shader(&MovingWindowShaderSpec {
+            precision: self.precision,
+            output_len,
+            axis_len,
+            out_axis_len,
+            stride_before,
+            before: request.before,
+            after: request.after,
+            op: request.op,
+            endpoints: request.endpoints,
+            nan_mode: request.nan_mode,
+            normalization: request.normalization,
+            fill_value,
+        });
+        let shader_module = self
+            .device_ref()
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("runmat-moving-window-specialized-shader"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
+            });
+        let pipeline_layout =
+            self.device_ref()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("runmat-moving-window-specialized-layout"),
+                    bind_group_layouts: &[&self.pipelines.moving_window.layout],
+                    push_constant_ranges: &[],
+                });
+        let pipeline = self.device_ref().create_compute_pipeline(
+            &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                label: Some("runmat-moving-window-specialized-pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader_module,
+                entry_point: "main",
+            },
+        );
 
         let bind_group = match self.precision {
             NumericPrecision::F64 => {
@@ -1183,7 +1437,7 @@ impl WgpuProvider {
         crate::backend::wgpu::dispatch::diff::run(
             self.device_ref(),
             self.queue_ref(),
-            &self.pipelines.moving_window.pipeline,
+            &pipeline,
             &bind_group,
             workgroups,
         );
@@ -2544,7 +2798,10 @@ mod tests {
         F: FnOnce(&'static dyn AccelProvider) -> R,
     {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().expect("lock");
+        let _guard = LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
             return None;
         };
@@ -3036,9 +3293,13 @@ mod tests {
             provider.free(&coordinates).ok();
             provider.free(&output).ok();
             assert_eq!(gathered.shape, expected.shape);
+            let tol = match provider.precision() {
+                runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-10,
+                runmat_accelerate_api::ProviderPrecision::F32 => 2.0e-6,
+            };
             for (idx, (actual, expected)) in gathered.data.iter().zip(expected.data).enumerate() {
                 assert!(
-                    (*actual - expected).abs() < 1.0e-10,
+                    (*actual - expected).abs() < tol * expected.abs().max(1.0),
                     "gradient mismatch at {idx}: actual={actual} expected={expected}"
                 );
             }

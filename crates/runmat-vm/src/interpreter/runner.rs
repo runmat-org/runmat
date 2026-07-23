@@ -1664,7 +1664,7 @@ mod tests {
     }
 
     #[test]
-    fn integer_validator_accepts_integer_valued_numeric_inputs() {
+    fn integer_validator_accepts_integer_valued_numeric_and_logical_inputs() {
         assert!(value_is_integer(&Value::Int(
             runmat_builtins::IntValue::I64(3)
         )));
@@ -1674,7 +1674,10 @@ mod tests {
         assert!(value_is_integer(&Value::Tensor(tensor)));
         let non_integer = Tensor::new(vec![1.0, 2.5], vec![1, 2]).expect("tensor");
         assert!(!value_is_integer(&Value::Tensor(non_integer)));
-        assert!(!value_is_integer(&Value::Bool(true)));
+        assert!(value_is_integer(&Value::Bool(true)));
+        assert!(value_is_integer(&Value::LogicalArray(
+            runmat_builtins::LogicalArray::new(vec![0, 1], vec![1, 2]).expect("logical array")
+        )));
     }
 
     #[test]

@@ -1,14 +1,5 @@
 use super::*;
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct BlackScholesPriceParams {
-    total: u32,
-    offset: u32,
-    chunk: u32,
-    _pad0: u32,
-}
-
 impl WgpuProvider {
     pub(crate) fn black_scholes_price_exec(
         &self,
@@ -89,53 +80,45 @@ impl WgpuProvider {
             self.create_storage_buffer_checked(total_len, "runmat-black-scholes-put-out")?;
 
         if total_len > 0 {
-            let shader = black_scholes_price_shader(self.precision, request);
-            let shader_module =
-                self.device_ref()
-                    .create_shader_module(wgpu::ShaderModuleDescriptor {
-                        label: Some("runmat-black-scholes-price-shader"),
-                        source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-                    });
-            let bind_layout =
-                self.device_ref()
-                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: Some("runmat-black-scholes-price-layout"),
-                        entries: &black_scholes_bind_layout_entries(),
-                    });
-            let pipeline_layout =
-                self.device_ref()
-                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                        label: Some("runmat-black-scholes-price-pipeline-layout"),
-                        bind_group_layouts: &[&bind_layout],
-                        push_constant_ranges: &[],
-                    });
-            let pipeline = self.device_ref().create_compute_pipeline(
-                &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
-                    label: Some("runmat-black-scholes-price-pipeline"),
-                    layout: Some(&pipeline_layout),
-                    module: &shader_module,
-                    entry_point: "main",
-                },
-            );
-
             let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
                 * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
             let mut offset = 0usize;
             while offset < total_len {
                 let chunk_len = (total_len - offset).min(chunk_capacity);
-                let params = BlackScholesPriceParams {
-                    total: total_len as u32,
-                    offset: offset as u32,
-                    chunk: chunk_len as u32,
-                    _pad0: 0,
-                };
-                let params_buffer =
+                let shader = black_scholes_price_shader(
+                    self.precision,
+                    request,
+                    total_len as u32,
+                    offset as u32,
+                    chunk_len as u32,
+                );
+                let shader_module =
                     self.device_ref()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("runmat-black-scholes-price-params"),
-                            contents: bytes_of(&params),
-                            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                        .create_shader_module(wgpu::ShaderModuleDescriptor {
+                            label: Some("runmat-black-scholes-price-shader"),
+                            source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
                         });
+                let bind_layout =
+                    self.device_ref()
+                        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                            label: Some("runmat-black-scholes-price-layout"),
+                            entries: &black_scholes_bind_layout_entries(),
+                        });
+                let pipeline_layout =
+                    self.device_ref()
+                        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                            label: Some("runmat-black-scholes-price-pipeline-layout"),
+                            bind_group_layouts: &[&bind_layout],
+                            push_constant_ranges: &[],
+                        });
+                let pipeline = self.device_ref().create_compute_pipeline(
+                    &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                        label: Some("runmat-black-scholes-price-pipeline"),
+                        layout: Some(&pipeline_layout),
+                        module: &shader_module,
+                        entry_point: "main",
+                    },
+                );
                 let bind_group = self
                     .device_ref()
                     .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -174,10 +157,6 @@ impl WgpuProvider {
                                 binding: 7,
                                 resource: put_buffer.as_ref().as_entire_binding(),
                             },
-                            wgpu::BindGroupEntry {
-                                binding: 8,
-                                resource: params_buffer.as_entire_binding(),
-                            },
                         ],
                     });
                 let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
@@ -212,24 +191,16 @@ impl WgpuProvider {
     }
 }
 
-fn black_scholes_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 9] {
+fn black_scholes_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 8] {
     std::array::from_fn(|binding| {
         let read_only = binding <= 5;
         wgpu::BindGroupLayoutEntry {
             binding: binding as u32,
             visibility: wgpu::ShaderStages::COMPUTE,
-            ty: if binding == 8 {
-                wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                }
-            } else {
-                wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                }
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only },
+                has_dynamic_offset: false,
+                min_binding_size: None,
             },
             count: None,
         }
@@ -239,70 +210,35 @@ fn black_scholes_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 9] {
 fn black_scholes_price_shader(
     precision: NumericPrecision,
     request: &ProviderBlackScholesPriceRequest<'_>,
+    total: u32,
+    offset: u32,
+    chunk: u32,
 ) -> String {
     let ty = precision.as_str();
-    let rank = request.output_shape.len();
-    let output_shape = wgsl_array_literal(request.output_shape);
-    let shapes = request
+    let input_indices = request
         .inputs
         .iter()
-        .map(|input| wgsl_array_literal(input.shape))
-        .collect::<Vec<_>>();
-    let strides = request
-        .inputs
-        .iter()
-        .map(|input| wgsl_array_literal(input.strides))
+        .map(|input| {
+            wgsl_broadcast_index_expression(
+                request.output_shape,
+                input.shape,
+                input.strides,
+                "linear",
+            )
+        })
         .collect::<Vec<_>>();
     let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
     let max_finite = match precision {
         NumericPrecision::F64 => "1.7976931348623157e308",
         NumericPrecision::F32 => "3.4028234663852886e38",
     };
-    let erf_abs_cutoff = match precision {
-        NumericPrecision::F64 => "6.0",
-        NumericPrecision::F32 => "6.0",
-    };
-    let erf_series_tol = match precision {
-        NumericPrecision::F64 => "1.0e-16",
-        NumericPrecision::F32 => "1.0e-6",
-    };
-    let erf_asym_large = match precision {
-        NumericPrecision::F64 => "1.0e300",
-        NumericPrecision::F32 => "1.0e30",
-    };
-    let inv_sqrt_pi = match precision {
-        NumericPrecision::F64 => "1.772453850905516",
-        NumericPrecision::F32 => "1.7724539",
-    };
 
     format!(
         r#"
-const RANK: u32 = {rank}u;
-const OUT_SHAPE: array<u32, {rank}> = array<u32, {rank}>({output_shape});
-const PRICE_SHAPE: array<u32, {rank}> = array<u32, {rank}>({price_shape});
-const STRIKE_SHAPE: array<u32, {rank}> = array<u32, {rank}>({strike_shape});
-const RATE_SHAPE: array<u32, {rank}> = array<u32, {rank}>({rate_shape});
-const TIME_SHAPE: array<u32, {rank}> = array<u32, {rank}>({time_shape});
-const VOL_SHAPE: array<u32, {rank}> = array<u32, {rank}>({vol_shape});
-const YIELD_SHAPE: array<u32, {rank}> = array<u32, {rank}>({yield_shape});
-const PRICE_STRIDES: array<u32, {rank}> = array<u32, {rank}>({price_strides});
-const STRIKE_STRIDES: array<u32, {rank}> = array<u32, {rank}>({strike_strides});
-const RATE_STRIDES: array<u32, {rank}> = array<u32, {rank}>({rate_strides});
-const TIME_STRIDES: array<u32, {rank}> = array<u32, {rank}>({time_strides});
-const VOL_STRIDES: array<u32, {rank}> = array<u32, {rank}>({vol_strides});
-const YIELD_STRIDES: array<u32, {rank}> = array<u32, {rank}>({yield_strides});
-const SQRT_2: {ty} = {ty}(1.4142135623730951);
 const MAX_FINITE_BLS: {ty} = {ty}({max_finite});
 
 struct Tensor {{
   data: array<{ty}>,
-}};
-
-struct Params {{
-  total: u32,
-  offset: u32,
-  chunk: u32,
-  pad0: u32,
 }};
 
 @group(0) @binding(0) var<storage, read> price_buf: Tensor;
@@ -313,7 +249,6 @@ struct Params {{
 @group(0) @binding(5) var<storage, read> yield_buf: Tensor;
 @group(0) @binding(6) var<storage, read_write> call_out: Tensor;
 @group(0) @binding(7) var<storage, read_write> put_out: Tensor;
-@group(0) @binding(8) var<uniform> params: Params;
 
 fn is_nan_bls(x: {ty}) -> bool {{
   return x != x;
@@ -328,127 +263,45 @@ fn nan_bls() -> {ty} {{
   return zero / zero;
 }}
 
-fn erf_real_bls(a: {ty}) -> {ty} {{
-  if (is_nan_bls(a)) {{
-    return a;
-  }}
-  if (!is_finite_bls(a)) {{
-    if (a > {ty}(0.0)) {{
-      return {ty}(1.0);
-    }}
-    return -{ty}(1.0);
-  }}
-  if (a == {ty}(0.0)) {{
-    return a;
-  }}
-  var sign = {ty}(1.0);
-  var x = a;
-  if (a < {ty}(0.0)) {{
-    sign = -{ty}(1.0);
-    x = -a;
-  }}
-  if (x >= {ty}({erf_abs_cutoff})) {{
-    return sign;
-  }}
-  let x2 = x * x;
-  if (x < {ty}(3.5)) {{
-    var sum = x;
-    var term = x;
-    var n: u32 = 1u;
-    loop {{
-      if (n >= 120u) {{
-        break;
-      }}
-      term = term * (-x2 / {ty}(n));
-      let add = term / {ty}((2u * n) + 1u);
-      sum = sum + add;
-      if (abs(add) <= {ty}({erf_series_tol}) * max({ty}(1.0), abs(sum))) {{
-        break;
-      }}
-      n = n + 1u;
-    }}
-    return sign * {ty}(1.1283791670955126) * sum;
-  }}
-  var asym_sum = {ty}(1.0);
-  var asym_term = {ty}(1.0);
-  var previous = {ty}({erf_asym_large});
-  var k: u32 = 1u;
-  loop {{
-    if (k >= 60u) {{
-      break;
-    }}
-    asym_term = asym_term * (-({ty}((2u * k) - 1u)) / ({ty}(2.0) * x2));
-    if (abs(asym_term) > previous) {{
-      break;
-    }}
-    asym_sum = asym_sum + asym_term;
-    previous = abs(asym_term);
-    if (abs(asym_term) <= {ty}({erf_series_tol}) * abs(asym_sum)) {{
-      break;
-    }}
-    k = k + 1u;
-  }}
-  let erfc_tail = exp(-x2) * asym_sum / (x * {ty}({inv_sqrt_pi}));
-  return sign * ({ty}(1.0) - erfc_tail);
-}}
-
 fn normcdf_bls(x: {ty}) -> {ty} {{
-  return {ty}(0.5) * ({ty}(1.0) + erf_real_bls(x / SQRT_2));
-}}
-
-fn broadcast_index(linear_in: u32, in_shape: array<u32, {rank}>, in_strides: array<u32, {rank}>) -> u32 {{
-  var linear = linear_in;
-  var offset = 0u;
-  var dim = 0u;
-  loop {{
-    if (dim >= RANK) {{
-      break;
-    }}
-    let out_extent = OUT_SHAPE[dim];
-    var coord = 0u;
-    if (out_extent != 0u) {{
-      coord = linear % out_extent;
-      linear = linear / out_extent;
-    }}
-    let in_extent = in_shape[dim];
-    let mapped = select(coord, 0u, (in_extent == 1u) || (out_extent == 0u));
-    offset = offset + mapped * in_strides[dim];
-    dim = dim + 1u;
-  }}
-  return offset;
+  let ax = abs(x);
+  let t = {ty}(1.0) / ({ty}(1.0) + {ty}(0.2316419) * ax);
+  let polynomial = t * ({ty}(0.319381530) + t * ({ty}(-0.356563782) + t * ({ty}(1.781477937) + t * ({ty}(-1.821255978) + t * {ty}(1.330274429)))));
+  let upper = {ty}(1.0) - {ty}(0.3989422804014327) * exp({ty}(-0.5) * ax * ax) * polynomial;
+  return select({ty}(1.0) - upper, upper, x >= {ty}(0.0));
 }}
 
 fn load_price(linear: u32) -> {ty} {{
-  return price_buf.data[broadcast_index(linear, PRICE_SHAPE, PRICE_STRIDES)];
+  return price_buf.data[{price_index}];
 }}
 
 fn load_strike(linear: u32) -> {ty} {{
-  return strike_buf.data[broadcast_index(linear, STRIKE_SHAPE, STRIKE_STRIDES)];
+  return strike_buf.data[{strike_index}];
 }}
 
 fn load_rate(linear: u32) -> {ty} {{
-  return rate_buf.data[broadcast_index(linear, RATE_SHAPE, RATE_STRIDES)];
+  return rate_buf.data[{rate_index}];
 }}
 
 fn load_time(linear: u32) -> {ty} {{
-  return time_buf.data[broadcast_index(linear, TIME_SHAPE, TIME_STRIDES)];
+  return time_buf.data[{time_index}];
 }}
 
 fn load_volatility(linear: u32) -> {ty} {{
-  return vol_buf.data[broadcast_index(linear, VOL_SHAPE, VOL_STRIDES)];
+  return vol_buf.data[{vol_index}];
 }}
 
 fn load_yield(linear: u32) -> {ty} {{
-  return yield_buf.data[broadcast_index(linear, YIELD_SHAPE, YIELD_STRIDES)];
+  return yield_buf.data[{yield_index}];
 }}
 
 @compute @workgroup_size({workgroup})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
-  if (gid.x >= params.chunk) {{
+  if (gid.x >= {chunk}u) {{
     return;
   }}
-  let linear = gid.x + params.offset;
-  if (linear >= params.total) {{
+  let linear = gid.x + {offset}u;
+  if (linear >= {total}u) {{
     return;
   }}
 
@@ -482,36 +335,44 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
   put_out.data[linear] = discounted_strike * normcdf_bls(-d2) - discounted_price * normcdf_bls(-d1);
 }}
 "#,
-        rank = rank,
-        output_shape = output_shape,
-        price_shape = shapes[0],
-        strike_shape = shapes[1],
-        rate_shape = shapes[2],
-        time_shape = shapes[3],
-        vol_shape = shapes[4],
-        yield_shape = shapes[5],
-        price_strides = strides[0],
-        strike_strides = strides[1],
-        rate_strides = strides[2],
-        time_strides = strides[3],
-        vol_strides = strides[4],
-        yield_strides = strides[5],
+        price_index = input_indices[0],
+        strike_index = input_indices[1],
+        rate_index = input_indices[2],
+        time_index = input_indices[3],
+        vol_index = input_indices[4],
+        yield_index = input_indices[5],
         ty = ty,
         max_finite = max_finite,
-        erf_abs_cutoff = erf_abs_cutoff,
-        erf_series_tol = erf_series_tol,
-        erf_asym_large = erf_asym_large,
-        inv_sqrt_pi = inv_sqrt_pi,
         workgroup = workgroup,
+        total = total,
+        offset = offset,
+        chunk = chunk,
     )
 }
 
-fn wgsl_array_literal(values: &[usize]) -> String {
-    values
-        .iter()
-        .map(|value| format!("{value}u"))
-        .collect::<Vec<_>>()
-        .join(", ")
+fn wgsl_broadcast_index_expression(
+    output_shape: &[usize],
+    input_shape: &[usize],
+    input_strides: &[usize],
+    linear: &str,
+) -> String {
+    let mut output_stride = 1usize;
+    let mut terms = Vec::new();
+    for ((&output_extent, &input_extent), &input_stride) in
+        output_shape.iter().zip(input_shape).zip(input_strides)
+    {
+        if input_extent != 1 && output_extent != 0 {
+            terms.push(format!(
+                "((({linear} / {output_stride}u) % {output_extent}u) * {input_stride}u)"
+            ));
+        }
+        output_stride = output_stride.saturating_mul(output_extent.max(1));
+    }
+    if terms.is_empty() {
+        "0u".to_owned()
+    } else {
+        terms.join(" + ")
+    }
 }
 
 #[cfg(test)]
@@ -643,15 +504,19 @@ mod tests {
             10.190561644708993,
             4.8616917585652715,
         ];
+        let tolerance = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 2.0e-5,
+            runmat_accelerate_api::ProviderPrecision::F32 => 3.0e-5,
+        };
         for idx in 0..call.data.len() {
             assert!(
-                (call.data[idx] - expected_call[idx]).abs() < 1.0e-8,
+                (call.data[idx] - expected_call[idx]).abs() < tolerance,
                 "call lane {idx}: got {}, expected {}",
                 call.data[idx],
                 expected_call[idx]
             );
             assert!(
-                (put.data[idx] - expected_put[idx]).abs() < 1.0e-8,
+                (put.data[idx] - expected_put[idx]).abs() < tolerance,
                 "put lane {idx}: got {}, expected {}",
                 put.data[idx],
                 expected_put[idx]

@@ -2184,11 +2184,14 @@ fn apply_round(a: {ty}) -> {ty} {{
     if params.digits == 0 {{
         return round_half_away(a);
     }}
-    let factor = pow({ty}(10.0), {ty}(params.digits));
-    if !is_finite_value(factor) || factor == {ty}(0.0) {{
+    let scale = pow({ty}(10.0), {ty}(abs(params.digits)));
+    if !is_finite_value(scale) || scale == {ty}(0.0) {{
         return a;
     }}
-    return round_half_away(a * factor) / factor;
+    if params.digits > 0 {{
+        return round_half_away(a * scale) / scale;
+    }}
+    return round_half_away(a / scale) * scale;
 }}
 "#
         )

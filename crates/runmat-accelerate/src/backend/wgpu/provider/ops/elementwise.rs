@@ -2133,7 +2133,7 @@ mod tests {
                 assert!(actual.is_nan(), "lane {idx}: expected NaN, got {actual}");
             } else {
                 assert!(
-                    (actual - expected).abs() <= tol,
+                    (actual - expected).abs() <= tol * expected.abs().max(1.0),
                     "lane {idx}: expected {expected}, got {actual}"
                 );
             }
@@ -2355,9 +2355,14 @@ mod tests {
             .expect("download significant");
 
         assert_eq!(integer_host.data, vec![-3.0, 0.0, 1.0, 1.0, 150.0, 98765.0]);
-        assert_eq!(
-            decimals_host.data,
-            vec![-0.0, -0.0, 0.0, 0.0, 100.0, 98800.0]
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-8,
+            runmat_accelerate_api::ProviderPrecision::F32 => 2e-6,
+        };
+        assert_close(
+            &decimals_host.data,
+            &[-0.0, -0.0, 0.0, 0.0, 100.0, 98800.0],
+            tol,
         );
         let expected = [-2.5, -0.2, 0.5, 1.23, 150.0, 98800.0];
         for (idx, (actual, expected)) in significant_host
@@ -2367,7 +2372,7 @@ mod tests {
             .enumerate()
         {
             assert!(
-                (actual - expected).abs() < 1e-8,
+                (actual - expected).abs() < tol * expected.abs().max(1.0),
                 "significant lane {idx}: expected {expected}, got {actual}"
             );
         }

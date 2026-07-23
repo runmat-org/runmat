@@ -1190,7 +1190,7 @@ mod tests {
         assert_eq!(placed_host.shape, vec![5, 3]);
         assert_eq!(
             placed_host.data,
-            vec![0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0, 0.0]
+            vec![0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0]
         );
 
         let extracted = provider.diag_extract(&placed, -1).expect("diag extract");

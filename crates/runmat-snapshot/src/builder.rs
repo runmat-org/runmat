@@ -595,18 +595,9 @@ impl SnapshotBuilder {
     /// Get standard library function sources
     fn get_stdlib_function_sources(&self) -> Vec<(String, String)> {
         vec![
-            (
-                "zeros".to_string(),
-                "function z = zeros(m, n); z = zeros(m, n); end".to_string(),
-            ),
-            (
-                "ones".to_string(),
-                "function o = ones(m, n); o = ones(m, n); end".to_string(),
-            ),
-            (
-                "eye".to_string(),
-                "function i = eye(n); i = eye(n); end".to_string(),
-            ),
+            // Registered builtins such as zeros, ones, and eye are already stored
+            // in the builtin registry. Defining source functions with those names
+            // would shadow the builtins and recursively call themselves.
             (
                 "sum_vec".to_string(),
                 "function s = sum_vec(v); s = 0; for i = 1:length(v); s = s + v(i); end; end"
@@ -614,7 +605,8 @@ impl SnapshotBuilder {
             ),
             (
                 "mean_vec".to_string(),
-                "function m = mean_vec(v); m = sum_vec(v) / length(v); end".to_string(),
+                "function m = mean_vec(v); total = 0; for i = 1:length(v); total = total + v(i); end; m = total / length(v); end"
+                    .to_string(),
             ),
         ]
     }
@@ -758,17 +750,45 @@ impl SnapshotBuilder {
         &self,
         assembly: &runmat_hir::HirAssembly,
     ) -> Result<runmat_vm::Bytecode> {
-        let entrypoint = assembly
+        // Function files intentionally lower without a script entrypoint. A cached
+        // standard-library function is nevertheless an executable host target, so
+        // represent that boundary explicitly instead of treating the valid
+        // function-file assembly as malformed.
+        let mut executable_assembly = assembly.clone();
+        if executable_assembly.entrypoints.is_empty() {
+            let function = executable_assembly
+                .functions
+                .iter()
+                .find(|function| function.parent.is_none())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "semantic HIR assembly has neither an entrypoint nor a top-level function"
+                    )
+                })?;
+            executable_assembly
+                .entrypoints
+                .push(runmat_hir::HirEntrypoint {
+                    id: runmat_hir::EntrypointId(0),
+                    name: Some(runmat_hir::EntrypointName("snapshot-cache".to_string())),
+                    target: function.id,
+                    origin: runmat_hir::EntrypointOrigin::HostSynthetic,
+                    policy: runmat_hir::EntrypointPolicy {
+                        workspace_export: runmat_hir::WorkspaceExportPolicy::ReturnFunctionOutputs,
+                        top_level_await: false,
+                    },
+                });
+        }
+        let entrypoint = executable_assembly
             .entrypoints
             .first()
-            .ok_or_else(|| anyhow::anyhow!("semantic HIR assembly has no entrypoint"))?;
-        let mir = runmat_mir::lowering::lower_assembly(assembly).map_err(|err| {
+            .expect("entrypoint is present or synthesized above");
+        let mir = runmat_mir::lowering::lower_assembly(&executable_assembly).map_err(|err| {
             anyhow::anyhow!(format!(
                 "failed to lower semantic HIR assembly to MIR: {err:?}"
             ))
         })?;
         let _analysis = runmat_mir::analysis::analyze_assembly(&mir);
-        runmat_vm::compile(assembly, &mir, entrypoint.id).map_err(Into::into)
+        runmat_vm::compile(&executable_assembly, &mir, entrypoint.id).map_err(Into::into)
     }
 
     /// Identify hotspot bytecode for JIT optimization
@@ -1282,6 +1302,34 @@ mod tests {
         let stats = builder.stats();
         assert!(stats.start_time.is_none());
         assert!(stats.errors.is_empty());
+    }
+
+    #[test]
+    fn function_file_hir_compiles_through_a_host_entrypoint() {
+        let builder = SnapshotBuilder::new(SnapshotConfig::default());
+        let assembly = builder
+            .compile_to_hir("function y = double_value(x); y = x * 2; end")
+            .expect("function source should lower to HIR");
+
+        assert!(assembly.entrypoints.is_empty());
+        assert_eq!(assembly.functions.len(), 1);
+        builder
+            .compile_assembly_to_bytecode(&assembly)
+            .expect("function-only HIR should compile for the snapshot cache");
+    }
+
+    #[test]
+    fn stdlib_source_cache_does_not_shadow_registered_builtins() {
+        let builder = SnapshotBuilder::new(SnapshotConfig::default());
+        let sources = builder.get_stdlib_function_sources();
+        let names: Vec<_> = sources.iter().map(|(name, _)| name.as_str()).collect();
+
+        assert_eq!(names, vec!["sum_vec", "mean_vec"]);
+        for (name, source) in sources {
+            builder
+                .compile_source_to_bytecode(&source)
+                .unwrap_or_else(|error| panic!("{name} should compile to bytecode: {error}"));
+        }
     }
 
     #[test]

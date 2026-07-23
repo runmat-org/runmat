@@ -458,7 +458,12 @@ pub struct FilterParams {
     pub state_shape: [AlignedU32; FILTER_MAX_RANK],
 }
 
-pub const IMFILTER_MAX_RANK: usize = 512;
+/// Maximum tensor rank represented directly by the WGPU `imfilter` kernel.
+///
+/// This matches the rank contract used by the other general tensor-indexing kernels. Higher-rank
+/// inputs remain supported by `imfilter_exec`, which detects them before allocating GPU parameter
+/// state and executes the host implementation before uploading the result.
+pub const IMFILTER_MAX_RANK: usize = PERMUTE_MAX_RANK;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
