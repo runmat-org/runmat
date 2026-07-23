@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, LogicalArray, NumericDType, Tensor, Value,
+    IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -440,6 +440,9 @@ impl GrayscaleInput {
                 "expected an MxN grayscale image; truecolor RGB images are not accepted",
             ));
         }
+        if let Some((class_min, class_max)) = exact_integer_image_range(tensor.integer_storage()) {
+            return Self::from_integer_values(tensor.data, class_min, class_max);
+        }
         match tensor.dtype {
             NumericDType::U8 => Self::from_integer_values(tensor.data, 0.0, 255.0),
             NumericDType::U16 => Self::from_integer_values(tensor.data, 0.0, 65535.0),
@@ -538,7 +541,8 @@ impl IndexedInput {
                 if !is_grayscale_shape(&tensor.shape) {
                     return Err(unsupported("indexed image must be an MxN matrix"));
                 }
-                let zero_based = matches!(tensor.dtype, NumericDType::U8 | NumericDType::U16);
+                let zero_based = exact_integer_image_range(tensor.integer_storage()).is_some()
+                    || matches!(tensor.dtype, NumericDType::U8 | NumericDType::U16);
                 Ok(Self {
                     values: tensor.data,
                     zero_based,
@@ -613,6 +617,14 @@ impl IndexedInput {
         }
         let locations: Vec<f64> = (1..=self.bins).map(|value| value as f64).collect();
         ImhistEvaluation::from_counts_locations(counts, locations)
+    }
+}
+
+fn exact_integer_image_range(storage: Option<&IntegerStorage>) -> Option<(f64, f64)> {
+    match storage {
+        Some(IntegerStorage::U8(_)) => Some((0.0, 255.0)),
+        Some(IntegerStorage::U16(_)) => Some((0.0, 65535.0)),
+        _ => None,
     }
 }
 
@@ -835,6 +847,29 @@ mod tests {
     }
 
     #[test]
+    fn exact_integer_grayscale_images_use_their_storage_class_range() {
+        let u8 = Tensor::new_integer(IntegerStorage::U8(vec![0, 1, 1, u8::MAX]), vec![2, 2])
+            .expect("uint8 tensor");
+        let u16 = Tensor::new_integer(
+            IntegerStorage::U16(vec![0, 1, u16::MAX, u16::MAX]),
+            vec![2, 2],
+        )
+        .expect("uint16 tensor");
+
+        let u8_image = GrayscaleInput::from_tensor(u8).expect("uint8 image");
+        assert_eq!(u8_image.class_max, 255.0);
+        assert_eq!(u8_image.default_bins, 256);
+        let u8_eval = u8_image.evaluate(None).expect("uint8 histogram");
+        assert_eq!(u8_eval.counts.data[0], 1.0);
+        assert_eq!(u8_eval.counts.data[1], 2.0);
+        assert_eq!(u8_eval.counts.data[255], 1.0);
+
+        let u16_image = GrayscaleInput::from_tensor(u16).expect("uint16 image");
+        assert_eq!(u16_image.class_max, 65535.0);
+        assert_eq!(u16_image.default_bins, 256);
+    }
+
+    #[test]
     fn two_outputs_return_counts_and_bin_locations_as_columns() {
         let image = tensor(vec![0.0, 0.5, 1.0, 1.0], vec![2, 2], NumericDType::F64);
         let Value::OutputList(outputs) = call(Value::Tensor(image), vec![Value::Num(3.0)], Some(2))
@@ -887,6 +922,16 @@ mod tests {
             panic!("expected counts");
         };
         assert_eq!(counts.data, vec![1.0, 2.0, 1.0]);
+    }
+
+    #[test]
+    fn exact_integer_indexed_images_use_zero_based_indices() {
+        let image = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 1, 2]), vec![2, 2])
+            .expect("uint16 tensor");
+        let indexed = IndexedInput::from_value(Value::Tensor(image), 3).expect("indexed input");
+
+        assert!(indexed.zero_based);
+        assert_eq!(indexed.values, vec![0.0, 1.0, 1.0, 2.0]);
     }
 
     #[test]
