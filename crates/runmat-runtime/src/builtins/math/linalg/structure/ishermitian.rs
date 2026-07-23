@@ -193,6 +193,7 @@ fn ishermitian_error_with_detail(
 )]
 async fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (mode, tol) = parse_optional_args(&rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "ishermitian")?;
     match value {
         Value::GpuTensor(handle) => ishermitian_gpu(handle, mode, tol).await,
         other => {
@@ -610,7 +611,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{
+        IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext, Type,
+    };
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -855,6 +858,22 @@ pub(crate) mod tests {
             .expect_err("ishermitian should reject strings");
         let message = err.to_string();
         assert!(message.contains("unsupported input type"));
+    }
+
+    #[test]
+    fn ishermitian_rejects_typed_complex_integer_inputs() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I64(vec![i64::MAX]),
+                IntegerStorage::I64(vec![-1]),
+            )
+            .expect("storage"),
+            vec![1, 1],
+        )
+        .expect("tensor");
+        let err = ishermitian_builtin(Value::ComplexTensor(tensor), Vec::new())
+            .expect_err("typed complex integer input must reject");
+        assert!(err.message().contains("complex numbers with integer types"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

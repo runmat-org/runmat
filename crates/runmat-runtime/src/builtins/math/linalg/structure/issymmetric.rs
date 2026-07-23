@@ -193,6 +193,7 @@ fn issymmetric_error_with_detail(
 )]
 async fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (mode, tol) = parse_optional_args(&rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "issymmetric")?;
     match value {
         Value::GpuTensor(handle) => issymmetric_gpu(handle, mode, tol).await,
         other => {
@@ -617,7 +618,9 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{
+        IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext, Type,
+    };
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -813,6 +816,22 @@ pub(crate) mod tests {
         let result = issymmetric_builtin(Value::Int(IntValue::I32(0)), vec![Value::from("skew")])
             .expect("issymmetric skew scalar");
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn issymmetric_rejects_typed_complex_integer_inputs() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1]),
+            )
+            .expect("storage"),
+            vec![1, 1],
+        )
+        .expect("tensor");
+        let err = issymmetric_builtin(Value::ComplexTensor(tensor), Vec::new())
+            .expect_err("typed complex integer input must reject");
+        assert!(err.message().contains("complex numbers with integer types"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
