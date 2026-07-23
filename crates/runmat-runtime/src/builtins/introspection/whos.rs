@@ -9,7 +9,7 @@ use runmat_accelerate_api::{handle_is_logical, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Value,
+    IntegerStorage, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -573,7 +573,17 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
             .map(|s| s.encode_utf16().count().saturating_mul(2))
             .sum(),
         Value::Symbolic(expr) => expr.to_string().encode_utf16().count().saturating_mul(2),
-        Value::Tensor(t) => t.data.len().saturating_mul(8),
+        // `whos` reports the MATLAB array payload size, not the size of
+        // RunMat's compatibility mirror. Integer arrays retain an f64 mirror
+        // internally, but their visible class determines their byte count.
+        Value::Tensor(t) => t.integer_storage().map_or_else(
+            || t.data.len().saturating_mul(t.dtype.byte_size()),
+            |storage| {
+                t.data
+                    .len()
+                    .saturating_mul(integer_storage_element_bytes(storage))
+            },
+        ),
         Value::SparseTensor(t) => t
             .values
             .len()
@@ -589,7 +599,14 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
                     .saturating_mul(std::mem::size_of::<usize>()),
             ),
         Value::Complex(_, _) => 16,
-        Value::ComplexTensor(t) => t.data.len().saturating_mul(16),
+        Value::ComplexTensor(t) => t.integer_data.as_ref().map_or_else(
+            || t.data.len().saturating_mul(16),
+            |storage| {
+                t.data
+                    .len()
+                    .saturating_mul(integer_storage_element_bytes(&storage.real).saturating_mul(2))
+            },
+        ),
         Value::Cell(ca) => {
             let mut total = 0usize;
             for handle in &ca.data {
@@ -703,6 +720,15 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
     Ok(bytes)
 }
 
+fn integer_storage_element_bytes(storage: &IntegerStorage) -> usize {
+    match storage {
+        IntegerStorage::I8(_) | IntegerStorage::U8(_) => 1,
+        IntegerStorage::I16(_) | IntegerStorage::U16(_) => 2,
+        IntegerStorage::I32(_) | IntegerStorage::U32(_) => 4,
+        IntegerStorage::I64(_) | IntegerStorage::U64(_) => 8,
+    }
+}
+
 fn gpu_element_size_bytes() -> usize {
     runmat_accelerate_api::provider()
         .map(|provider| match provider.precision() {
@@ -718,7 +744,10 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::call_builtin_async;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, CharArray, NumericDType, StructValue as TestStruct, Tensor};
+    use runmat_builtins::{
+        CellArray, CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
+        StructValue as TestStruct, Tensor,
+    };
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::{HashMap, HashSet};
@@ -1185,8 +1214,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn whos_reports_f64_width_for_integer_typed_tensors() {
-        // Tensor.data is always Vec<f64> (8 bytes/element) regardless of dtype.
+    fn whos_reports_matlab_payload_width_for_typed_numeric_tensors() {
         let _guard = workspace_guard();
         ensure_test_resolver();
         let u8_tensor =
@@ -1194,10 +1222,22 @@ pub(crate) mod tests {
         let u16_tensor =
             Tensor::new_with_dtype(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], NumericDType::U16)
                 .unwrap();
+        let i64_tensor = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, -1, 0, i64::MAX]),
+            vec![2, 2],
+        )
+        .unwrap();
+        let u64_tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 1, 9_007_199_254_740_993, u64::MAX]),
+            vec![2, 2],
+        )
+        .unwrap();
         set_workspace(
             &[
                 ("u8mat", Value::Tensor(u8_tensor)),
                 ("u16mat", Value::Tensor(u16_tensor)),
+                ("i64mat", Value::Tensor(i64_tensor)),
+                ("u64mat", Value::Tensor(u64_tensor)),
             ],
             &[],
         );
@@ -1209,12 +1249,62 @@ pub(crate) mod tests {
             .iter()
             .find(|st| field_string(st, "name").as_deref() == Some("u8mat"))
             .expect("u8mat");
-        assert_eq!(field_bytes(u8_entry).unwrap(), 32.0);
+        assert_eq!(field_bytes(u8_entry).unwrap(), 4.0);
 
         let u16_entry = entries
             .iter()
             .find(|st| field_string(st, "name").as_deref() == Some("u16mat"))
             .expect("u16mat");
-        assert_eq!(field_bytes(u16_entry).unwrap(), 32.0);
+        assert_eq!(field_bytes(u16_entry).unwrap(), 8.0);
+
+        let i64_entry = entries
+            .iter()
+            .find(|st| field_string(st, "name").as_deref() == Some("i64mat"))
+            .expect("i64mat");
+        assert_eq!(field_bytes(i64_entry).unwrap(), 32.0);
+
+        let u64_entry = entries
+            .iter()
+            .find(|st| field_string(st, "name").as_deref() == Some("u64mat"))
+            .expect("u64mat");
+        assert_eq!(field_bytes(u64_entry).unwrap(), 32.0);
+    }
+
+    #[test]
+    fn whos_memory_bytes_use_native_width_for_all_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![1, 2]),
+            IntegerStorage::I16(vec![1, 2]),
+            IntegerStorage::I32(vec![1, 2]),
+            IntegerStorage::I64(vec![1, 2]),
+            IntegerStorage::U8(vec![1, 2]),
+            IntegerStorage::U16(vec![1, 2]),
+            IntegerStorage::U32(vec![1, 2]),
+            IntegerStorage::U64(vec![1, 2]),
+        ];
+        let expected = [2, 4, 8, 16, 2, 4, 8, 16];
+
+        for (storage, expected) in storages.into_iter().zip(expected) {
+            let tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+            assert_eq!(
+                value_memory_bytes(&Value::Tensor(tensor), &mut HashSet::new()).expect("bytes"),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn whos_memory_bytes_preserve_typed_complex_integer_component_width() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U16(vec![1, 2]),
+            IntegerStorage::U16(vec![3, 4]),
+        )
+        .expect("typed complex storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex tensor");
+
+        assert_eq!(
+            value_memory_bytes(&Value::ComplexTensor(tensor), &mut HashSet::new()).expect("bytes"),
+            8
+        );
     }
 }
