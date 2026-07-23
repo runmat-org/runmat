@@ -248,6 +248,7 @@ fn error_with_detail(
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerComplexStorage;
 
     fn call(value: Value) -> BuiltinResult<Value> {
         block_on(uint32_builtin(value, Vec::new()))
@@ -292,8 +293,20 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn uint32_rejects_complex_input() {
-        let err = call(Value::Complex(1.0, 0.0)).expect_err("complex should fail");
-        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+    fn uint32_preserves_complex_integer_input() {
+        let result = call(Value::Complex(1.0, 0.0)).expect("complex integer conversion");
+        let Value::ComplexTensor(tensor) = result else {
+            panic!("expected typed complex integer result");
+        };
+        assert_eq!(
+            tensor.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U32(vec![1]),
+                    IntegerStorage::U32(vec![0]),
+                )
+                .expect("matching components")
+            )
+        );
     }
 }

@@ -329,11 +329,11 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn conj_int_promotes_to_double() {
+    fn conj_int_preserves_integer_class() {
         let result = conj_builtin(Value::Int(IntValue::I32(7))).expect("conj");
         match result {
-            Value::Num(n) => assert!((n - 7.0).abs() < 1e-12),
-            other => panic!("expected scalar result, got {other:?}"),
+            Value::Int(IntValue::I32(n)) => assert_eq!(n, 7),
+            other => panic!("expected int32 scalar result, got {other:?}"),
         }
     }
 

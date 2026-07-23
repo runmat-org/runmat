@@ -1255,13 +1255,13 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn ldivide_int_inputs_promote_to_double() {
+    fn ldivide_int_inputs_preserve_integer_class() {
         let lhs = Value::Int(IntValue::I32(6));
         let rhs = Value::Int(IntValue::I32(4));
         let result = ldivide_builtin(lhs, rhs, Vec::new()).expect("ldivide");
         match result {
-            Value::Num(v) => assert!((v - (4.0 / 6.0)).abs() < EPS),
-            other => panic!("expected numeric scalar, got {other:?}"),
+            Value::Int(IntValue::I32(v)) => assert_eq!(v, 1),
+            other => panic!("expected int32 scalar, got {other:?}"),
         }
     }
 }

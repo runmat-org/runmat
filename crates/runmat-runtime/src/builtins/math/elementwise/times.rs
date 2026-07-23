@@ -1257,13 +1257,13 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn times_int_inputs_promote_to_double() {
+    fn times_int_inputs_preserve_integer_class() {
         let lhs = Value::Int(IntValue::I32(3));
         let rhs = Value::Int(IntValue::I32(5));
         let result = times_builtin(lhs, rhs, Vec::new()).expect("times");
         match result {
-            Value::Num(v) => assert_eq!(v, 15.0),
-            other => panic!("expected numeric scalar, got {other:?}"),
+            Value::Int(IntValue::I32(v)) => assert_eq!(v, 15),
+            other => panic!("expected int32 scalar, got {other:?}"),
         }
     }
 }

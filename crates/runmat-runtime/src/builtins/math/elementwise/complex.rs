@@ -588,7 +588,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor, Type, Value,
+        CharArray, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
+        Tensor, Type, Value,
     };
 
     fn complex_call(real: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -876,18 +877,27 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn complex_promotes_integer_inputs() {
+    fn complex_preserves_integer_inputs() {
         let result = complex_call(
             Value::Int(IntValue::I32(3)),
             vec![Value::Int(IntValue::I32(-4))],
         )
         .expect("complex");
         match result {
-            Value::Complex(re, im) => {
-                assert_eq!(re, 3.0);
-                assert_eq!(im, -4.0);
+            Value::ComplexTensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 1]);
+                assert_eq!(
+                    tensor.integer_data,
+                    Some(
+                        IntegerComplexStorage::new(
+                            IntegerStorage::I32(vec![3]),
+                            IntegerStorage::I32(vec![-4]),
+                        )
+                        .expect("matching components")
+                    )
+                );
             }
-            other => panic!("expected Complex result, got {other:?}"),
+            other => panic!("expected typed complex integer result, got {other:?}"),
         }
     }
 

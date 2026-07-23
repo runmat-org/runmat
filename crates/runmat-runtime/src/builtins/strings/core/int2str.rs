@@ -492,7 +492,7 @@ pub(crate) mod tests {
         let matrix = int2str_builtin(Value::Tensor(tensor), Vec::new()).expect("uint64 array");
         assert_eq!(
             char_rows(matrix),
-            vec![format!("{} {}", u64::MAX, 1_u64 << 63)]
+            vec![format!("{}  {}", u64::MAX, 1_u64 << 63)]
         );
     }
 

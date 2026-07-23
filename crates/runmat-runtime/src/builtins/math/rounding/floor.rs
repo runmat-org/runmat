@@ -685,8 +685,8 @@ pub(crate) mod tests {
     fn floor_int_value_passthrough() {
         let result = floor_builtin(Value::Int(IntValue::I32(-4)), Vec::new()).expect("floor");
         match result {
-            Value::Num(v) => assert_eq!(v, -4.0),
-            other => panic!("expected scalar result, got {other:?}"),
+            Value::Int(IntValue::I32(v)) => assert_eq!(v, -4),
+            other => panic!("expected int32 scalar result, got {other:?}"),
         }
     }
 
