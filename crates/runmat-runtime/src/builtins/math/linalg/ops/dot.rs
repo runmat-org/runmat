@@ -228,6 +228,8 @@ async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<
     if rest.len() > 1 {
         return Err(dot_invalid_argument("dot: too many input arguments"));
     }
+    crate::builtins::common::validation::reject_typed_complex_integer(&lhs, DOT_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&rhs, DOT_NAME)?;
     let dim = match rest.first() {
         Some(value) => Some(parse_dimension_arg(value).await?),
         None => None,
