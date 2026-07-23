@@ -376,6 +376,10 @@ fn typed_complex_integer_signal_operations_are_rejected_before_f64_coercion() {
         ("periodogram signal", "periodogram(z(1, :))"),
         ("spectrogram signal", "spectrogram(z(1, :))"),
         ("sinc", "sinc(z(1, :))"),
+        ("fir1 cutoff", "fir1(4, z(1, 1))"),
+        ("buttord passband edge", "buttord(z(1, 1), 0.5, 3, 40)"),
+        ("zplane coefficients", "zplane(z(1, :), [1])"),
+        ("zplane SOS", "zplane(z)"),
     ];
 
     for (name, operation) in operations {

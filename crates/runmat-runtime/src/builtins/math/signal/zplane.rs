@@ -179,6 +179,9 @@ pub async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
     let (axes_target, args) =
         split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_invalid_argument)?;
+    for value in &args {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    }
     let data = parse_zero_pole_data(args).await?;
     render_zero_pole_plot(data)
 }

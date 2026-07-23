@@ -59,6 +59,7 @@ pub(crate) async fn value_to_complex_vector(
     label: &str,
     value: Value,
 ) -> BuiltinResult<ComplexVectorInput> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, builtin)?;
     match value {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
