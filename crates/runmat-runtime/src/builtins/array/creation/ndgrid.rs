@@ -6,8 +6,8 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray, NumericDType, ResolveContext,
-    Tensor, Type, Value,
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
+    ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -250,7 +250,7 @@ fn try_provider_outputs(
 
     let mut axes = Vec::with_capacity(parsed.output_count);
     for axis in parsed.axes.iter().take(parsed.output_count) {
-        if axis.class == OutputClass::Complex {
+        if matches!(axis.class, OutputClass::Complex | OutputClass::Integer) {
             return Ok(None);
         }
         let Some(handle) = axis.gpu_real.as_ref() else {
@@ -307,6 +307,7 @@ fn annotate_provider_output(handle: &GpuTensorHandle, class: OutputClass) {
             );
         }
         OutputClass::Complex => {}
+        OutputClass::Integer => {}
     }
 }
 
@@ -367,6 +368,7 @@ impl ParsedNdgrid {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputClass {
     Real(NumericDType),
+    Integer,
     Logical,
     Complex,
 }
@@ -382,6 +384,7 @@ struct AxisData {
     values: Vec<(f64, f64)>,
     len: usize,
     class: OutputClass,
+    integer_storage: Option<IntegerStorage>,
     integer_data: Option<IntegerComplexStorage>,
     gpu_real: Option<GpuTensorHandle>,
 }
@@ -396,12 +399,13 @@ async fn axis_from_value(
         Value::Tensor(tensor) => axis_from_tensor(tensor, index),
         Value::LogicalArray(logical) => axis_from_logical(logical, index),
         Value::Num(value) => Ok(real_scalar_axis(value, NumericDType::F64)),
-        Value::Int(value) => Ok(real_scalar_axis(value.to_f64(), NumericDType::F64)),
+        Value::Int(value) => Ok(integer_scalar_axis(value)),
         Value::Bool(value) => Ok(logical_scalar_axis(value)),
         Value::Complex(re, im) => Ok(AxisData {
             values: vec![(re, im)],
             len: 1,
             class: OutputClass::Complex,
+            integer_storage: None,
             integer_data: None,
             gpu_real: None,
         }),
@@ -426,6 +430,7 @@ async fn axis_from_value(
                     values: Vec::new(),
                     len: vector_len_from_shape(&handle.shape),
                     class,
+                    integer_storage: None,
                     integer_data: None,
                     gpu_real: Some(handle),
                 });
@@ -442,6 +447,7 @@ async fn axis_from_value(
                     values: vec![(re, im)],
                     len: 1,
                     class: OutputClass::Complex,
+                    integer_storage: None,
                     integer_data: None,
                     gpu_real: None,
                 }),
@@ -470,6 +476,19 @@ fn real_scalar_axis(value: f64, dtype: NumericDType) -> AxisData {
         values: vec![(value, 0.0)],
         len: 1,
         class: OutputClass::Real(dtype),
+        integer_storage: None,
+        integer_data: None,
+        gpu_real: None,
+    }
+}
+
+fn integer_scalar_axis(value: IntValue) -> AxisData {
+    let storage = IntegerStorage::from_scalar(value.clone());
+    AxisData {
+        values: vec![(value.to_f64(), 0.0)],
+        len: 1,
+        class: OutputClass::Integer,
+        integer_storage: Some(storage),
         integer_data: None,
         gpu_real: None,
     }
@@ -480,6 +499,7 @@ fn logical_scalar_axis(value: bool) -> AxisData {
         values: vec![(if value { 1.0 } else { 0.0 }, 0.0)],
         len: 1,
         class: OutputClass::Logical,
+        integer_storage: None,
         integer_data: None,
         gpu_real: None,
     }
@@ -496,6 +516,7 @@ fn axis_from_tensor(tensor: Tensor, index: usize) -> BuiltinResult<AxisData> {
             ),
         ));
     }
+    let integer_storage = tensor.integer_storage().cloned();
     let values = tensor
         .data
         .into_iter()
@@ -504,7 +525,10 @@ fn axis_from_tensor(tensor: Tensor, index: usize) -> BuiltinResult<AxisData> {
     Ok(AxisData {
         len: values.len(),
         values,
-        class: OutputClass::Real(tensor.dtype),
+        class: integer_storage
+            .as_ref()
+            .map_or(OutputClass::Real(tensor.dtype), |_| OutputClass::Integer),
+        integer_storage,
         integer_data: None,
         gpu_real: None,
     })
@@ -530,6 +554,7 @@ fn axis_from_logical(logical: LogicalArray, index: usize) -> BuiltinResult<AxisD
         len: values.len(),
         values,
         class: OutputClass::Logical,
+        integer_storage: None,
         integer_data: None,
         gpu_real: None,
     })
@@ -553,6 +578,7 @@ fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> BuiltinResul
         len: data.len(),
         values: data,
         class: OutputClass::Complex,
+        integer_storage: None,
         integer_data,
         gpu_real: None,
     })
@@ -589,6 +615,7 @@ async fn axis_to_host_async(axis: &AxisData) -> BuiltinResult<AxisData> {
             values: vec![(re, im)],
             len: 1,
             class: OutputClass::Complex,
+            integer_storage: None,
             integer_data: None,
             gpu_real: None,
         }),
@@ -637,6 +664,11 @@ fn build_host_outputs(
             shape: output_shape.to_vec(),
             data,
             class: axis.class,
+            integer_storage: axis.integer_storage.clone(),
+            integer_storage_values: axis
+                .integer_storage
+                .as_ref()
+                .map(|_| Vec::with_capacity(total)),
             integer_data: axis.integer_data.clone(),
             integer_values: axis
                 .integer_data
@@ -662,6 +694,15 @@ fn build_host_outputs(
                 imag.push(
                     storage
                         .imag
+                        .value_at(coord)
+                        .expect("axis coordinate is in bounds"),
+                );
+            } else if let (Some(storage), Some(values)) = (
+                axes[dim].integer_storage.as_ref(),
+                output.integer_storage_values.as_mut(),
+            ) {
+                values.push(
+                    storage
                         .value_at(coord)
                         .expect("axis coordinate is in bounds"),
                 );
@@ -703,6 +744,8 @@ struct GridOutput {
     shape: Vec<usize>,
     data: Vec<(f64, f64)>,
     class: OutputClass,
+    integer_storage: Option<IntegerStorage>,
+    integer_storage_values: Option<Vec<IntValue>>,
     integer_data: Option<IntegerComplexStorage>,
     integer_values: Option<(Vec<IntValue>, Vec<IntValue>)>,
 }
@@ -711,8 +754,34 @@ impl GridOutput {
     fn to_value(&self, residency: OutputResidency) -> BuiltinResult<Value> {
         match self.class {
             OutputClass::Real(dtype) => self.to_real_value(dtype, residency),
+            OutputClass::Integer => self.to_integer_value(residency),
             OutputClass::Logical => self.to_logical_value(residency),
             OutputClass::Complex => self.to_complex_value(residency),
+        }
+    }
+
+    fn to_integer_value(&self, residency: OutputResidency) -> BuiltinResult<Value> {
+        let (prototype, values) = self
+            .integer_storage
+            .as_ref()
+            .zip(self.integer_storage_values.as_ref())
+            .ok_or_else(|| {
+                ndgrid_error_with_detail(
+                    &NDGRID_ERROR_INTERNAL,
+                    "missing exact integer output storage",
+                )
+            })?;
+        let storage = prototype
+            .from_exact_values_like(values.clone())
+            .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
+        let tensor = Tensor::new_integer(storage, self.shape.clone())
+            .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
+        match residency {
+            OutputResidency::Host => Ok(tensor::tensor_into_value(tensor)),
+            OutputResidency::Gpu { .. } => Err(ndgrid_error_with_detail(
+                &NDGRID_ERROR_INTERNAL,
+                "GPU-resident typed integer outputs are not supported",
+            )),
         }
     }
 
@@ -1085,6 +1154,62 @@ mod tests {
         };
         assert_eq!(y_out.dtype, NumericDType::U16);
         assert_eq!(y_out.data, vec![10.0, 10.0, 20.0, 20.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn ndgrid_preserves_all_exact_integer_axis_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![-2, 7]),
+            IntegerStorage::I16(vec![-300, 400]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let source_values = storage.exact_values();
+            let expected = storage
+                .from_exact_values_like(vec![
+                    source_values[0].clone(),
+                    source_values[1].clone(),
+                    source_values[0].clone(),
+                    source_values[1].clone(),
+                ])
+                .expect("expected storage");
+            let expected_second = storage
+                .from_exact_values_like(vec![
+                    source_values[0].clone(),
+                    source_values[0].clone(),
+                    source_values[1].clone(),
+                    source_values[1].clone(),
+                ])
+                .expect("second expected storage");
+            let axis = Tensor::new_integer(storage, vec![1, 2]).expect("integer axis");
+            let eval = eval(&[Value::Tensor(axis)], Some(2)).expect("ndgrid");
+            let Value::Tensor(first_output) = output(&eval, 0).expect("grid output") else {
+                panic!("expected exact integer tensor");
+            };
+            assert_eq!(first_output.shape, vec![2, 2]);
+            assert_eq!(first_output.integer_storage(), Some(&expected));
+            let Value::Tensor(second_output) = output(&eval, 1).expect("second grid output") else {
+                panic!("expected second exact integer tensor");
+            };
+            assert_eq!(second_output.integer_storage(), Some(&expected_second));
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn ndgrid_preserves_exact_integer_scalars() {
+        let eval = eval(&[Value::Int(IntValue::U64(u64::MAX))], None).expect("ndgrid");
+        assert_eq!(
+            output(&eval, 0).expect("grid output"),
+            Value::Int(IntValue::U64(u64::MAX))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
