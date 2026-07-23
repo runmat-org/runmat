@@ -11,9 +11,13 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, ResolveContext, Tensor, Type, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
+
+use crate::builtins::math::elementwise::integer_arithmetic::{
+    integer_binary_scalar, IntegerBinaryOp,
+};
 
 type AlignedShapes = (Vec<usize>, Vec<usize>, Vec<usize>);
 const BUILTIN_NAME: &str = "kron";
@@ -263,8 +267,168 @@ async fn kron_gpu_mixed_right(left: Value, right: GpuTensorHandle) -> crate::Bui
 }
 
 fn kron_host(left: Value, right: Value) -> crate::BuiltinResult<Value> {
+    if let Some(result) = try_integer_kron(&left, &right)? {
+        return Ok(result);
+    }
     let numeric = compute_numeric(left, right)?;
     finalize_numeric(numeric, false)
+}
+
+enum KronIntegerOperand<'a> {
+    Scalar(&'a IntValue),
+    Array(&'a IntegerStorage, &'a [usize]),
+}
+
+impl KronIntegerOperand<'_> {
+    fn shape(&self) -> &[usize] {
+        match self {
+            Self::Scalar(_) => &[1, 1],
+            Self::Array(_, shape) => shape,
+        }
+    }
+
+    fn class_name(&self) -> &'static str {
+        match self {
+            Self::Scalar(value) => value.class_name(),
+            Self::Array(storage, _) => storage.class_name(),
+        }
+    }
+
+    fn zeros_like(&self, len: usize) -> IntegerStorage {
+        match self {
+            Self::Scalar(value) => IntegerStorage::from_scalar((*value).clone()).zeros_like(len),
+            Self::Array(storage, _) => storage.zeros_like(len),
+        }
+    }
+
+    fn value_at(&self, index: usize) -> IntValue {
+        match self {
+            Self::Scalar(value) => (*value).clone(),
+            Self::Array(storage, _) => storage
+                .value_at(index)
+                .expect("kron integer storage index must be valid"),
+        }
+    }
+}
+
+fn integer_kron_operand(value: &Value) -> Option<KronIntegerOperand<'_>> {
+    match value {
+        Value::Int(value) => Some(KronIntegerOperand::Scalar(value)),
+        Value::Tensor(tensor) => tensor
+            .integer_storage()
+            .map(|storage| KronIntegerOperand::Array(storage, &tensor.shape)),
+        _ => None,
+    }
+}
+
+fn integer_kron_scalar(value: &Value) -> Option<Value> {
+    match value {
+        Value::Num(_) | Value::Bool(_) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor.integer_storage().is_none() && tensor.data.len() == 1 => {
+            Some(value.clone())
+        }
+        Value::LogicalArray(array) if array.data.len() == 1 => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn try_integer_kron(left: &Value, right: &Value) -> crate::BuiltinResult<Option<Value>> {
+    let left_integer = integer_kron_operand(left);
+    let right_integer = integer_kron_operand(right);
+    if left_integer.is_none() && right_integer.is_none() {
+        return Ok(None);
+    }
+
+    let left_scalar = left_integer
+        .is_none()
+        .then(|| integer_kron_scalar(left))
+        .flatten();
+    let right_scalar = right_integer
+        .is_none()
+        .then(|| integer_kron_scalar(right))
+        .flatten();
+    if left_integer.is_none() && left_scalar.is_none()
+        || right_integer.is_none() && right_scalar.is_none()
+    {
+        return Err(kron_error_with_message(
+            "kron: integer arrays can only be combined with scalar double or logical values",
+            &KRON_ERROR_UNSUPPORTED_INPUT,
+        ));
+    }
+
+    let left_shape = left_integer
+        .as_ref()
+        .map(KronIntegerOperand::shape)
+        .unwrap_or(&[1, 1]);
+    let right_shape = right_integer
+        .as_ref()
+        .map(KronIntegerOperand::shape)
+        .unwrap_or(&[1, 1]);
+    let (_, shape_b, shape_out) = aligned_shapes(left_shape, right_shape)?;
+    let total_out = checked_total(&shape_out, "kron")?;
+    let prototype = left_integer
+        .as_ref()
+        .or(right_integer.as_ref())
+        .expect("integer presence was checked");
+
+    if let (Some(left_integer), Some(right_integer)) = (&left_integer, &right_integer) {
+        if left_integer.class_name() != right_integer.class_name() {
+            return Err(kron_error_with_message(
+                "kron: integer operands must have the same integer class",
+                &KRON_ERROR_UNSUPPORTED_INPUT,
+            ));
+        }
+    }
+    if total_out == 0 {
+        let tensor = Tensor::new_integer(prototype.zeros_like(0), shape_out)
+            .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))?;
+        return Ok(Some(tensor::tensor_into_value(tensor)));
+    }
+
+    let strides_out = column_major_strides(&shape_out);
+    let mut coords_a = vec![0usize; shape_out.len()];
+    let mut coords_b = vec![0usize; shape_out.len()];
+    let left_len = left_integer.as_ref().map_or(1, |operand| match operand {
+        KronIntegerOperand::Scalar(_) => 1,
+        KronIntegerOperand::Array(storage, _) => storage.len(),
+    });
+    let right_len = right_integer.as_ref().map_or(1, |operand| match operand {
+        KronIntegerOperand::Scalar(_) => 1,
+        KronIntegerOperand::Array(storage, _) => storage.len(),
+    });
+    let mut output = prototype.zeros_like(total_out);
+
+    for left_index in 0..left_len {
+        unravel_index(left_index, left_shape, &mut coords_a);
+        let left_value = left_integer
+            .as_ref()
+            .map(|operand| Value::Int(operand.value_at(left_index)))
+            .or_else(|| left_scalar.clone())
+            .expect("integer or scalar left operand was validated");
+        for right_index in 0..right_len {
+            unravel_index(right_index, right_shape, &mut coords_b);
+            let right_value = right_integer
+                .as_ref()
+                .map(|operand| Value::Int(operand.value_at(right_index)))
+                .or_else(|| right_scalar.clone())
+                .expect("integer or scalar right operand was validated");
+            let value = integer_binary_scalar(
+                &left_value,
+                &right_value,
+                IntegerBinaryOp::Multiply,
+                BUILTIN_NAME,
+            )
+            .map_err(|e| kron_error_with_message(e, &KRON_ERROR_UNSUPPORTED_INPUT))?;
+            let out_index = combine_indices(&coords_a, &coords_b, &shape_b, &strides_out)?;
+            output
+                .set_value(out_index, value)
+                .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))?;
+        }
+    }
+
+    let tensor = Tensor::new_integer(output, shape_out)
+        .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))?;
+    Ok(Some(tensor::tensor_into_value(tensor)))
 }
 
 fn compute_numeric(left: Value, right: Value) -> crate::BuiltinResult<KronNumericResult> {
@@ -512,7 +676,7 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{LogicalArray, Tensor, Type};
+    use runmat_builtins::{IntegerStorage, LogicalArray, Tensor, Type};
 
     #[test]
     fn kron_type_logical_returns_logical() {
@@ -557,6 +721,112 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn kron_preserves_every_exact_integer_class_and_saturates() {
+        let cases = vec![
+            (
+                IntegerStorage::I8(vec![i8::MAX, -2]),
+                IntegerStorage::I8(vec![2, 3]),
+                IntegerStorage::I8(vec![i8::MAX, -4, i8::MAX, -6]),
+            ),
+            (
+                IntegerStorage::I16(vec![i16::MAX, -2]),
+                IntegerStorage::I16(vec![2, 3]),
+                IntegerStorage::I16(vec![i16::MAX, -4, i16::MAX, -6]),
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MAX, -2]),
+                IntegerStorage::I32(vec![2, 3]),
+                IntegerStorage::I32(vec![i32::MAX, -4, i32::MAX, -6]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MAX, -2]),
+                IntegerStorage::I64(vec![2, 3]),
+                IntegerStorage::I64(vec![i64::MAX, -4, i64::MAX, -6]),
+            ),
+            (
+                IntegerStorage::U8(vec![u8::MAX, 2]),
+                IntegerStorage::U8(vec![2, 3]),
+                IntegerStorage::U8(vec![u8::MAX, 4, u8::MAX, 6]),
+            ),
+            (
+                IntegerStorage::U16(vec![u16::MAX, 2]),
+                IntegerStorage::U16(vec![2, 3]),
+                IntegerStorage::U16(vec![u16::MAX, 4, u16::MAX, 6]),
+            ),
+            (
+                IntegerStorage::U32(vec![u32::MAX, 2]),
+                IntegerStorage::U32(vec![2, 3]),
+                IntegerStorage::U32(vec![u32::MAX, 4, u32::MAX, 6]),
+            ),
+            (
+                IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
+                IntegerStorage::U64(vec![2, 3]),
+                IntegerStorage::U64(vec![u64::MAX, u64::MAX, u64::MAX, u64::MAX]),
+            ),
+        ];
+
+        for (left, right, expected) in cases {
+            let left = Tensor::new_integer(left, vec![2, 1]).expect("left integer tensor");
+            let right = Tensor::new_integer(right, vec![1, 2]).expect("right integer tensor");
+            let result = kron_builtin(Value::Tensor(left), Value::Tensor(right), Vec::new())
+                .expect("integer kron");
+            let Value::Tensor(result) = result else {
+                panic!("integer matrix kron must return a tensor");
+            };
+            assert_eq!(result.shape, vec![2, 2]);
+            assert_eq!(result.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn kron_integer_scalar_double_and_empty_paths_preserve_exact_class() {
+        let values =
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
+                .expect("uint64 tensor");
+        let result = kron_builtin(Value::Tensor(values), Value::Num(2.0), Vec::new())
+            .expect("integer scalar-double kron");
+        let Value::Tensor(result) = result else {
+            panic!("integer kron must return a tensor");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, u64::MAX]))
+        );
+
+        let empty = Tensor::new_integer(IntegerStorage::I64(Vec::new()), vec![0, 2])
+            .expect("empty integer tensor");
+        let result = kron_builtin(
+            Value::Tensor(empty),
+            Value::Int(IntValue::I64(3)),
+            Vec::new(),
+        )
+        .expect("empty integer kron");
+        let Value::Tensor(result) = result else {
+            panic!("empty integer kron must return a tensor");
+        };
+        assert_eq!(result.shape, vec![0, 2]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I64(Vec::new()))
+        );
+    }
+
+    #[test]
+    fn kron_rejects_mixed_class_and_non_scalar_double_integer_inputs() {
+        let left = Tensor::new_integer(IntegerStorage::I8(vec![1]), vec![1, 1]).unwrap();
+        let right = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        let error = kron_builtin(Value::Tensor(left), Value::Tensor(right), Vec::new())
+            .expect_err("mixed integer classes must fail");
+        assert!(error.to_string().contains("same integer class"));
+
+        let left = Tensor::new_integer(IntegerStorage::I8(vec![1, 2]), vec![1, 2]).unwrap();
+        let right = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let error = kron_builtin(Value::Tensor(left), Value::Tensor(right), Vec::new())
+            .expect_err("non-scalar double array must fail with integer input");
+        assert!(error.to_string().contains("scalar double or logical"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

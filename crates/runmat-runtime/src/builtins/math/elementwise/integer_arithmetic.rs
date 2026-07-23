@@ -55,6 +55,27 @@ pub(crate) fn try_integer_binary(
         .map_err(|error| format!("{builtin}: {error}"))
 }
 
+/// Applies an integer binary operation to scalar inputs and returns the exact
+/// integer result. Structural callers such as `kron` use this to share the
+/// elementwise integer class, scalar-double, rounding, and saturation rules
+/// without inheriting elementwise broadcast semantics.
+pub(crate) fn integer_binary_scalar(
+    lhs: &Value,
+    rhs: &Value,
+    operation: IntegerBinaryOp,
+    builtin: &str,
+) -> Result<IntValue, String> {
+    match try_integer_binary(lhs, rhs, operation, builtin)? {
+        Some(Value::Int(value)) => Ok(value),
+        Some(_) => Err(format!(
+            "{builtin}: internal integer scalar operation returned a non-scalar result"
+        )),
+        None => Err(format!(
+            "{builtin}: internal integer scalar operation requires an integer operand"
+        )),
+    }
+}
+
 struct IntegerOperand<'a> {
     storage: IntegerStorageRef<'a>,
     shape: Vec<usize>,
