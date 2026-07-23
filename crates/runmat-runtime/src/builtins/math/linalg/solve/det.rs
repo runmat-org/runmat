@@ -146,6 +146,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::linalg::solve::det"
 )]
 async fn det_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     match value {
         Value::GpuTensor(handle) => det_gpu(handle).await,
         Value::ComplexTensor(tensor) => det_complex_value(tensor),
