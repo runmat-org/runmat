@@ -7,8 +7,8 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
-    ResolveContext, SparseTensor, Tensor, Type, Value,
+    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+    NumericDType, ResolveContext, SparseTensor, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -216,6 +216,9 @@ fn blkdiag_host(args: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(result) = assemble_typed_complex_integer_blocks(&args) {
         return result;
     }
+    if let Some(result) = assemble_typed_integer_sparse_blocks(&args) {
+        return result;
+    }
     if let Some(result) = assemble_typed_integer_blocks(&args) {
         return result;
     }
@@ -225,6 +228,147 @@ fn blkdiag_host(args: Vec<Value>) -> BuiltinResult<Value> {
         blocks.push(Block::from_value(value)?);
     }
     assemble_blocks(blocks)
+}
+
+/// Assemble typed integer sparse blocks without reconstructing their stored values through f64.
+///
+/// The general sparse path predates exact integer buffers and uses `SparseTensor::values`, which
+/// is only a compatibility view. Once a typed sparse input selects sparse output, every block
+/// must retain the same integer class until mixed-class sparse promotion has a MATLAB-validated
+/// policy.
+fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<Value>> {
+    if !args.iter().any(
+        |value| matches!(value, Value::SparseTensor(sparse) if sparse.integer_storage().is_some()),
+    ) {
+        return None;
+    }
+
+    struct IntegerSparseBlock {
+        rows: usize,
+        cols: usize,
+        col_ptrs: Vec<usize>,
+        row_indices: Vec<usize>,
+        values: Vec<IntValue>,
+    }
+
+    let mut prototype: Option<IntegerStorage> = None;
+    let mut blocks = Vec::with_capacity(args.len());
+    for value in args {
+        let (rows, cols, col_ptrs, row_indices, values, storage) = match value {
+            Value::SparseTensor(sparse) => {
+                let Some(storage) = sparse.integer_storage() else {
+                    return Some(Err(error_with_detail(
+                        &ERROR_INVALID_INPUT,
+                        "blkdiag: typed sparse integer blocks require every input to use the same integer class",
+                    )));
+                };
+                (
+                    sparse.rows,
+                    sparse.cols,
+                    sparse.col_ptrs.clone(),
+                    sparse.row_indices.clone(),
+                    storage.exact_values(),
+                    storage.clone(),
+                )
+            }
+            Value::Tensor(tensor) => {
+                let Some(storage) = tensor.integer_storage() else {
+                    return Some(Err(error_with_detail(
+                        &ERROR_INVALID_INPUT,
+                        "blkdiag: typed sparse integer blocks require every input to use the same integer class",
+                    )));
+                };
+                let (rows, cols) = match matrix_dims_from_shape(&tensor.shape) {
+                    Some(dims) => dims,
+                    None => return Some(Err(validate_matrix_shape(&tensor.shape).unwrap_err())),
+                };
+                let source = storage.exact_values();
+                let mut col_ptrs = Vec::with_capacity(cols + 1);
+                let mut row_indices = Vec::new();
+                let mut values = Vec::new();
+                col_ptrs.push(0);
+                for col in 0..cols {
+                    for row in 0..rows {
+                        let value = source[row + col * rows].clone();
+                        if !value.is_zero() {
+                            row_indices.push(row);
+                            values.push(value);
+                        }
+                    }
+                    col_ptrs.push(values.len());
+                }
+                (rows, cols, col_ptrs, row_indices, values, storage.clone())
+            }
+            Value::Int(value) => {
+                let storage = IntegerStorage::from_scalar(value.clone());
+                let values: Vec<IntValue> = (!value.is_zero())
+                    .then(|| value.clone())
+                    .into_iter()
+                    .collect();
+                let row_indices = (!value.is_zero()).then_some(0).into_iter().collect();
+                let col_ptrs = vec![0, values.len()];
+                (1, 1, col_ptrs, row_indices, values, storage)
+            }
+            _ => {
+                return Some(Err(error_with_detail(
+                    &ERROR_INVALID_INPUT,
+                    "blkdiag: typed sparse integer blocks require every input to use the same integer class",
+                )));
+            }
+        };
+
+        if let Some(existing) = prototype.as_ref() {
+            if existing.class_name() != storage.class_name() {
+                return Some(Err(error_with_detail(
+                    &ERROR_INVALID_INPUT,
+                    "blkdiag: typed sparse integer blocks require every input to use the same integer class",
+                )));
+            }
+        } else {
+            prototype = Some(storage);
+        }
+        blocks.push(IntegerSparseBlock {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            values,
+        });
+    }
+
+    let prototype = prototype.expect("typed sparse input establishes an integer class");
+    let (rows, cols) = match blocks
+        .iter()
+        .try_fold((0usize, 0usize), |(rows, cols), block| {
+            Some((rows.checked_add(block.rows)?, cols.checked_add(block.cols)?))
+        }) {
+        Some(dims) => dims,
+        None => return Some(Err(size_overflow())),
+    };
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    let mut values = Vec::new();
+    col_ptrs.push(0);
+    let mut row_offset = 0usize;
+    for block in blocks {
+        for col in 0..block.cols {
+            for index in block.col_ptrs[col]..block.col_ptrs[col + 1] {
+                row_indices.push(row_offset + block.row_indices[index]);
+                values.push(block.values[index].clone());
+            }
+            col_ptrs.push(values.len());
+        }
+        row_offset += block.rows;
+    }
+    let storage = match prototype.from_exact_values_like(values) {
+        Ok(storage) => storage,
+        Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
+    };
+    Some(
+        SparseTensor::new_integer(rows, cols, col_ptrs, row_indices, storage)
+            .map(Value::SparseTensor)
+            .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail)),
+    )
 }
 
 /// Assemble same-class real integer blocks without consulting their lossy f64 mirrors.
@@ -1152,6 +1296,97 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn blkdiag_preserves_all_exact_sparse_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let source = storage.exact_values();
+            let nonzero: Vec<_> = source
+                .iter()
+                .filter(|value| !value.is_zero())
+                .cloned()
+                .collect();
+            let sparse = SparseTensor::new_integer(
+                2,
+                1,
+                vec![0, nonzero.len()],
+                source
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(row, value)| (!value.is_zero()).then_some(row))
+                    .collect(),
+                storage
+                    .from_exact_values_like(nonzero.clone())
+                    .expect("typed sparse storage"),
+            )
+            .expect("typed sparse matrix");
+
+            let Value::SparseTensor(output) = call(vec![
+                Value::SparseTensor(sparse),
+                Value::Int(source[1].clone()),
+            ])
+            .expect("blkdiag") else {
+                panic!("expected typed sparse integer blkdiag output");
+            };
+
+            let mut expected_values = nonzero;
+            expected_values.push(source[1].clone());
+            assert_eq!(output.rows, 3);
+            assert_eq!(output.cols, 2);
+            assert_eq!(
+                output.col_ptrs,
+                vec![0, expected_values.len() - 1, expected_values.len()]
+            );
+            assert_eq!(
+                output.integer_storage(),
+                Some(
+                    &storage
+                        .from_exact_values_like(expected_values)
+                        .expect("expected sparse integer storage")
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn blkdiag_preserves_exact_sparse_storage_with_typed_dense_blocks() {
+        let sparse = SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 1],
+            vec![0],
+            IntegerStorage::U64(vec![9_007_199_254_740_993]),
+        )
+        .expect("typed sparse matrix");
+        let dense = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
+            .expect("typed dense matrix");
+
+        let Value::SparseTensor(output) =
+            call(vec![Value::SparseTensor(sparse), Value::Tensor(dense)]).expect("blkdiag")
+        else {
+            panic!("expected typed sparse integer blkdiag output");
+        };
+
+        assert_eq!(output.rows, 3);
+        assert_eq!(output.cols, 3);
+        assert_eq!(output.col_ptrs, vec![0, 1, 1, 2]);
+        assert_eq!(output.row_indices, vec![0, 2]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+        );
     }
 
     #[test]
