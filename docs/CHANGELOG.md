@@ -48,6 +48,7 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 
 #### Changed
 * Moved `runmat check` off bytecode-only validation onto the shared static-analysis frontend (with the LSP), so it reports Rust-style / JSON diagnostics for unresolved and runtime-dependent calls instead of treating successful bytecode compilation as `valid`
+* Removed the unused startup-snapshot system as a pre-1.0 breaking cleanup: the `runmat-snapshot` crate and CLI, session loading APIs, `runtime.snapshot_path`, TypeScript snapshot initialization options, and packaged `stdlib.snapshot` artifact no longer exist. Workspace replay and remote filesystem snapshots are unchanged.
 
 #### Fixed
 * Fixed `@Class` folder constructor resolution so `Report(...)` from `src/@Report/Report.m` resolves correctly in manifest projects

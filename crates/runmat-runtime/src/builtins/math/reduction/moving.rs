@@ -1984,36 +1984,27 @@ fn checked_element_count(name: &'static str, shape: &[usize]) -> BuiltinResult<u
 }
 
 fn invalid_argument(name: &'static str, detail: impl Into<String>) -> RuntimeError {
-    descriptor_error(name, &ERROR_INVALID_ARGUMENT, detail)
+    descriptor_error(name, &ERROR_INVALID_ARGUMENT, "InvalidArgument", detail)
 }
 
 fn invalid_input(name: &'static str, detail: impl Into<String>) -> RuntimeError {
-    descriptor_error(name, &ERROR_INVALID_INPUT, detail)
+    descriptor_error(name, &ERROR_INVALID_INPUT, "InvalidInput", detail)
 }
 
 fn internal(name: &'static str, detail: impl Into<String>) -> RuntimeError {
-    descriptor_error(name, &ERROR_INTERNAL, detail)
+    descriptor_error(name, &ERROR_INTERNAL, "Internal", detail)
 }
 
 fn descriptor_error(
     name: &'static str,
     descriptor: &'static BuiltinErrorDescriptor,
+    identifier_suffix: &'static str,
     detail: impl Into<String>,
 ) -> RuntimeError {
     let builder = build_runtime_error(format!("{}: {}", descriptor.message, detail.into()))
         .with_builtin(name)
-        .with_identifier(format!("RunMat:{name}:{}", identifier_suffix(descriptor)));
+        .with_identifier(format!("RunMat:{name}:{identifier_suffix}"));
     builder.build()
-}
-
-fn identifier_suffix(descriptor: &'static BuiltinErrorDescriptor) -> &'static str {
-    if std::ptr::eq(descriptor, &ERROR_INVALID_ARGUMENT) {
-        "InvalidArgument"
-    } else if std::ptr::eq(descriptor, &ERROR_INVALID_INPUT) {
-        "InvalidInput"
-    } else {
-        "Internal"
-    }
 }
 
 #[cfg(test)]

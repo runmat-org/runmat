@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn trnd_scalar_is_deterministic_and_finite() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let result = block_on(trnd_builtin(vec![Value::Num(10.0)])).expect("trnd");
         match result {
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn trnd_accepts_size_forms() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let out = block_on(trnd_builtin(vec![
             Value::Num(5.0),
@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn trnd_distribution_has_heavier_tails_than_normal() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let n = 20_000;
         let out = block_on(trnd_builtin(vec![

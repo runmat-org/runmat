@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn exprnd_scalar_deterministic() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let result = block_on(exprnd_builtin(vec![Value::Num(2.0)])).expect("exprnd");
         let expected = random::expected_exponential_sequence(2.0, 1)[0];
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn exprnd_matrix_dims() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let args = vec![Value::Num(1.0), Value::Num(3.0), Value::Num(4.0)];
         let result = block_on(exprnd_builtin(args)).expect("exprnd");
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn exprnd_size_vec() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let size = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
         let args = vec![Value::Num(1.0), Value::Tensor(size)];
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn exprnd_distribution_mean() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let mu = 3.0_f64;
         let n = 50_000_usize;

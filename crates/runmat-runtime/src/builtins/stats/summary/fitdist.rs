@@ -1496,6 +1496,7 @@ mod tests {
 
     #[test]
     fn fitdist_gamma_weibull_and_poisson_smoke() {
+        let _rng_guard = random::test_guard();
         let gamma = block_on(fitdist_builtin(
             vec_tensor(&[1.0, 2.0, 4.0, 8.0]),
             Value::String("Gamma".into()),
@@ -1533,6 +1534,7 @@ mod tests {
 
     #[test]
     fn generic_pdf_cdf_random_name_overloads_execute() {
+        let _rng_guard = random::test_guard();
         let density = block_on(pdf_builtin(
             Value::String("Normal".into()),
             Value::Num(0.0),

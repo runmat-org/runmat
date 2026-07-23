@@ -583,9 +583,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_returns_current_state() {
-        let _guard = random::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = random::test_guard();
         random::reset_rng();
         let value = block_on(rng_builtin(Vec::new())).expect("rng");
         let snapshot = snapshot_from_value(&value).expect("snapshot");
@@ -612,9 +610,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_seed_is_reproducible() {
-        let _guard = random::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = random::test_guard();
         random::reset_rng();
         block_on(rng_builtin(vec![Value::Int(IntValue::U32(42))])).expect("rng");
         let seq1 = random::generate_uniform(5, "rng test").expect("uniform");
@@ -626,9 +622,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_restore_struct_roundtrip() {
-        let _guard = random::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = random::test_guard();
         random::reset_rng();
         let saved = block_on(rng_builtin(Vec::new())).expect("rng");
         block_on(rng_builtin(vec![Value::Int(IntValue::U32(7))])).expect("rng");
@@ -641,9 +635,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_default_restores_state() {
-        let _guard = random::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = random::test_guard();
         random::reset_rng();
         block_on(rng_builtin(vec![Value::Int(IntValue::U32(99))])).expect("seed rng");
         let previous = block_on(rng_builtin(vec![Value::from("default")])).expect("rng default");
@@ -658,9 +650,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_seed_with_twister_alias() {
-        let _guard = random::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = random::test_guard();
         random::reset_rng();
         block_on(rng_builtin(vec![Value::Int(IntValue::U32(123))])).expect("rng seed first");
         let host_seq = random::generate_uniform(4, "twister alias host").expect("uniform");
@@ -677,9 +667,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_rejects_negative_seed() {
-        let _guard = random::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = random::test_guard();
         random::reset_rng();
         let err = block_on(rng_builtin(vec![Value::Int(IntValue::I32(-5))])).unwrap_err();
         assert_eq!(err.identifier(), RNG_ERROR_SEED_NONNEGATIVE.identifier);
@@ -688,9 +676,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_rejects_unknown_generator() {
-        let _guard = random::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = random::test_guard();
         random::reset_rng();
         let err = block_on(rng_builtin(vec![
             Value::from("default"),
@@ -703,9 +689,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_state_struct_requires_type() {
-        let _guard = random::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = random::test_guard();
         random::reset_rng();
         let tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).expect("tensor");
         let mut st = StructValue::new();
@@ -721,9 +705,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_syncs_provider_state() {
-        let _guard = random::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = random::test_guard();
         random::reset_rng();
         test_support::with_test_provider(|provider| {
             block_on(rng_builtin(vec![Value::Int(IntValue::U32(9))])).expect("rng");
@@ -738,9 +720,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn rng_wgpu_uniform_matches_cpu() {
-        let _guard = random::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = random::test_guard();
         random::reset_rng();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
@@ -773,9 +753,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_shuffle_uses_entropy_or_override() {
-        let _guard = random::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = random::test_guard();
         random::reset_rng();
         unsafe { std::env::set_var("RUNMAT_RNG_SHUFFLE_SEED", "12345") };
         block_on(rng_builtin(vec![Value::from("shuffle")])).expect("rng shuffle");

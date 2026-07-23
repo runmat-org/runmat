@@ -1996,10 +1996,10 @@ fn electromagnetic_contract_snapshot_matches_expected_shape() {
     )
     .expect("electromagnetic results should succeed");
 
-    let snapshot_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let contract_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/data/electromagnetic_contract_snapshot.json");
     let expected: Value = serde_json::from_str(
-        &fs::read_to_string(&snapshot_path).expect("read electromagnetic contract snapshot"),
+        &fs::read_to_string(&contract_path).expect("read electromagnetic contract snapshot"),
     )
     .expect("parse electromagnetic contract snapshot");
 
@@ -2047,10 +2047,10 @@ fn nonlinear_contract_snapshot_matches_expected_shape() {
     )
     .expect("results should succeed");
 
-    let snapshot_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let contract_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/data/nonlinear_contract_snapshot.json");
     let expected: Value = serde_json::from_str(
-        &fs::read_to_string(&snapshot_path).expect("read nonlinear contract snapshot"),
+        &fs::read_to_string(&contract_path).expect("read nonlinear contract snapshot"),
     )
     .expect("parse nonlinear contract snapshot");
 

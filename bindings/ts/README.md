@@ -45,7 +45,6 @@ await session.executeRequest({
 
 | Option | Purpose |
 | --- | --- |
-| `snapshot` | Preload a runtime snapshot from bytes, a URL, a stream, or a custom fetcher. |
 | `enableGpu` | Request WebGPU acceleration. Defaults to GPU when WebGPU is available, with CPU fallback otherwise. |
 | `enableJit` | Enable the JIT tier where supported. |
 | `fsProvider` | Provide file I/O for `load`, `save`, scripts, datasets, and path execution. |

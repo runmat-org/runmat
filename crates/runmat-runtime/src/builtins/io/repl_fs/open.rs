@@ -488,6 +488,9 @@ mod tests {
     #[test]
     fn open_resolves_m_file_on_current_path() {
         let _guard = workspace_guard();
+        let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         ensure_test_resolver();
         set_workspace(&[]);
         let dir = tempdir().expect("tempdir");
@@ -532,6 +535,9 @@ mod tests {
     #[test]
     fn open_resolves_custom_extension_file_on_current_path() {
         let _guard = workspace_guard();
+        let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         ensure_test_resolver();
         set_workspace(&[]);
         let dir = tempdir().expect("tempdir");
@@ -558,6 +564,9 @@ mod tests {
     #[test]
     fn open_resolves_known_viewer_extension_file_on_current_path() {
         let _guard = workspace_guard();
+        let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         ensure_test_resolver();
         set_workspace(&[]);
         let dir = tempdir().expect("tempdir");
@@ -572,6 +581,9 @@ mod tests {
     #[test]
     fn open_accepts_project_and_model_file_classes_as_viewer_requests() {
         let _guard = workspace_guard();
+        let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         ensure_test_resolver();
         set_workspace(&[]);
         let dir = tempdir().expect("tempdir");

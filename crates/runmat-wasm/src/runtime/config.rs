@@ -18,18 +18,11 @@ pub(crate) struct InitOptions {
     #[serde(default)]
     pub(crate) enable_gpu: Option<bool>,
     #[serde(default)]
-    pub(crate) snapshot_url: Option<String>,
-    #[serde(default)]
-    pub(crate) snapshot_bytes: Option<Vec<u8>>,
-    #[serde(default)]
     pub(crate) telemetry_consent: Option<bool>,
     #[serde(default)]
     pub(crate) wgpu_power_preference: Option<String>,
     #[serde(default)]
     pub(crate) wgpu_force_fallback_adapter: Option<bool>,
-    #[cfg(target_arch = "wasm32")]
-    #[serde(skip)]
-    pub(crate) snapshot_stream: Option<JsValue>,
     #[serde(default)]
     pub(crate) scatter_target_points: Option<u32>,
     #[serde(default)]

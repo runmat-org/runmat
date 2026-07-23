@@ -1,7 +1,9 @@
 use anyhow::Result;
 use runmat_builtins::{self, Value};
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
-use tracing::{debug, info, info_span, warn};
+#[cfg(feature = "jit")]
+use tracing::warn;
+use tracing::{debug, info, info_span};
 
 use runmat_hir::{LoweringContext, LoweringResult, SourceId};
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
@@ -10,17 +12,11 @@ use runmat_runtime::{build_runtime_error, gather_if_needed_async, RuntimeError};
 use runmat_runtime::{
     runtime_export_workspace_state, runtime_import_workspace_state, WorkspaceReplayMode,
 };
-#[cfg(target_arch = "wasm32")]
-use runmat_snapshot::SnapshotBuilder;
-use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
 #[cfg(feature = "jit")]
 use runmat_turbine::TurbineEngine;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::Path;
-use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -50,8 +46,8 @@ use crate::{
 
 mod compile;
 mod config;
+mod init;
 mod run;
-mod snapshot;
 mod workspace;
 
 /// Host-agnostic RunMat execution session (parser + interpreter + optional JIT).
@@ -78,8 +74,6 @@ pub struct RunMatSession {
     next_semantic_function_id: usize,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
-    /// Loaded snapshot for standard library preloading
-    snapshot: Option<Rc<Snapshot>>,
     /// Cooperative cancellation flag shared with the runtime.
     interrupt_flag: Arc<AtomicBool>,
     /// Tracks whether an execution is currently active.

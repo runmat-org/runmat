@@ -2778,7 +2778,9 @@ fn spectral_range_shader_mode(range: ProviderSpectralRange) -> SpectralRangeShad
 
 #[cfg(test)]
 mod tests {
-    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{
+        register_wgpu_provider, WgpuProvider, WgpuProviderOptions,
+    };
     use num_complex::Complex;
     use runmat_accelerate_api::{
         AccelProvider, GpuTensorStorage, HostTensorView, ProviderEnvelopeMethod,
@@ -3362,7 +3364,11 @@ mod tests {
 
     #[test]
     fn iir_filter_unit_denominator_uses_resident_numerator_without_download() {
-        with_wgpu_provider(|provider| {
+        let Ok(provider) = WgpuProvider::new(WgpuProviderOptions::default()) else {
+            return;
+        };
+        {
+            let provider: &dyn AccelProvider = &provider;
             let b = provider
                 .upload(&HostTensorView {
                     data: &[1.0, 1.0],
@@ -3405,7 +3411,7 @@ mod tests {
 
             assert_eq!(output.shape, vec![1, 3]);
             assert_eq!(output.data, vec![1.0, 3.0, 5.0]);
-        });
+        }
     }
 
     #[test]

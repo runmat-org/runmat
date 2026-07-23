@@ -11,7 +11,7 @@ RunMat is developed as a Rust workspace with a small TypeScript package for the 
 
 The development section covers the repository mechanics around building, target support, testing, and performance work. Runtime design details stay in the earlier compiler, VM, GPU, WASM, filesystem, and session sections.
 
-The root `Cargo.toml` owns the crate list and shared dependency versions. Internal crates are version-pinned together, so workspace changes normally build against one coherent RunMat version. The TypeScript package under `bindings/ts` builds the WASM runtime, LSP bundle, generated builtin metadata, and startup snapshot used by JavaScript consumers.
+The root `Cargo.toml` owns the crate list and shared dependency versions. Internal crates are version-pinned together, so workspace changes normally build against one coherent RunMat version. The TypeScript package under `bindings/ts` builds the WASM runtime, LSP bundle, and generated builtin metadata used by JavaScript consumers.
 
 ## Page Map
 

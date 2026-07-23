@@ -712,6 +712,7 @@ mod tests {
 
     #[test]
     fn pcode_creates_obscured_executable_p_file_from_source_name() {
+        let _provider_lock = runmat_filesystem::provider_override_lock();
         let _lock = REPL_FS_TEST_LOCK
             .lock()
             .unwrap_or_else(|err| err.into_inner());
@@ -731,6 +732,7 @@ mod tests {
 
     #[test]
     fn pcode_inplace_writes_next_to_source() {
+        let _provider_lock = runmat_filesystem::provider_override_lock();
         let _lock = REPL_FS_TEST_LOCK
             .lock()
             .unwrap_or_else(|err| err.into_inner());
@@ -754,6 +756,7 @@ mod tests {
 
     #[test]
     fn pcode_folder_preserves_package_and_class_suffix_in_current_dir() {
+        let _provider_lock = runmat_filesystem::provider_override_lock();
         let _lock = REPL_FS_TEST_LOCK
             .lock()
             .unwrap_or_else(|err| err.into_inner());
@@ -777,6 +780,7 @@ mod tests {
 
     #[test]
     fn pcode_wildcard_ignores_non_m_files() {
+        let _provider_lock = runmat_filesystem::provider_override_lock();
         let _lock = REPL_FS_TEST_LOCK
             .lock()
             .unwrap_or_else(|err| err.into_inner());

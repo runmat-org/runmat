@@ -148,30 +148,7 @@ export type RunMatLogLevel = RunMatPresetLogLevel | (string & Record<never, neve
 
 export type WasmInitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
-export interface RunMatSnapshotSource {
-  bytes?: Uint8Array | ArrayBuffer;
-  url?: string;
-  fetcher?: SnapshotFetcher;
-  stream?: ReadableStream<Uint8Array | ArrayBufferView | ArrayBuffer>;
-}
-
-export interface SnapshotFetcherContext {
-  url?: string;
-}
-
-export type SnapshotFetcher = (
-  ctx: SnapshotFetcherContext
-) => Promise<SnapshotFetcherResult>;
-
-export type SnapshotFetcherResult =
-  | Uint8Array
-  | ArrayBuffer
-  | ArrayBufferView
-  | Response
-  | ReadableStream<Uint8Array | ArrayBufferView | ArrayBuffer>;
-
 export interface RunMatInitOptions {
-  snapshot?: RunMatSnapshotSource;
   enableGpu?: boolean;
   enableJit?: boolean;
   verbose?: boolean;
@@ -899,9 +876,6 @@ export interface RunMatSessionHandle {
 }
 
 interface NativeInitOptions {
-  snapshotBytes?: Uint8Array;
-  snapshotStream?: ReadableStream<Uint8Array | ArrayBufferView | ArrayBuffer>;
-  snapshotUrl?: string;
   enableGpu?: boolean;
   enableJit?: boolean;
   verbose?: boolean;
@@ -1180,7 +1154,6 @@ async function loadNativeModule(wasmModule?: WasmInitInput): Promise<RunMatNativ
 
 export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMatSessionHandle> {
   const native = await loadNativeModule(options.wasmModule);
-  const snapshotResolution = await resolveSnapshotSource(options.snapshot);
   const fsProvider = await resolveFsProvider(options.fsProvider);
   if (options.plotCanvas) {
     if (typeof native.createPlotSurface === "function") {
@@ -1213,9 +1186,6 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     }
   }
   const session = await native.initRunMat({
-    snapshotBytes: snapshotResolution.bytes,
-    snapshotStream: snapshotResolution.stream,
-    snapshotUrl: options.snapshot?.url,
     enableGpu: effectiveEnableGpu,
     enableJit: options.enableJit ?? false,
     verbose: options.verbose ?? false,
@@ -2171,127 +2141,6 @@ async function resolveFsProvider(
   }
 }
 
-type SnapshotStream = ReadableStream<Uint8Array | ArrayBufferView | ArrayBuffer>;
-
-interface SnapshotResolution {
-  bytes?: Uint8Array;
-  stream?: SnapshotStream;
-}
-
-async function resolveSnapshotSource(source?: RunMatSnapshotSource): Promise<SnapshotResolution> {
-  if (!source) {
-    return {};
-  }
-  if (source.bytes) {
-    return { bytes: toUint8Array(source.bytes) };
-  }
-  if (source.stream) {
-    return { stream: source.stream };
-  }
-  if (source.fetcher) {
-    const fetched = await source.fetcher({ url: source.url });
-    return coerceSnapshotFetcherResult(fetched);
-  }
-  if (source.url) {
-    if (typeof fetch === "undefined") {
-      throw new Error(
-        "Global fetch API is unavailable; provide snapshot.bytes or snapshot.fetcher instead."
-      );
-    }
-    const response = await fetch(source.url);
-    return coerceResponseForSnapshot(response, source.url);
-  }
-  return {};
-}
-
-async function coerceSnapshotFetcherResult(value: SnapshotFetcherResult): Promise<SnapshotResolution> {
-  if (value instanceof Uint8Array) {
-    return { bytes: value };
-  }
-  if (value instanceof ArrayBuffer) {
-    return { bytes: new Uint8Array(value) };
-  }
-  if (ArrayBuffer.isView(value)) {
-    return { bytes: toUint8Array(value) };
-  }
-  if (isReadableStream(value)) {
-    return { stream: value };
-  }
-  if (isResponse(value)) {
-    return coerceResponseForSnapshot(value);
-  }
-  throw new Error("Unsupported snapshot fetcher result");
-}
-
-async function coerceResponseForSnapshot(response: Response, origin?: string): Promise<SnapshotResolution> {
-  if (!response.ok) {
-    const suffix = origin ? ` from ${origin}` : "";
-    throw new Error(`Failed to fetch snapshot${suffix} (status ${response.status})`);
-  }
-  if (response.body) {
-    return { stream: response.body as SnapshotStream };
-  }
-  const buffer = await response.arrayBuffer();
-  return { bytes: new Uint8Array(buffer) };
-}
-
-function isReadableStream(value: unknown): value is SnapshotStream {
-  return typeof ReadableStream !== "undefined" && value instanceof ReadableStream;
-}
-
-function isResponse(value: unknown): value is Response {
-  return typeof Response !== "undefined" && value instanceof Response;
-}
-
-async function fetchSnapshotFromUrl(url: string): Promise<Uint8Array> {
-  if (typeof fetch === "undefined") {
-    throw new Error("Global fetch API is unavailable; provide snapshot.bytes or snapshot.fetcher instead.");
-  }
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch snapshot from ${url} (status ${response.status})`);
-  }
-  if (!response.body) {
-    const buffer = await response.arrayBuffer();
-    return new Uint8Array(buffer);
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-    if (!value) {
-      continue;
-    }
-    const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
-    total += chunk.length;
-    chunks.push(chunk);
-  }
-  const result = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return result;
-}
-
-function toUint8Array(data: Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Array {
-  if (data instanceof Uint8Array) {
-    return data;
-  }
-  if (data instanceof ArrayBuffer) {
-    return new Uint8Array(data);
-  }
-  if (ArrayBuffer.isView(data)) {
-    return new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
-  }
-  throw new Error("Unsupported snapshot buffer type");
-}
-
 function normalizeMaterializeSelector(
   selector: WorkspaceMaterializeSelector
 ): WorkspaceMaterializeSelectorWire {
@@ -2385,8 +2234,6 @@ function normalizeResumeInputValue(value: ResumeInputValue): ResumeInputPayload 
 }
 
 export const __internals = {
-  resolveSnapshotSource,
-  fetchSnapshotFromUrl,
   coerceFigureError,
   normalizeResumeInputValue,
   workspaceHover: workspaceHoverInternals as unknown as Record<string, unknown>,

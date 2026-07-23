@@ -597,7 +597,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_full_permutation_matches_expected_sequence() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let args = vec![Value::from(5)];
         let result = randperm_builtin(args).expect("randperm");
@@ -620,7 +620,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_partial_selection_is_unique_and_sorted() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let args = vec![Value::from(10), Value::from(4)];
         let result = randperm_builtin(args).expect("randperm");
@@ -675,7 +675,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_accepts_double_keyword() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let args = vec![Value::from(5), Value::from("double")];
         let result = randperm_builtin(args).expect("randperm");
@@ -688,7 +688,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_like_tensor_matches_host_output() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let proto_tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
         let args = vec![
@@ -706,7 +706,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_gpu_like_roundtrip() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         random::reset_rng();
         test_support::with_test_provider(|provider| {
             let proto_tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
@@ -745,7 +745,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn randperm_wgpu_produces_unique_indices() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         random::reset_rng();
         use runmat_accelerate::backend::wgpu::provider::{
             register_wgpu_provider, WgpuProviderOptions,

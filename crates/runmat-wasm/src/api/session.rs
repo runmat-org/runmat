@@ -71,7 +71,6 @@ use crate::wire::value::MAX_DATA_PREVIEW;
 #[wasm_bindgen]
 pub struct RunMatWasm {
     session: RefCell<RunMatSession>,
-    snapshot_seed: Option<Vec<u8>>,
     config: RefCell<SessionConfig>,
     gpu_status: GpuStatus,
     disposed: Cell<bool>,
@@ -128,14 +127,12 @@ struct GeometryInputFile {
 impl RunMatWasm {
     pub(crate) fn new(
         session: RunMatSession,
-        snapshot_seed: Option<Vec<u8>>,
         config: SessionConfig,
         gpu_status: GpuStatus,
         telemetry_sink: Option<Arc<dyn TelemetrySink>>,
     ) -> Self {
         Self {
             session: RefCell::new(session),
-            snapshot_seed,
             config: RefCell::new(config),
             gpu_status,
             disposed: Cell::new(false),
@@ -1189,12 +1186,8 @@ impl RunMatWasm {
         );
         let config = self.config.borrow();
         let consent = config.telemetry_consent;
-        let mut session = RunMatSession::with_snapshot_bytes(
-            config.enable_jit,
-            config.verbose,
-            self.snapshot_seed.as_deref(),
-        )
-        .map_err(|err| js_error(&format!("Failed to reset session: {err}")))?;
+        let mut session = RunMatSession::with_options(config.enable_jit, config.verbose)
+            .map_err(|err| js_error(&format!("Failed to reset session: {err}")))?;
         session.set_telemetry_consent(consent);
         if let Some(cid) = config.telemetry_client_id.clone() {
             session.set_telemetry_client_id(Some(cid));

@@ -2158,6 +2158,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sprand_pattern_form_preserves_shape_and_pattern() {
+        let _rng_guard = random::test_guard();
         let pattern =
             SparseTensor::new(3, 2, vec![0, 2, 3], vec![0, 2, 1], vec![10.0, 30.0, 20.0]).unwrap();
         let random = expect_sparse(sprand_builtin(vec![Value::SparseTensor(pattern)]).unwrap());
@@ -2173,6 +2174,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sprand_density_form_constructs_requested_sparse_shape() {
+        let _rng_guard = random::test_guard();
         let random = expect_sparse(
             sprand_builtin(vec![Value::Num(4.0), Value::Num(5.0), Value::Num(0.25)]).unwrap(),
         );
@@ -2186,6 +2188,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sprand_density_sampling_is_bounded_near_full_density() {
+        let _rng_guard = random::test_guard();
         let random = expect_sparse(
             sprand_builtin(vec![Value::Num(5.0), Value::Num(5.0), Value::Num(0.92)]).unwrap(),
         );
@@ -2195,6 +2198,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sprand_scalar_rc_form_matches_requested_condition_at_full_density() {
+        let _rng_guard = random::test_guard();
         random::set_seed(11).expect("seed");
         let random = expect_sparse(
             sprand_builtin(vec![
@@ -2216,6 +2220,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sprand_vector_rc_form_uses_requested_singular_values() {
+        let _rng_guard = random::test_guard();
         random::set_seed(13).expect("seed");
         let profile = Tensor::new(vec![1.0, 0.5], vec![2, 1]).unwrap();
         let random = expect_sparse(
@@ -2239,6 +2244,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sprand_rc_form_respects_density_and_typename_validation() {
+        let _rng_guard = random::test_guard();
         random::set_seed(17).expect("seed");
         let random = expect_sparse(
             sprand_builtin(vec![
@@ -2280,6 +2286,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sprand_rc_vector_shape_preserves_singular_value_without_rotation_cap() {
+        let _rng_guard = random::test_guard();
         random::set_seed(19).expect("seed");
         let random = expect_sparse(
             sprand_builtin(vec![

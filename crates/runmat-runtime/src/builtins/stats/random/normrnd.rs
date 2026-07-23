@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn normrnd_scalar_deterministic() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let result =
             block_on(normrnd_builtin(vec![Value::Num(0.0), Value::Num(1.0)])).expect("normrnd");
@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn normrnd_matrix_dims() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let args = vec![
             Value::Num(5.0),
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn normrnd_size_vec() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let size = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
         let args = vec![Value::Num(0.0), Value::Num(1.0), Value::Tensor(size)];
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn normrnd_distribution_mean_and_std() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let mu = 5.0_f64;
         let sigma = 2.0_f64;

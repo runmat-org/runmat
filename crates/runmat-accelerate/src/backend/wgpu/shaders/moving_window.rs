@@ -27,7 +27,7 @@ fn nanValue() -> f64 {
 }
 
 fn kthValue(
-    target: u32,
+    target_rank: u32,
     in_start: i32,
     in_end: i32,
     before_idx: u32,
@@ -72,7 +72,7 @@ fn kthValue(
                         equal = equal + fill_count;
                     }
                 }
-                if (less <= target && target < less + equal) {
+                if (less <= target_rank && target_rank < less + equal) {
                     if (!found || candidate < selected) {
                         selected = candidate;
                         found = true;
@@ -105,7 +105,7 @@ fn kthValue(
                 pos = pos + 1u;
             }
         }
-        if (less <= target && target < less + equal) {
+        if (less <= target_rank && target_rank < less + equal) {
             if (!found || candidate < selected) {
                 selected = candidate;
                 found = true;
@@ -363,7 +363,7 @@ fn nanValue() -> f32 {
 }
 
 fn kthValue(
-    target: u32,
+    target_rank: u32,
     in_start: i32,
     in_end: i32,
     before_idx: u32,
@@ -408,7 +408,7 @@ fn kthValue(
                         equal = equal + fill_count;
                     }
                 }
-                if (less <= target && target < less + equal) {
+                if (less <= target_rank && target_rank < less + equal) {
                     if (!found || candidate < selected) {
                         selected = candidate;
                         found = true;
@@ -441,7 +441,7 @@ fn kthValue(
                 pos = pos + 1u;
             }
         }
-        if (less <= target && target < less + equal) {
+        if (less <= target_rank && target_rank < less + equal) {
             if (!found || candidate < selected) {
                 selected = candidate;
                 found = true;

@@ -455,9 +455,9 @@ fn fea_benchmark_conformance_manifest_gates() {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|value| value.as_secs())
                 .unwrap_or(0);
-            let snapshot_path =
+            let report_path =
                 dir_path.join(format!("analysis_benchmark_report_rolling_{stamp}.json"));
-            let _ = fs::write(snapshot_path, &report_json);
+            let _ = fs::write(report_path, &report_json);
         }
     }
 

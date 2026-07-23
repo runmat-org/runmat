@@ -411,8 +411,8 @@ mod tests {
         }
     }
 
-    fn reset_rng() -> std::sync::MutexGuard<'static, ()> {
-        let guard = random::test_lock().lock().unwrap();
+    fn reset_rng() -> impl Drop {
+        let guard = random::test_guard();
         random::reset_rng();
         guard
     }

@@ -144,7 +144,6 @@ Common options:
 | `--debug` | Enable debug logging. |
 | `--log-level LEVEL` | Set log verbosity. |
 | `--verbose` | Print more execution detail. |
-| `--snapshot PATH` | Preload a runtime snapshot. |
 | `--no-jit` | Use the interpreter only. |
 | `--jit-threshold N` | Set the execution count before JIT tiering. |
 | `--jit-opt-level LEVEL` | Set JIT optimization policy. |
@@ -253,24 +252,6 @@ runmat benchmark main --iterations 25 --jit
 ```
 
 The benchmark command performs warmup runs, then reports total iterations, JIT executions, interpreter executions, total time, average time, and throughput.
-
-## Snapshots
-
-Snapshots preload runtime assets so startup does less work.
-
-```bash
-runmat snapshot create -o stdlib.snapshot --compression zstd -O speed
-runmat snapshot info stdlib.snapshot
-runmat snapshot validate stdlib.snapshot
-runmat snapshot presets
-```
-
-Load a snapshot for a script or REPL:
-
-```bash
-runmat --snapshot stdlib.snapshot analysis.m
-runmat --snapshot stdlib.snapshot
-```
 
 ## Remote Projects
 

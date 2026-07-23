@@ -266,6 +266,13 @@ impl WgpuProvider {
     }
 
     pub(crate) fn free_exec(&self, handle: &GpuTensorHandle) -> Result<()> {
+        if handle.device_id != self.runtime_device_id {
+            return Err(anyhow!(
+                "free: handle belongs to device {}, but this provider owns device {}",
+                handle.device_id,
+                self.runtime_device_id
+            ));
+        }
         log::trace!("wgpu free id={}", handle.buffer_id);
         let entry = self
             .buffers
@@ -324,5 +331,35 @@ impl WgpuProvider {
             memory_bytes,
             backend: Some(backend),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn free_rejects_handles_owned_by_another_device() {
+        let Ok(provider) = WgpuProvider::new(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let handle = provider
+            .upload_exec(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[2, 1],
+            })
+            .expect("upload");
+        let foreign = GpuTensorHandle {
+            device_id: handle.device_id.wrapping_add(1),
+            ..handle.clone()
+        };
+
+        let error = provider
+            .free_exec(&foreign)
+            .expect_err("foreign handle must not free a local buffer");
+        assert!(error.to_string().contains("belongs to device"));
+        futures::executor::block_on(provider.download_exec(&handle))
+            .expect("the locally owned buffer must remain live");
+        provider.free_exec(&handle).expect("free local handle");
     }
 }

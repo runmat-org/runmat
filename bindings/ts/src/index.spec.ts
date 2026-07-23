@@ -29,7 +29,6 @@ import {
   FEA_SUPPORTED_PHYSICS_PROFILES,
   type RunMatSessionHandle,
   type RunMatFilesystemProvider,
-  type RunMatSnapshotSource,
   type ExecuteRequest,
   type ExecuteResult,
   type GpuStatus,
@@ -38,24 +37,6 @@ import {
   setSignalTraceHandler,
   withSignalTrace
 } from "./index.js";
-
-async function readStream(stream: ReadableStream<Uint8Array> | undefined): Promise<number[]> {
-  if (!stream) {
-    return [];
-  }
-  const reader = stream.getReader();
-  const chunks: number[] = [];
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-    if (value) {
-      chunks.push(...value);
-    }
-  }
-  return chunks;
-}
 
 const defaultStats: SessionStats = {
   totalExecutions: 0,
@@ -220,45 +201,6 @@ function createHoverHarness(
   return { controller, provider: providerImpl, model, position };
 }
 
-describe("resolveSnapshotSource", () => {
-  it("prefers inline bytes", async () => {
-    const source: RunMatSnapshotSource = { bytes: new Uint8Array([1, 2, 3]) };
-    const resolved = await __internals.resolveSnapshotSource(source);
-    expect(Array.from(resolved.bytes ?? [])).toEqual([1, 2, 3]);
-    expect(resolved.stream).toBeUndefined();
-  });
-
-  it("invokes custom fetcher", async () => {
-    const fetcher = vi.fn(async () => new Uint8Array([9, 9, 9]));
-    const source: RunMatSnapshotSource = { fetcher };
-    const resolved = await __internals.resolveSnapshotSource(source);
-    expect(fetcher).toHaveBeenCalledOnce();
-    expect(Array.from(resolved.bytes ?? [])).toEqual([9, 9, 9]);
-  });
-
-  it("passes through readable streams from fetcher responses", async () => {
-    const payload = new Uint8Array([5, 6, 7]);
-    const response = new Response(payload);
-    const source: RunMatSnapshotSource = {
-      fetcher: vi.fn(async () => response)
-    };
-    const resolved = await __internals.resolveSnapshotSource(source);
-    expect(resolved.stream).toBeDefined();
-    const values = await readStream(resolved.stream as ReadableStream<Uint8Array>);
-    expect(values).toEqual([5, 6, 7]);
-  });
-
-  it("fetches from URL when provided", async () => {
-    const payload = new Uint8Array([4, 5, 6]);
-    const mockFetch = vi.fn(async () => new Response(payload));
-    // @ts-expect-error override global fetch for test
-    globalThis.fetch = mockFetch;
-    const result = await __internals.fetchSnapshotFromUrl("https://example.com/snapshot.bin");
-    expect(mockFetch).toHaveBeenCalledOnce();
-    expect(Array.from(result)).toEqual([4, 5, 6]);
-  });
-});
-
 describe("coerceFigureError", () => {
   it("wraps structured payloads", () => {
     const payload = {
@@ -367,13 +309,12 @@ describe("initRunMat wiring", () => {
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
-    await initRunMat({ snapshot: { bytes: new Uint8Array([1, 2, 3]) }, fsProvider, enableGpu: false });
+    await initRunMat({ fsProvider, enableGpu: false });
 
-    expect(options[0].snapshotBytes).toBeDefined();
     expect(options[0].fsProvider).toBe(fsProvider);
   });
 
-  it("passes snapshot bytes and telemetry flag through to native init", async () => {
+  it("passes telemetry consent through to native init", async () => {
     const captured: any[] = [];
     const native: NativeModule = {
       default: async () => {},
@@ -384,11 +325,9 @@ describe("initRunMat wiring", () => {
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
-    const snapshot = new Uint8Array([9, 9, 9]);
-    await initRunMat({ snapshot: { bytes: snapshot }, telemetryConsent: false, enableGpu: false });
+    await initRunMat({ telemetryConsent: false, enableGpu: false });
 
     expect(captured).toHaveLength(1);
-    expect(captured[0].snapshotBytes).toBe(snapshot);
     expect(captured[0].telemetryConsent).toBe(false);
   });
 
@@ -407,7 +346,6 @@ describe("initRunMat wiring", () => {
     __internals.setNativeModuleOverride(native);
 
     const session = await initRunMat({
-      snapshot: { bytes: new Uint8Array([2]) },
       telemetryId: "cid-host",
       enableGpu: false
     });
@@ -429,7 +367,6 @@ describe("initRunMat wiring", () => {
     __internals.setNativeModuleOverride(native);
 
     await initRunMat({
-      snapshot: { bytes: new Uint8Array([3]) },
       scatterTargetPoints: 250_000,
       surfaceVertexBudget: 1_000_000,
       enableGpu: false
@@ -452,7 +389,6 @@ describe("initRunMat wiring", () => {
     __internals.setNativeModuleOverride(native);
 
     await initRunMat({
-      snapshot: { bytes: new Uint8Array([4]) },
       logLevel: "trace",
       enableGpu: false
     });
@@ -479,7 +415,7 @@ describe("initRunMat wiring", () => {
     });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: true });
+    await initRunMat({ enableGpu: true });
 
     expect(captured).toHaveLength(1);
     expect(captured[0].enableGpu).toBe(false);
@@ -502,13 +438,12 @@ describe("initRunMat wiring", () => {
       default: async () => {},
       initRunMat: async (opts: any) => {
         captured.push(opts);
-        expect(opts.snapshotBytes).toBeDefined();
         return createMockNativeSession();
       }
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
-    await initRunMat({ snapshot: { bytes: new Uint8Array([7]) }, enableGpu: false });
+    await initRunMat({ enableGpu: false });
 
     expect(defaultSpy).toHaveBeenCalledOnce();
     expect(captured).toHaveLength(1);
@@ -531,7 +466,7 @@ describe("initRunMat wiring", () => {
     __internals.setNativeModuleOverride(native);
 
     const canvas = { id: "canvas" } as unknown as HTMLCanvasElement;
-    await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, plotCanvas: canvas, enableGpu: false });
+    await initRunMat({ plotCanvas: canvas, enableGpu: false });
 
     expect(order).toEqual(["createPlotSurface", "initRunMat"]);
     expect(createSurfaceSpy).toHaveBeenCalledWith(canvas);
@@ -550,7 +485,7 @@ describe("initRunMat wiring", () => {
     __internals.setNativeModuleOverride(native);
 
     await expect(
-      initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, plotCanvas: {} as HTMLCanvasElement, enableGpu: false })
+      initRunMat({ plotCanvas: {} as HTMLCanvasElement, enableGpu: false })
     ).rejects.toMatchObject({ code: "PlotCanvas" });
   });
 
@@ -565,7 +500,7 @@ describe("initRunMat wiring", () => {
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
-    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
+    const session = await initRunMat({ enableGpu: false });
     session.dispose();
     expect(disposeSpy).toHaveBeenCalledOnce();
     expect(() => session.telemetryConsent()).toThrow(/disposed/);
@@ -584,7 +519,7 @@ describe("initRunMat wiring", () => {
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
-    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
+    const session = await initRunMat({ enableGpu: false });
     await expect(session.memoryUsage()).resolves.toEqual({ bytes: 1024, pages: 16 });
   });
 });
@@ -782,7 +717,7 @@ describe("workspace replay bindings", () => {
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
-    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
+    const session = await initRunMat({ enableGpu: false });
     const exported = await session.exportWorkspaceState({ includeVariables: "off" });
     const imported = await session.importWorkspaceState(new Uint8Array([3, 3]));
 
@@ -841,7 +776,7 @@ describe("ExecuteResult passthroughs", () => {
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
-    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
+    const session = await initRunMat({ enableGpu: false });
     const result = await session.executeRequest({
       source: { kind: "text", name: "<test>", text: "clc;" }
     });
@@ -965,7 +900,7 @@ describe("materializeVariable wiring", () => {
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
-    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
+    const session = await initRunMat({ enableGpu: false });
     const materialized = await session.materializeVariable("token-123", { limit: 64 });
 
     expect(spy).toHaveBeenCalledWith("token-123", { limit: 64 });
@@ -995,7 +930,7 @@ describe("materializeVariable wiring", () => {
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
-    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([9]) }, enableGpu: false });
+    const session = await initRunMat({ enableGpu: false });
     await session.materializeVariable({ previewToken: "abc-uuid", name: "ignored" }, { limit: 0 });
 
     expect(spy).toHaveBeenCalledWith({ previewToken: "abc-uuid" }, {});
@@ -1018,7 +953,7 @@ describe("setFusionPlanEnabled", () => {
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
-    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
+    const session = await initRunMat({ enableGpu: false });
     session.setFusionPlanEnabled(true);
     expect(spy).toHaveBeenCalledWith(true);
   });

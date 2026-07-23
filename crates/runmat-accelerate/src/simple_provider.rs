@@ -64,7 +64,6 @@ const PROVIDER_ID_BLOCK_SIZE: u64 = 1_000_000_000;
 
 static REGISTRY: OnceCell<Mutex<HashMap<u64, Vec<f64>>>> = OnceCell::new();
 static NEXT_PROVIDER_ID_BASE: AtomicU64 = AtomicU64::new(PROVIDER_ID_BLOCK_SIZE);
-static NEXT_INPROCESS_DEVICE_ID: AtomicU64 = AtomicU64::new(1);
 
 fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
@@ -676,12 +675,7 @@ pub struct InProcessProvider {
 
 impl InProcessProvider {
     pub fn new() -> Self {
-        let device_id = NEXT_INPROCESS_DEVICE_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                current.checked_add(1)
-            })
-            .expect("in-process provider device ids exhausted");
-        let device_id = u32::try_from(device_id).expect("in-process provider device ids exhausted");
+        let device_id = runmat_accelerate_api::next_device_id();
         let id_base = NEXT_PROVIDER_ID_BASE
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(PROVIDER_ID_BLOCK_SIZE)
@@ -2757,6 +2751,13 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
+        if h.device_id != self.device_id {
+            return Err(anyhow::anyhow!(
+                "free: handle belongs to device {}, but this provider owns device {}",
+                h.device_id,
+                self.device_id
+            ));
+        }
         let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         guard.remove(&h.buffer_id);
         runmat_accelerate_api::clear_handle_precision(h);
@@ -8521,6 +8522,23 @@ mod tests {
         );
 
         runmat_accelerate_api::clear_provider();
+    }
+
+    #[test]
+    fn inprocess_free_rejects_handles_owned_by_another_device() {
+        let provider = InProcessProvider::new();
+        let handle = real_handle(&provider, &[1.0, 2.0], &[2, 1]);
+        let foreign = GpuTensorHandle {
+            device_id: handle.device_id.wrapping_add(1),
+            ..handle.clone()
+        };
+
+        let error = provider
+            .free(&foreign)
+            .expect_err("foreign handle must not free a local buffer");
+        assert!(error.to_string().contains("belongs to device"));
+        block_on(provider.download(&handle)).expect("the locally owned buffer must remain live");
+        provider.free(&handle).expect("free local handle");
     }
 
     fn assert_complex_close(

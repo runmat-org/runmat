@@ -78,6 +78,16 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop>(
             Ok(s) => s,
             Err(_) => continue,
         };
+        let key = compute_hash(&wgsl_bytes, layout_tag, meta.workgroup_size);
+        if stem != format!("{key:016x}") {
+            log::warn!(
+                "warmup: removing pipeline cache entry {} because its shader contents do not match its cache key",
+                stem
+            );
+            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_file(&wgsl_path);
+            continue;
+        }
         let bgl = match build_bgl_for_layout_tag(device, layout_tag) {
             Some(b) => b,
             None => continue,
@@ -93,7 +103,6 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop>(
             "warmup-shader-module",
             wgsl_str,
         );
-        let key = compute_hash(&wgsl_bytes, layout_tag, meta.workgroup_size);
         let compiled_pipeline = panic::catch_unwind(AssertUnwindSafe(|| {
             let pipeline = get_or_create(
                 key,

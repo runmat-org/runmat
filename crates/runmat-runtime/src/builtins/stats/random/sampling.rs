@@ -1666,7 +1666,7 @@ mod tests {
 
     #[test]
     fn datasample_samples_rows_and_returns_indices() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _lock = random::test_guard();
         random::reset_rng();
         let data =
             Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 10.0, 20.0, 30.0], vec![3, 2]).unwrap());
@@ -1700,7 +1700,7 @@ mod tests {
 
     #[test]
     fn datasample_supports_char_weights() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _lock = random::test_guard();
         random::reset_rng();
         let data = Value::CharArray(CharArray::new_row("ACGT"));
         let out = block_on(datasample::datasample_builtin(
@@ -1724,7 +1724,7 @@ mod tests {
 
     #[test]
     fn datasample_supports_cell_arrays() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _lock = random::test_guard();
         random::reset_rng();
         let data = Value::Cell(
             CellArray::new(
@@ -1769,7 +1769,7 @@ mod tests {
 
     #[test]
     fn randsample_range_and_population_vector() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _lock = random::test_guard();
         random::reset_rng();
         let range = block_on(randsample::randsample_builtin(vec![
             Value::Num(5.0),
@@ -1807,7 +1807,7 @@ mod tests {
 
     #[test]
     fn unidrnd_generates_with_scalar_or_array_upper_bound() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _lock = random::test_guard();
         random::reset_rng();
         let out = block_on(unidrnd::unidrnd_builtin(vec![
             Value::Num(3.0),
@@ -1839,7 +1839,7 @@ mod tests {
 
     #[test]
     fn dividerand_partitions_indices_into_row_vectors() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _lock = random::test_guard();
         random::reset_rng();
         let _guard = crate::output_count::push_output_count(Some(3));
         let out = block_on(dividerand::dividerand_builtin(vec![
@@ -1871,7 +1871,7 @@ mod tests {
 
     #[test]
     fn dividerand_supports_defaults_and_empty_partitions() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _lock = random::test_guard();
         random::reset_rng();
         {
             let _guard = crate::output_count::push_output_count(Some(3));
@@ -1956,7 +1956,7 @@ mod tests {
 
     #[test]
     fn bootstrp_weighted_mean_returns_stats_and_samples() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _lock = random::test_guard();
         random::reset_rng();
         let data = Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap());
         let _guard = crate::output_count::push_output_count(Some(2));
@@ -1993,7 +1993,7 @@ mod tests {
 
     #[test]
     fn bootstrp_empty_function_returns_indices_without_evaluating() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _lock = random::test_guard();
         random::reset_rng();
         let data = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
         let _guard = crate::output_count::push_output_count(Some(2));
@@ -2024,7 +2024,7 @@ mod tests {
 
     #[test]
     fn bootstrp_multiple_data_arguments_sample_rows_together() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _lock = random::test_guard();
         random::reset_rng();
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
         let y = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0, 8.0], vec![4, 1]).unwrap());
@@ -2043,7 +2043,7 @@ mod tests {
 
     #[test]
     fn bootstrp_scalar_data_arguments_are_passed_through() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _lock = random::test_guard();
         random::reset_rng();
         let out = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(3.0),
@@ -2062,7 +2062,7 @@ mod tests {
 
     #[test]
     fn bootstrp_row_vector_sampling_ignores_scalar_passthrough_for_axis_choice() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _lock = random::test_guard();
         random::reset_rng();
         let row = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap());
         let _guard = crate::output_count::push_output_count(Some(2));

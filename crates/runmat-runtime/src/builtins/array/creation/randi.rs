@@ -885,7 +885,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_default_scalar() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let result = block_on(randi_builtin(vec![Value::Num(6.0)])).expect("randi");
         let expected = expected_sequence(&Bounds::new(1, 6).unwrap(), 1)[0] as f64;
@@ -920,7 +920,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_range_with_dims() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let bounds = Tensor::new(vec![3.0, 8.0], vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(bounds), Value::Num(2.0), Value::Num(3.0)];
@@ -940,7 +940,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_like_tensor() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let proto = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
         let args = vec![Value::Num(5.0), Value::from("like"), Value::Tensor(proto)];
@@ -959,7 +959,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_logical_output() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let bounds = Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap();
         let args = vec![
@@ -994,7 +994,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_like_logical_prototype() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let proto = LogicalArray::zeros(vec![2, 3]);
         let bounds = Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap();
@@ -1055,7 +1055,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_gpu_like_roundtrip() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         random::reset_rng();
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
@@ -1087,7 +1087,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_gpu_like_shape_override() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         random::reset_rng();
         test_support::with_test_provider(|provider| {
             let proto = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
@@ -1131,7 +1131,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn randi_wgpu_like_produces_in_range_values() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         random::reset_rng();
         let provider = match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),

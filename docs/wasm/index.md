@@ -52,7 +52,7 @@ await session.executeRequest({
 
 | Group | Options | Purpose |
 | --- | --- | --- |
-| Runtime | `snapshot`, `enableJit`, `language.compat` | Control startup state, native-code tiering, and MATLAB compatibility mode. |
+| Runtime | `enableJit`, `language.compat` | Control native-code tiering and MATLAB compatibility mode. |
 | GPU | `enableGpu`, `wgpuPowerPreference`, `wgpuForceFallbackAdapter` | Request WebGPU acceleration and adapter preferences. |
 | Filesystem | `fsProvider` | Provide file I/O for `load`, `save`, scripts, and path execution. |
 | Plotting | `plotCanvas`, `scatterTargetPoints`, `surfaceVertexBudget` | Attach a canvas and tune plotting LOD defaults. |

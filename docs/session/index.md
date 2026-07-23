@@ -65,7 +65,7 @@ flowchart TD
 | [Execution Requests](/docs/runtime/session/execution-requests) | The structured request/result ABI around session execution. |
 | [Workspace State](/docs/runtime/session/workspace) | How variable slots, stable binding keys, deltas, removals, and `ans` work. |
 | [Variable Inspection](/docs/runtime/session/variable-inspection) | Workspace entries, previews, materialization, preview tokens, and GPU slices. |
-| [Snapshots & Replay](/docs/runtime/session/snapshots) | Startup snapshots versus workspace replay state. |
+| [Workspace Replay](/docs/runtime/session/workspace-replay) | Exporting and restoring live workspace state. |
 | [Interaction & Streams](/docs/runtime/session/interaction-and-streams) | Console streams, warnings, async input, cancellation, diagnostics, and effects. |
 | [Host Integration](/docs/runtime/session/host-integration) | CLI, WASM/TypeScript, notebook, editor, and lifecycle responsibilities. |
 

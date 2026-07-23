@@ -1258,6 +1258,7 @@ mod source_discovery_tests {
 
     #[test]
     fn loose_runtime_companions_use_the_shared_matlab_source_index() {
+        let _provider_guard = runmat_filesystem::provider_override_lock();
         let temp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(temp.path().join("+pkg")).unwrap();
         fs::create_dir_all(temp.path().join("private")).unwrap();

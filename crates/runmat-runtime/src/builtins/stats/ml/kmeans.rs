@@ -1160,6 +1160,7 @@ mod tests {
 
     #[test]
     fn kmeans_clusters_numeric_matrix_with_outputs() {
+        let _rng_guard = random::test_guard();
         random::reset_rng();
         let x = tensor(vec![0.0, 0.2, 9.8, 10.0, 0.0, 0.1, 9.9, 10.1], 4, 2);
         let _guard = crate::output_count::push_output_count(Some(4));
@@ -1204,6 +1205,7 @@ mod tests {
 
     #[test]
     fn kmeans_treats_vector_as_column_and_nan_rows_as_missing() {
+        let _rng_guard = random::test_guard();
         random::reset_rng();
         let x = tensor(vec![1.0, 2.0, f64::NAN, 20.0, 21.0], 1, 5);
         let _guard = crate::output_count::push_output_count(Some(2));
@@ -1227,6 +1229,7 @@ mod tests {
 
     #[test]
     fn kmeans_supports_cityblock_and_replicates() {
+        let _rng_guard = random::test_guard();
         random::reset_rng();
         let x = tensor(vec![0.0, 1.0, 10.0, 11.0], 4, 1);
         let out = block_on(kmeans_builtin(
@@ -1291,6 +1294,7 @@ mod tests {
 
     #[test]
     fn kmeans_supports_cluster_start_and_online_phase() {
+        let _rng_guard = random::test_guard();
         random::reset_rng();
         let x = tensor(vec![0.0, 0.1, 9.9, 10.0, 0.0, 0.2, 10.1, 10.0], 4, 2);
         let out = block_on(kmeans_builtin(

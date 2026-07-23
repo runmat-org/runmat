@@ -32,7 +32,6 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig) -> Result<()> {
     let mut engine = create_session(
         enable_jit,
         config.runtime.verbose,
-        config.runtime.snapshot_path.as_ref(),
         config,
         "Failed to create REPL engine",
     )?;
@@ -64,7 +63,7 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig) -> Result<()> {
         return Ok(());
     }
 
-    print_repl_banner(config, &engine);
+    print_repl_banner(config);
 
     loop {
         let readline = rl.readline("runmat> ");
@@ -110,7 +109,7 @@ enum BannerTone {
     Muted,
 }
 
-fn print_repl_banner(config: &RunMatRuntimeConfig, engine: &RunMatSession) {
+fn print_repl_banner(config: &RunMatRuntimeConfig) {
     let caps = detect_banner_capabilities();
 
     println!(
@@ -135,7 +134,7 @@ fn print_repl_banner(config: &RunMatRuntimeConfig, engine: &RunMatSession) {
     );
     println!();
     println!("{}", format_gpu_line(config, &caps));
-    println!("{}", format_runtime_line(config, engine, &caps));
+    println!("{}", format_runtime_line(config, &caps));
     println!();
     println!("{}", format_help_line(&caps));
     println!();
@@ -218,11 +217,7 @@ fn format_gpu_line(config: &RunMatRuntimeConfig, caps: &BannerCapabilities) -> S
     )
 }
 
-fn format_runtime_line(
-    config: &RunMatRuntimeConfig,
-    engine: &RunMatSession,
-    caps: &BannerCapabilities,
-) -> String {
+fn format_runtime_line(config: &RunMatRuntimeConfig, caps: &BannerCapabilities) -> String {
     let jit_value = if config.jit.enabled {
         style_text(
             jit_opt_level_label(config.jit.optimization_level),
@@ -233,20 +228,12 @@ fn format_runtime_line(
         style_text("off", caps, BannerTone::Bright)
     };
     let gc_value = style_text(gc_preset_label(config.gc.preset), caps, BannerTone::Bright);
-    let snapshot_value = if engine.snapshot_info().is_some() {
-        style_text("loaded", caps, BannerTone::Bright)
-    } else {
-        style_text("none", caps, BannerTone::Bright)
-    };
-
     format!(
-        "{} {}\n{} {}\n{} {}",
+        "{} {}\n{} {}",
         style_text("JIT:", caps, BannerTone::Label),
         jit_value,
         style_text("GC:", caps, BannerTone::Label),
-        gc_value,
-        style_text("Snapshot:", caps, BannerTone::Label),
-        snapshot_value
+        gc_value
     )
 }
 

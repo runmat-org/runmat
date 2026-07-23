@@ -33,7 +33,6 @@ bindings/ts/src/generated/*
 !bindings/ts/src/generated/
 !bindings/ts/src/generated/fea-study-document-contracts.ts
 bindings/ts/dist/**/*
-bindings/ts/stdlib.snapshot
 
 .idea
 *.iml

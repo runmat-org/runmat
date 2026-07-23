@@ -1,6 +1,7 @@
 use crate::build_runtime_error;
 use futures::executor::block_on;
 use runmat_builtins::{LogicalArray, Tensor, Value};
+use std::cell::Cell;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 pub mod fs {
@@ -34,8 +35,50 @@ pub mod fs {
 
 /// Ensure an in-process acceleration provider is registered for tests,
 /// invoking the supplied closure with the provider trait object.
+pub(crate) struct GlobalStateTestGuard {
+    _guard: Option<MutexGuard<'static, ()>>,
+}
+
+thread_local! {
+    static GLOBAL_STATE_TEST_DEPTH: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Serialize tests that mutate process-wide runtime state.
+///
+/// The guard is re-entrant on the current thread because RNG tests can invoke
+/// acceleration-provider test helpers. Tests on different threads still
+/// serialize on the same mutex.
+pub(crate) fn global_state_test_guard() -> GlobalStateTestGuard {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let guard = GLOBAL_STATE_TEST_DEPTH.with(|depth| {
+        let current = depth.get();
+        let guard = if current == 0 {
+            Some(
+                LOCK.get_or_init(|| Mutex::new(()))
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()),
+            )
+        } else {
+            None
+        };
+        depth.set(current + 1);
+        guard
+    });
+    GlobalStateTestGuard { _guard: guard }
+}
+
+impl Drop for GlobalStateTestGuard {
+    fn drop(&mut self) {
+        GLOBAL_STATE_TEST_DEPTH.with(|depth| {
+            let current = depth.get();
+            debug_assert!(current > 0, "global test-state guard depth underflow");
+            depth.set(current.saturating_sub(1));
+        });
+    }
+}
+
 pub struct AccelTestGuard {
-    _guard: MutexGuard<'static, ()>,
+    _guard: GlobalStateTestGuard,
 }
 
 impl Drop for AccelTestGuard {
@@ -46,11 +89,7 @@ impl Drop for AccelTestGuard {
 }
 
 pub fn accel_test_lock() -> AccelTestGuard {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    let guard = LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let guard = global_state_test_guard();
     runmat_accelerate_api::set_thread_provider(None);
     runmat_accelerate_api::clear_provider();
     AccelTestGuard { _guard: guard }

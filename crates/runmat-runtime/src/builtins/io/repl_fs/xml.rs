@@ -688,13 +688,24 @@ mod tests {
     use crate::builtins::common::fs::path_to_string;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 
+    fn fs_test_guard() -> (
+        std::sync::MutexGuard<'static, ()>,
+        std::sync::MutexGuard<'static, ()>,
+    ) {
+        let provider_guard = runmat_filesystem::provider_override_lock();
+        let repl_guard = REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        (provider_guard, repl_guard)
+    }
+
     fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
         futures::executor::block_on(value)
     }
 
     #[test]
     fn xmlread_returns_lightweight_document_object() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = fs_test_guard();
         let path = std::env::temp_dir().join("runmat_xmlread_test.xml");
         std::fs::write(
             &path,
@@ -725,7 +736,7 @@ mod tests {
 
     #[test]
     fn readstruct_imports_xml_children_attributes_and_repeats() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = fs_test_guard();
         let path = std::env::temp_dir().join("runmat_readstruct_test.xml");
         std::fs::write(
             &path,
@@ -755,7 +766,7 @@ mod tests {
 
     #[test]
     fn readstruct_supports_xml_option_aliases() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = fs_test_guard();
         let path = std::env::temp_dir().join("runmat_readstruct_options_test.xml");
         std::fs::write(&path, r#"<root id="r1">body</root>"#).unwrap();
         let value = run(readstruct_builtin(vec![
@@ -778,7 +789,7 @@ mod tests {
 
     #[test]
     fn xmlwrite_serializes_dom_to_string_or_file() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = fs_test_guard();
         let mut root = ObjectInstance::new("org.w3c.dom.Element".to_string());
         root.properties
             .insert("TagName".to_string(), char_value("root"));
@@ -808,7 +819,7 @@ mod tests {
 
     #[test]
     fn xmlread_rejects_mismatched_tags() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = fs_test_guard();
         let path = std::env::temp_dir().join("runmat_xmlread_bad_test.xml");
         std::fs::write(&path, "<root><a></root>").unwrap();
         let err = run(xmlread_builtin(vec![Value::String(path_to_string(&path))])).unwrap_err();

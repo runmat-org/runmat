@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn unifrnd_scalar_deterministic() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _provider_guard = reset_cpu_path();
         let result =
             block_on(unifrnd_builtin(vec![Value::Num(2.0), Value::Num(5.0)])).expect("unifrnd");
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn unifrnd_matrix_dims() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _provider_guard = reset_cpu_path();
         let args = vec![
             Value::Num(0.0),
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn unifrnd_size_vec() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _provider_guard = reset_cpu_path();
         let size = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
         let args = vec![Value::Num(0.0), Value::Num(1.0), Value::Tensor(size)];
@@ -377,7 +377,7 @@ mod tests {
 
     #[test]
     fn unifrnd_distribution_bounds() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _provider_guard = reset_cpu_path();
         let a = 2.0_f64;
         let b = 7.0_f64;

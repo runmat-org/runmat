@@ -681,6 +681,7 @@ mod tests {
 
     #[test]
     fn holdout_default_output_is_training_mask() {
+        let _rng_guard = random::test_guard();
         random::set_seed(2026).expect("seed");
         let train = logical_data(
             call(
@@ -695,6 +696,7 @@ mod tests {
 
     #[test]
     fn holdout_two_outputs_are_complements() {
+        let _rng_guard = random::test_guard();
         random::set_seed(7).expect("seed");
         let outputs = output_list(
             call(
@@ -713,6 +715,7 @@ mod tests {
 
     #[test]
     fn kfold_returns_fold_indices_covering_all_folds() {
+        let _rng_guard = random::test_guard();
         random::set_seed(11).expect("seed");
         let folds = tensor_data(
             call(
@@ -731,6 +734,7 @@ mod tests {
 
     #[test]
     fn classes_option_stratifies_holdout() {
+        let _rng_guard = random::test_guard();
         random::set_seed(13).expect("seed");
         let classes =
             Tensor::new(vec![1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0], vec![8, 1]).expect("classes");

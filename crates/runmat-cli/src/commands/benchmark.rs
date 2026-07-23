@@ -10,7 +10,6 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::cli::Cli;
 use crate::commands::session::create_session;
 use crate::diagnostics::format_frontend_error;
 use crate::telemetry::{capture_provider_snapshot, RuntimeExecutionCounters, TelemetryRunKind};
@@ -20,7 +19,6 @@ pub async fn execute_benchmark(
     file: PathBuf,
     iterations: u32,
     jit: bool,
-    cli: &Cli,
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     let file = resolve_benchmark_input(file)?;
@@ -29,13 +27,7 @@ pub async fn execute_benchmark(
     let content = fs::read_to_string(&file)
         .with_context(|| format!("Failed to read script file: {file:?}"))?;
 
-    let mut engine = create_session(
-        jit,
-        false,
-        cli.snapshot.as_ref(),
-        config,
-        "Failed to create execution engine",
-    )?;
+    let mut engine = create_session(jit, false, config, "Failed to create execution engine")?;
     let mut bench_run = engine.telemetry_run(TelemetryRunConfig {
         kind: TelemetryRunKind::Benchmark,
         jit_enabled: jit,

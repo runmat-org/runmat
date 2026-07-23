@@ -652,9 +652,6 @@ pub(crate) fn expected_complex_normal_sequence(count: usize) -> Vec<(f64, f64)> 
 }
 
 #[cfg(test)]
-static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
-
-#[cfg(test)]
-pub(crate) fn test_lock() -> &'static Mutex<()> {
-    TEST_MUTEX.get_or_init(|| Mutex::new(()))
+pub(crate) fn test_guard() -> super::test_support::GlobalStateTestGuard {
+    super::test_support::global_state_test_guard()
 }

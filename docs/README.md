@@ -71,7 +71,7 @@ If you want to understand how the runtime works internally, start with the [Comp
 - [Execution Requests](./session/execution-requests.md)
 - [Workspace State](./session/workspace.md)
 - [Variable Inspection](./session/variable-inspection.md)
-- [Snapshots & Replay](./session/snapshots.md)
+- [Workspace Replay](./session/workspace-replay.md)
 - [Interaction & Streams](./session/interaction-and-streams.md)
 - [Host Integration](./session/host-integration.md)
 

@@ -595,7 +595,26 @@ fn parse_data_ref(value: &Value) -> Option<SceneDataRef> {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
     use std::time::Instant;
+
+    struct CurrentDirGuard {
+        previous: PathBuf,
+    }
+
+    impl CurrentDirGuard {
+        fn change_to(path: &Path) -> Self {
+            let previous = runmat_filesystem::current_dir().expect("current dir");
+            runmat_filesystem::set_current_dir(path).expect("set cwd");
+            Self { previous }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            runmat_filesystem::set_current_dir(&self.previous).expect("restore current directory");
+        }
+    }
 
     #[cfg(feature = "plot-core")]
     fn write_scene_dataset(
@@ -924,6 +943,9 @@ mod tests {
     #[cfg(feature = "plot-core")]
     #[test]
     fn scene_chunk_reader_resolves_provider_relative_paths() {
+        let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let root = std::env::temp_dir().join(format!(
             "runmat_scene_relpath_{}",
             std::time::SystemTime::now()
@@ -943,8 +965,7 @@ mod tests {
         ))
         .expect("write chunk");
 
-        let previous = runmat_filesystem::current_dir().expect("current dir");
-        runmat_filesystem::set_current_dir(&root).expect("set cwd");
+        let _cwd = CurrentDirGuard::change_to(&root);
         let chunk = SceneDataChunkRef {
             src: Some(".artifacts/objects/ab/test_chunk.f64.chunk.json".to_string()),
             artifact_id: None,
@@ -958,8 +979,6 @@ mod tests {
         };
         let bytes =
             read_scene_chunk_bytes(&chunk, &data_ref).expect("read chunk via relative path");
-        runmat_filesystem::set_current_dir(previous).expect("restore cwd");
-
         assert_eq!(bytes, b"{\"values\":[1,2,3]}");
     }
 

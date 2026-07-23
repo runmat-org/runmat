@@ -829,17 +829,18 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
 
-    fn target_handle(class_name: &str) -> Value {
+    fn target_handle(class_name: &str) -> (Value, runmat_gc::ExplicitRoot) {
         let obj = ObjectInstance::new(class_name.to_string());
-        let handle = runmat_gc::gc_allocate(Value::Object(obj)).expect("gc");
-        Value::HandleObject(HandleRef {
+        let root = runmat_gc::gc_allocate_rooted(Value::Object(obj)).expect("gc");
+        let value = Value::HandleObject(HandleRef {
             class_name: class_name.to_string(),
-            target: handle,
+            target: root.handle(),
             valid: true,
-        })
+        });
+        (value, root)
     }
 
-    fn dynamic_target_handle(class_name: &str) -> Value {
+    fn dynamic_target_handle(class_name: &str) -> (Value, runmat_gc::ExplicitRoot) {
         runmat_builtins::register_class(runmat_builtins::ClassDef {
             name: class_name.to_string(),
             parent: Some(DYNAMICPROPS_CLASS.to_string()),
@@ -851,8 +852,8 @@ mod tests {
 
     #[test]
     fn addprop_adds_dynamic_property_and_returns_metadata_handle() {
-        runmat_gc::gc_test_context(|| {
-            let target = dynamic_target_handle("DynTarget");
+        {
+            let (target, _target_root) = dynamic_target_handle("DynTarget");
             let prop =
                 block_on(addprop_builtin(target.clone(), "gain".to_string())).expect("addprop");
             assert!(matches!(prop, Value::HandleObject(_)));
@@ -867,13 +868,13 @@ mod tests {
             };
             assert!(obj.has_dynamic_property("gain"));
             assert!(obj.properties.contains_key("gain"));
-        });
+        }
     }
 
     #[test]
     fn dynamic_property_delete_removes_target_property() {
-        runmat_gc::gc_test_context(|| {
-            let target = dynamic_target_handle("DynTarget");
+        {
+            let (target, _target_root) = dynamic_target_handle("DynTarget");
             let prop =
                 block_on(addprop_builtin(target.clone(), "gain".to_string())).expect("addprop");
             block_on(dynamic_property_delete_builtin(prop)).expect("delete");
@@ -886,13 +887,13 @@ mod tests {
             };
             assert!(!obj.has_dynamic_property("gain"));
             assert!(!obj.properties.contains_key("gain"));
-        });
+        }
     }
 
     #[test]
     fn dynamic_property_supports_value_access_and_metadata_mutation() {
-        runmat_gc::gc_test_context(|| {
-            let target = dynamic_target_handle("DynTarget");
+        {
+            let (target, _target_root) = dynamic_target_handle("DynTarget");
             let prop =
                 block_on(addprop_builtin(target.clone(), "gain".to_string())).expect("addprop");
 
@@ -934,32 +935,32 @@ mod tests {
                     .expect("dynamic property")
                     .hidden
             );
-        });
+        }
     }
 
     #[test]
     fn addprop_rejects_handle_classes_without_dynamicprops_parent() {
-        runmat_gc::gc_test_context(|| {
+        {
             runmat_builtins::register_class(runmat_builtins::ClassDef {
                 name: "PlainHandleForDynamicProps".to_string(),
                 parent: Some("handle".to_string()),
                 properties: HashMap::new(),
                 methods: HashMap::new(),
             });
-            let target = target_handle("PlainHandleForDynamicProps");
+            let (target, _target_root) = target_handle("PlainHandleForDynamicProps");
             let err = block_on(addprop_builtin(target, "gain".to_string()))
                 .expect_err("plain handles cannot add dynamic properties");
             assert!(
                 err.to_string().contains("not a dynamicprops subclass"),
                 "unexpected error: {err}"
             );
-        });
+        }
     }
 
     #[test]
     fn findprop_aliases_share_delete_invalidation() {
-        runmat_gc::gc_test_context(|| {
-            let target = dynamic_target_handle("DynAliasTarget");
+        {
+            let (target, _target_root) = dynamic_target_handle("DynAliasTarget");
             let first =
                 block_on(addprop_builtin(target.clone(), "gain".to_string())).expect("addprop");
             let second = findprop_builtin(target.clone(), "gain".to_string()).expect("findprop");
@@ -980,6 +981,6 @@ mod tests {
                 panic!("metadata object");
             };
             assert!(!metadata_obj.properties.contains_key(TARGET_FIELD));
-        });
+        }
     }
 }

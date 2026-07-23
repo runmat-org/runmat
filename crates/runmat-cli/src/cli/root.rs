@@ -7,9 +7,7 @@ use uuid::Uuid;
 
 use crate::cli::parse::{parse_bool_env, parse_figure_size, parse_log_level_env};
 use crate::cli::remote::{FsCommand, OrgCommand, ProjectCommand, RemoteCommand};
-use crate::cli::value_types::{
-    CaptureFiguresMode, CompressionAlg, FigureSize, GcPreset, LogLevel, OptLevel,
-};
+use crate::cli::value_types::{CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel};
 
 #[derive(Parser, Clone)]
 #[command(
@@ -26,7 +24,6 @@ Key features:
 • JIT compilation with Cranelift for optimal performance
 • Generational garbage collection with configurable policies
 • High-performance BLAS/LAPACK operations
-• Fast startup with snapshotting capabilities
 • World-class error messages and debugging
 • Compatible with MATLAB/Octave syntax and semantics
 
@@ -113,10 +110,6 @@ pub struct Cli {
     /// Verbose output for REPL and execution
     #[arg(short, long)]
     pub verbose: bool,
-
-    /// Snapshot file to preload standard library
-    #[arg(long)]
-    pub snapshot: Option<PathBuf>,
 
     /// Plotting mode
     #[arg(long, value_enum)]
@@ -282,11 +275,6 @@ pub enum Commands {
         #[arg(long)]
         jit: bool,
     },
-    /// Snapshot management
-    Snapshot {
-        #[command(subcommand)]
-        snapshot_command: SnapshotCommand,
-    },
     /// Configuration management
     Config {
         #[command(subcommand)]
@@ -354,34 +342,6 @@ pub enum GcCommand {
 }
 
 #[derive(Subcommand, Clone)]
-pub enum SnapshotCommand {
-    /// Create a new snapshot
-    Create {
-        /// Output snapshot file
-        #[arg(short, long)]
-        output: PathBuf,
-        /// Optimization level
-        #[arg(short = 'O', long, value_enum, default_value = "speed")]
-        optimization: OptLevel,
-        /// Compression algorithm
-        #[arg(short, long, value_enum)]
-        compression: Option<CompressionAlg>,
-    },
-    /// Load and inspect a snapshot
-    Info {
-        /// Snapshot file to inspect
-        snapshot: PathBuf,
-    },
-    /// List available presets
-    Presets,
-    /// Validate a snapshot file
-    Validate {
-        /// Snapshot file to validate
-        snapshot: PathBuf,
-    },
-}
-
-#[derive(Subcommand, Clone)]
 pub enum ConfigCommand {
     /// Show resolved runtime configuration
     Show {
@@ -405,6 +365,33 @@ pub enum ConfigCommand {
     },
     /// Show configuration file locations
     Paths,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn removed_startup_snapshot_flag_is_rejected() {
+        let error = match Cli::try_parse_from(["runmat", "--snapshot", "stdlib.snapshot", "main.m"])
+        {
+            Ok(_) => panic!("the removed startup snapshot flag must not parse"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("--snapshot"));
+    }
+
+    #[test]
+    fn snapshot_is_no_longer_a_cli_command() {
+        let cli = Cli::try_parse_from(["runmat", "snapshot"])
+            .expect("ordinary positional input must continue to parse as a script path");
+        assert!(cli.command.is_none());
+        assert_eq!(
+            cli.script.as_deref(),
+            Some(std::path::Path::new("snapshot"))
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]

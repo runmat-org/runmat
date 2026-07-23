@@ -669,7 +669,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_default_scalar() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let result = block_on(rand_builtin(Vec::new())).expect("rand");
         let expected = random::expected_uniform_sequence(1)[0];
@@ -700,7 +700,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_square_from_single_dimension() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let args = vec![Value::Num(3.0)];
         let result = block_on(rand_builtin(args)).expect("rand");
@@ -720,7 +720,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_legacy_seed_string_resets_sequence_and_queries_seed() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let seed_result = block_on(rand_builtin(vec![Value::from("seed"), Value::Num(2026.0)]))
             .expect("rand seed");
@@ -748,7 +748,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_legacy_seed_syncs_provider_state() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         random::reset_rng();
         test_support::with_test_provider(|provider| {
             block_on(rand_builtin(vec![Value::from("seed"), Value::Num(9.0)])).expect("rand seed");
@@ -763,7 +763,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_legacy_seed_literal_restarts_sequence() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         block_on(rand_builtin(vec![Value::from("seed"), Value::Num(2026.0)])).expect("rand seed");
         let first = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(4.0)])).expect("rand");
@@ -783,7 +783,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_legacy_seed_char_array_resets_sequence() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let seed_keyword = Value::CharArray(runmat_builtins::CharArray::new_row("seed"));
         block_on(rand_builtin(vec![seed_keyword.clone(), Value::Num(17.0)]))
@@ -803,7 +803,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_legacy_seed_rejects_invalid_seed_values() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let err = block_on(rand_builtin(vec![Value::from("seed"), Value::Num(-1.0)]))
             .expect_err("negative seed");
@@ -828,7 +828,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_like_tensor_infers_shape() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
@@ -848,7 +848,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_single_matrix_has_f32_dtype() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("single")];
         let result = block_on(rand_builtin(args)).expect("rand single");
@@ -874,7 +874,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_like_complex_produces_complex_tensor() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let args = vec![
             Value::Num(2.0),
@@ -899,7 +899,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_gpuarray_keyword_produces_valid_output() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let args = vec![Value::Num(3.0), Value::Num(4.0), Value::from("gpuArray")];
         let result = block_on(rand_builtin(args)).expect("rand gpuArray");
@@ -921,7 +921,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_gpu_like_uniform() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         random::reset_rng();
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();

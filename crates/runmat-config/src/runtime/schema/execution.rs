@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 use super::defaults::default_true;
 
@@ -16,8 +15,6 @@ pub struct RuntimeConfig {
     /// Enable verbose output
     #[serde(default)]
     pub verbose: bool,
-    /// Snapshot file to preload
-    pub snapshot_path: Option<PathBuf>,
 }
 
 /// JIT compiler configuration
@@ -76,7 +73,6 @@ impl Default for RuntimeConfig {
             callstack_limit: default_callstack_limit(),
             error_namespace: default_error_namespace(),
             verbose: false,
-            snapshot_path: None,
         }
     }
 }

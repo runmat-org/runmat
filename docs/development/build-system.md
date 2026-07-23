@@ -9,7 +9,7 @@ last_updated: "May 28, 2026"
 
 RunMat builds from a single Cargo workspace. The workspace keeps the language pipeline, execution engines, runtime builtins, acceleration layer, plotting, CLI, LSP, snapshotting, filesystem, and WASM bindings in one versioned graph.
 
-The TypeScript package in `bindings/ts` contains bindings for the WASM runtime to run in the browser, along with the LSP bundle, generated builtin metadata, and startup snapshot used by JavaScript consumers.
+The TypeScript package in `bindings/ts` contains bindings for the WASM runtime to run in the browser, along with the LSP bundle and generated builtin metadata used by JavaScript consumers.
 
 ## Workspace Layout
 
@@ -20,7 +20,7 @@ The root workspace uses Cargo resolver v2. Workspace dependency versions live in
 | Language pipeline | `runmat-lexer`, `runmat-parser`, `runmat-hir`, `runmat-mir`, `runmat-static-analysis` |
 | Execution | `runmat-vm`, `runmat-turbine`, `runmat-core` |
 | Runtime | `runmat-runtime`, `runmat-builtins`, `runmat-filesystem`, `runmat-time`, `runmat-config` |
-| Performance systems | `runmat-accelerate`, `runmat-accelerate-api`, `runmat-gc`, `runmat-gc-api`, `runmat-plot`, `runmat-snapshot` |
+| Performance systems | `runmat-accelerate`, `runmat-accelerate-api`, `runmat-gc`, `runmat-gc-api`, `runmat-plot` |
 | Host surfaces | `runmat` CLI, `runmat-lsp`, `runmat-wasm`, `runmat-server-client`, `runmat-telemetry`, `runmat-logging` |
 
 The `runmat` binary lives in `crates/runmat-cli`. It depends on the compiler, VM, runtime, plotting, acceleration, filesystem, config, telemetry, and session crates, so a default CLI build is the broadest native build target.
