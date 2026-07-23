@@ -10,7 +10,7 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 * Added restart + download RunMat Desktop options for if runtime is terminated due to memory pressure by Chrome / Safari / browser runtimes
 
 #### Fixed
-* Fixed logout / auth token refresh. Previously, when your authentication token expired (2h after log in), you'd need to log in again. OIDC refresh tokens are now implemented
+* Fixed logout / auth token refresh. Previously, when your authentication token expired (2h after log in), you'd need to log in again.
 * Fixed browser runtime worker recovery so lost/failed workers are fully reinitialized before commands run, instead of permanently failing with “RunMat session has not been initialised yet”
 * Fixed intermittent syntax highlighting: the web LSP no longer acknowledges document open/change before the WASM document entry exists, and now publishes revision-safe lexical/semantic tokens (including `%` comments) as analysis runs
 
