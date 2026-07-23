@@ -169,6 +169,8 @@ async fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRes
     if !rest.is_empty() {
         return Err(kron_error(&KRON_ERROR_TOO_MANY_INPUTS));
     }
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&b, BUILTIN_NAME)?;
 
     match (a, b) {
         (Value::GpuTensor(left), Value::GpuTensor(right)) => Ok(kron_gpu_gpu(left, right).await?),
