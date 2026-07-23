@@ -2170,7 +2170,7 @@ mod imp {
 #[cfg(not(target_arch = "wasm32"))]
 mod tests {
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_builtins::{ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage};
     use tempfile::tempdir;
 
     use super::imp::type_name;
@@ -2204,6 +2204,28 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn h5write_rejects_typed_complex_integer_without_float_coercion() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("typed_complex.h5");
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX]),
+            IntegerStorage::U64(vec![1_u64 << 63]),
+        )
+        .expect("matching components");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
+
+        let err = block_on(h5write_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/data".to_string()),
+            Value::ComplexTensor(tensor),
+            Vec::new(),
+        ))
+        .expect_err("typed complex integer HDF5 writes are unsupported");
+
+        assert_eq!(err.identifier(), Some("RunMat:hdf5:UnsupportedType"));
     }
 
     #[test]
