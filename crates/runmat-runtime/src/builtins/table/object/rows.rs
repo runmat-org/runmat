@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
+
 pub(crate) fn selected_row_names(
     object: &ObjectInstance,
     rows: &[usize],
@@ -313,35 +315,30 @@ pub(super) fn concatenate_numeric_columns(values: &[&Value]) -> BuiltinResult<Va
         _ => None,
     });
     if let Some(prototype) = typed_prototype {
-        let all_same_typed_class = values.iter().all(|value| {
-            matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some_and(|storage| storage.class_name() == prototype.class_name()))
-        });
-        if all_same_typed_class {
-            let mut exact = Vec::with_capacity(rows * total_cols);
-            for value in values {
-                let Value::Tensor(tensor) = value else {
-                    unreachable!("numeric columns were validated above");
-                };
-                let storage = tensor
-                    .integer_storage()
-                    .expect("typed column was checked above");
-                for col in 0..tensor.cols() {
-                    for row in 0..rows {
-                        exact.push(storage.value_at(row + col * tensor.rows()).ok_or_else(
-                            || invalid_index("table: integer column row index out of bounds"),
-                        )?);
-                    }
+        let target = IntegerTarget::from_storage(prototype);
+        let mut exact = Vec::with_capacity(rows * total_cols);
+        for value in values {
+            let Value::Tensor(tensor) = value else {
+                unreachable!("numeric columns were validated above");
+            };
+            for col in 0..tensor.cols() {
+                for row in 0..rows {
+                    let index = row + col * tensor.rows();
+                    let value = match tensor.integer_storage() {
+                        Some(storage) => {
+                            target.cast_int(&storage.value_at(index).ok_or_else(|| {
+                                invalid_index("table: integer column row index out of bounds")
+                            })?)
+                        }
+                        None => target.cast_scalar(tensor.get2(row, col).map_err(invalid_index)?),
+                    };
+                    exact.push(value);
                 }
             }
-            return Tensor::new_integer(
-                prototype
-                    .from_same_class_values(exact)
-                    .map_err(invalid_variable)?,
-                vec![rows, total_cols],
-            )
+        }
+        return Tensor::new_integer(target.storage(exact), vec![rows, total_cols])
             .map(Value::Tensor)
             .map_err(invalid_variable);
-        }
     }
     let mut data = Vec::with_capacity(rows * total_cols);
     for value in values {
@@ -464,6 +461,38 @@ mod tests {
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::U64(vec![large, u64::MAX, 7, 0, 9, 2]))
+        );
+    }
+
+    #[test]
+    fn concatenate_numeric_columns_uses_leftmost_integer_class_for_mixed_inputs() {
+        let first = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I8(vec![12, i8::MIN]), vec![2, 1])
+                .expect("left integer column"),
+        );
+        let second = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 7]), vec![2, 1])
+                .expect("wide unsigned column"),
+        );
+        let third =
+            Value::Tensor(Tensor::new(vec![3.5, -300.0], vec![2, 1]).expect("double column"));
+
+        let Value::Tensor(result) =
+            concatenate_numeric_columns(&[&first, &second, &third]).expect("mixed integer columns")
+        else {
+            panic!("expected exact integer tensor result");
+        };
+        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I8(vec![
+                12,
+                i8::MIN,
+                i8::MAX,
+                7,
+                4,
+                i8::MIN
+            ]))
         );
     }
 }
