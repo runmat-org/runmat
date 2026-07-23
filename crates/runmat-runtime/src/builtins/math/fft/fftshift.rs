@@ -416,8 +416,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        builtin_function_by_name, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor,
-        Type,
+        builtin_function_by_name, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+        LogicalArray, ResolveContext, Tensor, Type,
     };
 
     fn error_message(error: crate::RuntimeError) -> String {
@@ -613,6 +613,31 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn fftshift_preserves_typed_complex_integer_storage_at_u64_boundaries() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX, 2, 3, 4, 1_u64 << 63]),
+                IntegerStorage::U64(vec![10, 20, 30, 40, 50]),
+            )
+            .expect("storage"),
+            vec![5, 1],
+        )
+        .expect("tensor");
+
+        let Value::ComplexTensor(result) =
+            fftshift_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("fftshift")
+        else {
+            panic!("expected complex tensor");
+        };
+        let storage = result.integer_data.expect("exact integer storage");
+        assert_eq!(
+            storage.real,
+            IntegerStorage::U64(vec![4, 1_u64 << 63, u64::MAX, 2, 3])
+        );
+        assert_eq!(storage.imag, IntegerStorage::U64(vec![40, 50, 10, 20, 30]));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
