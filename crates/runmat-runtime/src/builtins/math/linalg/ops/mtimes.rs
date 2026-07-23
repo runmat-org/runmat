@@ -296,7 +296,9 @@ async fn mtimes_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     }
 
     if contains_integer(&lhs) || contains_integer(&rhs) {
-        if !mtimes_scalar(&lhs) && !mtimes_scalar(&rhs) {
+        if (contains_integer(&lhs) && !mtimes_scalar(&rhs))
+            || (contains_integer(&rhs) && !mtimes_scalar(&lhs))
+        {
             return Err(mtimes_invalid_input(
                 "mtimes: if one input is an integer class, the other input must be scalar",
             ));
