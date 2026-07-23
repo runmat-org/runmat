@@ -6,7 +6,7 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Type, Value,
+    IntValue, IntegerStorage, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -672,6 +672,10 @@ fn reduce_tensor_median_dim(
             .map_err(|e| median_internal_error(format!("median: {e}")));
     }
 
+    if let Some(storage) = tensor.integer_storage() {
+        return reduce_integer_tensor_median_dim(tensor, storage, dim, output_shape, reduce_len);
+    }
+
     if reduce_len == 1 {
         return Tensor::new(tensor.data.clone(), tensor.shape.clone())
             .map_err(|e| median_internal_error(format!("median: {e}")));
@@ -724,6 +728,104 @@ fn reduce_tensor_median_dim(
     }
 
     Tensor::new(output, output_shape).map_err(|e| median_internal_error(format!("median: {e}")))
+}
+
+fn reduce_integer_tensor_median_dim(
+    tensor: &Tensor,
+    storage: &IntegerStorage,
+    dim: usize,
+    output_shape: Vec<usize>,
+    reduce_len: usize,
+) -> BuiltinResult<Tensor> {
+    if reduce_len == 1 {
+        return Tensor::new_integer(storage.clone(), tensor.shape.clone())
+            .map_err(|e| median_internal_error(format!("median: {e}")));
+    }
+
+    let dim_index = dim - 1;
+    let stride_before = dim_product(&tensor.shape[..dim_index]);
+    let stride_after = dim_product(&tensor.shape[dim..]);
+    let exact = storage.exact_values();
+    let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
+
+    for after in 0..stride_after {
+        for before in 0..stride_before {
+            let mut slice = Vec::with_capacity(reduce_len);
+            for k in 0..reduce_len {
+                let index = before + k * stride_before + after * stride_before * reduce_len;
+                slice.push(exact[index].clone());
+            }
+            slice.sort_by(compare_same_class_integer);
+            output.push(integer_median_from_sorted(&slice));
+        }
+    }
+
+    Tensor::new_integer(
+        storage
+            .from_same_class_values(output)
+            .map_err(median_internal_error)?,
+        output_shape,
+    )
+    .map_err(|e| median_internal_error(format!("median: {e}")))
+}
+
+fn compare_same_class_integer(left: &IntValue, right: &IntValue) -> Ordering {
+    match (left, right) {
+        (IntValue::I8(a), IntValue::I8(b)) => a.cmp(b),
+        (IntValue::I16(a), IntValue::I16(b)) => a.cmp(b),
+        (IntValue::I32(a), IntValue::I32(b)) => a.cmp(b),
+        (IntValue::I64(a), IntValue::I64(b)) => a.cmp(b),
+        (IntValue::U8(a), IntValue::U8(b)) => a.cmp(b),
+        (IntValue::U16(a), IntValue::U16(b)) => a.cmp(b),
+        (IntValue::U32(a), IntValue::U32(b)) => a.cmp(b),
+        (IntValue::U64(a), IntValue::U64(b)) => a.cmp(b),
+        _ => unreachable!("integer storage supplies one homogeneous class"),
+    }
+}
+
+fn integer_median_from_sorted(values: &[IntValue]) -> IntValue {
+    let middle = values.len() / 2;
+    if values.len() % 2 == 1 {
+        return values[middle].clone();
+    }
+    macro_rules! signed_median {
+        ($variant:ident, $ty:ty) => {{
+            let IntValue::$variant(lower) = &values[middle - 1] else {
+                unreachable!()
+            };
+            let IntValue::$variant(upper) = &values[middle] else {
+                unreachable!()
+            };
+            let sum = *lower as i128 + *upper as i128;
+            let rounded = if sum >= 0 {
+                (sum + 1) / 2
+            } else {
+                (sum - 1) / 2
+            };
+            IntValue::$variant(rounded as $ty)
+        }};
+    }
+    macro_rules! unsigned_median {
+        ($variant:ident, $ty:ty) => {{
+            let IntValue::$variant(lower) = &values[middle - 1] else {
+                unreachable!()
+            };
+            let IntValue::$variant(upper) = &values[middle] else {
+                unreachable!()
+            };
+            IntValue::$variant(((*lower as u128 + *upper as u128 + 1) / 2) as $ty)
+        }};
+    }
+    match values.first().expect("nonempty median slice") {
+        IntValue::I8(_) => signed_median!(I8, i8),
+        IntValue::I16(_) => signed_median!(I16, i16),
+        IntValue::I32(_) => signed_median!(I32, i32),
+        IntValue::I64(_) => signed_median!(I64, i64),
+        IntValue::U8(_) => unsigned_median!(U8, u8),
+        IntValue::U16(_) => unsigned_median!(U16, u16),
+        IntValue::U32(_) => unsigned_median!(U32, u32),
+        IntValue::U64(_) => unsigned_median!(U64, u64),
+    }
 }
 
 pub fn compute_median_inplace(values: &mut [f64]) -> f64 {
@@ -783,7 +885,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     #[test]
     fn median_type_reduces_first_dim() {
@@ -854,6 +956,73 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0, 10.0], vec![4, 1]).unwrap();
         let result = median_builtin(Value::Tensor(tensor), Vec::new()).expect("median");
         assert_eq!(result, Value::Num(6.5));
+    }
+
+    #[test]
+    fn median_preserves_every_integer_class_and_rounds_even_pairs() {
+        let cases = [
+            IntegerStorage::I8(vec![-4, -3, 2, 3]),
+            IntegerStorage::I16(vec![-400, -300, 200, 300]),
+            IntegerStorage::I32(vec![i32::MIN, -1, 2, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, -3, 2, i64::MAX]),
+            IntegerStorage::U8(vec![0, 1, 2, u8::MAX]),
+            IntegerStorage::U16(vec![0, 1, 2, u16::MAX]),
+            IntegerStorage::U32(vec![0, 1, 2, u32::MAX]),
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX - 1, u64::MAX]),
+        ];
+
+        for storage in cases {
+            let input = Tensor::new_integer(storage.clone(), vec![4, 1]).expect("typed input");
+            let result = median_builtin(Value::Tensor(input), Vec::new()).expect("median");
+            let expected = integer_median_from_sorted(&storage.exact_values());
+            assert_eq!(result, Value::Int(expected));
+        }
+    }
+
+    #[test]
+    fn median_typed_integer_dimensions_and_all_retain_exact_storage() {
+        let large = 9_007_199_254_740_993_u64;
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![large, u64::MAX, 4, 8, 1, 3]),
+            vec![2, 3],
+        )
+        .expect("typed input");
+
+        let Value::Tensor(by_column) =
+            median_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("median by column")
+        else {
+            panic!("expected typed tensor result");
+        };
+        assert_eq!(
+            by_column.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                ((large as u128 + u64::MAX as u128 + 1) / 2) as u64,
+                6,
+                2,
+            ]))
+        );
+
+        let result =
+            median_builtin(Value::Tensor(tensor), vec![Value::from("all")]).expect("median all");
+        assert_eq!(result, Value::Int(IntValue::U64(6)));
+    }
+
+    #[test]
+    fn median_typed_integer_length_one_dimension_keeps_exact_storage() {
+        let large = 9_007_199_254_740_993_u64;
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![large, u64::MAX]), vec![1, 2])
+            .expect("typed input");
+
+        let Value::Tensor(result) =
+            median_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(1))])
+                .expect("median along singleton dimension")
+        else {
+            panic!("expected typed tensor result");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![large, u64::MAX]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
