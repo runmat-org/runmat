@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -306,6 +306,14 @@ impl Mat2CellInput {
                 Ok(tensor::tensor_into_value(tensor))
             }
             Mat2CellKind::Complex(t) => {
+                if let Some(storage) = &t.integer_data {
+                    return extract_typed_complex_integer_block(
+                        storage,
+                        &self.base_shape,
+                        start,
+                        sizes,
+                    );
+                }
                 let data = copy_block(&t.data, &self.base_shape, start, sizes)?;
                 let shape = adjust_output_shape(sizes);
                 if data.len() == 1 {
@@ -354,6 +362,43 @@ impl Mat2CellInput {
             Mat2CellKind::Char(ca) => slice_char_array(ca, start, sizes),
         }
     }
+}
+
+fn extract_typed_complex_integer_block(
+    storage: &IntegerComplexStorage,
+    base_shape: &[usize],
+    start: &[usize],
+    sizes: &[usize],
+) -> BuiltinResult<Value> {
+    let real = storage
+        .real
+        .from_exact_values_like(copy_block(
+            &storage.real.exact_values(),
+            base_shape,
+            start,
+            sizes,
+        )?)
+        .map_err(|e| {
+            mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+        })?;
+    let imag = storage
+        .imag
+        .from_exact_values_like(copy_block(
+            &storage.imag.exact_values(),
+            base_shape,
+            start,
+            sizes,
+        )?)
+        .map_err(|e| {
+            mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+        })?;
+    let storage = IntegerComplexStorage::new(real, imag).map_err(|e| {
+        mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+    })?;
+    let tensor = ComplexTensor::new_integer(storage, adjust_output_shape(sizes)).map_err(|e| {
+        mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+    })?;
+    Ok(Value::ComplexTensor(tensor))
 }
 
 fn parse_partitions(dims: &[usize], size_args: &[Value]) -> BuiltinResult<Vec<Vec<usize>>> {

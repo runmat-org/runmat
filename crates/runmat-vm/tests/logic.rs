@@ -607,6 +607,38 @@ fn typed_complex_integer_cell2mat_preserves_exact_components() {
 }
 
 #[test]
+fn typed_complex_integer_mat2cell_preserves_exact_components() {
+    let vars = execute_source(
+        "z = complex(uint64([18446744073709551615 9223372036854775808]), uint64([5 6])); c = mat2cell(z, [1], [1 1]); item = c{1,2}; item_real = real(item); item_imag = imag(item); out = cell2mat(c); out_real = real(out); out_imag = imag(out);",
+    )
+    .expect("mat2cell should preserve typed complex integer storage");
+
+    assert!(matches!(
+        &vars[2],
+        Value::ComplexTensor(tensor)
+            if tensor.shape == vec![1, 1]
+                && tensor.integer_data.as_ref().is_some_and(|storage|
+                    storage.real == IntegerStorage::U64(vec![1_u64 << 63])
+                        && storage.imag == IntegerStorage::U64(vec![6]))
+    ));
+    assert!(matches!(
+        &vars[3],
+        Value::Int(IntValue::U64(value)) if *value == 1_u64 << 63
+    ));
+    assert!(matches!(&vars[4], Value::Int(IntValue::U64(6))));
+    assert!(matches!(
+        &vars[6],
+        Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))
+    ));
+    assert!(matches!(
+        &vars[7],
+        Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::U64(vec![5, 6]))
+    ));
+}
+
+#[test]
 fn typed_complex_integer_numerical_integration_is_rejected_before_f64_coercion() {
     for operation in [
         "gradient(z)",
