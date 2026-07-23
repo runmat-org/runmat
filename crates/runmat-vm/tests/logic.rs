@@ -197,6 +197,19 @@ fn typed_complex_integer_kron_is_rejected_before_f64_coercion() {
 }
 
 #[test]
+fn typed_complex_integer_trace_is_rejected_before_f64_coercion() {
+    let err = execute_source(
+        "z = complex(uint64([9223372036854775808 2; 3 4]), uint64([1 2; 3 4])); out = trace(z);",
+    )
+    .expect_err("trace must reject typed complex integers");
+    assert!(
+        err.to_string()
+            .contains("operations involving complex numbers with integer types are not supported"),
+        "unexpected trace error: {err}"
+    );
+}
+
+#[test]
 fn typed_complex_integer_gpuarray_is_rejected_before_provider_dispatch() {
     let err = execute_source(
         "z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); g = gpuArray(z);",
