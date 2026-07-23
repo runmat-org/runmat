@@ -4141,6 +4141,22 @@ fn typed_complex_integer_metadata_script_surface() {
 }
 
 #[test]
+fn typed_complex_integer_jsonencode_script_surface_preserves_exact_components() {
+    let vars = execute_source(
+        "z = complex(uint64(18446744073709551615), uint64(9223372036854775808)); encoded = jsonencode(z);",
+    );
+    assert!(
+        vars.iter().any(|value| matches!(
+            value,
+            runmat_builtins::Value::CharArray(chars)
+                if chars.data.iter().collect::<String>()
+                    == "{\"real\":18446744073709551615,\"imag\":9223372036854775808}"
+        )),
+        "jsonencode must use exact typed-complex integer components: {vars:?}"
+    );
+}
+
+#[test]
 fn num_arguments_from_subscript_script_surface() {
     let program = r#"
         C = {"one", 2, "three"};

@@ -555,13 +555,33 @@ fn complex_tensor_to_json(
     }
     let keep_dims = compute_keep_dims(&ct.shape, true);
     if keep_dims.is_empty() {
-        let (re, im) = ct.data[0];
-        return complex_scalar_to_json(re, im, options);
+        return complex_tensor_value_to_json(ct, 0, options);
     }
     build_strided_array(&ct.shape, &keep_dims, |offset| {
-        let (re, im) = ct.data[offset];
-        complex_scalar_to_json(re, im, options)
+        complex_tensor_value_to_json(ct, offset, options)
     })
+}
+
+fn complex_tensor_value_to_json(
+    ct: &ComplexTensor,
+    offset: usize,
+    options: &JsonEncodeOptions,
+) -> BuiltinResult<JsonValue> {
+    if let Some(storage) = &ct.integer_data {
+        return Ok(JsonValue::Object(vec![
+            (
+                "real".to_string(),
+                JsonValue::Number(integer_storage_number(&storage.real, offset)),
+            ),
+            (
+                "imag".to_string(),
+                JsonValue::Number(integer_storage_number(&storage.imag, offset)),
+            ),
+        ]));
+    }
+
+    let (real, imag) = ct.data[offset];
+    complex_scalar_to_json(real, imag, options)
 }
 
 fn string_array_to_json(
@@ -1189,6 +1209,69 @@ pub(crate) mod tests {
             as_string(encoded),
             "[{\"real\":1,\"imag\":2},{\"real\":3.5,\"imag\":-4}]"
         );
+    }
+
+    #[test]
+    fn jsonencode_typed_complex_integers_preserves_every_class_exactly() {
+        let cases = [
+            (
+                "int8",
+                IntegerStorage::I8(vec![-1]),
+                IntegerStorage::I8(vec![2]),
+                "{\"real\":-1,\"imag\":2}",
+            ),
+            (
+                "int16",
+                IntegerStorage::I16(vec![-3]),
+                IntegerStorage::I16(vec![4]),
+                "{\"real\":-3,\"imag\":4}",
+            ),
+            (
+                "int32",
+                IntegerStorage::I32(vec![-5]),
+                IntegerStorage::I32(vec![6]),
+                "{\"real\":-5,\"imag\":6}",
+            ),
+            (
+                "int64",
+                IntegerStorage::I64(vec![-9223372036854775808]),
+                IntegerStorage::I64(vec![9223372036854775807]),
+                "{\"real\":-9223372036854775808,\"imag\":9223372036854775807}",
+            ),
+            (
+                "uint8",
+                IntegerStorage::U8(vec![1]),
+                IntegerStorage::U8(vec![2]),
+                "{\"real\":1,\"imag\":2}",
+            ),
+            (
+                "uint16",
+                IntegerStorage::U16(vec![3]),
+                IntegerStorage::U16(vec![4]),
+                "{\"real\":3,\"imag\":4}",
+            ),
+            (
+                "uint32",
+                IntegerStorage::U32(vec![5]),
+                IntegerStorage::U32(vec![6]),
+                "{\"real\":5,\"imag\":6}",
+            ),
+            (
+                "uint64",
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1_u64 << 63]),
+                "{\"real\":18446744073709551615,\"imag\":9223372036854775808}",
+            ),
+        ];
+
+        for (class, real, imag, expected) in cases {
+            let storage = runmat_builtins::IntegerComplexStorage::new(real, imag)
+                .expect("matching integer components");
+            let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
+            let encoded = block_on(jsonencode_builtin(Value::ComplexTensor(tensor), Vec::new()))
+                .expect("jsonencode typed complex integer");
+            assert_eq!(as_string(encoded), expected, "{class}");
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
