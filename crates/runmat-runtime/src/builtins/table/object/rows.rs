@@ -89,6 +89,37 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                 .map_err(invalid_variable)
         }
         Value::ComplexTensor(tensor) => {
+            if let Some(storage) = &tensor.integer_data {
+                let mut real = Vec::with_capacity(rows.len() * tensor.cols);
+                let mut imag = Vec::with_capacity(rows.len() * tensor.cols);
+                for col in 0..tensor.cols {
+                    for &row in rows {
+                        let index = row + col * tensor.rows;
+                        real.push(storage.real.value_at(index).ok_or_else(|| {
+                            invalid_index("table: complex variable row index out of bounds")
+                        })?);
+                        imag.push(storage.imag.value_at(index).ok_or_else(|| {
+                            invalid_index("table: complex variable row index out of bounds")
+                        })?);
+                    }
+                }
+                return ComplexTensor::new_integer(
+                    runmat_builtins::IntegerComplexStorage::new(
+                        storage
+                            .real
+                            .from_exact_values_like(real)
+                            .map_err(invalid_variable)?,
+                        storage
+                            .imag
+                            .from_exact_values_like(imag)
+                            .map_err(invalid_variable)?,
+                    )
+                    .map_err(invalid_variable)?,
+                    vec![rows.len(), tensor.cols],
+                )
+                .map(Value::ComplexTensor)
+                .map_err(invalid_variable);
+            }
             let mut data = Vec::with_capacity(rows.len() * tensor.cols);
             for col in 0..tensor.cols {
                 for &row in rows {
@@ -283,6 +314,37 @@ mod tests {
         assert_eq!(
             selected.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, large, 0, 7]))
+        );
+    }
+
+    #[test]
+    fn select_rows_preserves_exact_complex_integer_storage() {
+        let large = 9_007_199_254_740_993_i64;
+        let value = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                runmat_builtins::IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![large, i64::MIN]),
+                    IntegerStorage::I64(vec![0, 7]),
+                )
+                .unwrap(),
+                vec![2, 1],
+            )
+            .unwrap(),
+        );
+
+        let selected = select_rows(&value, &[1, 0]).unwrap();
+        let Value::ComplexTensor(selected) = selected else {
+            panic!("expected complex tensor row selection");
+        };
+        assert_eq!(
+            selected.integer_data,
+            Some(
+                runmat_builtins::IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![i64::MIN, large]),
+                    IntegerStorage::I64(vec![7, 0]),
+                )
+                .unwrap(),
+            )
         );
     }
 }
