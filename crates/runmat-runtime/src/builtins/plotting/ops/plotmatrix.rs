@@ -577,6 +577,7 @@ mod tests {
             rows,
             cols,
             shape: vec![rows, cols],
+            integer_data: None,
             dtype: runmat_builtins::NumericDType::F64,
         })
     }

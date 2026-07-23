@@ -188,6 +188,7 @@ mod tests {
             cols: shape.get(1).copied().unwrap_or(1),
             shape,
             data,
+            integer_data: None,
             dtype: NumericDType::F64,
         })
     }

@@ -476,6 +476,7 @@ mod tests {
             rows,
             cols,
             shape: vec![rows, cols],
+            integer_data: None,
             dtype: NumericDType::F64,
         })
     }

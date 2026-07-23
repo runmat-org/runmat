@@ -1013,7 +1013,7 @@ pub(crate) mod tests {
         );
 
         let mut fields = StructValue::new();
-        fields.insert("values", Value::ComplexTensor(tensor));
+        fields.insert("values", Value::ComplexTensor(tensor.clone()));
         assert_eq!(
             render_value(&Value::Struct(fields), RenderMode::TopLevel),
             vec!["    values: [1x2 complex uint64]".to_string()]
