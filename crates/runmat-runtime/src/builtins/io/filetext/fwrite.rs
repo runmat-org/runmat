@@ -758,45 +758,58 @@ fn write_elements(
         let floating = value.as_f64();
         match spec.input {
             InputType::UInt8 => {
-                let byte = to_u8(floating);
+                let byte = integer_unsigned(value, u8::MAX as u64)
+                    .map_or_else(|| to_u8(floating), |v| v as u8);
                 write_bytes(file, &[byte])?;
             }
             InputType::Int8 => {
-                let byte = to_i8(floating) as u8;
+                let byte = integer_signed(value, i8::MIN as i64, i8::MAX as i64)
+                    .map_or_else(|| to_i8(floating), |v| v as i8) as u8;
                 write_bytes(file, &[byte])?;
             }
             InputType::UInt16 => {
-                let bytes = encode_u16(floating, endianness);
+                let bytes = integer_unsigned(value, u16::MAX as u64).map_or_else(
+                    || encode_u16(floating, endianness),
+                    |v| endian_u16(v as u16, endianness),
+                );
                 write_bytes(file, &bytes)?;
             }
             InputType::Int16 => {
-                let bytes = encode_i16(floating, endianness);
+                let bytes = integer_signed(value, i16::MIN as i64, i16::MAX as i64).map_or_else(
+                    || encode_i16(floating, endianness),
+                    |v| endian_i16(v as i16, endianness),
+                );
                 write_bytes(file, &bytes)?;
             }
             InputType::UInt32 => {
-                let bytes = encode_u32(floating, endianness);
+                let bytes = integer_unsigned(value, u32::MAX as u64).map_or_else(
+                    || encode_u32(floating, endianness),
+                    |v| endian_u32(v as u32, endianness),
+                );
                 write_bytes(file, &bytes)?;
             }
             InputType::Int32 => {
-                let bytes = encode_i32(floating, endianness);
+                let bytes = integer_signed(value, i32::MIN as i64, i32::MAX as i64).map_or_else(
+                    || encode_i32(floating, endianness),
+                    |v| endian_i32(v as i32, endianness),
+                );
                 write_bytes(file, &bytes)?;
             }
             InputType::UInt64 => {
                 let bytes = match value {
-                    WriteElement::Integer(IntValue::U64(value)) => match endianness {
-                        Endianness::Little => value.to_le_bytes(),
-                        Endianness::Big => value.to_be_bytes(),
-                    },
+                    WriteElement::Integer(_) => {
+                        endian_u64(integer_unsigned(value, u64::MAX).unwrap(), endianness)
+                    }
                     _ => encode_u64(floating, endianness),
                 };
                 write_bytes(file, &bytes)?;
             }
             InputType::Int64 => {
                 let bytes = match value {
-                    WriteElement::Integer(IntValue::I64(value)) => match endianness {
-                        Endianness::Little => value.to_le_bytes(),
-                        Endianness::Big => value.to_be_bytes(),
-                    },
+                    WriteElement::Integer(_) => endian_i64(
+                        integer_signed(value, i64::MIN, i64::MAX).unwrap(),
+                        endianness,
+                    ),
                     _ => encode_i64(floating, endianness),
                 };
                 write_bytes(file, &bytes)?;
@@ -817,6 +830,62 @@ fn write_elements(
         }
     }
     Ok(values.len())
+}
+
+fn integer_raw(value: &WriteElement) -> Option<i128> {
+    match value {
+        WriteElement::Integer(IntValue::I8(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::I16(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::I32(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::I64(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U8(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U16(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U32(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U64(v)) => Some(*v as i128),
+        WriteElement::Floating(_) => None,
+    }
+}
+fn integer_unsigned(value: &WriteElement, max: u64) -> Option<u64> {
+    integer_raw(value).map(|v| v.clamp(0, max as i128) as u64)
+}
+fn integer_signed(value: &WriteElement, min: i64, max: i64) -> Option<i64> {
+    integer_raw(value).map(|v| v.clamp(min as i128, max as i128) as i64)
+}
+fn endian_u16(value: u16, endian: Endianness) -> [u8; 2] {
+    match endian {
+        Endianness::Little => value.to_le_bytes(),
+        Endianness::Big => value.to_be_bytes(),
+    }
+}
+fn endian_i16(value: i16, endian: Endianness) -> [u8; 2] {
+    match endian {
+        Endianness::Little => value.to_le_bytes(),
+        Endianness::Big => value.to_be_bytes(),
+    }
+}
+fn endian_u32(value: u32, endian: Endianness) -> [u8; 4] {
+    match endian {
+        Endianness::Little => value.to_le_bytes(),
+        Endianness::Big => value.to_be_bytes(),
+    }
+}
+fn endian_i32(value: i32, endian: Endianness) -> [u8; 4] {
+    match endian {
+        Endianness::Little => value.to_le_bytes(),
+        Endianness::Big => value.to_be_bytes(),
+    }
+}
+fn endian_u64(value: u64, endian: Endianness) -> [u8; 8] {
+    match endian {
+        Endianness::Little => value.to_le_bytes(),
+        Endianness::Big => value.to_be_bytes(),
+    }
+}
+fn endian_i64(value: i64, endian: Endianness) -> [u8; 8] {
+    match endian {
+        Endianness::Little => value.to_le_bytes(),
+        Endianness::Big => value.to_be_bytes(),
+    }
 }
 
 fn write_bytes(file: &mut File, bytes: &[u8]) -> Result<(), String> {
@@ -1026,6 +1095,27 @@ pub(crate) mod tests {
         assert!(labels.contains(&"count = fwrite(fid, data, precision, skip)"));
         assert!(labels.contains(&"count = fwrite(fid, data, precision, machinefmt)"));
         assert!(labels.contains(&"count = fwrite(fid, data, precision, skip, machinefmt)"));
+    }
+
+    #[test]
+    fn typed_integer_precision_conversions_stay_in_integer_domain() {
+        let signed_min = WriteElement::Integer(IntValue::I64(i64::MIN));
+        let unsigned_max = WriteElement::Integer(IntValue::U64(u64::MAX));
+        let wide_unsigned = WriteElement::Integer(IntValue::U64(9_007_199_254_740_993));
+
+        assert_eq!(integer_unsigned(&signed_min, u64::MAX), Some(0));
+        assert_eq!(
+            integer_signed(&unsigned_max, i64::MIN, i64::MAX),
+            Some(i64::MAX)
+        );
+        assert_eq!(
+            integer_unsigned(&wide_unsigned, u32::MAX as u64),
+            Some(u32::MAX as u64)
+        );
+        assert_eq!(
+            integer_signed(&wide_unsigned, i32::MIN as i64, i32::MAX as i64),
+            Some(i32::MAX as i64)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
