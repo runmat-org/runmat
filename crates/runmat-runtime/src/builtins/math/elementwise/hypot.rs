@@ -146,6 +146,8 @@ fn hypot_error_with_detail(
     builtin_path = "crate::builtins::math::elementwise::hypot"
 )]
 async fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&lhs, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&rhs, BUILTIN_NAME)?;
     match (lhs, rhs) {
         (Value::GpuTensor(a), Value::GpuTensor(b)) => hypot_gpu_pair(a, b).await,
         (Value::GpuTensor(a), other) => {
@@ -262,7 +264,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type, Value,
+        CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+        ResolveContext, Tensor, Type, Value,
     };
 
     fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -304,6 +307,28 @@ pub(crate) mod tests {
     fn hypot_type_scalar_returns_num() {
         let out = numeric_binary_type(&[Type::Num, Type::Int], &ResolveContext::new(Vec::new()));
         assert_eq!(out, Type::Num);
+    }
+
+    #[test]
+    fn hypot_rejects_typed_complex_integer_inputs() {
+        let complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(IntegerStorage::I64(vec![1]), IntegerStorage::I64(vec![-2]))
+                .expect("storage"),
+            vec![1, 1],
+        )
+        .expect("tensor");
+
+        let left = hypot_builtin(Value::ComplexTensor(complex.clone()), Value::Num(1.0))
+            .expect_err("typed complex integer input must reject");
+        assert!(left
+            .message()
+            .contains("complex numbers with integer types"));
+
+        let right = hypot_builtin(Value::Num(1.0), Value::ComplexTensor(complex))
+            .expect_err("typed complex integer input must reject");
+        assert!(right
+            .message()
+            .contains("complex numbers with integer types"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

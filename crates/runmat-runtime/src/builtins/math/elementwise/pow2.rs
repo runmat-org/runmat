@@ -193,7 +193,13 @@ async fn pow2_unary(value: Value) -> BuiltinResult<Value> {
             let (rr, ii) = pow2_complex(re, im);
             Ok(Value::Complex(rr, ii))
         }
-        Value::ComplexTensor(ct) => pow2_complex_tensor(ct),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(
+                &ct,
+                BUILTIN_NAME,
+            )?;
+            pow2_complex_tensor(ct)
+        }
         Value::CharArray(ca) => pow2_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(pow2_error_with_detail(
             &POW2_ERROR_INVALID_INPUT,
@@ -204,6 +210,8 @@ async fn pow2_unary(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn pow2_binary(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&mantissa, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&exponent, BUILTIN_NAME)?;
     match (mantissa, exponent) {
         (Value::GpuTensor(mh), Value::GpuTensor(eh)) => pow2_gpu_scale(mh, eh).await,
         (Value::GpuTensor(mh), other) => {
@@ -469,7 +477,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
+    use runmat_builtins::{
+        IntValue, IntegerComplexStorage, IntegerStorage, ResolveContext, Tensor, Type,
+    };
 
     fn pow2_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::pow2_builtin(first, rest))
@@ -490,6 +500,31 @@ pub(crate) mod tests {
     fn pow2_string_input_has_stable_identifier() {
         let err = pow2_builtin(Value::from("bad"), vec![]).expect_err("expected error");
         assert_eq!(err.identifier(), POW2_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn pow2_rejects_typed_complex_integer_inputs() {
+        let complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1]),
+            )
+            .expect("storage"),
+            vec![1, 1],
+        )
+        .expect("tensor");
+
+        let unary = pow2_builtin(Value::ComplexTensor(complex.clone()), vec![])
+            .expect_err("typed complex integer input must reject");
+        assert!(unary
+            .message()
+            .contains("complex numbers with integer types"));
+
+        let binary = pow2_builtin(Value::Num(1.0), vec![Value::ComplexTensor(complex)])
+            .expect_err("typed complex integer exponent must reject");
+        assert!(binary
+            .message()
+            .contains("complex numbers with integer types"));
     }
 
     #[test]
