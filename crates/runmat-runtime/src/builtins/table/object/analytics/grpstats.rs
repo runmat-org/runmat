@@ -506,6 +506,7 @@ fn group_atom_is_missing(atom: &GroupAtom) -> bool {
     match atom {
         GroupAtom::Missing => true,
         GroupAtom::Number(value) => value.is_nan(),
+        GroupAtom::Integer(_) => false,
         GroupAtom::Text(value) => value.is_empty(),
         GroupAtom::Logical(_) => false,
     }
@@ -553,7 +554,16 @@ fn grouping_atoms(value: &Value, rows: usize) -> BuiltinResult<Vec<GroupAtom>> {
         )));
     }
     match value {
-        Value::Tensor(tensor) => Ok(tensor.data.iter().copied().map(GroupAtom::Number).collect()),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return Ok(storage
+                    .exact_values()
+                    .into_iter()
+                    .map(GroupAtom::Integer)
+                    .collect());
+            }
+            Ok(tensor.data.iter().copied().map(GroupAtom::Number).collect())
+        }
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()
@@ -587,13 +597,17 @@ fn grouping_atoms(value: &Value, rows: usize) -> BuiltinResult<Vec<GroupAtom>> {
 fn cell_atom(value: &Value) -> GroupAtom {
     match value {
         Value::Num(value) => GroupAtom::Number(*value),
-        Value::Int(value) => GroupAtom::Number(value.to_f64()),
+        Value::Int(value) => GroupAtom::Integer(value.clone()),
         Value::Bool(value) => GroupAtom::Logical(*value),
         Value::String(value) => GroupAtom::Text(value.clone()),
         Value::CharArray(array) if array.rows == 1 => {
             GroupAtom::Text(array.data.iter().collect::<String>().trim().to_string())
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => GroupAtom::Number(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+            .map(GroupAtom::Integer)
+            .unwrap_or(GroupAtom::Number(tensor.data[0])),
         Value::LogicalArray(array) if array.data.len() == 1 => {
             GroupAtom::Logical(array.data[0] != 0)
         }
