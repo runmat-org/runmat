@@ -308,6 +308,41 @@ pub(super) fn concatenate_numeric_columns(values: &[&Value]) -> BuiltinResult<Va
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     let total_cols: usize = cols.iter().sum();
+    let typed_prototype = values.iter().find_map(|value| match value {
+        Value::Tensor(tensor) => tensor.integer_storage(),
+        _ => None,
+    });
+    if let Some(prototype) = typed_prototype {
+        let all_same_typed_class = values.iter().all(|value| {
+            matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some_and(|storage| storage.class_name() == prototype.class_name()))
+        });
+        if all_same_typed_class {
+            let mut exact = Vec::with_capacity(rows * total_cols);
+            for value in values {
+                let Value::Tensor(tensor) = value else {
+                    unreachable!("numeric columns were validated above");
+                };
+                let storage = tensor
+                    .integer_storage()
+                    .expect("typed column was checked above");
+                for col in 0..tensor.cols() {
+                    for row in 0..rows {
+                        exact.push(storage.value_at(row + col * tensor.rows()).ok_or_else(
+                            || invalid_index("table: integer column row index out of bounds"),
+                        )?);
+                    }
+                }
+            }
+            return Tensor::new_integer(
+                prototype
+                    .from_same_class_values(exact)
+                    .map_err(invalid_variable)?,
+                vec![rows, total_cols],
+            )
+            .map(Value::Tensor)
+            .map_err(invalid_variable);
+        }
+    }
     let mut data = Vec::with_capacity(rows * total_cols);
     for value in values {
         let Value::Tensor(tensor) = value else {
@@ -409,6 +444,26 @@ mod tests {
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::I8(vec![i8::MAX, 0]))
+        );
+    }
+
+    #[test]
+    fn concatenate_numeric_columns_preserves_same_class_exact_integers() {
+        let large = 9_007_199_254_740_993_u64;
+        let first = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![large, u64::MAX]), vec![2, 1]).unwrap(),
+        );
+        let second = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![7, 0, 9, 2]), vec![2, 2]).unwrap(),
+        );
+
+        let Value::Tensor(result) = concatenate_numeric_columns(&[&first, &second]).unwrap() else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![large, u64::MAX, 7, 0, 9, 2]))
         );
     }
 }
