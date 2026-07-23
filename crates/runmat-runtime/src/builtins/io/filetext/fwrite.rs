@@ -4,7 +4,7 @@ use std::io::{Seek, SeekFrom, Write};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, Value,
+    CharArray, IntValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -658,20 +658,60 @@ fn numeric_scalar(value: &Value, err: &str) -> Result<f64, String> {
     }
 }
 
-fn flatten_elements(value: &Value) -> Result<Vec<f64>, String> {
+#[derive(Clone, Debug)]
+enum WriteElement {
+    Floating(f64),
+    Integer(IntValue),
+}
+
+impl WriteElement {
+    fn as_f64(&self) -> f64 {
+        match self {
+            Self::Floating(value) => *value,
+            Self::Integer(value) => value.to_f64(),
+        }
+    }
+}
+
+fn flatten_elements(value: &Value) -> Result<Vec<WriteElement>, String> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
-        Value::Num(n) => Ok(vec![*n]),
-        Value::Int(int) => Ok(vec![int.to_f64()]),
-        Value::Bool(b) => Ok(vec![if *b { 1.0 } else { 0.0 }]),
+        Value::Tensor(tensor) => Ok(tensor.integer_storage().map_or_else(
+            || {
+                tensor
+                    .data
+                    .iter()
+                    .copied()
+                    .map(WriteElement::Floating)
+                    .collect()
+            },
+            |storage| {
+                storage
+                    .exact_values()
+                    .into_iter()
+                    .map(WriteElement::Integer)
+                    .collect()
+            },
+        )),
+        Value::Num(n) => Ok(vec![WriteElement::Floating(*n)]),
+        Value::Int(int) => Ok(vec![WriteElement::Integer(int.clone())]),
+        Value::Bool(b) => Ok(vec![WriteElement::Floating(if *b { 1.0 } else { 0.0 })]),
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()
-            .map(|bit| if *bit != 0 { 1.0 } else { 0.0 })
+            .map(|bit| WriteElement::Floating(if *bit != 0 { 1.0 } else { 0.0 }))
             .collect()),
-        Value::CharArray(ca) => Ok(flatten_char_array(ca)),
-        Value::String(text) => Ok(text.chars().map(|ch| ch as u32 as f64).collect()),
-        Value::StringArray(sa) => Ok(flatten_string_array(sa)),
+        Value::CharArray(ca) => Ok(flatten_char_array(ca)
+            .into_iter()
+            .map(WriteElement::Floating)
+            .collect()),
+        Value::String(text) => Ok(text
+            .chars()
+            .map(|ch| WriteElement::Floating(ch as u32 as f64))
+            .collect()),
+        Value::StringArray(sa) => Ok(flatten_string_array(sa)
+            .into_iter()
+            .map(WriteElement::Floating)
+            .collect()),
         Value::GpuTensor(_) => Err("fwrite: expected host tensor data after gathering".to_string()),
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err("fwrite: complex values are not supported yet".to_string())
@@ -707,53 +747,66 @@ fn flatten_string_array(sa: &runmat_builtins::StringArray) -> Vec<f64> {
 
 fn write_elements(
     file: &mut File,
-    values: &[f64],
+    values: &[WriteElement],
     spec: WriteSpec,
     skip: usize,
     machine: MachineFormat,
 ) -> Result<usize, String> {
     let endianness = machine.to_endianness();
     let skip_offset = skip as i64;
-    for &value in values {
+    for value in values {
+        let floating = value.as_f64();
         match spec.input {
             InputType::UInt8 => {
-                let byte = to_u8(value);
+                let byte = to_u8(floating);
                 write_bytes(file, &[byte])?;
             }
             InputType::Int8 => {
-                let byte = to_i8(value) as u8;
+                let byte = to_i8(floating) as u8;
                 write_bytes(file, &[byte])?;
             }
             InputType::UInt16 => {
-                let bytes = encode_u16(value, endianness);
+                let bytes = encode_u16(floating, endianness);
                 write_bytes(file, &bytes)?;
             }
             InputType::Int16 => {
-                let bytes = encode_i16(value, endianness);
+                let bytes = encode_i16(floating, endianness);
                 write_bytes(file, &bytes)?;
             }
             InputType::UInt32 => {
-                let bytes = encode_u32(value, endianness);
+                let bytes = encode_u32(floating, endianness);
                 write_bytes(file, &bytes)?;
             }
             InputType::Int32 => {
-                let bytes = encode_i32(value, endianness);
+                let bytes = encode_i32(floating, endianness);
                 write_bytes(file, &bytes)?;
             }
             InputType::UInt64 => {
-                let bytes = encode_u64(value, endianness);
+                let bytes = match value {
+                    WriteElement::Integer(IntValue::U64(value)) => match endianness {
+                        Endianness::Little => value.to_le_bytes(),
+                        Endianness::Big => value.to_be_bytes(),
+                    },
+                    _ => encode_u64(floating, endianness),
+                };
                 write_bytes(file, &bytes)?;
             }
             InputType::Int64 => {
-                let bytes = encode_i64(value, endianness);
+                let bytes = match value {
+                    WriteElement::Integer(IntValue::I64(value)) => match endianness {
+                        Endianness::Little => value.to_le_bytes(),
+                        Endianness::Big => value.to_be_bytes(),
+                    },
+                    _ => encode_i64(floating, endianness),
+                };
                 write_bytes(file, &bytes)?;
             }
             InputType::Float32 => {
-                let bytes = encode_f32(value, endianness);
+                let bytes = encode_f32(floating, endianness);
                 write_bytes(file, &bytes)?;
             }
             InputType::Float64 => {
-                let bytes = encode_f64(value, endianness);
+                let bytes = encode_f64(floating, endianness);
                 write_bytes(file, &bytes)?;
             }
         }
@@ -930,7 +983,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntegerStorage, Tensor};
     use runmat_filesystem::File;
     use runmat_time::system_time_now;
     use std::io::Read;
@@ -998,6 +1051,78 @@ pub(crate) mod tests {
         let bytes = test_support::fs::read(&path).expect("read");
         assert_eq!(bytes, vec![1u8, 2, 255]);
         test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fwrite_uint64_preserves_exact_typed_tensor_bytes() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fwrite_uint64_exact");
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("w+b"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let values = [9_007_199_254_740_993, u64::MAX];
+        let tensor = Tensor::new_integer(IntegerStorage::U64(values.to_vec()), vec![2, 1])
+            .expect("typed uint64 tensor");
+
+        let eval = run_evaluate(
+            &Value::Num(fid as f64),
+            &Value::Tensor(tensor),
+            &vec![Value::from("uint64")],
+        )
+        .expect("fwrite");
+        assert_eq!(eval.count(), values.len());
+        run_fclose(&[Value::Num(fid as f64)]).expect("fclose");
+
+        let bytes = test_support::fs::read(&path).expect("read");
+        assert_eq!(
+            bytes,
+            values
+                .into_iter()
+                .flat_map(u64::to_ne_bytes)
+                .collect::<Vec<_>>()
+        );
+        test_support::fs::remove_file(path).expect("remove file");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fwrite_int64_preserves_exact_typed_tensor_bytes() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fwrite_int64_exact");
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("w+b"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let values = [i64::MIN, i64::MAX];
+        let tensor = Tensor::new_integer(IntegerStorage::I64(values.to_vec()), vec![2, 1])
+            .expect("typed int64 tensor");
+
+        let eval = run_evaluate(
+            &Value::Num(fid as f64),
+            &Value::Tensor(tensor),
+            &vec![Value::from("int64")],
+        )
+        .expect("fwrite");
+        assert_eq!(eval.count(), values.len());
+        run_fclose(&[Value::Num(fid as f64)]).expect("fclose");
+
+        let bytes = test_support::fs::read(&path).expect("read");
+        assert_eq!(
+            bytes,
+            values
+                .into_iter()
+                .flat_map(i64::to_ne_bytes)
+                .collect::<Vec<_>>()
+        );
+        test_support::fs::remove_file(path).expect("remove file");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
