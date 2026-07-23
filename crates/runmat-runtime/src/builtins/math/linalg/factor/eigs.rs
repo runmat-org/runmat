@@ -413,7 +413,7 @@ fn matrix_order(value: &Value) -> BuiltinResult<usize> {
     };
     if rows != cols {
         return Err(error_with_detail(
-            "eigs: input matrix must be square",
+            ERROR_INVALID_INPUT.message,
             &ERROR_INVALID_INPUT,
         ));
     }

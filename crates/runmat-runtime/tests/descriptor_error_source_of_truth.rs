@@ -90,12 +90,18 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
             }
 
             if trimmed.starts_with("identifier:") && trimmed.contains("Some(") {
+                let inline_literal = trimmed.contains("Some(\"");
+                let descriptor_macro_expression = trimmed.contains("concat!(")
+                    && trimmed.contains('$')
+                    && trimmed.contains("\"RunMat:\"");
                 assert!(
-                    trimmed.contains("Some(\""),
-                    "{} forwards identifier via constant/expression ({trimmed}); keep identifier text authored inline in BuiltinErrorDescriptor rows",
+                    inline_literal || descriptor_macro_expression,
+                    "{} forwards identifier via a non-canonical constant/expression ({trimmed}); author it inline in a BuiltinErrorDescriptor row or in the descriptor-generating macro itself",
                     file.display()
                 );
-                if let Some(identifier) = parse_inline_string_literal(trimmed) {
+                if inline_literal {
+                    let identifier = parse_inline_string_literal(trimmed)
+                        .expect("inline descriptor identifiers contain a string literal");
                     *descriptor_identifier_counts.entry(identifier).or_insert(0) += 1;
                 }
             }

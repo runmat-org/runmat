@@ -146,10 +146,11 @@ fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
 }
 
 fn ngrams_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("bagOfNgrams")
-        .with_identifier("RunMat:bagOfNgrams:InvalidInput")
-        .build()
+    let mut builder = build_runtime_error(message).with_builtin("bagOfNgrams");
+    if let Some(identifier) = ERROR_INVALID_INPUT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn ensure_bag_of_ngrams_class_registered() {

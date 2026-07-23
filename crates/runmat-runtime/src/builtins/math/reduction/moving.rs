@@ -2007,10 +2007,12 @@ fn descriptor_error(
 }
 
 fn identifier_suffix(descriptor: &'static BuiltinErrorDescriptor) -> &'static str {
-    match descriptor.code {
-        "RM.MOVING.INVALID_ARGUMENT" => "InvalidArgument",
-        "RM.MOVING.INVALID_INPUT" => "InvalidInput",
-        _ => "Internal",
+    if std::ptr::eq(descriptor, &ERROR_INVALID_ARGUMENT) {
+        "InvalidArgument"
+    } else if std::ptr::eq(descriptor, &ERROR_INVALID_INPUT) {
+        "InvalidInput"
+    } else {
+        "Internal"
     }
 }
 

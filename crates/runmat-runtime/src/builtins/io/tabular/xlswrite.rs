@@ -1535,10 +1535,12 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 
 fn map_writecell_error(err: RuntimeError) -> RuntimeError {
     let detail = err.message().to_string();
-    let builder = build_runtime_error(format!("xlswrite: {detail}"))
+    let mut builder = build_runtime_error(format!("xlswrite: {detail}"))
         .with_builtin(BUILTIN_NAME)
-        .with_source(err)
-        .with_identifier("RunMat:xlswrite:Io");
+        .with_source(err);
+    if let Some(identifier) = XLSWRITE_ERROR_IO.identifier {
+        builder = builder.with_identifier(identifier);
+    }
     builder.build()
 }
 

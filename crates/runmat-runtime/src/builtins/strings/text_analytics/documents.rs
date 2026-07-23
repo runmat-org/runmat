@@ -234,6 +234,56 @@ const ERROR_REMOVE_STOP_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErr
 const REMOVE_STOP_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] =
     [ERROR_REMOVE_STOP_WORDS_INVALID_INPUT];
 
+const ERROR_TOKEN_DETAILS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TOKENDETAILS.INVALID_INPUT",
+    identifier: Some("RunMat:tokenDetails:InvalidInput"),
+    when: "Inputs do not match a supported tokenDetails form.",
+    message: "tokenDetails received invalid input",
+};
+const ERROR_ADD_TYPE_DETAILS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ADDTYPEDETAILS.INVALID_INPUT",
+    identifier: Some("RunMat:addTypeDetails:InvalidInput"),
+    when: "Inputs do not match a supported addTypeDetails form.",
+    message: "addTypeDetails received invalid input",
+};
+const ERROR_ADD_SENTENCE_DETAILS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ADDSENTENCEDETAILS.INVALID_INPUT",
+    identifier: Some("RunMat:addSentenceDetails:InvalidInput"),
+    when: "Inputs do not match a supported addSentenceDetails form.",
+    message: "addSentenceDetails received invalid input",
+};
+const ERROR_ADD_LEMMA_DETAILS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ADDLEMMADETAILS.INVALID_INPUT",
+    identifier: Some("RunMat:addLemmaDetails:InvalidInput"),
+    when: "Inputs do not match a supported addLemmaDetails form.",
+    message: "addLemmaDetails received invalid input",
+};
+const ERROR_ADD_PART_OF_SPEECH_DETAILS_INVALID_INPUT: BuiltinErrorDescriptor =
+    BuiltinErrorDescriptor {
+        code: "RM.ADDPARTOFSPEECHDETAILS.INVALID_INPUT",
+        identifier: Some("RunMat:addPartOfSpeechDetails:InvalidInput"),
+        when: "Inputs do not match a supported addPartOfSpeechDetails form.",
+        message: "addPartOfSpeechDetails received invalid input",
+    };
+const ERROR_ADD_ENTITY_DETAILS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ADDENTITYDETAILS.INVALID_INPUT",
+    identifier: Some("RunMat:addEntityDetails:InvalidInput"),
+    when: "Inputs do not match a supported addEntityDetails form.",
+    message: "addEntityDetails received invalid input",
+};
+const ERROR_ADD_DEPENDENCY_DETAILS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ADDDEPENDENCYDETAILS.INVALID_INPUT",
+    identifier: Some("RunMat:addDependencyDetails:InvalidInput"),
+    when: "Inputs do not match a supported addDependencyDetails form.",
+    message: "addDependencyDetails received invalid input",
+};
+const ERROR_VADER_SENTIMENT_SCORES_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.VADERSENTIMENTSCORES.INVALID_INPUT",
+    identifier: Some("RunMat:vaderSentimentScores:InvalidInput"),
+    when: "Inputs do not match a supported vaderSentimentScores form.",
+    message: "vaderSentimentScores received invalid input",
+};
+
 pub const TOKENIZED_DOCUMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
         BuiltinSignatureDescriptor {
@@ -351,24 +401,25 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
     fn_name: &str,
     message: impl Into<String>,
 ) -> crate::RuntimeError {
-    let identifier = match fn_name {
-        "removeStopWords" => "RunMat:removeStopWords:InvalidInput",
-        "removeWords" => "RunMat:removeWords:InvalidInput",
-        "removeLongWords" => "RunMat:removeLongWords:InvalidInput",
-        "tokenDetails" => "RunMat:tokenDetails:InvalidInput",
-        "addTypeDetails" => "RunMat:addTypeDetails:InvalidInput",
-        "addSentenceDetails" => "RunMat:addSentenceDetails:InvalidInput",
-        "addLemmaDetails" => "RunMat:addLemmaDetails:InvalidInput",
-        "addPartOfSpeechDetails" => "RunMat:addPartOfSpeechDetails:InvalidInput",
-        "addEntityDetails" => "RunMat:addEntityDetails:InvalidInput",
-        "addDependencyDetails" => "RunMat:addDependencyDetails:InvalidInput",
-        "vaderSentimentScores" => "RunMat:vaderSentimentScores:InvalidInput",
-        _ => "RunMat:textAnalyticsDocuments:InvalidInput",
+    let descriptor = match fn_name {
+        "removeStopWords" => ERROR_REMOVE_STOP_WORDS_INVALID_INPUT,
+        "removeWords" => ERROR_REMOVE_WORDS_INVALID_INPUT,
+        "removeLongWords" => ERROR_REMOVE_LONG_WORDS_INVALID_INPUT,
+        "tokenDetails" => ERROR_TOKEN_DETAILS_INVALID_INPUT,
+        "addTypeDetails" => ERROR_ADD_TYPE_DETAILS_INVALID_INPUT,
+        "addSentenceDetails" => ERROR_ADD_SENTENCE_DETAILS_INVALID_INPUT,
+        "addLemmaDetails" => ERROR_ADD_LEMMA_DETAILS_INVALID_INPUT,
+        "addPartOfSpeechDetails" => ERROR_ADD_PART_OF_SPEECH_DETAILS_INVALID_INPUT,
+        "addEntityDetails" => ERROR_ADD_ENTITY_DETAILS_INVALID_INPUT,
+        "addDependencyDetails" => ERROR_ADD_DEPENDENCY_DETAILS_INVALID_INPUT,
+        "vaderSentimentScores" => ERROR_VADER_SENTIMENT_SCORES_INVALID_INPUT,
+        _ => ERROR_INVALID_INPUT,
     };
-    build_runtime_error(message)
-        .with_builtin(fn_name)
-        .with_identifier(identifier)
-        .build()
+    let builder = build_runtime_error(message).with_builtin(fn_name);
+    match descriptor.identifier {
+        Some(identifier) => builder.with_identifier(identifier).build(),
+        None => builder.build(),
+    }
 }
 
 fn ensure_tokenized_document_class_registered() {

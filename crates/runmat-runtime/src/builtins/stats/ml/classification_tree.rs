@@ -97,6 +97,20 @@ const ERROR_FITCTREE_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "fitctree: internal error",
 };
 
+const ERROR_PREDICT_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PREDICT.INVALID_ARGUMENT",
+    identifier: Some("RunMat:predict:InvalidArgument"),
+    when: "Classification-tree prediction inputs are malformed or incompatible with the model.",
+    message: "predict: invalid argument",
+};
+
+const ERROR_PREDICT_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PREDICT.INTERNAL",
+    identifier: Some("RunMat:predict:Internal"),
+    when: "Classification-tree prediction cannot construct its output.",
+    message: "predict: internal error",
+};
+
 const FITCTREE_ERRORS: [BuiltinErrorDescriptor; 2] =
     [ERROR_FITCTREE_INVALID_ARGUMENT, ERROR_FITCTREE_INTERNAL];
 
@@ -131,17 +145,22 @@ fn fitctree_internal(message: impl Into<String>) -> RuntimeError {
 }
 
 fn predict_invalid(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(PREDICT_NAME)
-        .with_identifier("RunMat:predict:InvalidArgument")
-        .build()
+    predict_error(message, &ERROR_PREDICT_INVALID_ARGUMENT)
 }
 
 fn predict_internal(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(PREDICT_NAME)
-        .with_identifier("RunMat:predict:Internal")
-        .build()
+    predict_error(message, &ERROR_PREDICT_INTERNAL)
+}
+
+fn predict_error(
+    message: impl Into<String>,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(PREDICT_NAME);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[derive(Clone, Debug)]

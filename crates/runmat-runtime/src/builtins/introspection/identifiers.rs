@@ -143,6 +143,13 @@ const ERROR_ISKEYWORD_TEXT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "iskeyword: input must be a string scalar or character vector",
 };
 
+const ERROR_ISKEYWORD_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISKEYWORD.INTERNAL",
+    identifier: Some("RunMat:iskeyword:Internal"),
+    when: "RunMat cannot construct the keyword-list cell array.",
+    message: "iskeyword: failed to build keyword list",
+};
+
 pub const NAMELENGTHMAX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &NAMELENGTHMAX_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -154,7 +161,11 @@ pub const ISKEYWORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISKEYWORD_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[ERROR_ISKEYWORD_ARG_COUNT, ERROR_ISKEYWORD_TEXT],
+    errors: &[
+        ERROR_ISKEYWORD_ARG_COUNT,
+        ERROR_ISKEYWORD_TEXT,
+        ERROR_ISKEYWORD_INTERNAL,
+    ],
 };
 
 #[runtime_builtin(
@@ -200,10 +211,11 @@ fn keyword_cell() -> BuiltinResult<Value> {
     CellArray::new(values, MATLAB_KEYWORDS.len(), 1)
         .map(Value::Cell)
         .map_err(|err| {
-            build_runtime_error(format!("iskeyword: failed to build keyword list ({err})"))
-                .with_builtin("iskeyword")
-                .with_identifier("RunMat:iskeyword:Internal")
-                .build()
+            error_with_detail(
+                "iskeyword",
+                &ERROR_ISKEYWORD_INTERNAL,
+                format!("iskeyword: failed to build keyword list ({err})"),
+            )
         })
 }
 
@@ -217,7 +229,15 @@ fn text_scalar(value: &Value) -> BuiltinResult<String> {
 }
 
 fn error(builtin: &str, descriptor: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    let mut builder = build_runtime_error(descriptor.message).with_builtin(builtin);
+    error_with_detail(builtin, descriptor, descriptor.message)
+}
+
+fn error_with_detail(
+    builtin: &str,
+    descriptor: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(builtin);
     if let Some(identifier) = descriptor.identifier {
         builder = builder.with_identifier(identifier);
     }

@@ -991,14 +991,6 @@ async fn reduction_max_gpu(
     handle: GpuTensorHandle,
     args: &ReductionArgs,
 ) -> BuiltinResult<Option<MaxEvaluation>> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     if args.nan_mode == ReductionNaN::Omit {
         log::trace!("max: gpu path disabled (nan_mode=omit)");
         return Ok(None);

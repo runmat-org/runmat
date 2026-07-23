@@ -242,20 +242,26 @@ pub(super) fn deep_learning_error(
     function: &'static str,
     message: impl Into<String>,
 ) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(function)
-        .with_identifier("RunMat:deepLearning:InvalidInput")
-        .build()
+    descriptor_error(function, message, &ERROR_INVALID_INPUT)
 }
 
 pub(super) fn unsupported_error(
     function: &'static str,
     message: impl Into<String>,
 ) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(function)
-        .with_identifier("RunMat:deepLearning:Unsupported")
-        .build()
+    descriptor_error(function, message, &ERROR_UNSUPPORTED)
+}
+
+fn descriptor_error(
+    function: &'static str,
+    message: impl Into<String>,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(function);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 pub(super) fn ensure_dlarray_class_registered() {

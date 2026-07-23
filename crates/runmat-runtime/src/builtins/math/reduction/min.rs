@@ -795,14 +795,6 @@ async fn reduction_min_gpu(
     handle: GpuTensorHandle,
     args: &ReductionArgs,
 ) -> BuiltinResult<Option<MinEvaluation>> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     if args.nan_mode == ReductionNaN::Omit {
         log::trace!("min: gpu path disabled (nan_mode=omit)");
         return Ok(None);

@@ -21,8 +21,6 @@ const DIGRAPH_CLASS: &str = "digraph";
 const NUM_NODES_PROPERTY: &str = "NumNodes";
 const GRAPH_NAME: &str = "graph";
 const DIGRAPH_NAME: &str = "digraph";
-const INTERNAL_ERROR_ID: &str = "RunMat:graph:Internal";
-const INVALID_ERROR_ID: &str = "RunMat:graph:InvalidArgument";
 
 const INPUT_GRAPH: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "G",
@@ -99,13 +97,13 @@ const GRAPH_QUERY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatur
 
 const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.GRAPH.INVALID_ARGUMENT",
-    identifier: Some(INVALID_ERROR_ID),
+    identifier: Some("RunMat:graph:InvalidArgument"),
     when: "Graph arguments, node ids, node names, edge weights, or output counts are invalid.",
     message: "graph: invalid argument",
 };
 const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.GRAPH.INTERNAL",
-    identifier: Some(INTERNAL_ERROR_ID),
+    identifier: Some("RunMat:graph:Internal"),
     when: "RunMat cannot build the requested graph value or query output.",
     message: "graph: internal error",
 };
@@ -189,17 +187,23 @@ fn numeric_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
 }
 
 fn graph_error(name: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(name)
-        .with_identifier(INVALID_ERROR_ID)
-        .build()
+    error_from_descriptor(name, ERROR_INVALID_ARGUMENT, message)
 }
 
 fn internal_error(name: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(name)
-        .with_identifier(INTERNAL_ERROR_ID)
-        .build()
+    error_from_descriptor(name, ERROR_INTERNAL, message)
+}
+
+fn error_from_descriptor(
+    name: &'static str,
+    descriptor: BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let builder = build_runtime_error(message).with_builtin(name);
+    match descriptor.identifier {
+        Some(identifier) => builder.with_identifier(identifier).build(),
+        None => builder.build(),
+    }
 }
 
 async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {

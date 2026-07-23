@@ -330,6 +330,13 @@ const ERROR_WRITE_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "Unable to write word embedding file",
 };
 
+const ERROR_WORD_EMBEDDING_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WORDEMBEDDING.INVALID_INPUT",
+    identifier: Some("RunMat:wordEmbedding:InvalidInput"),
+    when: "Internal wordEmbedding object construction receives invalid data.",
+    message: "wordEmbedding received invalid input",
+};
+
 const FASTTEXT_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_FASTTEXT_INVALID_INPUT];
 const READ_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_READ_INVALID_INPUT, ERROR_READ_IO];
 const WRITE_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_WRITE_INVALID_INPUT, ERROR_WRITE_IO];
@@ -2512,20 +2519,21 @@ fn looks_like_zip(bytes: &[u8]) -> bool {
 }
 
 fn embedding_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeError {
-    let identifier = match fn_name {
-        "fastTextWordEmbedding" => "RunMat:fastTextWordEmbedding:InvalidInput",
-        "readWordEmbedding" => "RunMat:readWordEmbedding:InvalidInput",
-        "writeWordEmbedding" => "RunMat:writeWordEmbedding:InvalidInput",
-        "trainWordEmbedding" => "RunMat:trainWordEmbedding:InvalidInput",
-        "doc2sequence" => "RunMat:doc2sequence:InvalidInput",
-        "word2vec" => "RunMat:word2vec:InvalidInput",
-        "vec2word" => "RunMat:vec2word:InvalidInput",
-        _ => "RunMat:wordEmbedding:InvalidInput",
+    let descriptor = match fn_name {
+        "fastTextWordEmbedding" => ERROR_FASTTEXT_INVALID_INPUT,
+        "readWordEmbedding" => ERROR_READ_INVALID_INPUT,
+        "writeWordEmbedding" => ERROR_WRITE_INVALID_INPUT,
+        "trainWordEmbedding" => ERROR_TRAIN_INVALID_INPUT,
+        "doc2sequence" => ERROR_DOC2SEQUENCE_INVALID_INPUT,
+        "word2vec" => ERROR_WORD2VEC_INVALID_INPUT,
+        "vec2word" => ERROR_VEC2WORD_INVALID_INPUT,
+        _ => ERROR_WORD_EMBEDDING_INVALID_INPUT,
     };
-    build_runtime_error(message.into())
-        .with_builtin(fn_name)
-        .with_identifier(identifier)
-        .build()
+    let builder = build_runtime_error(message.into()).with_builtin(fn_name);
+    match descriptor.identifier {
+        Some(identifier) => builder.with_identifier(identifier).build(),
+        None => builder.build(),
+    }
 }
 
 fn embedding_error_with_source(
@@ -2533,16 +2541,18 @@ fn embedding_error_with_source(
     message: impl Into<String>,
     source: impl std::error::Error + Send + Sync + 'static,
 ) -> crate::RuntimeError {
-    let identifier = match fn_name {
-        "readWordEmbedding" => "RunMat:readWordEmbedding:IOError",
-        "writeWordEmbedding" => "RunMat:writeWordEmbedding:IOError",
-        _ => "RunMat:wordEmbedding:InvalidInput",
+    let descriptor = match fn_name {
+        "readWordEmbedding" => ERROR_READ_IO,
+        "writeWordEmbedding" => ERROR_WRITE_IO,
+        _ => ERROR_WORD_EMBEDDING_INVALID_INPUT,
     };
-    build_runtime_error(message.into())
+    let builder = build_runtime_error(message.into())
         .with_builtin(fn_name)
-        .with_identifier(identifier)
-        .with_source(source)
-        .build()
+        .with_source(source);
+    match descriptor.identifier {
+        Some(identifier) => builder.with_identifier(identifier).build(),
+        None => builder.build(),
+    }
 }
 
 #[cfg(test)]

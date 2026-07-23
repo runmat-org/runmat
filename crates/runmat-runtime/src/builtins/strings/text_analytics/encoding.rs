@@ -897,17 +897,17 @@ fn char_row_to_string(array: &CharArray) -> String {
 }
 
 fn encoding_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeError {
-    let identifier = match fn_name {
-        "wordEncoding" => "RunMat:wordEncoding:InvalidInput",
-        "word2ind" => "RunMat:word2ind:InvalidInput",
-        "ind2word" => "RunMat:ind2word:InvalidInput",
-        "isVocabularyWord" => "RunMat:isVocabularyWord:InvalidInput",
-        _ => "RunMat:wordEncoding:InvalidInput",
+    let descriptor = match fn_name {
+        "word2ind" => ERROR_WORD2IND_INVALID_INPUT,
+        "ind2word" => ERROR_IND2WORD_INVALID_INPUT,
+        "isVocabularyWord" => ERROR_IS_VOCABULARY_WORD_INVALID_INPUT,
+        _ => ERROR_ENCODING_INVALID_INPUT,
     };
-    build_runtime_error(message.into())
-        .with_builtin(fn_name)
-        .with_identifier(identifier)
-        .build()
+    let builder = build_runtime_error(message.into()).with_builtin(fn_name);
+    match descriptor.identifier {
+        Some(identifier) => builder.with_identifier(identifier).build(),
+        None => builder.build(),
+    }
 }
 
 #[cfg(test)]

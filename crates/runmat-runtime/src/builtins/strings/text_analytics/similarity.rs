@@ -111,17 +111,22 @@ fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
 }
 
 fn similarity_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(NAME)
-        .with_identifier("RunMat:cosineSimilarity:InvalidInput")
-        .build()
+    descriptor_error(message, &ERROR_INVALID_INPUT)
 }
 
 fn dimension_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(NAME)
-        .with_identifier("RunMat:cosineSimilarity:DimensionMismatch")
-        .build()
+    descriptor_error(message, &ERROR_DIMENSION_MISMATCH)
+}
+
+fn descriptor_error(
+    message: impl Into<String>,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(

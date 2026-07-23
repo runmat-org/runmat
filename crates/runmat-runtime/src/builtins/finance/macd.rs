@@ -59,26 +59,26 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
-const ERRORS: [BuiltinErrorDescriptor; 3] = [
-    BuiltinErrorDescriptor {
+const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
         code: "RM.macd.INVALID_INPUT",
         identifier: Some("RunMat:macd:InvalidInput"),
         when: "Input is not a numeric M-by-4 matrix or table/timetable with High, Low, Open, and Close variables.",
         message: "macd: invalid input",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.macd.OUTPUT_COUNT",
-        identifier: Some("RunMat:macd:OutputCount"),
-        when: "More than two output arguments are requested.",
-        message: "macd: too many output arguments",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.macd.INTERNAL",
-        identifier: Some("RunMat:macd:Internal"),
-        when: "Output construction fails.",
-        message: "macd: internal error",
-    },
-];
+    };
+const ERROR_OUTPUT_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.macd.OUTPUT_COUNT",
+    identifier: Some("RunMat:macd:OutputCount"),
+    when: "More than two output arguments are requested.",
+    message: "macd: too many output arguments",
+};
+const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.macd.INTERNAL",
+    identifier: Some("RunMat:macd:Internal"),
+    when: "Output construction fails.",
+    message: "macd: internal error",
+};
+const ERRORS: [BuiltinErrorDescriptor; 3] =
+    [ERROR_INVALID_INPUT, ERROR_OUTPUT_COUNT, ERROR_INTERNAL];
 
 pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
@@ -118,7 +118,7 @@ async fn macd_builtin(data: Value) -> BuiltinResult<Value> {
         Some(0) => return Ok(Value::OutputList(Vec::new())),
         Some(count) if count > 2 => {
             return Err(macd_error(
-                "RunMat:macd:OutputCount",
+                ERROR_OUTPUT_COUNT,
                 "macd: at most two outputs are supported",
             ));
         }
@@ -320,18 +320,19 @@ fn tensor_shape_for(tensor: &Tensor) -> Vec<usize> {
 }
 
 fn macd_invalid(message: impl Into<String>) -> RuntimeError {
-    macd_error("RunMat:macd:InvalidInput", message)
+    macd_error(ERROR_INVALID_INPUT, message)
 }
 
 fn macd_internal(message: impl Into<String>) -> RuntimeError {
-    macd_error("RunMat:macd:Internal", message)
+    macd_error(ERROR_INTERNAL, message)
 }
 
-fn macd_error(identifier: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(NAME)
-        .with_identifier(identifier)
-        .build()
+fn macd_error(descriptor: BuiltinErrorDescriptor, message: impl Into<String>) -> RuntimeError {
+    let builder = build_runtime_error(message).with_builtin(NAME);
+    match descriptor.identifier {
+        Some(identifier) => builder.with_identifier(identifier).build(),
+        None => builder.build(),
+    }
 }
 
 #[cfg(test)]

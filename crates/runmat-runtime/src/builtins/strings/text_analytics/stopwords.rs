@@ -67,10 +67,11 @@ fn string_array_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
 }
 
 fn stopwords_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("stopWords")
-        .with_identifier("RunMat:stopWords:InvalidInput")
-        .build()
+    let mut builder = build_runtime_error(message).with_builtin("stopWords");
+    if let Some(identifier) = ERROR_INVALID_INPUT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(

@@ -339,17 +339,22 @@ async fn normalize_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
 }
 
 fn normalize_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("normalize")
-        .with_identifier("RunMat:normalize:InvalidArgument")
-        .build()
+    normalize_descriptor_error(message, &ERROR_INVALID_ARGUMENT)
 }
 
 fn normalize_internal(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("normalize")
-        .with_identifier("RunMat:normalize:Internal")
-        .build()
+    normalize_descriptor_error(message, &ERROR_INTERNAL)
+}
+
+fn normalize_descriptor_error(
+    message: impl Into<String>,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin("normalize");
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 async fn value_to_input(value: Value) -> BuiltinResult<NumericInput> {

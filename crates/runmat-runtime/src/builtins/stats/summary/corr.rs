@@ -143,17 +143,22 @@ fn corr_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
 }
 
 fn corr_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(NAME)
-        .with_identifier("RunMat:corr:InvalidArgument")
-        .build()
+    corr_descriptor_error(message, &ERROR_INVALID_ARGUMENT)
 }
 
 fn corr_internal(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(NAME)
-        .with_identifier("RunMat:corr:Internal")
-        .build()
+    corr_descriptor_error(message, &ERROR_INTERNAL)
+}
+
+fn corr_descriptor_error(
+    message: impl Into<String>,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[derive(Clone, Copy)]

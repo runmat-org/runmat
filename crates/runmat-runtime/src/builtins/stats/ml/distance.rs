@@ -244,17 +244,23 @@ fn vector_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
 }
 
 fn distance_error(name: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(name)
-        .with_identifier("RunMat:distance:InvalidArgument")
-        .build()
+    distance_descriptor_error(name, message, &ERROR_INVALID_ARGUMENT)
 }
 
 fn internal_error(name: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(name)
-        .with_identifier("RunMat:distance:Internal")
-        .build()
+    distance_descriptor_error(name, message, &ERROR_INTERNAL)
+}
+
+fn distance_descriptor_error(
+    name: &'static str,
+    message: impl Into<String>,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(name);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[derive(Clone, Debug)]

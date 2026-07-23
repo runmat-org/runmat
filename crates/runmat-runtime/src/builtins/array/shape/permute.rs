@@ -474,14 +474,6 @@ pub(crate) async fn permute_gpu(
     handle: GpuTensorHandle,
     order: &[usize],
 ) -> crate::BuiltinResult<Value> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     if let Some(provider) = runmat_accelerate_api::provider() {
         let zero_based: Vec<usize> = order.iter().map(|&idx| idx - 1).collect();
         if let Ok(out) = provider.permute(&handle, &zero_based) {

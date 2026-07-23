@@ -89,8 +89,19 @@ const ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "bayesopt: unsupported option",
 };
 
-const ERRORS: [BuiltinErrorDescriptor; 3] =
-    [ERROR_INVALID_ARGUMENT, ERROR_OBJECTIVE, ERROR_UNSUPPORTED];
+const ERROR_FLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BAYESOPT.FLOW",
+    identifier: Some("RunMat:bayesopt:Flow"),
+    when: "An input cannot be gathered before Bayesian optimization begins.",
+    message: "bayesopt: failed to gather input",
+};
+
+const ERRORS: [BuiltinErrorDescriptor; 4] = [
+    ERROR_INVALID_ARGUMENT,
+    ERROR_OBJECTIVE,
+    ERROR_UNSUPPORTED,
+    ERROR_FLOW,
+];
 
 pub const BAYESOPT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
@@ -163,23 +174,21 @@ fn bayesopt_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
 }
 
 fn map_flow(err: RuntimeError, label: &str) -> RuntimeError {
-    build_runtime_error(format!(
-        "bayesopt: failed to gather {label}: {}",
-        err.message()
-    ))
-    .with_builtin(NAME)
-    .with_identifier("RunMat:bayesopt:Flow")
-    .build()
+    bayesopt_error(
+        format!("bayesopt: failed to gather {label}: {}", err.message()),
+        &ERROR_FLOW,
+    )
 }
 
 fn bayesopt_error(
     message: impl Into<String>,
     descriptor: &'static BuiltinErrorDescriptor,
 ) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(NAME)
-        .with_identifier(descriptor.identifier.unwrap_or("RunMat:bayesopt:Error"))
-        .build()
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[derive(Clone, Debug)]

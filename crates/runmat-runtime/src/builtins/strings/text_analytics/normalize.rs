@@ -85,10 +85,11 @@ fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
 }
 
 fn normalize_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("normalizeWords")
-        .with_identifier("RunMat:normalizeWords:InvalidInput")
-        .build()
+    let mut builder = build_runtime_error(message).with_builtin("normalizeWords");
+    if let Some(identifier) = ERROR_INVALID_INPUT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(

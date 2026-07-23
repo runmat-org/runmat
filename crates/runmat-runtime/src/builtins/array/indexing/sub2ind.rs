@@ -254,17 +254,6 @@ fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> crate::BuiltinResult<Optio
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        #[cfg(all(test, feature = "wgpu"))]
-        {
-            if subs
-                .iter()
-                .any(|v| matches!(v, Value::GpuTensor(h) if h.device_id != 0))
-            {
-                let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                    runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-                );
-            }
-        }
         let provider = match runmat_accelerate_api::provider() {
             Some(p) => p,
             None => return Ok(None),

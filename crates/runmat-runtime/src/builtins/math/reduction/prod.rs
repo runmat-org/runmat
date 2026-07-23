@@ -778,14 +778,6 @@ fn prod_host(value: Value, parsed: &ParsedArguments) -> BuiltinResult<Value> {
 }
 
 async fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<Value> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     if matches!(parsed.nan_mode, ReductionNaN::Omit) {
         return prod_gpu_fallback(&handle, parsed).await;
     }

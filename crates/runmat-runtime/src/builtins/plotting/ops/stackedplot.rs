@@ -1270,8 +1270,11 @@ fn stacked_err(detail: impl AsRef<str>) -> RuntimeError {
 }
 
 fn stacked_runtime_error(builtin: &'static str, detail: impl AsRef<str>) -> RuntimeError {
-    let mut builder = build_runtime_error(format!("{builtin}: {}", detail.as_ref()));
-    builder = builder.with_identifier("RunMat:stackedplot:InvalidArgument");
+    let mut builder =
+        build_runtime_error(format!("{builtin}: {}", detail.as_ref())).with_builtin(builtin);
+    if let Some(identifier) = ERROR_INVALID_ARGUMENT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
     builder.build()
 }
 

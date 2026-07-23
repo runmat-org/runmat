@@ -748,14 +748,6 @@ fn sum_host_complex_scalar(re: f64, im: f64, parsed: &ParsedArguments) -> Builti
 }
 
 async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<Value> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     if matches!(parsed.nan_mode, ReductionNaN::Omit) {
         return sum_gpu_with_omitnan(handle, parsed).await;
     }
@@ -791,14 +783,6 @@ async fn sum_gpu_with_omitnan(
     handle: GpuTensorHandle,
     parsed: &ParsedArguments,
 ) -> BuiltinResult<Value> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     let Some(provider) = runmat_accelerate_api::provider() else {
         return sum_gpu_fallback(&handle, parsed).await;
     };

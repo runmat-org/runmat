@@ -1452,7 +1452,9 @@ fn default_colors() -> Vec<Vec4> {
 fn textscatter_error(builtin: &'static str, detail: impl AsRef<str>) -> RuntimeError {
     let mut builder =
         build_runtime_error(format!("{builtin}: {}", detail.as_ref())).with_builtin(builtin);
-    builder = builder.with_identifier("RunMat:textscatter:InvalidArgument");
+    if let Some(identifier) = ERROR_INVALID_ARGUMENT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
     builder.build()
 }
 
@@ -1462,7 +1464,9 @@ fn map_internal(builtin: &'static str, err: RuntimeError) -> RuntimeError {
     }
     let mut builder =
         build_runtime_error(format!("{builtin}: {}", err.message)).with_builtin(builtin);
-    builder = builder.with_identifier("RunMat:textscatter:Internal");
+    if let Some(identifier) = ERROR_INTERNAL.identifier {
+        builder = builder.with_identifier(identifier);
+    }
     builder.build()
 }
 

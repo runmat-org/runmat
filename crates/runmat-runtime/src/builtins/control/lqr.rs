@@ -13,11 +13,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::control::tf_model::{
-    control_error, output_complex_column, validate_sample_time, SS_CLASS,
-};
+use crate::builtins::control::tf_model::{output_complex_column, validate_sample_time, SS_CLASS};
 use crate::builtins::control::type_resolvers::lqr_type;
-use crate::{dispatcher, BuiltinResult};
+use crate::{build_runtime_error, dispatcher, BuiltinResult};
 
 const BUILTIN_NAME: &str = "lqr";
 const EPS: f64 = 1.0e-10;
@@ -300,9 +298,8 @@ impl RealMatrix {
         let gathered = dispatcher::gather_if_needed_async(&value)
             .await
             .map_err(|err| {
-                control_error(
-                    BUILTIN_NAME,
-                    "RunMat:lqr:UnsupportedInput",
+                lqr_error(
+                    &LQR_ERROR_UNSUPPORTED_INPUT,
                     format!(
                         "{BUILTIN_NAME}: failed to gather {label}: {}",
                         err.message()
@@ -894,11 +891,11 @@ fn lqr_error(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
 ) -> crate::RuntimeError {
-    control_error(
-        BUILTIN_NAME,
-        error.identifier.unwrap_or("RunMat:lqr:Error"),
-        message,
-    )
+    let builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    match error.identifier {
+        Some(identifier) => builder.with_identifier(identifier).build(),
+        None => builder.build(),
+    }
 }
 
 #[cfg(test)]
