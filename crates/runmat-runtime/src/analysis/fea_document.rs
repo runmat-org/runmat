@@ -153,7 +153,7 @@ struct FeaMeshDocument {
     validation: FeaMeshValidationDocument,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FeaMeshValidationDocument {
     #[serde(default)]
@@ -172,21 +172,6 @@ struct FeaMeshValidationDocument {
     min_boundary_edge_recovery_ratio: Option<f64>,
     #[serde(default)]
     max_volume_components: Option<usize>,
-}
-
-impl Default for FeaMeshValidationDocument {
-    fn default() -> Self {
-        Self {
-            coverage: FeaMeshCoveragePreset::default(),
-            quality: FeaMeshQualityPreset::default(),
-            min_bounds_coverage_ratio: None,
-            min_volume_coverage_ratio: None,
-            min_boundary_area_ratio: None,
-            min_boundary_face_recovery_ratio: None,
-            min_boundary_edge_recovery_ratio: None,
-            max_volume_components: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]

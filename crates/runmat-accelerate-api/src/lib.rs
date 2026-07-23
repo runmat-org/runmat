@@ -23,17 +23,31 @@ static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
 static SEQUENCE_THRESHOLD_PROVIDER: OnceCell<SequenceThresholdFn> = OnceCell::new();
 static WORKGROUP_SIZE_HINT_PROVIDER: OnceCell<WorkgroupSizeHintFn> = OnceCell::new();
 
-static LOGICAL_HANDLES: Lazy<RwLock<HashSet<u64>>> = Lazy::new(|| RwLock::new(HashSet::new()));
-static LOGICAL_HANDLE_HITS: Lazy<RwLock<HashMap<u64, u64>>> =
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct HandleMetadataKey {
+    device_id: u32,
+    buffer_id: u64,
+}
+
+fn handle_metadata_key(handle: &GpuTensorHandle) -> HandleMetadataKey {
+    HandleMetadataKey {
+        device_id: handle.device_id,
+        buffer_id: handle.buffer_id,
+    }
+}
+
+static LOGICAL_HANDLES: Lazy<RwLock<HashSet<HandleMetadataKey>>> =
+    Lazy::new(|| RwLock::new(HashSet::new()));
+static LOGICAL_HANDLE_HITS: Lazy<RwLock<HashMap<HandleMetadataKey, u64>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
-static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<u64, TransposeInfo>>> =
+static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<HandleMetadataKey, TransposeInfo>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
-static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<u64, ProviderPrecision>>> =
+static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<HandleMetadataKey, ProviderPrecision>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
-static HANDLE_CLASS_NAMES: Lazy<RwLock<HashMap<u64, String>>> =
+static HANDLE_CLASS_NAMES: Lazy<RwLock<HashMap<HandleMetadataKey, String>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
-static HANDLE_STORAGES: Lazy<RwLock<HashMap<u64, GpuTensorStorage>>> =
+static HANDLE_STORAGES: Lazy<RwLock<HashMap<HandleMetadataKey, GpuTensorStorage>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,14 +124,14 @@ pub fn export_context(kind: AccelContextKind) -> Option<AccelContextHandle> {
 /// supplied handle.
 #[cfg(feature = "wgpu")]
 pub fn export_wgpu_buffer(handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
-    provider().and_then(|p| p.export_wgpu_buffer(handle))
+    provider_for_handle(handle).and_then(|p| p.export_wgpu_buffer(handle))
 }
 
 /// Record the precision associated with a GPU tensor handle so host operations can
 /// reconstruct the original dtype when gathering back to the CPU.
 pub fn set_handle_precision(handle: &GpuTensorHandle, precision: ProviderPrecision) {
     if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
-        guard.insert(handle.buffer_id, precision);
+        guard.insert(handle_metadata_key(handle), precision);
     }
 }
 
@@ -126,13 +140,13 @@ pub fn handle_precision(handle: &GpuTensorHandle) -> Option<ProviderPrecision> {
     HANDLE_PRECISIONS
         .read()
         .ok()
-        .and_then(|guard| guard.get(&handle.buffer_id).copied())
+        .and_then(|guard| guard.get(&handle_metadata_key(handle)).copied())
 }
 
 /// Clear any recorded precision metadata for a GPU tensor handle.
 pub fn clear_handle_precision(handle: &GpuTensorHandle) {
     if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
-        guard.remove(&handle.buffer_id);
+        guard.remove(&handle_metadata_key(handle));
     }
 }
 
@@ -143,7 +157,7 @@ pub fn clear_handle_precision(handle: &GpuTensorHandle) {
 /// the exact requested or inferred class.
 pub fn set_handle_class_name(handle: &GpuTensorHandle, class_name: impl Into<String>) {
     if let Ok(mut guard) = HANDLE_CLASS_NAMES.write() {
-        guard.insert(handle.buffer_id, class_name.into());
+        guard.insert(handle_metadata_key(handle), class_name.into());
     }
 }
 
@@ -152,29 +166,30 @@ pub fn handle_class_name(handle: &GpuTensorHandle) -> Option<String> {
     HANDLE_CLASS_NAMES
         .read()
         .ok()
-        .and_then(|guard| guard.get(&handle.buffer_id).cloned())
+        .and_then(|guard| guard.get(&handle_metadata_key(handle)).cloned())
 }
 
 /// Clear any recorded MATLAB underlying class metadata for a GPU tensor handle.
 pub fn clear_handle_class_name(handle: &GpuTensorHandle) {
     if let Ok(mut guard) = HANDLE_CLASS_NAMES.write() {
-        guard.remove(&handle.buffer_id);
+        guard.remove(&handle_metadata_key(handle));
     }
 }
 
 /// Annotate a GPU tensor handle as logically-typed (`logical` in MATLAB terms)
 /// or clear the logical flag when `logical` is `false`.
 pub fn set_handle_logical(handle: &GpuTensorHandle, logical: bool) {
+    let key = handle_metadata_key(handle);
     if let Ok(mut guard) = LOGICAL_HANDLES.write() {
         if logical {
-            guard.insert(handle.buffer_id);
+            guard.insert(key);
             if let Ok(mut hits) = LOGICAL_HANDLE_HITS.write() {
-                *hits.entry(handle.buffer_id).or_insert(0) += 1;
+                *hits.entry(key).or_insert(0) += 1;
             }
         } else {
-            guard.remove(&handle.buffer_id);
+            guard.remove(&key);
             if let Ok(mut hits) = LOGICAL_HANDLE_HITS.write() {
-                hits.remove(&handle.buffer_id);
+                hits.remove(&key);
             }
         }
     }
@@ -189,21 +204,21 @@ pub fn clear_handle_logical(handle: &GpuTensorHandle) {
 pub fn handle_is_logical(handle: &GpuTensorHandle) -> bool {
     LOGICAL_HANDLES
         .read()
-        .map(|guard| guard.contains(&handle.buffer_id))
+        .map(|guard| guard.contains(&handle_metadata_key(handle)))
         .unwrap_or(false)
 }
 
-pub fn handle_logical_hits(buffer_id: u64) -> Option<u64> {
+pub fn handle_logical_hits(handle: &GpuTensorHandle) -> Option<u64> {
     LOGICAL_HANDLE_HITS
         .read()
         .ok()
-        .and_then(|guard| guard.get(&buffer_id).copied())
+        .and_then(|guard| guard.get(&handle_metadata_key(handle)).copied())
 }
 
 pub fn record_handle_transpose(handle: &GpuTensorHandle, base_rows: usize, base_cols: usize) {
     if let Ok(mut guard) = TRANSPOSED_HANDLES.write() {
         guard.insert(
-            handle.buffer_id,
+            handle_metadata_key(handle),
             TransposeInfo {
                 base_rows,
                 base_cols,
@@ -214,7 +229,7 @@ pub fn record_handle_transpose(handle: &GpuTensorHandle, base_rows: usize, base_
 
 pub fn clear_handle_transpose(handle: &GpuTensorHandle) {
     if let Ok(mut guard) = TRANSPOSED_HANDLES.write() {
-        guard.remove(&handle.buffer_id);
+        guard.remove(&handle_metadata_key(handle));
     }
 }
 
@@ -222,7 +237,7 @@ pub fn handle_transpose_info(handle: &GpuTensorHandle) -> Option<TransposeInfo> 
     TRANSPOSED_HANDLES
         .read()
         .ok()
-        .and_then(|guard| guard.get(&handle.buffer_id).copied())
+        .and_then(|guard| guard.get(&handle_metadata_key(handle)).copied())
 }
 
 pub fn handle_is_transposed(handle: &GpuTensorHandle) -> bool {
@@ -345,8 +360,8 @@ pub async fn uniform_spectral_estimate(
 ) -> anyhow::Result<ProviderSpectralResult> {
     validate_uniform_spectral_request(&request)?;
 
-    let provider =
-        provider().ok_or_else(|| anyhow!("uniform_spectral_estimate: GPU provider unavailable"))?;
+    let provider = provider_for_handle(request.input)
+        .ok_or_else(|| anyhow!("uniform_spectral_estimate: GPU provider unavailable"))?;
     provider.uniform_spectral_estimate(&request).await
 }
 
@@ -448,8 +463,8 @@ pub async fn signal_envelope(
         _ => {}
     }
 
-    let provider =
-        provider().ok_or_else(|| anyhow!("signal_envelope: GPU provider unavailable"))?;
+    let provider = provider_for_handle(request.input)
+        .ok_or_else(|| anyhow!("signal_envelope: GPU provider unavailable"))?;
     provider.signal_envelope(&request).await
 }
 
@@ -481,7 +496,8 @@ pub async fn signal_hilbert(
         return Err(anyhow!("signal_hilbert: invalid request"));
     }
 
-    let provider = provider().ok_or_else(|| anyhow!("signal_hilbert: GPU provider unavailable"))?;
+    let provider = provider_for_handle(request.input)
+        .ok_or_else(|| anyhow!("signal_hilbert: GPU provider unavailable"))?;
     provider.signal_hilbert(&request).await
 }
 
@@ -565,7 +581,7 @@ pub struct WgpuBufferRef {
 
 pub fn set_handle_storage(handle: &GpuTensorHandle, storage: GpuTensorStorage) {
     if let Ok(mut guard) = HANDLE_STORAGES.write() {
-        guard.insert(handle.buffer_id, storage);
+        guard.insert(handle_metadata_key(handle), storage);
     }
 }
 
@@ -573,13 +589,13 @@ pub fn handle_storage(handle: &GpuTensorHandle) -> GpuTensorStorage {
     HANDLE_STORAGES
         .read()
         .ok()
-        .and_then(|guard| guard.get(&handle.buffer_id).cloned())
+        .and_then(|guard| guard.get(&handle_metadata_key(handle)).cloned())
         .unwrap_or(GpuTensorStorage::Real)
 }
 
 pub fn clear_handle_storage(handle: &GpuTensorHandle) {
     if let Ok(mut guard) = HANDLE_STORAGES.write() {
-        guard.remove(&handle.buffer_id);
+        guard.remove(&handle_metadata_key(handle));
     }
 }
 
@@ -3195,6 +3211,7 @@ fn current_thread_provider() -> Option<&'static dyn AccelProvider> {
 /// - Concurrent callers must ensure registration happens once or is properly
 ///   synchronized; this function does not enforce thread-safety for re-registration.
 pub unsafe fn register_provider(p: &'static dyn AccelProvider) {
+    replace_thread_provider(Some(p));
     if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
         *guard = Some(p);
     }
@@ -3217,14 +3234,16 @@ pub fn provider() -> Option<&'static dyn AccelProvider> {
         .and_then(|guard| guard.as_ref().copied())
 }
 
-/// Clear the globally registered provider. Intended for tests to ensure deterministic behaviour.
+/// Clear the active provider selection without invalidating providers that own live handles.
+///
+/// Registered device owners are retained because a [`GpuTensorHandle`] may outlive its provider's
+/// tenure as the global default. Removing its owner here would make that otherwise-valid handle
+/// impossible to gather or operate on. Tests that need a different default can safely call this
+/// function and register another provider; device ids keep the handle namespaces distinct.
 pub fn clear_provider() {
     replace_thread_provider(None);
     if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
         *guard = None;
-    }
-    if let Ok(mut map) = PROVIDER_REGISTRY.write() {
-        map.clear();
     }
 }
 
@@ -3285,7 +3304,8 @@ pub fn set_thread_provider(provider: Option<&'static dyn AccelProvider>) {
 
 /// Convenience: perform elementwise add via provider if possible; otherwise return None
 pub async fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
-    if let Some(p) = provider() {
+    if a.device_id == b.device_id {
+        let p = provider_for_handle(a)?;
         if let Ok(h) = p.elem_add(a, b).await {
             return Some(h);
         }
@@ -3295,7 +3315,8 @@ pub async fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Gp
 
 /// Convenience: perform elementwise hypot via provider if possible; otherwise return None
 pub async fn try_elem_hypot(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
-    if let Some(p) = provider() {
+    if a.device_id == b.device_id {
+        let p = provider_for_handle(a)?;
         if let Ok(h) = p.elem_hypot(a, b).await {
             return Some(h);
         }
@@ -3305,7 +3326,8 @@ pub async fn try_elem_hypot(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<
 
 /// Convenience: perform elementwise max via provider if possible; otherwise return None
 pub async fn try_elem_max(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
-    if let Some(p) = provider() {
+    if a.device_id == b.device_id {
+        let p = provider_for_handle(a)?;
         if let Ok(h) = p.elem_max(a, b).await {
             return Some(h);
         }
@@ -3315,7 +3337,8 @@ pub async fn try_elem_max(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Gp
 
 /// Convenience: perform elementwise min via provider if possible; otherwise return None
 pub async fn try_elem_min(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
-    if let Some(p) = provider() {
+    if a.device_id == b.device_id {
+        let p = provider_for_handle(a)?;
         if let Ok(h) = p.elem_min(a, b).await {
             return Some(h);
         }
@@ -3325,7 +3348,8 @@ pub async fn try_elem_min(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Gp
 
 /// Convenience: perform elementwise atan2 via provider if possible; otherwise return None
 pub async fn try_elem_atan2(y: &GpuTensorHandle, x: &GpuTensorHandle) -> Option<GpuTensorHandle> {
-    if let Some(p) = provider() {
+    if y.device_id == x.device_id {
+        let p = provider_for_handle(y)?;
         if let Ok(h) = p.elem_atan2(y, x).await {
             return Some(h);
         }
@@ -3625,6 +3649,51 @@ mod tests {
         }
     }
 
+    #[test]
+    fn handle_metadata_is_namespaced_by_device_and_buffer() {
+        let first = test_handle(PROVIDER_A.device_id());
+        let second = test_handle(PROVIDER_B.device_id());
+        assert_eq!(first.buffer_id, second.buffer_id);
+
+        set_handle_precision(&first, ProviderPrecision::F32);
+        set_handle_precision(&second, ProviderPrecision::F64);
+        set_handle_class_name(&first, "single");
+        set_handle_class_name(&second, "uint64");
+        set_handle_storage(&first, GpuTensorStorage::Real);
+        set_handle_storage(&second, GpuTensorStorage::ComplexInterleaved);
+        set_handle_logical(&first, true);
+        record_handle_transpose(&second, 2, 3);
+
+        assert_eq!(handle_precision(&first), Some(ProviderPrecision::F32));
+        assert_eq!(handle_precision(&second), Some(ProviderPrecision::F64));
+        assert_eq!(handle_class_name(&first).as_deref(), Some("single"));
+        assert_eq!(handle_class_name(&second).as_deref(), Some("uint64"));
+        assert_eq!(handle_storage(&first), GpuTensorStorage::Real);
+        assert_eq!(
+            handle_storage(&second),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        assert!(handle_is_logical(&first));
+        assert!(!handle_is_logical(&second));
+        assert!(handle_transpose_info(&first).is_none());
+        assert_eq!(
+            handle_transpose_info(&second),
+            Some(TransposeInfo {
+                base_rows: 2,
+                base_cols: 3
+            })
+        );
+
+        clear_handle_precision(&first);
+        clear_handle_precision(&second);
+        clear_handle_class_name(&first);
+        clear_handle_class_name(&second);
+        clear_handle_storage(&first);
+        clear_handle_storage(&second);
+        clear_handle_logical(&first);
+        clear_handle_transpose(&second);
+    }
+
     fn spectral_request<'a>(
         input: &'a GpuTensorHandle,
         frame_mode: ProviderSpectralFrameMode,
@@ -3681,6 +3750,50 @@ mod tests {
             provider_for_handle(&test_handle(PROVIDER_A.device_id())).expect("provider for handle");
 
         assert_eq!(provider.device_info(), PROVIDER_A.name);
+        clear_provider();
+    }
+
+    #[test]
+    fn clearing_active_provider_preserves_live_handle_owner() {
+        let _lock = PROVIDER_TEST_LOCK
+            .lock()
+            .expect("provider test lock poisoned");
+        register_test_providers();
+        let handle = test_handle(PROVIDER_A.device_id());
+
+        clear_provider();
+
+        assert!(provider().is_none());
+        let owner = provider_for_handle(&handle).expect("registered handle owner survives clear");
+        assert_eq!(owner.device_info(), PROVIDER_A.name);
+    }
+
+    #[test]
+    fn concurrent_registration_keeps_each_threads_active_provider() {
+        let _lock = PROVIDER_TEST_LOCK
+            .lock()
+            .expect("provider test lock poisoned");
+        clear_provider();
+
+        let first = std::thread::spawn(|| {
+            unsafe { register_provider(&PROVIDER_A) };
+            std::thread::yield_now();
+            provider().map(AccelProvider::device_info)
+        });
+        let second = std::thread::spawn(|| {
+            unsafe { register_provider(&PROVIDER_B) };
+            std::thread::yield_now();
+            provider().map(AccelProvider::device_info)
+        });
+
+        assert_eq!(
+            first.join().expect("first registration thread"),
+            Some(PROVIDER_A.name.to_string())
+        );
+        assert_eq!(
+            second.join().expect("second registration thread"),
+            Some(PROVIDER_B.name.to_string())
+        );
         clear_provider();
     }
 

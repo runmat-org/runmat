@@ -48,11 +48,11 @@ impl IntegerTarget {
             Self::I8 => IntValue::I8(cast_signed(value, i8::MIN as f64, i8::MAX as f64) as i8),
             Self::I16 => IntValue::I16(cast_signed(value, i16::MIN as f64, i16::MAX as f64) as i16),
             Self::I32 => IntValue::I32(cast_signed(value, i32::MIN as f64, i32::MAX as f64) as i32),
-            Self::I64 => IntValue::I64(cast_signed(value, i64::MIN as f64, i64::MAX as f64) as i64),
+            Self::I64 => IntValue::I64(cast_signed(value, i64::MIN as f64, i64::MAX as f64)),
             Self::U8 => IntValue::U8(cast_unsigned(value, u8::MAX as f64) as u8),
             Self::U16 => IntValue::U16(cast_unsigned(value, u16::MAX as f64) as u16),
             Self::U32 => IntValue::U32(cast_unsigned(value, u32::MAX as f64) as u32),
-            Self::U64 => IntValue::U64(cast_unsigned(value, u64::MAX as f64) as u64),
+            Self::U64 => IntValue::U64(cast_unsigned(value, u64::MAX as f64)),
         }
     }
 
@@ -262,7 +262,7 @@ fn cast_unsigned(value: f64, max: f64) -> u64 {
     if value.is_nan() || value.is_sign_negative() {
         0
     } else if value.is_infinite() {
-        u64::MAX.min(max as u64)
+        max as u64
     } else {
         value.round().clamp(0.0, max) as u64
     }

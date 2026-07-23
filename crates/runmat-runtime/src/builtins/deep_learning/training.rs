@@ -1090,11 +1090,13 @@ impl NumericPayload {
                             .get("Format")
                             .cloned()
                             .unwrap_or_else(|| Value::String(String::new())),
-                        labels: object
-                            .properties
-                            .get("Labels")
-                            .cloned()
-                            .unwrap_or_else(|| Value::String(String::new())),
+                        labels: Box::new(
+                            object
+                                .properties
+                                .get("Labels")
+                                .cloned()
+                                .unwrap_or_else(|| Value::String(String::new())),
+                        ),
                     },
                 }
             }
@@ -1145,7 +1147,7 @@ enum NumericRepr {
     Dlarray {
         inner: Box<NumericRepr>,
         format: Value,
-        labels: Value,
+        labels: Box<Value>,
     },
 }
 
@@ -1173,7 +1175,7 @@ impl NumericRepr {
                 vec![
                     ("Data", inner.materialize(data)?),
                     ("Format", format.clone()),
-                    ("Labels", labels.clone()),
+                    ("Labels", labels.as_ref().clone()),
                 ],
             )),
         }

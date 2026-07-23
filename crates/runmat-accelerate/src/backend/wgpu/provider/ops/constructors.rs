@@ -1142,6 +1142,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     )
 }
 
+fn column_major_strides_checked(shape: &[usize]) -> Result<Vec<usize>> {
+    let mut strides = Vec::with_capacity(shape.len());
+    let mut stride = 1usize;
+    for &extent in shape {
+        strides.push(stride);
+        stride = stride
+            .checked_mul(extent)
+            .ok_or_else(|| anyhow!("ndgrid: stride exceeds GPU limits"))?;
+    }
+    Ok(strides)
+}
+
 #[cfg(test)]
 mod tests {
     use runmat_accelerate_api::{
@@ -1237,16 +1249,4 @@ mod tests {
         assert_eq!(gx.data, vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0]);
         assert_eq!(gy.data, vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]);
     }
-}
-
-fn column_major_strides_checked(shape: &[usize]) -> Result<Vec<usize>> {
-    let mut strides = Vec::with_capacity(shape.len());
-    let mut stride = 1usize;
-    for &extent in shape {
-        strides.push(stride);
-        stride = stride
-            .checked_mul(extent)
-            .ok_or_else(|| anyhow!("ndgrid: stride exceeds GPU limits"))?;
-    }
-    Ok(strides)
 }

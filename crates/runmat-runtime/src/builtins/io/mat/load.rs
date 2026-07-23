@@ -1873,7 +1873,10 @@ pub(crate) mod tests {
         }
         match values.get("u16").unwrap() {
             Value::Tensor(t) => {
-                assert_eq!(t.dtype, NumericDType::U16);
+                assert_eq!(
+                    t.integer_storage(),
+                    Some(&IntegerStorage::U16(vec![10, 20]))
+                );
                 assert_eq!(t.data, vec![10.0, 20.0]);
             }
             other => panic!("expected tensor, got {other:?}"),

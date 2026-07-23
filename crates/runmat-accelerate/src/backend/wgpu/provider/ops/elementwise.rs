@@ -12,8 +12,8 @@ use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::resources::UniformBufferKey;
 use crate::backend::wgpu::shaders::elementwise::{
     complex_binary_broadcast_shader, complex_binary_shader, complex_from_real_imag_shader,
-    complex_from_real_shader, complex_unary_shader, round_digits_shader, ComplexBinaryOp,
-    ComplexUnaryOp,
+    complex_from_real_shader, complex_unary_shader, real_unary_shader, round_digits_shader,
+    ComplexBinaryOp, ComplexUnaryOp,
 };
 use crate::backend::wgpu::shaders::logical::{
     ELEM_EQ_SHADER_F32, ELEM_EQ_SHADER_F64, ELEM_GE_SHADER_F32, ELEM_GE_SHADER_F64,
@@ -844,6 +844,32 @@ impl WgpuProvider {
         if len > (u32::MAX as usize) {
             return Err(gpu_dispatch_length_limit_error("unary_op", len));
         }
+        let shader = real_unary_shader(op, self.precision);
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-unary-specialized-shader",
+            &shader,
+        );
+        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+            self.device_ref(),
+            "runmat-unary-specialized-pipeline-layout",
+            &self.pipelines.unary.layout,
+        );
+        let layout_tag = format!("runmat-unary-op-{}", op as u32);
+        let shader_hash = self.compute_pipeline_hash_bytes(
+            shader.as_bytes(),
+            &layout_tag,
+            Some(crate::backend::wgpu::config::effective_workgroup_size()),
+        );
+        let pipeline = self.get_or_create_pipeline(
+            shader_hash,
+            &pipeline_layout,
+            &module,
+            "runmat-unary-specialized-pipeline",
+            Some(shader.as_bytes()),
+            Some(&layout_tag),
+            Some(crate::backend::wgpu::config::effective_workgroup_size()),
+        );
         let start = Instant::now();
         {
             let mut enc =
@@ -855,7 +881,7 @@ impl WgpuProvider {
                 label: Some("runmat-unary-noop-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.unary.pipeline);
+            pass.set_pipeline(&pipeline);
             drop(pass);
             self.submit(enc);
         }
@@ -880,14 +906,7 @@ impl WgpuProvider {
                 offset: offset as u32,
                 total: len as u32,
             };
-            let params_buffer = self.kernel_resources.uniform_buffer(
-                self.device_ref(),
-                UniformBufferKey::LenOpParams,
-                std::mem::size_of::<crate::backend::wgpu::params::LenOpParams>() as u64,
-                "runmat-unary-params",
-            );
-            self.queue
-                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+            let params_buffer = self.uniform_buffer(&params, "runmat-unary-params");
             let bind_group = self
                 .device_ref()
                 .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -915,7 +934,7 @@ impl WgpuProvider {
             crate::backend::wgpu::dispatch::elementwise::run(
                 self.device_ref(),
                 self.queue_ref(),
-                &self.pipelines.unary.pipeline,
+                &pipeline,
                 &bind_group,
                 groups,
             );

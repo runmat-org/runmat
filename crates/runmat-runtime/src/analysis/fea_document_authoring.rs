@@ -774,14 +774,14 @@ fn study_readiness(
     driving_conditions: &[FeaStudyDrivingConditionEntry],
 ) -> FeaStudyReadiness {
     let mut blockers = Vec::new();
-    if summary.geometry_path.as_deref().map_or(true, str::is_empty) {
+    if summary.geometry_path.as_deref().is_none_or(str::is_empty) {
         blockers.push("Set geometry.path to the CAD or mesh file for this study.");
     }
     let model_profile = summary.model_profile.as_deref();
-    if model_profile.map_or(true, str::is_empty) {
+    if model_profile.is_none_or(str::is_empty) {
         blockers.push("Choose a physics model profile.");
     }
-    if summary.run_backend.as_deref().map_or(true, str::is_empty) {
+    if summary.run_backend.as_deref().is_none_or(str::is_empty) {
         blockers.push("Choose a run backend.");
     }
     if model_profile.is_some() && FeaStudyReadinessProfile::from_summary(summary).is_none() {
@@ -1385,7 +1385,7 @@ fn remove_map_entry(
     entry_key: &str,
 ) -> Result<(), String> {
     let block = require_mapping_block(document, block_key)?;
-    if block.remove(&yaml_string(entry_key)).is_none() {
+    if block.remove(yaml_string(entry_key)).is_none() {
         return Err(format!("{block_key} entry does not exist: {entry_key}"));
     }
     Ok(())
@@ -1513,7 +1513,7 @@ fn require_mapping_block<'a>(
 ) -> Result<&'a mut Mapping, String> {
     let root = ensure_mapping(document);
     let block = root
-        .get_mut(&yaml_string(block_key))
+        .get_mut(yaml_string(block_key))
         .ok_or_else(|| format!("{block_key} block does not exist"))?;
     match block {
         YamlValue::Mapping(mapping) => Ok(mapping),
@@ -1528,7 +1528,7 @@ fn require_sequence_block_labeled<'a>(
 ) -> Result<&'a mut Vec<YamlValue>, String> {
     let root = ensure_mapping(document);
     let block = root
-        .get_mut(&yaml_string(block_key))
+        .get_mut(yaml_string(block_key))
         .ok_or_else(|| format!("{public_block_label} block does not exist"))?;
     match block {
         YamlValue::Sequence(items) => Ok(items),
@@ -1542,7 +1542,7 @@ where
 {
     document
         .as_mapping()
-        .and_then(|root| root.get(&yaml_string(key)))
+        .and_then(|root| root.get(yaml_string(key)))
         .and_then(YamlValue::as_mapping)
         .map(|items| {
             items
@@ -1559,7 +1559,7 @@ where
 {
     document
         .as_mapping()
-        .and_then(|root| root.get(&yaml_string(key)))
+        .and_then(|root| root.get(yaml_string(key)))
         .and_then(YamlValue::as_sequence)
         .map(|items| {
             items
@@ -1574,7 +1574,7 @@ where
 fn nested_scalar(value: &YamlValue, path: &[&str]) -> Option<String> {
     let mut current = value;
     for key in path {
-        current = current.as_mapping()?.get(&yaml_string(key))?;
+        current = current.as_mapping()?.get(yaml_string(key))?;
     }
     scalar_to_string(current)
 }

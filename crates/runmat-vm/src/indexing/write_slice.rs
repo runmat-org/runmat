@@ -483,21 +483,21 @@ async fn materialize_integer_rhs_for_plan(
             let mut coordinates = vec![0usize; dims];
             for _ in 0..plan.indices.len() {
                 let mut rhs_index = 0usize;
-                for dimension in 0..dims {
+                for (dimension, &selected_coordinate) in coordinates.iter().enumerate().take(dims) {
                     let coordinate = if shape[dimension] == 1 {
                         0
                     } else {
-                        coordinates[dimension]
+                        selected_coordinate
                     };
                     rhs_index += coordinate * strides[dimension];
                 }
                 output.push(IntegerAssignmentValue::Exact(values[rhs_index].clone()));
-                for dimension in 0..dims {
-                    coordinates[dimension] += 1;
-                    if coordinates[dimension] < plan.selection_lengths[dimension].max(1) {
+                for (dimension, coordinate) in coordinates.iter_mut().enumerate().take(dims) {
+                    *coordinate += 1;
+                    if *coordinate < plan.selection_lengths[dimension].max(1) {
                         break;
                     }
-                    coordinates[dimension] = 0;
+                    *coordinate = 0;
                 }
             }
             Ok(output)

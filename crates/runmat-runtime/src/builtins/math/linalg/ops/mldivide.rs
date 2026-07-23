@@ -186,6 +186,13 @@ pub(crate) async fn mldivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Val
 }
 
 async fn try_gpu_mldivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
+    // A configured accelerator must not change the residency of an otherwise
+    // host-only operation. Only continue on the GPU when at least one operand
+    // is already resident there.
+    if !matches!(lhs, Value::GpuTensor(_)) && !matches!(rhs, Value::GpuTensor(_)) {
+        return Ok(None);
+    }
+
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -631,8 +638,11 @@ pub(crate) mod tests {
         assert_eq!(
             result,
             Value::Tensor(
-                Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, 2]), vec![1, 2])
-                    .expect("integer result")
+                Tensor::new_integer(
+                    IntegerStorage::U64(vec![1_u64 << 63, 1_u64 << 62]),
+                    vec![1, 2],
+                )
+                .expect("integer result")
             )
         );
     }

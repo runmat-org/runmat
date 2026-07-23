@@ -955,6 +955,201 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+fn wgsl_function<'a>(source: &'a str, name: &str) -> &'a str {
+    let signature = format!("fn {name}(");
+    let start = source
+        .find(&signature)
+        .unwrap_or_else(|| panic!("unary WGSL helper `{name}` is missing"));
+    let open = source[start..]
+        .find('{')
+        .map(|offset| start + offset)
+        .expect("unary WGSL helper has no body");
+    let mut depth = 0usize;
+    for (offset, byte) in source.as_bytes()[open..].iter().enumerate() {
+        match byte {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &source[start..=open + offset];
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unary WGSL helper `{name}` has an unterminated body")
+}
+
+pub(crate) fn real_unary_shader(
+    op: crate::backend::wgpu::types::UnaryOpCode,
+    precision: NumericPrecision,
+) -> String {
+    use crate::backend::wgpu::types::UnaryOpCode;
+
+    let (source, ty, nan, pos_inf, neg_inf, is_inf) = match precision {
+        NumericPrecision::F64 => (
+            UNARY_SHADER_F64,
+            "f64",
+            "is_nan64",
+            "pos_inf_f64",
+            "neg_inf_f64",
+            "is_inf64",
+        ),
+        NumericPrecision::F32 => (
+            UNARY_SHADER_F32,
+            "f32",
+            "is_nan32",
+            "pos_inf_f32",
+            "neg_inf_f32",
+            "is_inf32",
+        ),
+    };
+    let header_end = source
+        .find("fn expm1_precise")
+        .expect("unary WGSL helper section is missing");
+    let mut shader = format!(
+        r#"
+struct Tensor {{ data: array<{ty}>, }};
+struct Params {{ len: u32, op: u32, offset: u32, total: u32, }};
+@group(0) @binding(0) var<storage, read> A: Tensor;
+@group(0) @binding(1) var<storage, read_write> Out: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+"#
+    );
+
+    let helpers: Vec<&str> = match op {
+        UnaryOpCode::Expm1 => vec!["expm1_precise"],
+        UnaryOpCode::Log1p => vec!["log1p_precise"],
+        UnaryOpCode::Gamma => vec![
+            "lanczos_gamma",
+            "is_non_positive_integer",
+            nan,
+            pos_inf,
+            neg_inf,
+            if ty == "f64" { "nan_f64" } else { "nan_f32" },
+            is_inf,
+            "gamma_real",
+        ],
+        UnaryOpCode::Factorial => vec![
+            nan,
+            pos_inf,
+            neg_inf,
+            if ty == "f64" { "nan_f64" } else { "nan_f32" },
+            is_inf,
+            "factorial_real",
+        ],
+        UnaryOpCode::Sinc => vec![nan, pos_inf, neg_inf, is_inf, "sinc_real"],
+        UnaryOpCode::Heaviside => vec![nan, "heaviside_real"],
+        UnaryOpCode::Erf => vec![nan, pos_inf, neg_inf, is_inf, "erf_real"],
+        UnaryOpCode::Gammaln => vec![
+            "lanczos_gammaln",
+            nan,
+            pos_inf,
+            if ty == "f64" { "nan_f64" } else { "nan_f32" },
+            "gammaln_real",
+        ],
+        UnaryOpCode::Round => vec![nan, pos_inf, neg_inf, is_inf],
+        UnaryOpCode::Erfcinv if ty == "f32" => {
+            vec![nan, pos_inf, neg_inf, is_inf, "erf_real"]
+        }
+        UnaryOpCode::Erfcinv => vec![nan, pos_inf, neg_inf, is_inf, "erf_real", "erfcinv_real"],
+        _ => Vec::new(),
+    };
+    if !helpers.is_empty() {
+        let constants_start = source
+            .find("const PI:")
+            .expect("unary WGSL constants are missing");
+        shader.push_str(&source[constants_start..header_end]);
+    }
+    for helper in helpers {
+        shader.push_str(wgsl_function(source, helper));
+        shader.push_str("\n\n");
+    }
+
+    let apply_body = match op {
+        UnaryOpCode::Sin => "return sin(a);".to_owned(),
+        UnaryOpCode::Cos => "return cos(a);".to_owned(),
+        UnaryOpCode::Abs => "return abs(a);".to_owned(),
+        UnaryOpCode::Exp => "return exp(a);".to_owned(),
+        UnaryOpCode::Log => "return log(a);".to_owned(),
+        UnaryOpCode::Sqrt => "return sqrt(a);".to_owned(),
+        UnaryOpCode::Sign => "if (a > 0.0) { return 1.0; } if (a < 0.0) { return -1.0; } if (a == 0.0) { return 0.0; } return a;".to_owned(),
+        UnaryOpCode::Real | UnaryOpCode::Conj => "return a;".to_owned(),
+        UnaryOpCode::Imag => "return 0.0;".to_owned(),
+        UnaryOpCode::Angle => format!("return atan2({ty}(0.0), a);"),
+        UnaryOpCode::Expm1 => "return expm1_precise(a);".to_owned(),
+        UnaryOpCode::Log1p => "return log1p_precise(a);".to_owned(),
+        UnaryOpCode::Log10 => "return log(a) * 0.4342944819032518;".to_owned(),
+        UnaryOpCode::Log2 => "return log(a) * 1.4426950408889634;".to_owned(),
+        UnaryOpCode::Pow2 => "return exp(a * 0.6931471805599453);".to_owned(),
+        UnaryOpCode::Floor => "return floor(a);".to_owned(),
+        UnaryOpCode::Ceil => "return ceil(a);".to_owned(),
+        UnaryOpCode::Fix => "let value = trunc(a); if (value == 0.0) { return 0.0; } return value;".to_owned(),
+        UnaryOpCode::Tan => "return tan(a);".to_owned(),
+        UnaryOpCode::Asin => "return asin(a);".to_owned(),
+        UnaryOpCode::Acos => "return acos(a);".to_owned(),
+        UnaryOpCode::Atan => "return atan(a);".to_owned(),
+        UnaryOpCode::Sinh => "return sinh(a);".to_owned(),
+        UnaryOpCode::Cosh => "return cosh(a);".to_owned(),
+        UnaryOpCode::Tanh => "return tanh(a);".to_owned(),
+        UnaryOpCode::Asinh => "return asinh(a);".to_owned(),
+        UnaryOpCode::Acosh => "return acosh(a);".to_owned(),
+        UnaryOpCode::Atanh => "return atanh(a);".to_owned(),
+        UnaryOpCode::Gamma => "return gamma_real(a);".to_owned(),
+        UnaryOpCode::Factorial => "return factorial_real(a);".to_owned(),
+        UnaryOpCode::Single => if ty == "f64" { "return f64(f32(a));" } else { "return a;" }.to_owned(),
+        UnaryOpCode::NextPow2 => "let value = abs(a); if (value == 0.0) { return 0.0; } return ceil(log2(value));".to_owned(),
+        UnaryOpCode::Sinc => "return sinc_real(a);".to_owned(),
+        UnaryOpCode::Heaviside => "return heaviside_real(a);".to_owned(),
+        UnaryOpCode::Erf => "return erf_real(a);".to_owned(),
+        UnaryOpCode::Gammaln => "return gammaln_real(a);".to_owned(),
+        UnaryOpCode::Round => format!("if ({nan}(a) || {is_inf}(a)) {{ return a; }} if (a >= 0.0) {{ return floor(a + 0.5); }} return ceil(a - 0.5);"),
+        UnaryOpCode::Erfcinv if ty == "f32" => "if (a != a) { return a; } if (a < 0.0 || a > 2.0) { return bitcast<f32>(0x7fc00000u); } if (a == 0.0) { return bitcast<f32>(0x7f800000u); } if (a == 2.0) { return bitcast<f32>(0xff800000u); } if (a == 1.0) { return 0.0; } var lo: f32 = -6.0; var hi: f32 = 6.0; var step: u32 = 0u; loop { if (step >= 26u) { break; } let mid = 0.5 * (lo + hi); let erfc_mid = 1.0 - erf_real(mid); if (erfc_mid > a) { lo = mid; } else { hi = mid; } step = step + 1u; } return 0.5 * (lo + hi);".to_owned(),
+        UnaryOpCode::Erfcinv => "return erfcinv_real(a);".to_owned(),
+    };
+    shader.push_str(&format!(
+        r#"
+fn apply(a: {ty}) -> {ty} {{ {apply_body} }}
+
+@compute @workgroup_size(512)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let local = gid.x;
+    if local >= params.len {{ return; }}
+    let idx = params.offset + local;
+    if idx >= params.total {{ return; }}
+    Out.data[idx] = apply(A.data[idx]);
+}}
+"#
+    ));
+    shader
+}
+
+pub const UNARY_LAYOUT_SHADER_F64: &str = r#"
+struct Tensor { data: array<f64>, };
+struct Params { len: u32, op: u32, offset: u32, total: u32, };
+@group(0) @binding(0) var<storage, read> A: Tensor;
+@group(0) @binding(1) var<storage, read_write> Out: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+@compute @workgroup_size(512)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = params.offset + gid.x;
+    if gid.x < params.len && idx < params.total { Out.data[idx] = A.data[idx]; }
+}
+"#;
+
+pub const UNARY_LAYOUT_SHADER_F32: &str = r#"
+struct Tensor { data: array<f32>, };
+struct Params { len: u32, op: u32, offset: u32, total: u32, };
+@group(0) @binding(0) var<storage, read> A: Tensor;
+@group(0) @binding(1) var<storage, read_write> Out: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+@compute @workgroup_size(512)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = params.offset + gid.x;
+    if gid.x < params.len && idx < params.total { Out.data[idx] = A.data[idx]; }
+}
+"#;
+
 pub const UNARY_SHADER_F64: &str = r#"
 struct Tensor {
     data: array<f64>,
@@ -1316,10 +1511,21 @@ fn erfcinv_real(a: f64) -> f64 {
     if (a == 1.0) {
         return 0.0;
     }
-    if (a > 1.0) {
-        return -erfcinv_positive_tail_real(2.0 - a);
+    let target = 1.0 - a;
+    var sign = 1.0;
+    if (target < 0.0) {
+        sign = -1.0;
     }
-    return erfcinv_positive_tail_real(a);
+    let magnitude = abs(target);
+    let log_term = log(1.0 - magnitude * magnitude);
+    let first = (2.0 / (PI * 0.147)) + (0.5 * log_term);
+    var estimate = sign * sqrt(sqrt(first * first - log_term / 0.147) - first);
+    let derivative_scale = 1.1283791670955126;
+    estimate = estimate - (erf_real(estimate) - target) / (derivative_scale * exp(-estimate * estimate));
+    estimate = estimate - (erf_real(estimate) - target) / (derivative_scale * exp(-estimate * estimate));
+    estimate = estimate - (erf_real(estimate) - target) / (derivative_scale * exp(-estimate * estimate));
+    estimate = estimate - (erf_real(estimate) - target) / (derivative_scale * exp(-estimate * estimate));
+    return estimate;
 }
 
 fn apply(a: f64) -> f64 {
@@ -1659,45 +1865,9 @@ fn erf_real(a: f32) -> f32 {
         return sign;
     }
     let x2 = x * x;
-    if (x < 3.5) {
-        var sum = x;
-        var term = x;
-        var n: u32 = 1u;
-        loop {
-            if (n >= 50u) {
-                break;
-            }
-            term = term * (-x2 / f32(n));
-            let add = term / f32((2u * n) + 1u);
-            sum = sum + add;
-            if (abs(add) <= 1.0e-6 * max(1.0, abs(sum))) {
-                break;
-            }
-            n = n + 1u;
-        }
-        return sign * 1.1283792 * sum;
-    }
-    var asym_sum = 1.0;
-    var asym_term = 1.0;
-    var previous = 1.0e30;
-    var k: u32 = 1u;
-    loop {
-        if (k >= 30u) {
-            break;
-        }
-        asym_term = asym_term * (-(f32((2u * k) - 1u)) / (2.0 * x2));
-        if (abs(asym_term) > previous) {
-            break;
-        }
-        asym_sum = asym_sum + asym_term;
-        previous = abs(asym_term);
-        if (abs(asym_term) <= 1.0e-6 * abs(asym_sum)) {
-            break;
-        }
-        k = k + 1u;
-    }
-    let erfc_tail = exp(-x2) * asym_sum / (x * 1.7724539);
-    return sign * (1.0 - erfc_tail);
+    let t = 1.0 / (1.0 + 0.3275911 * x);
+    let polynomial = (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;
+    return sign * (1.0 - polynomial * exp(-x2));
 }
 
 fn erfc_positive_tail_real(a: f32) -> f32 {
@@ -1743,7 +1913,7 @@ fn erfcinv_positive_tail_real(target: f32) -> f32 {
 
     var step: u32 = 0u;
     loop {
-        if (step >= 60u) {
+        if (step >= 32u) {
             break;
         }
         let mid = 0.5 * (lo + hi);
@@ -1773,10 +1943,15 @@ fn erfcinv_real(a: f32) -> f32 {
     if (a == 1.0) {
         return 0.0;
     }
-    if (a > 1.0) {
-        return -erfcinv_positive_tail_real(2.0 - a);
+    let target = 1.0 - a;
+    var sign: f32 = 1.0;
+    if (target < 0.0) {
+        sign = -1.0;
     }
-    return erfcinv_positive_tail_real(a);
+    let magnitude = abs(target);
+    let log_term = log(1.0 - magnitude * magnitude);
+    let first = (2.0 / (PI * 0.147)) + (0.5 * log_term);
+    return sign * sqrt(sqrt(first * first - log_term / 0.147) - first);
 }
 
 fn apply(a: f32) -> f32 {

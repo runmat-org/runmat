@@ -9,8 +9,8 @@ const BINARY_BROADCAST_SHADER_F64: &str =
     crate::backend::wgpu::shaders::elementwise::BINARY_BROADCAST_SHADER_F64;
 const BINARY_BROADCAST_SHADER_F32: &str =
     crate::backend::wgpu::shaders::elementwise::BINARY_BROADCAST_SHADER_F32;
-const UNARY_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::UNARY_SHADER_F64;
-const UNARY_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::UNARY_SHADER_F32;
+const UNARY_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::UNARY_LAYOUT_SHADER_F64;
+const UNARY_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::UNARY_LAYOUT_SHADER_F32;
 const SCALAR_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::SCALAR_SHADER_F64;
 const SCALAR_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::SCALAR_SHADER_F32;
 const TRANSPOSE_SHADER_F64: &str = crate::backend::wgpu::shaders::transpose::TRANSPOSE_SHADER_F64;

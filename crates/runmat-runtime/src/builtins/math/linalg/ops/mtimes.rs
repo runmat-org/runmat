@@ -657,7 +657,7 @@ pub(crate) mod tests {
         let err = mtimes_builtin(Value::Int(IntValue::I32(2)), Value::Tensor(a))
             .expect_err("integer matrix product must reject");
         assert_eq!(err.identifier(), MTIMES_ERROR_INVALID_INPUT.identifier);
-        assert!(err.message().contains("other input must be scalar"));
+        assert!(err.message().contains("scalar double or logical"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

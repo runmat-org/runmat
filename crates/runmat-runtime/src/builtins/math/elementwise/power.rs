@@ -314,10 +314,15 @@ fn power_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if let Some(result) = symbolic_binary(&lhs, &rhs, SymbolicBinaryOp::Pow) {
         return Ok(result);
     }
-    if let Some(result) = try_integer_binary(&lhs, &rhs, IntegerBinaryOp::Power, BUILTIN_NAME)
-        .map_err(builtin_error)?
-    {
-        return Ok(result);
+    // Character arrays participate in numeric power through their Unicode code
+    // points. An exact-integer operand on the other side must not claim this
+    // operation before the character operand is converted below.
+    if !matches!(lhs, Value::CharArray(_)) && !matches!(rhs, Value::CharArray(_)) {
+        if let Some(result) = try_integer_binary(&lhs, &rhs, IntegerBinaryOp::Power, BUILTIN_NAME)
+            .map_err(builtin_error)?
+        {
+            return Ok(result);
+        }
     }
     if let Some(result) = scalar_power_value(&lhs, &rhs) {
         return Ok(result);

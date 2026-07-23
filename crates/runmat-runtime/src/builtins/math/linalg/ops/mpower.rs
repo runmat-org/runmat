@@ -171,7 +171,9 @@ async fn mpower_builtin(base: Value, exponent: Value) -> BuiltinResult<Value> {
 }
 
 pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult<Value> {
-    if (contains_integer(base) || contains_integer(exponent))
+    let integer_base = contains_integer(base);
+    let integer_exponent = contains_integer(exponent);
+    if (integer_base || integer_exponent)
         && scalar_mpower_input(base)
         && scalar_mpower_input(exponent)
     {
@@ -188,7 +190,7 @@ pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult
             return Ok(result);
         }
     }
-    if contains_integer(base) || contains_integer(exponent) {
+    if integer_base || (integer_exponent && !scalar_mpower_input(exponent)) {
         return Err(mpower_invalid_argument(
             "mpower: non-scalar integer matrix powers are not supported",
         ));

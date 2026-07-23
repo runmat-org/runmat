@@ -178,7 +178,7 @@ fn exact_integer_scalar(target: IntegerTarget, value: f64) -> Option<IntValue> {
         IntegerTarget::U8 => value >= 0.0 && value < u8::MAX as f64 + 1.0,
         IntegerTarget::U16 => value >= 0.0 && value < u16::MAX as f64 + 1.0,
         IntegerTarget::U32 => value >= 0.0 && value < u32::MAX as f64 + 1.0,
-        IntegerTarget::U64 => value >= 0.0 && value < 18_446_744_073_709_551_616.0,
+        IntegerTarget::U64 => (0.0..18_446_744_073_709_551_616.0).contains(&value),
     };
     in_range.then(|| target.cast_scalar(value))
 }
@@ -315,7 +315,7 @@ fn signed_negative_integer_power(base: i128, exponent: u128, max: i128) -> i128 
     match base {
         0 => max,
         1 => 1,
-        -1 if exponent % 2 == 0 => 1,
+        -1 if exponent.is_multiple_of(2) => 1,
         -1 => -1,
         2 if exponent == 1 => 1,
         -2 if exponent == 1 => -1,

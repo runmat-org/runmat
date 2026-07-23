@@ -1697,7 +1697,7 @@ mod tests {
         assert_eq!(gathered.shape, vec![5, 3]);
         assert_eq!(
             gathered.data,
-            vec![0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0, 0.0]
+            vec![0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0]
         );
 
         let matrix = Tensor::new(

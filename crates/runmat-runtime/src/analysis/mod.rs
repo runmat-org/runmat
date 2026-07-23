@@ -9508,21 +9508,17 @@ pub fn analysis_run_linear_static_with_options(
                 | QualityReasonCode::SolidMeshQualityMinJacobianFailed
         )
     }) || !mesh_validation_reasons.is_empty();
-    let result_quality = if run.fields_are_empty() {
-        QualityGate::Fail
-    } else if solid_mesh_has_failure {
-        QualityGate::Fail
-    } else if !field_topology_reasons.is_empty() {
-        QualityGate::Fail
-    } else if !missing_solid_mesh_reasons.is_empty() {
-        QualityGate::Warn
-    } else if !solid_mesh_reasons.is_empty() {
-        QualityGate::Warn
-    } else if has_material_assignment_conflict {
-        QualityGate::Warn
-    } else {
-        QualityGate::Pass
-    };
+    let result_quality =
+        if run.fields_are_empty() || solid_mesh_has_failure || !field_topology_reasons.is_empty() {
+            QualityGate::Fail
+        } else if !missing_solid_mesh_reasons.is_empty()
+            || !solid_mesh_reasons.is_empty()
+            || has_material_assignment_conflict
+        {
+            QualityGate::Warn
+        } else {
+            QualityGate::Pass
+        };
 
     let mut quality_reasons = Vec::new();
     if has_material_assignment_conflict {
@@ -9663,7 +9659,7 @@ fn field_topology_quality_reasons(
 enum MeshValidationEvidenceStatus {
     NotRequested,
     Missing { detail: String },
-    Present(MeshValidationEvidence),
+    Present(Box<MeshValidationEvidence>),
 }
 
 fn mesh_validation_evidence_quality_reasons(
@@ -15119,8 +15115,11 @@ fn append_solved_adaptive_mesh_summary(
                         || (key.name == "current_density_gradient" && has_current_density)
                         || (key.name == "energy_density" && has_electromagnetic_energy_density)))
                 || (key.namespace == "acoustic"
-                    && ((key.name == "pressure_gradient" && has_acoustic_pressure)
-                        || (key.name == "pressure_curvature" && has_acoustic_pressure)))
+                    && has_acoustic_pressure
+                    && matches!(
+                        key.name.as_str(),
+                        "pressure_gradient" | "pressure_curvature"
+                    ))
                 || (key.namespace == "cfd"
                     && ((key.name == "velocity_gradient" && has_cfd_velocity)
                         || (key.name == "pressure_gradient" && has_cfd_pressure)
@@ -16209,7 +16208,7 @@ fn resolve_analysis_mesh_validation_evidence_status(
         });
     };
     serde_json::from_value::<MeshValidationEvidence>(validation_value)
-        .map(MeshValidationEvidenceStatus::Present)
+        .map(|validation| MeshValidationEvidenceStatus::Present(Box::new(validation)))
         .map_err(|err| {
             operation_error(
                 operation,

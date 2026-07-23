@@ -1,12 +1,10 @@
-#[cfg(not(target_arch = "wasm32"))]
-use once_cell::sync::OnceCell;
-#[cfg(target_arch = "wasm32")]
-use once_cell::unsync::OnceCell;
 #[cfg(target_arch = "wasm32")]
 use runmat_thread_local::runmat_thread_local;
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{OnceLock, RwLock};
 
 /// Shared WGPU instance/device/queue triple exported by a host acceleration provider.
 #[derive(Clone)]
@@ -21,20 +19,27 @@ pub struct SharedWgpuContext {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-static GLOBAL_CONTEXT: OnceCell<SharedWgpuContext> = OnceCell::new();
+static GLOBAL_CONTEXT: OnceLock<RwLock<Option<SharedWgpuContext>>> = OnceLock::new();
 
 #[cfg(target_arch = "wasm32")]
 runmat_thread_local! {
-    static GLOBAL_CONTEXT: RefCell<OnceCell<SharedWgpuContext>> = RefCell::new(OnceCell::new());
+    static GLOBAL_CONTEXT: RefCell<Option<SharedWgpuContext>> = RefCell::new(None);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn global_context() -> &'static RwLock<Option<SharedWgpuContext>> {
+    GLOBAL_CONTEXT.get_or_init(|| RwLock::new(None))
 }
 
 /// Install a shared context that other subsystems (GUI, exporters, web) can reuse.
 pub fn install_shared_wgpu_context(context: SharedWgpuContext) {
     #[cfg(not(target_arch = "wasm32"))]
-    let _ = GLOBAL_CONTEXT.set(context);
+    if let Ok(mut slot) = global_context().write() {
+        *slot = Some(context);
+    }
     #[cfg(target_arch = "wasm32")]
     GLOBAL_CONTEXT.with(|cell| {
-        let _ = cell.borrow_mut().set(context);
+        *cell.borrow_mut() = Some(context);
     });
 }
 
@@ -42,10 +47,13 @@ pub fn install_shared_wgpu_context(context: SharedWgpuContext) {
 pub fn shared_wgpu_context() -> Option<SharedWgpuContext> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        GLOBAL_CONTEXT.get().cloned()
+        global_context()
+            .read()
+            .ok()
+            .and_then(|context| context.clone())
     }
     #[cfg(target_arch = "wasm32")]
     {
-        GLOBAL_CONTEXT.with(|cell| cell.borrow().get().cloned())
+        GLOBAL_CONTEXT.with(|cell| cell.borrow().clone())
     }
 }

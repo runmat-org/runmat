@@ -32,9 +32,7 @@ fn discover_source_catalog(
     use std::path::{Path, PathBuf};
 
     let Ok(cwd) = runmat_filesystem::current_dir() else {
-        let Some(source_name) = source_name else {
-            return None;
-        };
+        let source_name = source_name?;
         let source_path = PathBuf::from(source_name);
         if source_path.is_absolute() {
             let source_cwd = source_path

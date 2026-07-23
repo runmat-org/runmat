@@ -464,25 +464,25 @@ fn cumprod_host(
         Value::Int(value) => {
             let storage =
                 crate::builtins::math::reduction::integer_native::storage_from_scalar(&value);
-            return crate::builtins::math::reduction::integer_native::cumulative(
+            crate::builtins::math::reduction::integer_native::cumulative(
                 &storage,
                 &[1, 1],
                 dim.unwrap_or(1),
                 integer_direction(direction),
                 crate::builtins::math::reduction::integer_native::CumulativeOperation::Product,
             )
-            .map_err(|error| cumprod_internal_error(&error));
+            .map_err(|error| cumprod_internal_error(&error))
         }
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
-            return crate::builtins::math::reduction::integer_native::cumulative(
+            crate::builtins::math::reduction::integer_native::cumulative(
                 tensor.integer_storage().expect("checked integer storage"),
                 &tensor.shape,
                 target_dim,
                 integer_direction(direction),
                 crate::builtins::math::reduction::integer_native::CumulativeOperation::Product,
             )
-            .map_err(|error| cumprod_internal_error(&error));
+            .map_err(|error| cumprod_internal_error(&error))
         }
         other => cumprod_host_floating(other, dim, direction, nan_mode),
     }

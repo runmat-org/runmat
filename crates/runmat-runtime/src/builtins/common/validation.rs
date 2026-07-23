@@ -492,7 +492,7 @@ pub fn value_is_real(value: &Value) -> bool {
 
 pub fn value_is_integer(value: &Value) -> bool {
     match value {
-        Value::Int(_) => true,
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
         Value::Num(v) => v.is_finite() && v.fract() == 0.0,
         Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && v.fract() == 0.0),
         Value::SparseTensor(t) => t.values.iter().all(|v| v.is_finite() && v.fract() == 0.0),

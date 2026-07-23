@@ -592,16 +592,16 @@ fn cummin_host(
         Value::Int(value) => {
             let storage =
                 crate::builtins::math::reduction::integer_native::storage_from_scalar(&value);
-            return integer_cummin(&storage, vec![1, 1], dim.unwrap_or(1), direction);
+            integer_cummin(&storage, vec![1, 1], dim.unwrap_or(1), direction)
         }
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
-            return integer_cummin(
+            integer_cummin(
                 tensor.integer_storage().expect("checked integer storage"),
                 tensor.shape.clone(),
                 target_dim,
                 direction,
-            );
+            )
         }
         other => cummin_host_floating(other, dim, direction, nan_mode),
     }

@@ -308,7 +308,7 @@ pub(crate) mod tests {
         let result = squeeze_builtin(Value::Tensor(tensor)).expect("squeeze ok");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(tensor.shape, vec![2, 1]);
                 assert_eq!(
                     tensor.integer_storage(),
                     Some(&IntegerStorage::U64(vec![0, u64::MAX]))

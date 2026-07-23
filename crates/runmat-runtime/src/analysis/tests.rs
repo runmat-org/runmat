@@ -2221,8 +2221,10 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         confidence: EvidenceConfidence::Verified,
     }];
     spec.model = Some(model);
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.backend = runmat_meshing_core::MeshBackendKind::StructuredGridTetrahedron;
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::StructuredGridTetrahedron,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
     mesh_options.validation.quality = runmat_meshing_core::QualityThresholds {
         min_scaled_jacobian: 0.0,
         max_aspect_ratio: 1.0e9,
@@ -2921,9 +2923,11 @@ fn analysis_author_study_persists_nested_shell_generation_evidence() {
     let _ = fs::remove_dir_all(&root);
     let _runtime_guard = scoped_study_artifact_root(&root);
     let geometry = nested_tetrahedron_shell_study_geometry();
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.backend = runmat_meshing_core::MeshBackendKind::Solid;
-    mesh_options.target_size = runmat_meshing_core::MeshTargetSize::LengthM(10.0);
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        target_size: runmat_meshing_core::MeshTargetSize::LengthM(10.0),
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
     mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
     mesh_options.refinement.max_iterations = 0;
     let mesh = runmat_meshing::generate_analysis_mesh(&geometry, mesh_options)
@@ -3299,8 +3303,10 @@ fn analysis_run_study_persists_solid_backend_analysis_mesh_artifact() {
     let _runtime_guard = scoped_study_artifact_root(&root);
     let mut spec = sample_linear_static_study_spec();
     spec.geometry = closed_cube_geometry_asset();
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.backend = runmat_meshing_core::MeshBackendKind::Solid;
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
     mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
     mesh_options.refinement.max_iterations = 0;
     spec.mesh_options = Some(mesh_options);
@@ -3422,9 +3428,11 @@ fn analysis_run_study_consumes_generated_nested_shell_solid_artifact() {
             fz: 25.0,
         },
     }];
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.backend = runmat_meshing_core::MeshBackendKind::Solid;
-    mesh_options.target_size = runmat_meshing_core::MeshTargetSize::LengthM(10.0);
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        target_size: runmat_meshing_core::MeshTargetSize::LengthM(10.0),
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
     mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
     mesh_options.refinement.max_iterations = 0;
     let mut spec = sample_linear_static_study_spec();
@@ -3549,8 +3557,10 @@ fn analysis_run_study_persists_solid_boundary_focus_sizing_evidence() {
         confidence: EvidenceConfidence::Verified,
     }];
     spec.model = Some(model);
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.backend = runmat_meshing_core::MeshBackendKind::Solid;
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
     mesh_options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Fine;
     mesh_options.refinement.focus.constraints = runmat_meshing_core::RefinementFocusLevel::Fine;
     spec.mesh_options = Some(mesh_options);
@@ -3671,8 +3681,10 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
     ];
     spec.model = Some(model);
 
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.max_elements = 42_000;
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        max_elements: 42_000,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
     mesh_options.validation.max_volume_component_count = Some(3);
     mesh_options.validation.min_bounds_coverage_ratio = 0.95;
     mesh_options.validation.min_boundary_face_recovery_ratio = 0.98;
@@ -5950,6 +5962,8 @@ fn write_ready_minimal_analysis_mesh_artifact(test_name: &str) -> (PathBuf, Path
         &mesh_path,
         serde_json::to_vec_pretty(&serde_json::json!({
             "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
             "mesh_evidence_artifact_path": evidence_path.display().to_string(),
             "mesh_validation_options": validation_options.clone(),
             "mesh": mesh,
@@ -5970,8 +5984,10 @@ fn write_generated_through_hole_analysis_mesh_artifacts(
     let _ = fs::remove_dir_all(root);
     fs::create_dir_all(root).expect("create generated analysis mesh artifact root");
     let geometry = through_hole_study_geometry();
-    let mut options = runmat_meshing_core::VolumeMeshingOptions::default();
-    options.backend = runmat_meshing_core::MeshBackendKind::Solid;
+    let options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
     let mesh = runmat_meshing::generate_analysis_mesh(&geometry, options.clone())
         .expect("through-hole fixture should generate an analysis mesh");
     let validation_options = runmat_meshing_core::AnalysisMeshValidationOptions {
@@ -6003,6 +6019,8 @@ fn write_generated_through_hole_analysis_mesh_artifacts(
             "schema_version": "fea_study_analysis_mesh_artifact/v1",
             "mesh_evidence_artifact_path": evidence_path.display().to_string(),
             "mesh_options": options,
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
             "mesh_validation_options": validation_options,
             "mesh": mesh,
         }))
@@ -6535,7 +6553,7 @@ fn mesh_validation_evidence_quality_reasons_fail_closed_on_not_solve_ready() {
     evidence.unrepaired_exact_quality_node_adjacent_count = 4;
 
     let reasons = mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Present(
-        evidence.clone(),
+        Box::new(evidence.clone()),
     ));
 
     assert_eq!(reasons.len(), 1);
@@ -6567,8 +6585,10 @@ fn mesh_validation_evidence_quality_reasons_fail_closed_on_not_solve_ready() {
 
     evidence.solve_ready = true;
     assert!(
-        mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Present(evidence))
-            .is_empty()
+        mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Present(Box::new(
+            evidence,
+        )))
+        .is_empty()
     );
     assert!(
         mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::NotRequested)
@@ -8551,8 +8571,10 @@ fn append_solved_adaptive_mesh_summary_enforces_element_budget() {
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
     });
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.max_elements = 2;
+    let mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        max_elements: 2,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
     fs::write(
         &artifact_path,
         serde_json::to_vec_pretty(&serde_json::json!({
@@ -13259,8 +13281,10 @@ fn analysis_generate_study_run_figures_uses_generated_solid_through_hole_topolog
             confidence: EvidenceConfidence::Verified,
         },
     ];
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.backend = runmat_meshing_core::MeshBackendKind::Solid;
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
     mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
     mesh_options.refinement.max_iterations = 0;
     let mut spec = sample_linear_static_study_spec();
@@ -13364,9 +13388,11 @@ fn analysis_generate_study_run_figures_uses_generated_nested_shell_topology() {
             fz: 25.0,
         },
     }];
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.backend = runmat_meshing_core::MeshBackendKind::Solid;
-    mesh_options.target_size = runmat_meshing_core::MeshTargetSize::LengthM(10.0);
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        target_size: runmat_meshing_core::MeshTargetSize::LengthM(10.0),
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
     mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
     mesh_options.refinement.max_iterations = 0;
     let mut spec = sample_linear_static_study_spec();

@@ -1858,12 +1858,24 @@ pub(crate) mod tests {
         let file = File::open(&path).unwrap();
         let mat = matfile::MatFile::parse(file).unwrap();
         let array = mat.find_by_name("wgpu_tensor").unwrap();
-        match array.data() {
-            matfile::NumericData::Double { real, imag } => {
+        match (provider.precision(), array.data()) {
+            (
+                runmat_accelerate_api::ProviderPrecision::F32,
+                matfile::NumericData::Single { real, imag },
+            ) => {
+                assert_eq!(real, &[0.0_f32, 1.0, 2.0, 3.0]);
+                assert!(imag.is_none());
+            }
+            (
+                runmat_accelerate_api::ProviderPrecision::F64,
+                matfile::NumericData::Double { real, imag },
+            ) => {
                 assert_eq!(real, &tensor.data);
                 assert!(imag.is_none());
             }
-            _ => panic!("expected double array"),
+            (precision, data) => {
+                panic!("expected MAT numeric class matching {precision:?}, got {data:?}")
+            }
         }
     }
 }

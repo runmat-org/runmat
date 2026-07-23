@@ -14,32 +14,34 @@ fn geometry_prep_for_analysis_is_deterministic_for_fixture_inputs() {
         target_element_budget: 120_000,
     };
 
-    for (path, bytes) in [("/fixtures/tri.stl", TRIANGLE_STL.as_bytes())] {
-        let geometry = geometry_load_op(path, bytes, OperationContext::new(None, None))
-            .expect("geometry load should succeed");
-        let first = geometry_prep_for_analysis_op(
-            &geometry.data,
-            spec.clone(),
-            OperationContext::new(Some("trace-prep-1".to_string()), None),
-        )
-        .expect("first prep should succeed");
-        let second = geometry_prep_for_analysis_op(
-            &geometry.data,
-            spec.clone(),
-            OperationContext::new(Some("trace-prep-2".to_string()), None),
-        )
-        .expect("second prep should succeed");
+    let geometry = geometry_load_op(
+        "/fixtures/tri.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(None, None),
+    )
+    .expect("geometry load should succeed");
+    let first = geometry_prep_for_analysis_op(
+        &geometry.data,
+        spec.clone(),
+        OperationContext::new(Some("trace-prep-1".to_string()), None),
+    )
+    .expect("first prep should succeed");
+    let second = geometry_prep_for_analysis_op(
+        &geometry.data,
+        spec,
+        OperationContext::new(Some("trace-prep-2".to_string()), None),
+    )
+    .expect("second prep should succeed");
 
-        assert_ne!(first.data.prep_artifact_id, second.data.prep_artifact_id);
-        assert_eq!(first.data.prep, second.data.prep);
-        assert!(!first.data.prep_artifact_id.is_empty());
-        assert_eq!(
-            first.data.prep.schema_version,
-            "geometry-prep-for-analysis/v1"
-        );
-        assert!(first.data.prep.quality.min_scaled_jacobian >= 0.5);
-        assert_eq!(first.data.prep.quality.inverted_element_count, 0);
-    }
+    assert_ne!(first.data.prep_artifact_id, second.data.prep_artifact_id);
+    assert_eq!(first.data.prep, second.data.prep);
+    assert!(!first.data.prep_artifact_id.is_empty());
+    assert_eq!(
+        first.data.prep.schema_version,
+        "geometry-prep-for-analysis/v1"
+    );
+    assert!(first.data.prep.quality.min_scaled_jacobian >= 0.5);
+    assert_eq!(first.data.prep.quality.inverted_element_count, 0);
 }
 
 #[test]

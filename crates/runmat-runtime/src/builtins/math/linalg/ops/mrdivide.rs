@@ -186,6 +186,13 @@ pub(crate) async fn mrdivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Val
 }
 
 async fn try_gpu_mrdivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
+    // A configured accelerator must not change the residency of an otherwise
+    // host-only operation. Only continue on the GPU when at least one operand
+    // is already resident there.
+    if !matches!(lhs, Value::GpuTensor(_)) && !matches!(rhs, Value::GpuTensor(_)) {
+        return Ok(None);
+    }
+
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -949,6 +956,10 @@ pub(crate) mod tests {
             Some(p) => p,
             None => panic!("wgpu provider not available"),
         };
+        let tolerance = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-4,
+        };
 
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![4.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
@@ -974,7 +985,10 @@ pub(crate) mod tests {
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
-            assert!((gpu - cpu).abs() < 1e-10);
+            assert!(
+                (gpu - cpu).abs() < tolerance,
+                "gpu={gpu} cpu={cpu} tolerance={tolerance}"
+            );
         }
     }
 
