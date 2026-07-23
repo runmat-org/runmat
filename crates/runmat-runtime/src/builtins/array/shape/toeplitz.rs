@@ -254,7 +254,7 @@ fn toeplitz_typed_complex(
     let mut imag = Vec::with_capacity(len);
     for col in 0..cols {
         for row in 0..rows {
-            let index = if row >= col { row - col } else { col - row };
+            let index = row.abs_diff(col);
             let storage = if row >= col { &c } else { &r };
             real.push(
                 storage
