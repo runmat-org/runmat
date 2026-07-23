@@ -247,6 +247,36 @@ pub(super) fn assign_rows(mut current: Value, rows: &[usize], rhs: Value) -> Bui
                     "table: tensor assignment column count mismatch",
                 ));
             }
+            let target_rows = target.rows();
+            let target_cols = target.cols();
+            if target.integer_storage().is_some() {
+                let target_storage = target
+                    .integer_data
+                    .as_mut()
+                    .expect("integer storage was checked above");
+                for col in 0..target_cols {
+                    for (src_row, &dst_row) in rows.iter().enumerate() {
+                        let source_index = src_row + col * source.rows();
+                        let target_index = dst_row + col * target_rows;
+                        let exact = match source.integer_storage() {
+                            Some(source_storage) => target_storage.cast_exact_assignment(
+                                &source_storage.value_at(source_index).ok_or_else(|| {
+                                    invalid_index("table: source integer storage is inconsistent")
+                                })?,
+                            ),
+                            None => target_storage.cast_f64_assignment(
+                                source.get2(src_row, col).map_err(invalid_index)?,
+                            ),
+                        };
+                        let compatibility_value = exact.to_f64();
+                        target_storage
+                            .set_value(target_index, exact)
+                            .map_err(invalid_variable)?;
+                        target.data[target_index] = compatibility_value;
+                    }
+                }
+                return Ok(current);
+            }
             for col in 0..target.cols() {
                 for (src_row, &dst_row) in rows.iter().enumerate() {
                     let value = source.get2(src_row, col).map_err(invalid_index)?;
@@ -345,6 +375,40 @@ mod tests {
                 )
                 .unwrap(),
             )
+        );
+    }
+
+    #[test]
+    fn assign_rows_preserves_exact_integer_source_and_target_storage() {
+        let large = 9_007_199_254_740_993_u64;
+        let current = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![0, 1]), vec![2, 1]).unwrap(),
+        );
+        let rhs = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap(),
+        );
+
+        let Value::Tensor(result) = assign_rows(current, &[1], rhs).unwrap() else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![0, large]))
+        );
+    }
+
+    #[test]
+    fn assign_rows_converts_floating_source_into_target_integer_class() {
+        let current =
+            Value::Tensor(Tensor::new_integer(IntegerStorage::I8(vec![0, 0]), vec![2, 1]).unwrap());
+        let rhs = Value::Tensor(Tensor::new_2d(vec![200.6], 1, 1).unwrap());
+
+        let Value::Tensor(result) = assign_rows(current, &[0], rhs).unwrap() else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I8(vec![i8::MAX, 0]))
         );
     }
 }

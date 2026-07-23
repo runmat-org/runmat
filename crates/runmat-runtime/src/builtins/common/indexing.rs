@@ -213,8 +213,17 @@ pub fn matrix_set_element(
             "RunMat:IndexOutOfBounds",
         ));
     }
+    let index = (row - 1) + (col - 1) * tensor.rows();
+    let mut compatibility_value = value;
+    if let Some(storage) = &mut tensor.integer_data {
+        let exact = storage.cast_f64_assignment(value);
+        compatibility_value = exact.to_f64();
+        storage
+            .set_value(index, exact)
+            .map_err(|err| indexing_error_with_identifier(err, "RunMat:IndexOutOfBounds"))?;
+    }
     tensor
-        .set2(row - 1, col - 1, value)
+        .set2(row - 1, col - 1, compatibility_value)
         .map_err(|err| indexing_error_with_identifier(err, "RunMat:IndexOutOfBounds"))
 }
 
@@ -230,6 +239,20 @@ pub fn matrix_get_row(tensor: &Tensor, row: usize) -> Result<Tensor, RuntimeErro
             ),
             "RunMat:IndexOutOfBounds",
         ));
+    }
+
+    if let Some(storage) = tensor.integer_storage() {
+        let values = (0..tensor.cols())
+            .map(|col| storage.value_at((row - 1) + col * tensor.rows()))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| indexing_error("integer storage is inconsistent"))?;
+        return Tensor::new_integer(
+            storage
+                .from_same_class_values(values)
+                .map_err(indexing_error)?,
+            vec![1, tensor.cols()],
+        )
+        .map_err(indexing_error);
     }
 
     // Column-major: row slice picks every element spaced by rows across columns
@@ -252,6 +275,21 @@ pub fn matrix_get_col(tensor: &Tensor, col: usize) -> Result<Tensor, RuntimeErro
             ),
             "RunMat:IndexOutOfBounds",
         ));
+    }
+
+    if let Some(storage) = tensor.integer_storage() {
+        let start = (col - 1) * tensor.rows();
+        let values = (0..tensor.rows())
+            .map(|row| storage.value_at(start + row))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| indexing_error("integer storage is inconsistent"))?;
+        return Tensor::new_integer(
+            storage
+                .from_same_class_values(values)
+                .map_err(indexing_error)?,
+            vec![tensor.rows(), 1],
+        )
+        .map_err(indexing_error);
     }
 
     let mut col_data = Vec::with_capacity(tensor.rows());
@@ -565,7 +603,7 @@ async fn gpu_index_scalar(
 
 #[cfg(test)]
 mod tests {
-    use super::perform_indexing;
+    use super::{matrix_get_col, matrix_get_row, matrix_set_element, perform_indexing};
     use futures::executor::block_on;
     use runmat_builtins::{
         CellArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
@@ -718,6 +756,30 @@ mod tests {
                 .expect("expected storage")
             )
         );
+    }
+
+    #[test]
+    fn common_tensor_index_helpers_preserve_exact_integer_storage() {
+        let large = 9_007_199_254_740_993_u64;
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![large, u64::MAX, 3, 4]), vec![2, 2])
+                .expect("tensor");
+
+        assert_eq!(
+            matrix_get_row(&tensor, 2).unwrap().integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 4]))
+        );
+        assert_eq!(
+            matrix_get_col(&tensor, 1).unwrap().integer_storage(),
+            Some(&IntegerStorage::U64(vec![large, u64::MAX]))
+        );
+
+        matrix_set_element(&mut tensor, 1, 2, -4.2).unwrap();
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![large, u64::MAX, 0, 4]))
+        );
+        assert_eq!(tensor.data[2], 0.0);
     }
 
     #[test]

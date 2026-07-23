@@ -28,52 +28,15 @@ pub(crate) fn values(storage: &IntegerStorage) -> Vec<IntValue> {
     }
 }
 
-fn cast_signed(value: &IntegerAssignmentValue, min: i64, max: i64) -> i64 {
-    match value {
-        IntegerAssignmentValue::Exact(value) => value.to_i64().clamp(min, max),
-        IntegerAssignmentValue::Float(value) if value.is_nan() => 0,
-        IntegerAssignmentValue::Float(value) if value.is_infinite() => {
-            if value.is_sign_negative() {
-                min
-            } else {
-                max
-            }
-        }
-        IntegerAssignmentValue::Float(value) => value.round().clamp(min as f64, max as f64) as i64,
-    }
-}
-
-fn cast_unsigned(value: &IntegerAssignmentValue, max: u64) -> u64 {
-    match value {
-        IntegerAssignmentValue::Exact(IntValue::U64(value)) => (*value).min(max),
-        IntegerAssignmentValue::Exact(value) => (value.to_i64().max(0) as u64).min(max),
-        IntegerAssignmentValue::Float(value) if value.is_nan() || value.is_sign_negative() => 0,
-        IntegerAssignmentValue::Float(value) if value.is_infinite() => max,
-        IntegerAssignmentValue::Float(value) => value.round().clamp(0.0, max as f64) as u64,
-    }
-}
-
 /// Converts a scalar assignment value to the exact class of `storage`.
 ///
 /// This is shared by dense and sparse integer assignment so they retain the
 /// same round-and-saturate behavior without converting wide integers through
 /// the floating compatibility view.
 pub(crate) fn scalar_value(storage: &IntegerStorage, value: &IntegerAssignmentValue) -> IntValue {
-    match storage {
-        IntegerStorage::I8(_) => {
-            IntValue::I8(cast_signed(value, i8::MIN as i64, i8::MAX as i64) as i8)
-        }
-        IntegerStorage::I16(_) => {
-            IntValue::I16(cast_signed(value, i16::MIN as i64, i16::MAX as i64) as i16)
-        }
-        IntegerStorage::I32(_) => {
-            IntValue::I32(cast_signed(value, i32::MIN as i64, i32::MAX as i64) as i32)
-        }
-        IntegerStorage::I64(_) => IntValue::I64(cast_signed(value, i64::MIN, i64::MAX)),
-        IntegerStorage::U8(_) => IntValue::U8(cast_unsigned(value, u8::MAX as u64) as u8),
-        IntegerStorage::U16(_) => IntValue::U16(cast_unsigned(value, u16::MAX as u64) as u16),
-        IntegerStorage::U32(_) => IntValue::U32(cast_unsigned(value, u32::MAX as u64) as u32),
-        IntegerStorage::U64(_) => IntValue::U64(cast_unsigned(value, u64::MAX)),
+    match value {
+        IntegerAssignmentValue::Exact(value) => storage.cast_exact_assignment(value),
+        IntegerAssignmentValue::Float(value) => storage.cast_f64_assignment(*value),
     }
 }
 
@@ -85,43 +48,14 @@ pub(crate) fn scatter(
     if rhs_values.len() != plan.indices.len() {
         return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
     }
-    macro_rules! write_values {
-        ($values:expr, $convert:expr) => {{
-            for (&dst, value) in plan.indices.iter().zip(rhs_values.iter()) {
-                $values[dst as usize] = $convert(value);
-            }
-        }};
-    }
-    match storage {
-        IntegerStorage::I8(values) => write_values!(values, |value| cast_signed(
-            value,
-            i8::MIN as i64,
-            i8::MAX as i64
-        ) as i8),
-        IntegerStorage::I16(values) => write_values!(values, |value| cast_signed(
-            value,
-            i16::MIN as i64,
-            i16::MAX as i64
-        ) as i16),
-        IntegerStorage::I32(values) => write_values!(values, |value| cast_signed(
-            value,
-            i32::MIN as i64,
-            i32::MAX as i64
-        ) as i32),
-        IntegerStorage::I64(values) => {
-            write_values!(values, |value| cast_signed(value, i64::MIN, i64::MAX))
-        }
-        IntegerStorage::U8(values) => {
-            write_values!(values, |value| cast_unsigned(value, u8::MAX as u64) as u8)
-        }
-        IntegerStorage::U16(values) => {
-            write_values!(values, |value| cast_unsigned(value, u16::MAX as u64) as u16)
-        }
-        IntegerStorage::U32(values) => {
-            write_values!(values, |value| cast_unsigned(value, u32::MAX as u64) as u32)
-        }
-        IntegerStorage::U64(values) => {
-            write_values!(values, |value| cast_unsigned(value, u64::MAX))
+    for (&dst, value) in plan.indices.iter().zip(rhs_values.iter()) {
+        match value {
+            IntegerAssignmentValue::Exact(value) => storage
+                .set_exact_assignment(dst as usize, value)
+                .map_err(|err| mex("Assignment", &err))?,
+            IntegerAssignmentValue::Float(value) => storage
+                .set_f64_assignment(dst as usize, *value)
+                .map_err(|err| mex("Assignment", &err))?,
         }
     }
     Ok(())

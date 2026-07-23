@@ -350,6 +350,46 @@ impl IntegerStorage {
             .collect()
     }
 
+    /// Converts an exact integer scalar to this storage class using the
+    /// round-and-saturate assignment semantics used by MATLAB integer arrays.
+    pub fn cast_exact_assignment(&self, value: &IntValue) -> IntValue {
+        match self {
+            Self::I8(_) => IntValue::I8(value.to_i64().clamp(i8::MIN as i64, i8::MAX as i64) as i8),
+            Self::I16(_) => {
+                IntValue::I16(value.to_i64().clamp(i16::MIN as i64, i16::MAX as i64) as i16)
+            }
+            Self::I32(_) => {
+                IntValue::I32(value.to_i64().clamp(i32::MIN as i64, i32::MAX as i64) as i32)
+            }
+            Self::I64(_) => IntValue::I64(value.to_i64()),
+            Self::U8(_) => IntValue::U8(cast_exact_unsigned(value, u8::MAX as u64) as u8),
+            Self::U16(_) => IntValue::U16(cast_exact_unsigned(value, u16::MAX as u64) as u16),
+            Self::U32(_) => IntValue::U32(cast_exact_unsigned(value, u32::MAX as u64) as u32),
+            Self::U64(_) => IntValue::U64(cast_exact_unsigned(value, u64::MAX)),
+        }
+    }
+
+    /// Converts a floating scalar to this storage class using the
+    /// round-and-saturate assignment semantics used by MATLAB integer arrays.
+    pub fn cast_f64_assignment(&self, value: f64) -> IntValue {
+        match self {
+            Self::I8(_) => {
+                IntValue::I8(cast_f64_signed(value, i8::MIN as i64, i8::MAX as i64) as i8)
+            }
+            Self::I16(_) => {
+                IntValue::I16(cast_f64_signed(value, i16::MIN as i64, i16::MAX as i64) as i16)
+            }
+            Self::I32(_) => {
+                IntValue::I32(cast_f64_signed(value, i32::MIN as i64, i32::MAX as i64) as i32)
+            }
+            Self::I64(_) => IntValue::I64(cast_f64_signed(value, i64::MIN, i64::MAX)),
+            Self::U8(_) => IntValue::U8(cast_f64_unsigned(value, u8::MAX as u64) as u8),
+            Self::U16(_) => IntValue::U16(cast_f64_unsigned(value, u16::MAX as u64) as u16),
+            Self::U32(_) => IntValue::U32(cast_f64_unsigned(value, u32::MAX as u64) as u32),
+            Self::U64(_) => IntValue::U64(cast_f64_unsigned(value, u64::MAX)),
+        }
+    }
+
     /// Rebuilds this homogeneous storage class from exact values.
     pub fn from_exact_values_like(&self, values: Vec<IntValue>) -> Result<Self, String> {
         macro_rules! rebuild {
@@ -409,6 +449,20 @@ impl IntegerStorage {
         }
     }
 
+    /// Converts and stores an exact scalar without materializing a floating
+    /// compatibility value or rebuilding the backing buffer.
+    pub fn set_exact_assignment(&mut self, index: usize, value: &IntValue) -> Result<(), String> {
+        let value = self.cast_exact_assignment(value);
+        self.set_value(index, value)
+    }
+
+    /// Converts and stores a floating scalar using integer assignment
+    /// semantics without rebuilding the backing buffer.
+    pub fn set_f64_assignment(&mut self, index: usize, value: f64) -> Result<(), String> {
+        let value = self.cast_f64_assignment(value);
+        self.set_value(index, value)
+    }
+
     /// Builds storage with this buffer's class from same-class exact values.
     pub fn from_same_class_values(&self, values: Vec<IntValue>) -> Result<Self, String> {
         macro_rules! collect_values {
@@ -437,6 +491,37 @@ impl IntegerStorage {
             Self::U32(_) => collect_values!(U32, u32),
             Self::U64(_) => collect_values!(U64, u64),
         }
+    }
+}
+
+fn cast_exact_unsigned(value: &IntValue, max: u64) -> u64 {
+    match value {
+        IntValue::U64(value) => (*value).min(max),
+        value => (value.to_i64().max(0) as u64).min(max),
+    }
+}
+
+fn cast_f64_signed(value: f64, min: i64, max: i64) -> i64 {
+    if value.is_nan() {
+        0
+    } else if value.is_infinite() {
+        if value.is_sign_negative() {
+            min
+        } else {
+            max
+        }
+    } else {
+        value.round().clamp(min as f64, max as f64) as i64
+    }
+}
+
+fn cast_f64_unsigned(value: f64, max: u64) -> u64 {
+    if value.is_nan() || value.is_sign_negative() {
+        0
+    } else if value.is_infinite() {
+        max
+    } else {
+        value.round().clamp(0.0, max as f64) as u64
     }
 }
 
@@ -472,7 +557,7 @@ impl NumericDType {
 
 #[cfg(test)]
 mod integer_storage_tests {
-    use super::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
+    use super::{ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
 
     #[test]
     fn uint64_tensor_keeps_exact_backing_values() {
@@ -496,6 +581,23 @@ mod integer_storage_tests {
             Some("int64")
         );
         assert!(tensor.data.is_empty());
+    }
+
+    #[test]
+    fn assignment_conversion_preserves_wide_exact_values_and_mutates_in_place() {
+        let large = 9_007_199_254_740_993_u64;
+        let mut storage = IntegerStorage::U64(vec![0, 1]);
+
+        storage
+            .set_exact_assignment(0, &IntValue::U64(large))
+            .unwrap();
+        storage.set_f64_assignment(1, -4.2).unwrap();
+
+        assert_eq!(storage, IntegerStorage::U64(vec![large, 0]));
+        assert_eq!(
+            IntegerStorage::I8(vec![0]).cast_f64_assignment(200.6),
+            IntValue::I8(i8::MAX)
+        );
     }
 
     #[test]
