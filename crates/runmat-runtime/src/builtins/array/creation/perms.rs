@@ -178,6 +178,14 @@ fn evaluate_host(value: Value) -> BuiltinResult<Value> {
 fn perms_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let elements = vector_len(&tensor.shape)?;
     let rows = checked_output_rows(elements)?;
+    if let Some(storage) = tensor.integer_data {
+        let storage = storage
+            .from_exact_values_like(permuted_columns(&storage.exact_values(), rows, elements)?)
+            .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")))?;
+        return Tensor::new_integer(storage, vec![rows, elements])
+            .map(Value::Tensor)
+            .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")));
+    }
     let data = permuted_columns(&tensor.data, rows, elements)?;
     Tensor::new_with_dtype(data, vec![rows, elements], tensor.dtype)
         .map(Value::Tensor)
@@ -370,7 +378,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, NumericDType};
+    use runmat_builtins::{IntValue, IntegerStorage, NumericDType};
 
     fn call(value: Value) -> BuiltinResult<Value> {
         block_on(super::perms_builtin(value, Vec::new()))
@@ -489,6 +497,38 @@ mod tests {
         };
         assert_eq!(out.dtype, NumericDType::U32);
         assert_eq!(tensor_rows(&out), vec![vec![2.0, 1.0], vec![1.0, 2.0]]);
+    }
+
+    #[test]
+    fn exact_integer_tensor_classes_and_values_are_preserved() {
+        let storages = [
+            IntegerStorage::I8(vec![-2, 7]),
+            IntegerStorage::I16(vec![-300, 400]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let expected = storage
+                .from_exact_values_like(vec![
+                    values[1].clone(),
+                    values[0].clone(),
+                    values[0].clone(),
+                    values[1].clone(),
+                ])
+                .expect("expected storage");
+            let input = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+            let Value::Tensor(output) = call(Value::Tensor(input)).expect("perms") else {
+                panic!("expected exact integer tensor");
+            };
+            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
     }
 
     #[test]
