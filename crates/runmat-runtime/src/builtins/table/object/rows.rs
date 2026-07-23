@@ -60,6 +60,24 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
     match value {
         Value::Tensor(tensor) => {
             let cols = tensor.cols();
+            if let Some(storage) = tensor.integer_storage() {
+                let mut values = Vec::with_capacity(rows.len() * cols);
+                for col in 0..cols {
+                    for &row in rows {
+                        values.push(storage.value_at(row + col * tensor.rows()).ok_or_else(
+                            || invalid_index("table: numeric variable row index out of bounds"),
+                        )?);
+                    }
+                }
+                return Tensor::new_integer(
+                    storage
+                        .from_exact_values_like(values)
+                        .map_err(invalid_variable)?,
+                    vec![rows.len(), cols],
+                )
+                .map(Value::Tensor)
+                .map_err(invalid_variable);
+            }
             let mut data = Vec::with_capacity(rows.len() * cols);
             for col in 0..cols {
                 for &row in rows {
@@ -243,4 +261,28 @@ pub(super) fn concatenate_numeric_columns(values: &[&Value]) -> BuiltinResult<Va
     Tensor::new(data, vec![rows, total_cols])
         .map(Value::Tensor)
         .map_err(invalid_variable)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn select_rows_preserves_exact_integer_storage() {
+        let large = 9_007_199_254_740_993_u64;
+        let value = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![large, u64::MAX, 7, 0]), vec![2, 2])
+                .unwrap(),
+        );
+
+        let selected = select_rows(&value, &[1, 0]).unwrap();
+        let Value::Tensor(selected) = selected else {
+            panic!("expected tensor row selection");
+        };
+        assert_eq!(
+            selected.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, large, 0, 7]))
+        );
+    }
 }

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, LogicalArray, ObjectInstance, SparseTensor, StringArray, Tensor, Value,
+    CellArray, IntValue, LogicalArray, ObjectInstance, SparseTensor, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -78,6 +78,7 @@ enum Atom {
     Missing,
     Logical(bool),
     Number(f64),
+    Integer(IntValue),
     Text(String),
 }
 
@@ -87,7 +88,8 @@ impl Atom {
             Self::Missing => 0,
             Self::Logical(_) => 1,
             Self::Number(_) => 2,
-            Self::Text(_) => 3,
+            Self::Integer(_) => 3,
+            Self::Text(_) => 4,
         }
     }
 
@@ -102,6 +104,7 @@ impl Atom {
                 }
             }
             Self::Number(value) => format_key_number(*value),
+            Self::Integer(value) => format_integer_key(value),
             Self::Text(text) => text.clone(),
         }
     }
@@ -131,9 +134,47 @@ impl Ord for Atom {
             (Self::Missing, Self::Missing) => Ordering::Equal,
             (Self::Logical(a), Self::Logical(b)) => a.cmp(b),
             (Self::Number(a), Self::Number(b)) => a.total_cmp(b),
+            (Self::Integer(a), Self::Integer(b)) => compare_integer_values(a, b),
             (Self::Text(a), Self::Text(b)) => a.cmp(b),
             _ => Ordering::Equal,
         }
+    }
+}
+
+fn compare_integer_values(left: &IntValue, right: &IntValue) -> Ordering {
+    let left = integer_sign_and_magnitude(left);
+    let right = integer_sign_and_magnitude(right);
+    match (left.0, right.0) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        (false, false) => left.1.cmp(&right.1),
+        (true, true) => right.1.cmp(&left.1),
+    }
+}
+
+fn integer_sign_and_magnitude(value: &IntValue) -> (bool, u64) {
+    match value {
+        IntValue::I8(value) => (*value < 0, value.unsigned_abs() as u64),
+        IntValue::I16(value) => (*value < 0, value.unsigned_abs() as u64),
+        IntValue::I32(value) => (*value < 0, value.unsigned_abs() as u64),
+        IntValue::I64(value) => (*value < 0, value.unsigned_abs()),
+        IntValue::U8(value) => (false, *value as u64),
+        IntValue::U16(value) => (false, *value as u64),
+        IntValue::U32(value) => (false, *value as u64),
+        IntValue::U64(value) => (false, *value),
+    }
+}
+
+fn format_integer_key(value: &IntValue) -> String {
+    match value {
+        IntValue::I8(value) => value.to_string(),
+        IntValue::I16(value) => value.to_string(),
+        IntValue::I32(value) => value.to_string(),
+        IntValue::I64(value) => value.to_string(),
+        IntValue::U8(value) => value.to_string(),
+        IntValue::U16(value) => value.to_string(),
+        IntValue::U32(value) => value.to_string(),
+        IntValue::U64(value) => value.to_string(),
     }
 }
 
@@ -543,24 +584,47 @@ fn tensor_columns(
 ) -> BuiltinResult<Vec<GroupColumn>> {
     if !split_matrix || tensor.cols() <= 1 || tensor.rows() == 1 {
         let rows = tensor.data.len();
+        let value = if let Some(storage) = tensor.integer_storage() {
+            Tensor::new_integer(storage.clone(), vec![rows, 1]).map_err(grouping_error)?
+        } else {
+            Tensor::new_with_dtype(tensor.data, vec![rows, 1], tensor.dtype)
+                .map_err(grouping_error)?
+        };
         return Ok(vec![GroupColumn {
             name: base_name.to_string(),
             rows,
-            value: Value::Tensor(Tensor::new(tensor.data, vec![rows, 1]).map_err(grouping_error)?),
+            value: Value::Tensor(value),
         }]);
     }
     let mut out = Vec::with_capacity(tensor.cols());
     for col in 0..tensor.cols() {
-        let mut data = Vec::with_capacity(tensor.rows());
-        for row in 0..tensor.rows() {
-            data.push(tensor.get2(row, col).map_err(grouping_error)?);
-        }
+        let value = if let Some(storage) = tensor.integer_storage() {
+            let values = (0..tensor.rows())
+                .map(|row| {
+                    storage
+                        .value_at(row + col * tensor.rows())
+                        .expect("integer tensor storage matches tensor shape")
+                })
+                .collect();
+            Tensor::new_integer(
+                storage
+                    .from_exact_values_like(values)
+                    .map_err(grouping_error)?,
+                vec![tensor.rows(), 1],
+            )
+            .map_err(grouping_error)?
+        } else {
+            let mut data = Vec::with_capacity(tensor.rows());
+            for row in 0..tensor.rows() {
+                data.push(tensor.get2(row, col).map_err(grouping_error)?);
+            }
+            Tensor::new_with_dtype(data, vec![tensor.rows(), 1], tensor.dtype)
+                .map_err(grouping_error)?
+        };
         out.push(GroupColumn {
             name: format!("{base_name}{col_plus}", col_plus = col + 1),
             rows: tensor.rows(),
-            value: Value::Tensor(
-                Tensor::new(data, vec![tensor.rows(), 1]).map_err(grouping_error)?,
-            ),
+            value: Value::Tensor(value),
         });
     }
     Ok(out)
@@ -723,6 +787,12 @@ fn build_grouping_with_options(
 fn atom_at(value: &Value, row: usize) -> BuiltinResult<Atom> {
     match value {
         Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .value_at(row)
+                    .map(Atom::Integer)
+                    .ok_or_else(|| grouping_error("grouping: numeric row out of bounds"));
+            }
             let value = *tensor
                 .data
                 .get(row)
@@ -793,7 +863,7 @@ fn scalar_atom(value: &Value) -> BuiltinResult<Atom> {
                 Ok(Atom::Number(*value))
             }
         }
-        Value::Int(value) => Ok(Atom::Number(value.to_f64())),
+        Value::Int(value) => Ok(Atom::Integer(value.clone())),
         Value::Bool(flag) => Ok(Atom::Logical(*flag)),
         Value::String(text) => {
             if is_missing_text(text) {
@@ -1883,6 +1953,30 @@ mod tests {
         ))
         .unwrap();
         match empty_is_group {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 1.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn grouping_uses_exact_integer_keys_and_preserves_group_labels() {
+        let large = 9_007_199_254_740_992_u64;
+        let groups = Value::Tensor(
+            Tensor::new_integer(
+                runmat_builtins::IntegerStorage::U64(vec![large, large + 1, large]),
+                vec![3, 1],
+            )
+            .unwrap(),
+        );
+
+        let grouped = block_on(findgroups_builtin(groups.clone(), Vec::new())).unwrap();
+        match grouped {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0, 1.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+
+        let counted = block_on(groupcounts_builtin(groups, Vec::new())).unwrap();
+        match counted {
             Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
