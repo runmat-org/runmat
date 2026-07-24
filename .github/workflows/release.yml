@@ -123,8 +123,11 @@ jobs:
           $required = @(
             (Join-Path $vcpkgRoot 'vcpkg.exe'),
             (Join-Path $prefix 'include\zmq.h'),
+            (Join-Path $prefix 'include\H5pubconf.h'),
             (Join-Path $prefix 'include\opencascade'),
             (Join-Path $prefix 'lib\openblas.lib'),
+            (Join-Path $prefix 'lib\hdf5.lib'),
+            (Join-Path $prefix 'bin\hdf5.dll'),
             (Join-Path $prefix 'lib\TKBRep.lib'),
             (Join-Path $prefix 'lib\pkgconfig\libzmq.pc')
           )
@@ -156,6 +159,7 @@ jobs:
           $lapackLibs = if (Test-Path (Join-Path $prefix 'lib\libf2c.lib')) { 'lapack;libf2c;openblas' } else { 'lapack;openblas' }
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=$lapackLibs"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$prefix"
+          Add-Content -Path $env:GITHUB_ENV -Value "HDF5_DIR=$prefix"
           Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_ROOT=$prefix"
           Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_INCLUDE_DIR=$prefix\include\opencascade"
           Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_LIB_DIR=$prefix\lib"
@@ -243,7 +247,7 @@ jobs:
             command: build
 
           - release_for: linux-x86_64
-            os: ubuntu-latest-gpu
+            os: warp-ubuntu-latest-x64-16x
             target: x86_64-unknown-linux-gnu
             bin: runmat
             name: runmat-linux-x86_64.tar.gz
@@ -257,20 +261,20 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref_name }}
 
-      - name: Install BLAS/LAPACK dependencies (Linux)
+      - name: Install native dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
+          sudo apt-get install -y cmake libhdf5-dev libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
 
-      - name: Install macOS dependencies (ZMQ)
+      - name: Install macOS native dependencies
         if: runner.os == 'macOS'
         run: |
           brew update
           brew list cmake >/dev/null 2>&1 || brew install cmake
-          brew install zeromq
+          brew install hdf5 zeromq
 
-      - name: Install Windows MSVC dependencies (ZMQ, vcpkg + OpenBLAS/LAPACK)
+      - name: Install Windows MSVC native dependencies
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
         run: |
@@ -286,7 +290,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_PATH=$($zmq)"
           Add-Content -Path $env:GITHUB_ENV -Value "PKG_CONFIG_PATH=$($zmq)\lib\pkgconfig"
 
-          Write-Host "Cloning vcpkg and installing OpenBLAS/CLAPACK/OpenCASCADE"
+          Write-Host "Cloning vcpkg and installing HDF5/OpenBLAS/CLAPACK/OpenCASCADE"
           $vcpkgRoot = Join-Path $pwd "vcpkg"
           $vcpkgRevision = "a7eda31dc16994fcaa8587982eb833a8695f1b6f"
           git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
@@ -359,12 +363,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "vcpkg install openblas failed with exit code $LASTEXITCODE" }
           & "$vcpkgRoot\vcpkg.exe" install "clapack:$triplet"
           if ($LASTEXITCODE -ne 0) { throw "vcpkg install clapack failed with exit code $LASTEXITCODE" }
+          & "$vcpkgRoot\vcpkg.exe" install "hdf5:$triplet"
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install hdf5 failed with exit code $LASTEXITCODE" }
           if ($triplet -eq "arm64-windows") {
             & "$vcpkgRoot\vcpkg.exe" install "opencascade:$triplet" --allow-unsupported
           } else {
             & "$vcpkgRoot\vcpkg.exe" install "opencascade:$triplet"
           }
           if ($LASTEXITCODE -ne 0) { throw "vcpkg install opencascade failed with exit code $LASTEXITCODE" }
+          $hdf5Prefix = "$vcpkgRoot\installed\$triplet"
+          foreach ($artifact in @(
+            "$hdf5Prefix\include\H5pubconf.h",
+            "$hdf5Prefix\lib\hdf5.lib",
+            "$hdf5Prefix\bin\hdf5.dll"
+          )) {
+            if (-not (Test-Path $artifact)) {
+              throw "vcpkg hdf5 is missing required artifact: $artifact"
+            }
+          }
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
           Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
 
@@ -374,6 +390,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;libf2c;openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
+          Add-Content -Path $env:GITHUB_ENV -Value "HDF5_DIR=$hdf5Prefix"
           Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_ROOT=$vcpkgRoot\installed\$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_INCLUDE_DIR=$vcpkgRoot\installed\$triplet\include\opencascade"
           Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
