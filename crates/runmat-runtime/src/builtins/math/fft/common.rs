@@ -3,7 +3,7 @@ use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntValue, Tensor, Value};
 use rustfft::FftPlanner;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -470,14 +470,19 @@ pub fn parse_2d_lengths_from_data(
 
 pub fn parse_nd_sizes_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(t) => parse_nd_sizes_data(&t.data, builtin),
+        Value::Tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                return parse_nd_sizes_integers(&storage.exact_values(), builtin);
+            }
+            parse_nd_sizes_data(&t.data, builtin)
+        }
         Value::LogicalArray(logical) => {
             let t = tensor::logical_to_tensor(logical)
                 .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
             parse_nd_sizes_data(&t.data, builtin)
         }
         Value::Num(n) => parse_nd_sizes_data(&[*n], builtin),
-        Value::Int(i) => parse_nd_sizes_data(&[i.to_f64()], builtin),
+        Value::Int(i) => parse_nd_sizes_integers(std::slice::from_ref(i), builtin),
         Value::Complex(re, im) => {
             if im.abs() > f64::EPSILON {
                 return Err(builtin_error(
@@ -520,9 +525,28 @@ fn parse_nd_sizes_data(data: &[f64], builtin: &str) -> BuiltinResult<Vec<usize>>
                 format!("{builtin}: SIZE values must be integers"),
             ));
         }
+        if rounded >= (usize::MAX as f64) + 1.0 {
+            return Err(builtin_error(
+                builtin,
+                format!("{builtin}: SIZE values exceed the maximum supported size"),
+            ));
+        }
         out.push(rounded as usize);
     }
     Ok(out)
+}
+
+fn parse_nd_sizes_integers(data: &[IntValue], builtin: &str) -> BuiltinResult<Vec<usize>> {
+    data.iter()
+        .map(|value| {
+            value.try_to_usize().ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    format!("{builtin}: SIZE values must be non-negative platform integers"),
+                )
+            })
+        })
+        .collect()
 }
 
 pub fn parse_symflag(value: &Value, builtin: &str) -> BuiltinResult<Option<bool>> {
@@ -835,4 +859,36 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
 
 fn is_vector_shape(shape: &[usize]) -> bool {
     shape.iter().copied().filter(|&dim| dim > 1).count() <= 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn nd_sizes_preserve_typed_integer_values_and_bounds() {
+        let sizes = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, 9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .unwrap();
+        assert_eq!(
+            parse_nd_sizes_value(&Value::Tensor(sizes), "fftn").unwrap(),
+            vec![1, 9_007_199_254_740_993usize]
+        );
+
+        let err = parse_nd_sizes_value(&Value::Int(IntValue::I64(-1)), "fftn")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("non-negative"), "unexpected error: {err}");
+
+        let err = parse_nd_sizes_value(&Value::Num((usize::MAX as f64) + 1.0), "fftn")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("maximum supported size"),
+            "unexpected error: {err}"
+        );
+    }
 }
