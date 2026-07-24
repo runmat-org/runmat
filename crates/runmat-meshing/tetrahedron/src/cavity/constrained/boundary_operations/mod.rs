@@ -5,11 +5,17 @@ pub use edge_patch::split_constrained_cavity_boundary_edge_patch_at_centroid;
 #[cfg(test)]
 pub(crate) use edge_patch::split_constrained_cavity_boundary_edge_patch_with_weights;
 mod face_splits;
-pub(super) use face_splits::*;
+#[cfg(test)]
+pub(super) use face_splits::split_constrained_cavity_boundary_face_on_edge;
 pub use face_splits::{
     split_constrained_cavity_boundary_face, split_constrained_cavity_boundary_face_at_barycentric,
     split_constrained_cavity_boundary_face_at_centroid, split_constrained_cavity_boundary_faces,
     split_constrained_cavity_boundary_faces_at_centroids,
+};
+pub(super) use face_splits::{
+    split_constrained_cavity_boundary_faces_on_edge,
+    split_constrained_cavity_boundary_faces_on_edge_patch,
+    split_constrained_cavity_boundary_faces_on_three_edges,
 };
 mod source_edge;
 pub use source_edge::{

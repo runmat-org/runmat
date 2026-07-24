@@ -1023,20 +1023,40 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
 
+          function Install-VcpkgPackage {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Package,
+              [string[]]$ExtraArguments = @(),
+              [int]$MaximumAttempts = 3
+            )
+
+            for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
+              & "$vcpkgRoot\vcpkg.exe" install "${Package}:$triplet" @ExtraArguments
+              if ($LASTEXITCODE -eq 0) {
+                return
+              }
+
+              if ($attempt -eq $MaximumAttempts) {
+                throw "vcpkg install ${Package}:$triplet failed after $MaximumAttempts attempts"
+              }
+
+              $delaySeconds = 15 * [Math]::Pow(2, $attempt - 1)
+              Write-Warning "vcpkg install ${Package}:$triplet failed on attempt $attempt of $MaximumAttempts; retrying in $delaySeconds seconds"
+              Start-Sleep -Seconds $delaySeconds
+            }
+          }
+
           # vcpkg builds OpenBLAS without LAPACK on Windows; use CLAPACK for
           # LAPACK symbols without depending on a gfortran-backed LAPACK build.
-          & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet"
-          if ($LASTEXITCODE -ne 0) { throw "vcpkg install openblas failed with exit code $LASTEXITCODE" }
-          & "$vcpkgRoot\vcpkg.exe" install "clapack:$triplet"
-          if ($LASTEXITCODE -ne 0) { throw "vcpkg install clapack failed with exit code $LASTEXITCODE" }
-          & "$vcpkgRoot\vcpkg.exe" install "hdf5:$triplet"
-          if ($LASTEXITCODE -ne 0) { throw "vcpkg install hdf5 failed with exit code $LASTEXITCODE" }
+          Install-VcpkgPackage -Package "openblas"
+          Install-VcpkgPackage -Package "clapack"
+          Install-VcpkgPackage -Package "hdf5"
           if ($triplet -eq "arm64-windows") {
-            & "$vcpkgRoot\vcpkg.exe" install "opencascade:$triplet" --allow-unsupported
+            Install-VcpkgPackage -Package "opencascade" -ExtraArguments @("--allow-unsupported")
           } else {
-            & "$vcpkgRoot\vcpkg.exe" install "opencascade:$triplet"
+            Install-VcpkgPackage -Package "opencascade"
           }
-          if ($LASTEXITCODE -ne 0) { throw "vcpkg install opencascade failed with exit code $LASTEXITCODE" }
           $hdf5Prefix = "$vcpkgRoot\installed\$triplet"
           foreach ($artifact in @(
             "$hdf5Prefix\include\H5pubconf.h",
