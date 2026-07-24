@@ -9,7 +9,7 @@ use std::process::Command;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
     BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
-    LogicalArray, NumericDType, ObjectInstance, StructValue, Tensor, Value,
+    IntegerStorage, LogicalArray, NumericDType, ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
@@ -1200,33 +1200,41 @@ impl MemmapFormat {
             .map(|count| count.saturating_mul(values_per_record))
             .unwrap_or(available_values);
         let total_values = total_values.min(available_values);
-        let mut data = Vec::with_capacity(total_values);
-        for idx in 0..total_values {
-            let start = idx * element_size;
-            data.push(read_typed_value(
-                &self.dtype,
-                &bytes[start..start + element_size],
-            )?);
-        }
         let mut shape = self.shape.clone();
         if let Some(repeat) = repeat.filter(|repeat| *repeat > 1) {
             shape.push(repeat);
-        } else if shape.iter().product::<usize>() != data.len() {
-            shape = vec![data.len(), 1];
+        } else if shape.iter().product::<usize>() != total_values {
+            shape = vec![total_values, 1];
         }
         let (rows, cols) = if shape.len() >= 2 {
             (shape[0], shape[1])
         } else {
             (shape.first().copied().unwrap_or(0), 1)
         };
-        let tensor = Value::Tensor(Tensor {
-            data,
-            integer_data: None,
-            shape,
-            rows,
-            cols,
-            dtype: tensor_dtype(&self.dtype),
-        });
+        let tensor = if let Some(storage) = decode_integer_storage(&self.dtype, bytes, total_values)
+        {
+            Value::Tensor(
+                Tensor::new_integer(storage, shape)
+                    .map_err(|err| compat_error("memmapfile", err))?,
+            )
+        } else {
+            let mut data = Vec::with_capacity(total_values);
+            for idx in 0..total_values {
+                let start = idx * element_size;
+                data.push(read_typed_value(
+                    &self.dtype,
+                    &bytes[start..start + element_size],
+                )?);
+            }
+            Value::Tensor(Tensor {
+                data,
+                integer_data: None,
+                shape,
+                rows,
+                cols,
+                dtype: tensor_dtype(&self.dtype),
+            })
+        };
         if let Some(field) = &self.field {
             let mut st = StructValue::new();
             st.insert(field.clone(), tensor);
@@ -1277,11 +1285,64 @@ fn dtype_size(dtype: &str) -> BuiltinResult<usize> {
 fn tensor_dtype(dtype: &str) -> NumericDType {
     match dtype.to_ascii_lowercase().as_str() {
         "single" => NumericDType::F32,
-        "uint8" | "int8" | "char" => NumericDType::U8,
-        "uint16" | "int16" => NumericDType::U16,
-        "uint32" | "int32" => NumericDType::U32,
+        "char" => NumericDType::U8,
         _ => NumericDType::F64,
     }
+}
+
+fn decode_integer_storage(dtype: &str, bytes: &[u8], value_count: usize) -> Option<IntegerStorage> {
+    let bytes = &bytes[..value_count.checked_mul(dtype_size(dtype).ok()?)?];
+    Some(match dtype.to_ascii_lowercase().as_str() {
+        "int8" => IntegerStorage::I8(bytes.iter().map(|value| *value as i8).collect()),
+        "uint8" => IntegerStorage::U8(bytes.to_vec()),
+        "int16" => IntegerStorage::I16(
+            bytes
+                .chunks_exact(2)
+                .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
+                .collect(),
+        ),
+        "uint16" => IntegerStorage::U16(
+            bytes
+                .chunks_exact(2)
+                .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+                .collect(),
+        ),
+        "int32" => IntegerStorage::I32(
+            bytes
+                .chunks_exact(4)
+                .map(|chunk| i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                .collect(),
+        ),
+        "uint32" => IntegerStorage::U32(
+            bytes
+                .chunks_exact(4)
+                .map(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                .collect(),
+        ),
+        "int64" => IntegerStorage::I64(
+            bytes
+                .chunks_exact(8)
+                .map(|chunk| {
+                    i64::from_le_bytes([
+                        chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6],
+                        chunk[7],
+                    ])
+                })
+                .collect(),
+        ),
+        "uint64" => IntegerStorage::U64(
+            bytes
+                .chunks_exact(8)
+                .map(|chunk| {
+                    u64::from_le_bytes([
+                        chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6],
+                        chunk[7],
+                    ])
+                })
+                .collect(),
+        ),
+        _ => return None,
+    })
 }
 
 fn read_typed_value(dtype: &str, bytes: &[u8]) -> BuiltinResult<f64> {
@@ -1496,7 +1557,98 @@ mod tests {
         };
         assert_eq!(samples.data, vec![1.0, 2.0]);
         assert_eq!(samples.shape, vec![2, 1]);
+        assert_eq!(
+            samples.integer_storage(),
+            Some(&IntegerStorage::U16(vec![1, 2]))
+        );
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn memmapfile_decodes_all_integer_formats_without_float_coercion() {
+        let cases = [
+            (
+                "int8",
+                vec![i8::MIN as u8, i8::MAX as u8],
+                IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            ),
+            (
+                "uint8",
+                vec![0, u8::MAX],
+                IntegerStorage::U8(vec![0, u8::MAX]),
+            ),
+            (
+                "int16",
+                [i16::MIN.to_le_bytes(), i16::MAX.to_le_bytes()].concat(),
+                IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            ),
+            (
+                "uint16",
+                [0_u16.to_le_bytes(), u16::MAX.to_le_bytes()].concat(),
+                IntegerStorage::U16(vec![0, u16::MAX]),
+            ),
+            (
+                "int32",
+                [i32::MIN.to_le_bytes(), i32::MAX.to_le_bytes()].concat(),
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            ),
+            (
+                "uint32",
+                [0_u32.to_le_bytes(), u32::MAX.to_le_bytes()].concat(),
+                IntegerStorage::U32(vec![0, u32::MAX]),
+            ),
+            (
+                "int64",
+                [i64::MIN.to_le_bytes(), i64::MAX.to_le_bytes()].concat(),
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            ),
+            (
+                "uint64",
+                [0_u64.to_le_bytes(), u64::MAX.to_le_bytes()].concat(),
+                IntegerStorage::U64(vec![0, u64::MAX]),
+            ),
+        ];
+
+        for (dtype, bytes, expected) in cases {
+            let mapped = MemmapFormat {
+                dtype: dtype.to_string(),
+                shape: vec![1, 2],
+                field: None,
+            }
+            .decode(&bytes, None)
+            .unwrap();
+            let Value::Tensor(tensor) = mapped else {
+                panic!("expected tensor");
+            };
+            assert_eq!(tensor.shape, vec![1, 2], "{dtype}");
+            assert_eq!(tensor.integer_storage(), Some(&expected), "{dtype}");
+        }
+    }
+
+    #[test]
+    fn memmapfile_preserves_integer_storage_for_repeated_records() {
+        let bytes = [
+            1_u32.to_le_bytes(),
+            u32::MAX.to_le_bytes(),
+            3_u32.to_le_bytes(),
+            4_u32.to_le_bytes(),
+        ]
+        .concat();
+        let mapped = MemmapFormat {
+            dtype: "uint32".to_string(),
+            shape: vec![2, 1],
+            field: None,
+        }
+        .decode(&bytes, Some(2))
+        .unwrap();
+        let Value::Tensor(tensor) = mapped else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.shape, vec![2, 1, 2]);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U32(vec![1, u32::MAX, 3, 4]))
+        );
     }
 
     #[test]
