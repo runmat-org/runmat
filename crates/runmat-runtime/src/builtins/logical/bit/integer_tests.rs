@@ -386,6 +386,58 @@ fn bitget_sparse_double_scalar_position_preserves_sparse_storage() {
 }
 
 #[test]
+fn sparse_bitwise_position_and_value_arrays_broadcast_with_zero_aware_storage() {
+    let sparse =
+        runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 5.0])
+            .expect("sparse");
+
+    let Value::SparseTensor(shifted) = block_on(bitshift_builtin(vec![
+        Value::SparseTensor(sparse.clone()),
+        Value::Tensor(Tensor::new(vec![1.0, -1.0], vec![2, 1]).expect("shifts")),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("broadcast sparse bitshift") else {
+        panic!("bitshift leaves implicit zeros sparse for every shift");
+    };
+    assert_eq!(shifted.get(0, 0), Some(6.0));
+    assert_eq!(shifted.get(1, 1), Some(2.0));
+
+    let Value::SparseTensor(got) = block_on(bitget_builtin(vec![
+        Value::SparseTensor(sparse.clone()),
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("positions")),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("broadcast sparse bitget") else {
+        panic!("bitget leaves implicit zeros sparse for every position");
+    };
+    assert_eq!(got.get(0, 0), Some(1.0));
+    assert_eq!(got.nnz(), 1);
+
+    let Value::SparseTensor(cleared) = block_on(bitset_builtin(vec![
+        Value::SparseTensor(sparse.clone()),
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("positions")),
+        Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).expect("clear values")),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("broadcast sparse bitset clear") else {
+        panic!("clearing broadcast positions preserves implicit zeros");
+    };
+    assert_eq!(cleared.get(0, 0), Some(2.0));
+    assert_eq!(cleared.get(1, 1), Some(5.0));
+
+    let Value::Tensor(set) = block_on(bitset_builtin(vec![
+        Value::SparseTensor(sparse),
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("positions")),
+        Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).expect("set values")),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("broadcast sparse bitset set") else {
+        panic!("setting an implicit position materializes the result");
+    };
+    assert_eq!(set.data, vec![2.0, 0.0, 2.0, 7.0]);
+}
+
+#[test]
 fn bitget_is_registered_and_dispatches() {
     assert!(runmat_builtins::builtin_function_by_name(BITGET_NAME).is_some());
     assert_eq!(

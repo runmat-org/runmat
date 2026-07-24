@@ -658,27 +658,40 @@ async fn sparse_bitget(
         ));
     }
     let positions = shift_buffer_from(bit).await?;
-    if positions.data.len() != 1 {
-        return Err(error_with_detail(
-            BITGET_NAME,
-            &ERROR_INVALID_INPUT,
-            "sparse bitget currently requires a scalar bit position",
-        ));
-    }
     let class = assumed;
     let width = class.map_or(64, IntegerClass::bit_width);
-    let position = positions.data[0];
-    if !(1..=i128::from(width)).contains(&position) {
-        return Err(error_with_detail(
-            BITGET_NAME,
-            &ERROR_INVALID_INPUT,
-            format!("bit position {position} must be between 1 and {width}"),
-        ));
+    let sparse_shape = sparse.shape();
+    let plan = BroadcastPlan::new(&sparse_shape, &positions.shape)
+        .map_err(|err| error_with_detail(BITGET_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    let output_shape = plan.output_shape().to_vec();
+    checked_sparse_result_len(&output_shape, BITGET_NAME)?;
+    let mut data = Vec::with_capacity(plan.len());
+    for (_, sparse_index, bit_index) in plan.iter() {
+        let position = positions.data[bit_index];
+        if !(1..=i128::from(width)).contains(&position) {
+            return Err(error_with_detail(
+                BITGET_NAME,
+                &ERROR_INVALID_INPUT,
+                format!("bit position {position} must be between 1 and {width}"),
+            ));
+        }
+        let row = sparse_index % sparse.rows;
+        let col = sparse_index / sparse.rows;
+        let bits = sparse
+            .get(row, col)
+            .map(|value| double_to_bits(BITGET_NAME, value, class))
+            .transpose()?
+            .unwrap_or(0);
+        data.push((bits >> (position as u32 - 1)) & 1);
     }
-    map_sparse_real_values(&sparse, BITGET_NAME, |value| {
-        let bits = double_to_bits(BITGET_NAME, value, class)?;
-        Ok(((bits >> (position as u32 - 1)) & 1) as f64)
-    })
+    sparse_or_full_from_bits(
+        data,
+        output_shape.clone(),
+        class,
+        None,
+        BITGET_NAME,
+        output_shape.len() == 2,
+    )
 }
 
 #[runtime_builtin(
@@ -762,33 +775,56 @@ async fn sparse_bitset(
             shape: vec![1, 1],
         },
     };
-    if positions.data.len() != 1 || values.data.len() != 1 {
-        return Err(error_with_detail(
-            BITSET_NAME,
-            &ERROR_INVALID_INPUT,
-            "sparse bitset currently requires scalar bit and V inputs",
-        ));
-    }
     let class = assumed;
     let width = class.map_or(64, IntegerClass::bit_width);
-    let position = positions.data[0];
-    if !(1..=i128::from(width)).contains(&position) {
-        return Err(error_with_detail(
-            BITSET_NAME,
-            &ERROR_INVALID_INPUT,
-            format!("bit position {position} must be between 1 and {width}"),
-        ));
+    let sparse_shape = sparse.shape();
+    let input_positions = BroadcastPlan::new(&sparse_shape, &positions.shape)
+        .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    checked_sparse_result_len(input_positions.output_shape(), BITSET_NAME)?;
+    let input_position_indices = input_positions
+        .iter()
+        .map(|(_, sparse_index, position_index)| (sparse_index, position_index))
+        .collect::<Vec<_>>();
+    let plan = BroadcastPlan::new(input_positions.output_shape(), &values.shape)
+        .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    let output_shape = plan.output_shape().to_vec();
+    checked_sparse_result_len(&output_shape, BITSET_NAME)?;
+    let mut data = Vec::with_capacity(plan.len());
+    let mut implicit_result_nonzero = false;
+    for (_, input_position_index, value_index) in plan.iter() {
+        let (sparse_index, position_index) = input_position_indices[input_position_index];
+        let position = positions.data[position_index];
+        if !(1..=i128::from(width)).contains(&position) {
+            return Err(error_with_detail(
+                BITSET_NAME,
+                &ERROR_INVALID_INPUT,
+                format!("bit position {position} must be between 1 and {width}"),
+            ));
+        }
+        let row = sparse_index % sparse.rows;
+        let col = sparse_index / sparse.rows;
+        let stored = sparse.get(row, col);
+        let current = stored
+            .map(|value| double_to_bits(BITSET_NAME, value, class))
+            .transpose()?
+            .unwrap_or(0);
+        let mask = 1_u64 << (position as u32 - 1);
+        let result = if values.data[value_index] {
+            current | mask
+        } else {
+            current & !mask
+        };
+        implicit_result_nonzero |= stored.is_none() && result != 0;
+        data.push(result);
     }
-    let mask = 1_u64 << (position as u32 - 1);
-    let set = values.data[0];
-    map_sparse_real_values(&sparse, BITSET_NAME, |value| {
-        let bits = double_to_bits(BITSET_NAME, value, class)?;
-        let result = if set { bits | mask } else { bits & !mask };
-        Ok(match class {
-            Some(class) => int_value_to_i128(&class.value_from_bits(result)) as f64,
-            None => result as f64,
-        })
-    })
+    sparse_or_full_from_bits(
+        data,
+        output_shape.clone(),
+        class,
+        None,
+        BITSET_NAME,
+        output_shape.len() == 2 && !implicit_result_nonzero,
+    )
 }
 
 #[runtime_builtin(
@@ -865,22 +901,31 @@ async fn sparse_bitshift(
         ));
     }
     let shifts = shift_buffer_from(shift).await?;
-    if shifts.data.len() != 1 {
-        return Err(error_with_detail(
-            BITSHIFT_NAME,
-            &ERROR_INVALID_INPUT,
-            "sparse bitshift currently requires a scalar shift count",
-        ));
-    }
     let class = assumed;
-    map_sparse_real_values(&sparse, BITSHIFT_NAME, |value| {
-        let bits = double_to_bits(BITSHIFT_NAME, value, class)?;
-        let shifted = apply_shift(bits, shifts.data[0], class);
-        Ok(match class {
-            Some(class) => int_value_to_i128(&class.value_from_bits(shifted)) as f64,
-            None => shifted as f64,
-        })
-    })
+    let sparse_shape = sparse.shape();
+    let plan = BroadcastPlan::new(&sparse_shape, &shifts.shape)
+        .map_err(|err| error_with_detail(BITSHIFT_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    let output_shape = plan.output_shape().to_vec();
+    checked_sparse_result_len(&output_shape, BITSHIFT_NAME)?;
+    let mut data = Vec::with_capacity(plan.len());
+    for (_, sparse_index, shift_index) in plan.iter() {
+        let row = sparse_index % sparse.rows;
+        let col = sparse_index / sparse.rows;
+        let bits = sparse
+            .get(row, col)
+            .map(|value| double_to_bits(BITSHIFT_NAME, value, class))
+            .transpose()?
+            .unwrap_or(0);
+        data.push(apply_shift(bits, shifts.data[shift_index], class));
+    }
+    sparse_or_full_from_bits(
+        data,
+        output_shape.clone(),
+        class,
+        None,
+        BITSHIFT_NAME,
+        output_shape.len() == 2,
+    )
 }
 
 #[runtime_builtin(
@@ -1070,7 +1115,6 @@ async fn sparse_binary_bitwise(
     let output_shape = plan.output_shape().to_vec();
     checked_sparse_result_len(&output_shape, name)?;
 
-    let rows = output_shape.first().copied().unwrap_or(1);
     let can_return_sparse = output_class.is_none() && output_shape.len() == 2;
     let mut bits = Vec::with_capacity(plan.len());
     let mut implicit_result_nonzero = false;
@@ -1094,7 +1138,26 @@ async fn sparse_binary_bitwise(
         bits.push(result);
     }
 
-    if can_return_sparse && !implicit_result_nonzero {
+    sparse_or_full_from_bits(
+        bits,
+        output_shape,
+        compute_class,
+        output_class,
+        name,
+        can_return_sparse && !implicit_result_nonzero,
+    )
+}
+
+fn sparse_or_full_from_bits(
+    bits: Vec<u64>,
+    output_shape: Vec<usize>,
+    compute_class: Option<IntegerClass>,
+    output_class: Option<IntegerClass>,
+    name: &'static str,
+    return_sparse: bool,
+) -> BuiltinResult<Value> {
+    if return_sparse {
+        let rows = output_shape[0];
         let cols = output_shape[1];
         let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
         let mut row_indices = Vec::new();
