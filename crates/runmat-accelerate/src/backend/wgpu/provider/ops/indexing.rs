@@ -1,5 +1,36 @@
 use super::*;
 
+fn linear_storage_lane_factor(
+    integer_type: Option<runmat_accelerate_api::IntegerElementType>,
+    storage: GpuTensorStorage,
+) -> usize {
+    match integer_type {
+        Some(
+            runmat_accelerate_api::IntegerElementType::I64
+            | runmat_accelerate_api::IntegerElementType::U64,
+        ) => 2,
+        Some(_) => 1,
+        None => match storage {
+            GpuTensorStorage::Real => 1,
+            GpuTensorStorage::ComplexInterleaved => 2,
+        },
+    }
+}
+
+fn linear_values_entry_len(
+    integer_type: Option<runmat_accelerate_api::IntegerElementType>,
+    storage: GpuTensorStorage,
+    index_count: usize,
+) -> Option<usize> {
+    // Integer BufferEntry lengths are logical element counts; only float/complex
+    // buffers expose their storage-lane count as len.
+    if integer_type.is_some() {
+        Some(index_count)
+    } else {
+        index_count.checked_mul(linear_storage_lane_factor(integer_type, storage))
+    }
+}
+
 impl WgpuProvider {
     pub(crate) fn scatter_column_exec(
         &self,
@@ -628,17 +659,7 @@ impl WgpuProvider {
         let integer_type = entry.integer_type;
         let expected = product_checked(output_shape)
             .ok_or_else(|| anyhow!("gather_linear: output shape product overflow"))?;
-        let lane_factor = match integer_type {
-            Some(
-                runmat_accelerate_api::IntegerElementType::I64
-                | runmat_accelerate_api::IntegerElementType::U64,
-            ) => 2usize,
-            Some(_) => 1usize,
-            None => match entry.storage {
-                GpuTensorStorage::Real => 1usize,
-                GpuTensorStorage::ComplexInterleaved => 2usize,
-            },
-        };
+        let lane_factor = linear_storage_lane_factor(integer_type, entry.storage);
         if integer_type.is_none() {
             ensure!(
                 entry.len % lane_factor == 0,
@@ -819,17 +840,7 @@ impl WgpuProvider {
             target_entry.storage,
             values_entry.storage
         );
-        let lane_factor = match integer_type {
-            Some(
-                runmat_accelerate_api::IntegerElementType::I64
-                | runmat_accelerate_api::IntegerElementType::U64,
-            ) => 2usize,
-            Some(_) => 1usize,
-            None => match target_entry.storage {
-                GpuTensorStorage::Real => 1usize,
-                GpuTensorStorage::ComplexInterleaved => 2usize,
-            },
-        };
+        let lane_factor = linear_storage_lane_factor(integer_type, target_entry.storage);
         if integer_type.is_none() {
             ensure!(
                 target_entry.len % lane_factor == 0,
@@ -851,9 +862,12 @@ impl WgpuProvider {
             values_len = values_entry.len
         )
         .entered();
+        let expected_values_len =
+            linear_values_entry_len(integer_type, target_entry.storage, indices.len())
+                .ok_or_else(|| anyhow!("scatter_linear: values length overflow"))?;
         ensure!(
-            values_entry.len == indices.len() * lane_factor,
-            "scatter_linear: values raw length {} does not match index count {} for lane factor {}",
+            values_entry.len == expected_values_len,
+            "scatter_linear: values length {} does not match index count {} for lane factor {}",
             values_entry.len,
             indices.len(),
             lane_factor
@@ -1109,6 +1123,36 @@ mod tests {
     use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView};
+
+    #[test]
+    fn linear_scatter_length_uses_logical_counts_for_all_integer_types() {
+        use runmat_accelerate_api::IntegerElementType;
+
+        for integer_type in [
+            IntegerElementType::I8,
+            IntegerElementType::I16,
+            IntegerElementType::I32,
+            IntegerElementType::I64,
+            IntegerElementType::U8,
+            IntegerElementType::U16,
+            IntegerElementType::U32,
+            IntegerElementType::U64,
+        ] {
+            assert_eq!(
+                linear_values_entry_len(Some(integer_type), GpuTensorStorage::Real, 3),
+                Some(3),
+                "{integer_type:?} must use logical element count"
+            );
+        }
+        assert_eq!(
+            linear_values_entry_len(None, GpuTensorStorage::Real, 3),
+            Some(3)
+        );
+        assert_eq!(
+            linear_values_entry_len(None, GpuTensorStorage::ComplexInterleaved, 3),
+            Some(6)
+        );
+    }
 
     #[test]
     fn wgpu_linear_gather_and_scatter_copy_complex_logical_elements() {
