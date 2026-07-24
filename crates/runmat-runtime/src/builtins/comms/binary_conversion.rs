@@ -773,7 +773,7 @@ async fn digit_matrix_from_value(
             cols: 1,
         }),
         Value::Int(i) => Ok(DigitMatrix {
-            data: vec![number_to_digit(i.to_f64(), builtin, "B")?],
+            data: vec![integer_to_digit(&i, builtin, "B")?],
             rows: 1,
             cols: 1,
         }),
@@ -838,7 +838,7 @@ async fn decimal_vector_from_value(value: Value) -> BuiltinResult<Vec<u128>> {
                 .collect()
         }
         Value::Num(n) => Ok(vec![number_to_decimal(n, "D")?]),
-        Value::Int(i) => Ok(vec![number_to_decimal(i.to_f64(), "D")?]),
+        Value::Int(i) => Ok(vec![integer_to_nonnegative(&i, DE2BI_NAME, "D")?]),
         Value::Bool(b) => Ok(vec![if b { 1 } else { 0 }]),
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(de2bi_error(
             "de2bi: D must contain real nonnegative integers",
@@ -1002,6 +1002,9 @@ fn parse_nonnegative_integer(
     builtin: &'static str,
     name: &str,
 ) -> BuiltinResult<u128> {
+    if let Value::Int(integer) = value {
+        return integer_to_nonnegative(integer, builtin, name);
+    }
     let n = scalar_number(value, builtin, name)?;
     if !n.is_finite() {
         return Err(
@@ -1055,6 +1058,30 @@ fn number_to_digit(value: f64, builtin: &'static str, name: &str) -> BuiltinResu
         .build());
     }
     Ok(integer as usize)
+}
+
+fn integer_to_digit(value: &IntValue, builtin: &'static str, name: &str) -> BuiltinResult<usize> {
+    let integer = integer_to_nonnegative(value, builtin, name)?;
+    if integer > usize::MAX as u128 {
+        return Err(build_runtime_error(format!(
+            "{builtin}: {name} value is too large for this platform"
+        ))
+        .with_builtin(builtin)
+        .build());
+    }
+    Ok(integer as usize)
+}
+
+fn integer_to_nonnegative(
+    value: &IntValue,
+    builtin: &'static str,
+    name: &str,
+) -> BuiltinResult<u128> {
+    value.try_to_u64().map(u128::from).ok_or_else(|| {
+        build_runtime_error(format!("{builtin}: {name} must be a nonnegative integer"))
+            .with_builtin(builtin)
+            .build()
+    })
 }
 
 fn number_to_decimal(value: f64, name: &str) -> BuiltinResult<u128> {
@@ -1557,5 +1584,28 @@ mod tests {
         assert!(err
             .to_string()
             .contains("maximum exact integer supported by RunMat"));
+    }
+
+    #[test]
+    fn bi2de_and_de2bi_scalar_integers_remain_exact() {
+        assert_eq!(
+            integer_to_nonnegative(&IntValue::U64(u64::MAX), DE2BI_NAME, "D").unwrap(),
+            u128::from(u64::MAX)
+        );
+        assert_eq!(
+            block_on(decimal_vector_from_value(Value::Int(IntValue::U64(
+                u64::MAX
+            ))))
+            .unwrap(),
+            vec![u128::from(u64::MAX)]
+        );
+        let digits = block_on(digit_matrix_from_value(
+            Value::Int(IntValue::U8(1)),
+            BI2DE_NAME,
+        ))
+        .unwrap();
+        assert_eq!(digits.data, vec![1]);
+        assert!(integer_to_nonnegative(&IntValue::I8(-1), DE2BI_NAME, "D").is_err());
+        assert!(block_on(decimal_vector_from_value(Value::Int(IntValue::I8(-1)))).is_err());
     }
 }
