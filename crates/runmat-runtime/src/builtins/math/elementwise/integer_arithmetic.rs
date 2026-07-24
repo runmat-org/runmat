@@ -1,8 +1,11 @@
 //! Exact MATLAB integer arithmetic shared by elementwise binary builtins.
 
+use num_bigint::BigInt;
+use num_traits::{Signed, ToPrimitive};
 use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
+use crate::builtins::math::elementwise::extended_precision::Extended;
 use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 
 #[derive(Clone, Copy)]
@@ -72,11 +75,6 @@ fn apply_integer_remainder_scalar(
         ));
     };
     let exact_scalar = exact_integer_scalar(integer.target, scalar);
-    if exact_scalar.is_none() && integer.target.uses_extended_scalar_precision() {
-        return Err(format!(
-            "{builtin}: nonintegral scalar-double operands for int64 and uint64 require extended-precision arithmetic"
-        ));
-    }
     let mut values = Vec::with_capacity(integer.storage.len());
     for index in 0..integer.storage.len() {
         let value = integer.storage.value_at(index);
@@ -86,6 +84,8 @@ fn apply_integer_remainder_scalar(
             } else {
                 exact_integer_remainder(scalar, value, operation)
             }
+        } else if integer.target.uses_extended_scalar_precision() {
+            extended_integer_remainder(value, scalar, integer_is_left, operation, builtin)?
         } else if integer_is_left {
             integer
                 .target
@@ -97,6 +97,91 @@ fn apply_integer_remainder_scalar(
         });
     }
     integer_values_into_value(integer.target, values, integer.shape).map(Some)
+}
+
+fn extended_integer_remainder(
+    integer: IntValue,
+    scalar: f64,
+    integer_is_left: bool,
+    operation: IntegerRemainderOp,
+    builtin: &str,
+) -> Result<IntValue, String> {
+    let Some(scalar) = Extended::from_f64(scalar) else {
+        return Err(format!(
+            "{builtin}: non-finite scalar double is not supported with 64-bit integers"
+        ));
+    };
+    let integer_extended = extended_from_int_value(&integer);
+    let (dividend, divisor) = if integer_is_left {
+        (integer_extended, scalar)
+    } else {
+        (scalar, integer_extended)
+    };
+    if divisor.is_zero() {
+        return Ok(match operation {
+            IntegerRemainderOp::Rem => integer_target_zero(&integer),
+            IntegerRemainderOp::Mod => integer,
+        });
+    }
+    let quotient = dividend.divide(&divisor).expect("nonzero extended divisor");
+    let mut quotient_integer = quotient.trunc_to_bigint();
+    let mut remainder =
+        dividend.subtract(&divisor.multiply(&extended_from_bigint(&quotient_integer)));
+    if matches!(operation, IntegerRemainderOp::Mod)
+        && !remainder.is_zero()
+        && remainder.is_negative() != divisor.is_negative()
+    {
+        quotient_integer -= 1;
+        remainder = dividend.subtract(&divisor.multiply(&extended_from_bigint(&quotient_integer)));
+    }
+    extended_to_integer_like(remainder, &integer)
+}
+
+fn extended_from_int_value(value: &IntValue) -> Extended {
+    match value {
+        IntValue::I64(value) => Extended::from_i128(i128::from(*value)),
+        IntValue::U64(value) => Extended::from_u64(*value),
+        _ => unreachable!("extended arithmetic only handles 64-bit integer values"),
+    }
+}
+
+fn extended_from_bigint(value: &BigInt) -> Extended {
+    if let Some(value) = value.to_i128() {
+        Extended::from_i128(value)
+    } else {
+        // Quotients in this path are bounded by the finite input magnitudes;
+        // values outside the target range only arise before final saturation.
+        Extended::from_u64(value.to_u64().unwrap_or(u64::MAX))
+    }
+}
+
+fn integer_target_zero(prototype: &IntValue) -> IntValue {
+    match prototype {
+        IntValue::I64(_) => IntValue::I64(0),
+        IntValue::U64(_) => IntValue::U64(0),
+        _ => unreachable!("extended arithmetic only handles 64-bit integer values"),
+    }
+}
+
+fn extended_to_integer_like(value: Extended, prototype: &IntValue) -> Result<IntValue, String> {
+    let rounded = value.round_away_to_bigint();
+    Ok(match prototype {
+        IntValue::I64(_) => IntValue::I64(rounded.to_i64().unwrap_or_else(|| {
+            if rounded.is_negative() {
+                i64::MIN
+            } else {
+                i64::MAX
+            }
+        })),
+        IntValue::U64(_) => IntValue::U64(rounded.to_u64().unwrap_or_else(|| {
+            if rounded.is_negative() {
+                0
+            } else {
+                u64::MAX
+            }
+        })),
+        _ => return Err("extended arithmetic only handles 64-bit integer values".into()),
+    })
 }
 
 /// Applies a MATLAB integer binary operation when either operand is integer
@@ -1041,14 +1126,25 @@ mod tests {
     }
 
     #[test]
-    fn nonintegral_scalar_double_remainders_reject_64_bit_integer_storage() {
-        let error = try_integer_remainder(
+    fn nonintegral_scalar_double_remainders_use_extended_precision_for_64_bit_storage() {
+        let remainder = try_integer_remainder(
             &Value::Int(IntValue::U64((1_u64 << 53) + 1)),
             &Value::Num(2.5),
             IntegerRemainderOp::Rem,
             "rem",
         )
-        .expect_err("64-bit scalar double must not use an f64 fallback");
-        assert!(error.contains("extended-precision"));
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(remainder, Value::Int(IntValue::U64(1)));
+
+        let modulus = try_integer_remainder(
+            &Value::Int(IntValue::I64(-7)),
+            &Value::Num(2.5),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(modulus, Value::Int(IntValue::I64(1)));
     }
 }

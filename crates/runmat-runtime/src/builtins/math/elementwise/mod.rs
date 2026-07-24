@@ -9,6 +9,7 @@ pub(crate) mod erf;
 pub(crate) mod erfcinv;
 pub(crate) mod exp;
 pub(crate) mod expm1;
+pub(crate) mod extended_precision;
 pub(crate) mod factorial;
 pub(crate) mod gamma;
 pub(crate) mod gammaln;
