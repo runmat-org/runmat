@@ -414,16 +414,12 @@ fn parse_generator_keyword(keyword: &str) -> BuiltinResult<RngAlgorithm> {
 
 fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
     match value {
-        Value::Int(i) => {
-            let v = i.to_i64();
-            if v < 0 {
-                return Err(rng_error_with(
-                    &RNG_ERROR_SEED_NONNEGATIVE,
-                    format!("{label}: seed must be non-negative"),
-                ));
-            }
-            Ok(v as u64)
-        }
+        Value::Int(i) => i.try_to_u64().ok_or_else(|| {
+            rng_error_with(
+                &RNG_ERROR_SEED_NONNEGATIVE,
+                format!("{label}: seed must be non-negative"),
+            )
+        }),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(rng_error_with(
@@ -500,17 +496,12 @@ fn parse_state_scalar(value: &Value) -> BuiltinResult<u64> {
             }
             Ok(rounded as u64)
         }
-        Value::Int(i) => {
-            let v = i.to_i64();
-            if v < 0 {
-                Err(rng_error_with(
-                    &RNG_ERROR_INVALID_ARGUMENT,
-                    "rng: State must be non-negative",
-                ))
-            } else {
-                Ok(v as u64)
-            }
-        }
+        Value::Int(i) => i.try_to_u64().ok_or_else(|| {
+            rng_error_with(
+                &RNG_ERROR_INVALID_ARGUMENT,
+                "rng: State must be non-negative",
+            )
+        }),
         other => Err(rng_error_with(
             &RNG_ERROR_INVALID_ARGUMENT,
             format!("rng: unsupported State value {other:?}"),
@@ -621,6 +612,20 @@ pub(crate) mod tests {
         block_on(rng_builtin(vec![Value::Int(IntValue::U32(42))])).expect("rng");
         let seq2 = random::generate_uniform(5, "rng test").expect("uniform");
         assert_eq!(seq1, seq2);
+    }
+
+    #[test]
+    fn rng_integer_seed_and_state_preserve_full_uint64_range() {
+        assert_eq!(
+            parse_seed_scalar(&Value::Int(IntValue::U64(u64::MAX)), "rng: seed")
+                .expect("uint64 seed"),
+            u64::MAX
+        );
+        assert_eq!(
+            parse_state_scalar(&Value::Int(IntValue::U64(u64::MAX))).expect("uint64 state"),
+            u64::MAX
+        );
+        assert!(parse_seed_scalar(&Value::Int(IntValue::I64(-1)), "rng: seed").is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

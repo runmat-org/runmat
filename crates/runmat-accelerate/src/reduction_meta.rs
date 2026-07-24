@@ -146,11 +146,24 @@ fn parse_dims_from_value(value: &Value) -> Option<Vec<usize>> {
 }
 
 fn parse_single_int(int_val: &IntValue) -> Option<Vec<usize>> {
-    let raw = int_val.to_i64();
-    if raw >= 1 {
-        Some(vec![raw as usize])
-    } else {
-        None
+    int_val
+        .try_to_usize()
+        .filter(|raw| *raw >= 1)
+        .map(|raw| vec![raw])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reduction_dimension_preserves_representable_uint64_values() {
+        let expected = usize::try_from(u64::MAX).ok();
+        assert_eq!(
+            parse_single_int(&IntValue::U64(u64::MAX)),
+            expected.map(|value| vec![value])
+        );
+        assert_eq!(parse_single_int(&IntValue::I64(-1)), None);
     }
 }
 

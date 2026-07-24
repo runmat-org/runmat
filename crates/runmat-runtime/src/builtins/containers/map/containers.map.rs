@@ -1824,7 +1824,9 @@ fn integer_from_value(
 ) -> BuiltinResult<i64> {
     match value {
         Value::Int(i) => {
-            let v = i.to_i64();
+            let Some(v) = i.try_to_i64() else {
+                return Err(map_error(context, builtin));
+            };
             if v < min || v > max {
                 return Err(map_error(context, builtin));
             }
@@ -1861,11 +1863,13 @@ fn unsigned_from_value(
 ) -> BuiltinResult<u64> {
     match value {
         Value::Int(i) => {
-            let v = i.to_i64();
-            if v < 0 || v as u64 > max {
+            let Some(v) = i.try_to_u64() else {
+                return Err(map_error(context, builtin));
+            };
+            if v > max {
                 return Err(map_error(context, builtin));
             }
-            Ok(v as u64)
+            Ok(v)
         }
         Value::Num(n) => {
             if !n.is_finite() || *n < 0.0 || *n > max as f64 {
@@ -2485,6 +2489,28 @@ pub(crate) mod tests {
                 map_id(&handle, BUILTIN_CONSTRUCTOR).expect_err("corrupted map id should reject");
             assert_eq!(err.identifier(), CONTAINERS_MAP_ERROR_INTERNAL.identifier);
         }
+    }
+
+    #[test]
+    fn typed_map_keys_preserve_full_uint64_range() {
+        assert_eq!(
+            unsigned_from_value(
+                &Value::Int(IntValue::U64(u64::MAX)),
+                u64::MAX,
+                "key",
+                BUILTIN_CONSTRUCTOR,
+            )
+            .expect("uint64 key"),
+            u64::MAX
+        );
+        assert!(integer_from_value(
+            &Value::Int(IntValue::U64(u64::MAX)),
+            i64::MIN,
+            i64::MAX,
+            "key",
+            BUILTIN_CONSTRUCTOR,
+        )
+        .is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

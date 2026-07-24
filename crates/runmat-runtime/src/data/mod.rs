@@ -1314,13 +1314,10 @@ fn parse_usize_vector(value: &Value) -> BuiltinResult<Vec<usize>> {
             }
             Ok(vec![*n as usize])
         }
-        Value::Int(i) => {
-            let n = i.to_i64();
-            if n < 0 {
-                return Err(data_error("data schema dimensions must be non-negative"));
-            }
-            Ok(vec![n as usize])
-        }
+        Value::Int(i) => i
+            .try_to_usize()
+            .map(|n| vec![n])
+            .ok_or_else(|| data_error("data schema dimensions must be non-negative integers")),
         _ => Err(data_error(
             "data schema dimension field must be numeric tensor/vector",
         )),
@@ -1500,6 +1497,17 @@ pub fn remove_tx(tx_id: &str) -> BuiltinResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schema_dimensions_preserve_large_typed_unsigned_values() {
+        let expected = usize::try_from(u64::MAX).ok();
+        let parsed = parse_usize_vector(&Value::Int(IntValue::U64(u64::MAX)));
+        match expected {
+            Some(value) => assert_eq!(parsed.expect("representable dimension"), vec![value]),
+            None => assert!(parsed.is_err()),
+        }
+        assert!(parse_usize_vector(&Value::Int(IntValue::I64(-1))).is_err());
+    }
 
     #[test]
     fn payload_roundtrips_every_native_integer_storage_class() {

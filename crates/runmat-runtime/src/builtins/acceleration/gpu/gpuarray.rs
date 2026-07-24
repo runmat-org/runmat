@@ -568,14 +568,12 @@ fn value_to_lower_string(value: &Value) -> Option<String> {
 }
 
 fn int_to_dim(value: &IntValue) -> BuiltinResult<usize> {
-    let raw = value.to_i64();
-    if raw < 0 {
-        return Err(gpu_array_error_with_message(
+    value.try_to_usize().ok_or_else(|| {
+        gpu_array_error_with_message(
             "gpuArray: size arguments must be non-negative integers",
             &GPUARRAY_ERROR_SIZE_ARGUMENT,
-        ));
-    }
-    Ok(raw as usize)
+        )
+    })
 }
 
 fn float_to_dim(value: f64) -> BuiltinResult<usize> {
@@ -1063,6 +1061,13 @@ pub(crate) mod tests {
             assert_eq!(gathered.shape, tensor.shape);
             assert_eq!(gathered.data, tensor.data);
         });
+    }
+
+    #[test]
+    fn gpu_array_dimension_preserves_representable_uint64_values() {
+        let expected = usize::try_from(u64::MAX).ok();
+        assert_eq!(int_to_dim(&IntValue::U64(u64::MAX)).ok(), expected);
+        assert!(int_to_dim(&IntValue::I64(-1)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

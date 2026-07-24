@@ -149,6 +149,43 @@ impl IntValue {
             }
         }
     }
+
+    /// Returns the signed representation when it is exactly representable.
+    ///
+    /// Unlike [`Self::to_i64`], this never saturates an out-of-range `uint64`.
+    pub fn try_to_i64(&self) -> Option<i64> {
+        match self {
+            IntValue::I8(v) => Some(*v as i64),
+            IntValue::I16(v) => Some(*v as i64),
+            IntValue::I32(v) => Some(*v as i64),
+            IntValue::I64(v) => Some(*v),
+            IntValue::U8(v) => Some(*v as i64),
+            IntValue::U16(v) => Some(*v as i64),
+            IntValue::U32(v) => Some(*v as i64),
+            IntValue::U64(v) => i64::try_from(*v).ok(),
+        }
+    }
+
+    /// Returns the unsigned representation when it is exactly representable.
+    pub fn try_to_u64(&self) -> Option<u64> {
+        match self {
+            IntValue::I8(v) => u64::try_from(*v).ok(),
+            IntValue::I16(v) => u64::try_from(*v).ok(),
+            IntValue::I32(v) => u64::try_from(*v).ok(),
+            IntValue::I64(v) => u64::try_from(*v).ok(),
+            IntValue::U8(v) => Some(*v as u64),
+            IntValue::U16(v) => Some(*v as u64),
+            IntValue::U32(v) => Some(*v as u64),
+            IntValue::U64(v) => Some(*v),
+        }
+    }
+
+    /// Returns the platform dimension representation when it is exactly
+    /// representable and non-negative.
+    pub fn try_to_usize(&self) -> Option<usize> {
+        self.try_to_u64()
+            .and_then(|value| usize::try_from(value).ok())
+    }
     pub fn to_f64(&self) -> f64 {
         match self {
             // `uint64` has a wider positive range than `int64`. Converting it
@@ -238,6 +275,19 @@ mod int_value_tests {
         assert_eq!(
             String::try_from(&Value::Int(IntValue::U64(u64::MAX))).expect("string conversion"),
             "18446744073709551615"
+        );
+    }
+
+    #[test]
+    fn checked_integer_conversions_do_not_saturate_or_change_sign() {
+        assert_eq!(IntValue::I64(i64::MIN).try_to_i64(), Some(i64::MIN));
+        assert_eq!(IntValue::U64(i64::MAX as u64).try_to_i64(), Some(i64::MAX));
+        assert_eq!(IntValue::U64(u64::MAX).try_to_i64(), None);
+        assert_eq!(IntValue::I64(-1).try_to_u64(), None);
+        assert_eq!(IntValue::U64(u64::MAX).try_to_u64(), Some(u64::MAX));
+        assert_eq!(
+            IntValue::U64(u64::MAX).try_to_usize(),
+            usize::try_from(u64::MAX).ok()
         );
     }
 }

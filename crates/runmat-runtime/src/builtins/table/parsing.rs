@@ -34,7 +34,9 @@ pub(super) fn bool_scalar(value: &Value, context: &str) -> BuiltinResult<bool> {
 
 pub(super) fn nonnegative_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
     match value {
-        Value::Int(value) if value.to_i64() >= 0 => Ok(value.to_i64() as usize),
+        Value::Int(value) => value.try_to_usize().ok_or_else(|| {
+            invalid_argument(format!("table: {context} must be a non-negative integer"))
+        }),
         Value::Num(value)
             if value.is_finite()
                 && *value >= 0.0
