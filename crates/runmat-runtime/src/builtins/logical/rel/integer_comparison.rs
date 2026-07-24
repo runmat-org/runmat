@@ -23,8 +23,8 @@ pub(crate) enum IntegerComparisonError {
 }
 
 /// Performs a comparison when native integer storage is compared against other
-/// native integer storage or a scalar numeric value. Other numeric domains
-/// deliberately stay on the established builtin paths.
+/// native integer storage or real numeric storage. This keeps integer values
+/// exact even when the other operand is an f64 array.
 pub(crate) fn try_integer_comparison(
     lhs: &Value,
     rhs: &Value,
@@ -36,16 +36,16 @@ pub(crate) fn try_integer_comparison(
         (None, None) => return Ok(None),
         (Some(lhs), Some(rhs)) => compare_integer_operands(&lhs, &rhs, operation)?,
         (Some(lhs), None) => {
-            let Some(rhs) = numeric_scalar(rhs) else {
+            let Some(rhs) = numeric_operand(rhs) else {
                 return Ok(None);
             };
-            compare_integer_scalar(&lhs, rhs, true, operation)?
+            compare_integer_numeric(&lhs, &rhs, true, operation)?
         }
         (None, Some(rhs)) => {
-            let Some(lhs) = numeric_scalar(lhs) else {
+            let Some(lhs) = numeric_operand(lhs) else {
                 return Ok(None);
             };
-            compare_integer_scalar(&rhs, lhs, false, operation)?
+            compare_integer_numeric(&rhs, &lhs, false, operation)?
         }
     };
     Ok(Some(result))
@@ -66,15 +66,20 @@ fn compare_integer_operands(
     logical_result(data, plan.output_shape().to_vec())
 }
 
-fn compare_integer_scalar(
+fn compare_integer_numeric(
     integer: &IntegerOperand<'_>,
-    scalar: f64,
+    numeric: &NumericOperand<'_>,
     integer_is_left: bool,
     operation: IntegerComparisonOp,
 ) -> Result<Value, IntegerComparisonError> {
-    let mut data = Vec::with_capacity(integer.shape.iter().product());
-    for index in 0..integer.shape.iter().product() {
-        let ordering = integer_f64_order(integer.value_at(index), scalar);
+    let plan = BroadcastPlan::new(&integer.shape, numeric.shape())
+        .map_err(|_| IntegerComparisonError::SizeMismatch)?;
+    let mut data = Vec::with_capacity(plan.len());
+    for (_, integer_index, numeric_index) in plan.iter() {
+        let ordering = integer_f64_order(
+            integer.value_at(integer_index),
+            numeric.value_at(numeric_index),
+        );
         let ordering = if integer_is_left {
             ordering
         } else {
@@ -82,7 +87,7 @@ fn compare_integer_scalar(
         };
         data.push(matches_optional_relation(ordering, operation) as u8);
     }
-    logical_result(data, integer.shape.clone())
+    logical_result(data, plan.output_shape().to_vec())
 }
 
 fn logical_result(data: Vec<u8>, shape: Vec<usize>) -> Result<Value, IntegerComparisonError> {
@@ -206,16 +211,37 @@ fn integer_as_i128(value: &IntValue) -> i128 {
     }
 }
 
-fn numeric_scalar(value: &Value) -> Option<f64> {
+enum NumericOperand<'a> {
+    Scalar(f64),
+    Tensor(&'a [f64], &'a [usize]),
+    Logical(&'a [u8], &'a [usize]),
+}
+
+impl NumericOperand<'_> {
+    fn shape(&self) -> &[usize] {
+        match self {
+            Self::Scalar(_) => &[1, 1],
+            Self::Tensor(_, shape) | Self::Logical(_, shape) => shape,
+        }
+    }
+
+    fn value_at(&self, index: usize) -> f64 {
+        match self {
+            Self::Scalar(value) => *value,
+            Self::Tensor(data, _) => data[index],
+            Self::Logical(data, _) => f64::from(data[index] != 0),
+        }
+    }
+}
+
+fn numeric_operand(value: &Value) -> Option<NumericOperand<'_>> {
     match value {
-        Value::Num(value) => Some(*value),
-        Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.integer_storage().is_none() && tensor.data.len() == 1 => {
-            tensor.data.first().copied()
+        Value::Num(value) => Some(NumericOperand::Scalar(*value)),
+        Value::Bool(value) => Some(NumericOperand::Scalar(if *value { 1.0 } else { 0.0 })),
+        Value::Tensor(tensor) if tensor.integer_storage().is_none() => {
+            Some(NumericOperand::Tensor(&tensor.data, &tensor.shape))
         }
-        Value::LogicalArray(array) if array.data.len() == 1 => {
-            Some(if array.data[0] == 0 { 0.0 } else { 1.0 })
-        }
+        Value::LogicalArray(array) => Some(NumericOperand::Logical(&array.data, &array.shape)),
         _ => None,
     }
 }
@@ -331,6 +357,54 @@ mod tests {
         let tensor = array(IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]), vec![1, 2]);
         assert_eq!(
             try_integer_comparison(&tensor, &rounded, IntegerComparisonOp::Ne).expect("comparison"),
+            Some(Value::LogicalArray(
+                LogicalArray::new(vec![1, 1], vec![1, 2]).expect("logical result")
+            ))
+        );
+    }
+
+    #[test]
+    fn compares_integer_storage_to_broadcast_float_arrays_without_64_bit_loss() {
+        let integer = array(
+            IntegerStorage::U64(vec![1_u64 << 53, (1_u64 << 53) + 1]),
+            vec![2, 1],
+        );
+        let float = Value::Tensor(
+            runmat_builtins::Tensor::new(
+                vec![(1_u64 << 53) as f64, 0.0, (1_u64 << 53) as f64],
+                vec![1, 3],
+            )
+            .expect("float tensor"),
+        );
+        let result = try_integer_comparison(&integer, &float, IntegerComparisonOp::Eq)
+            .expect("comparison")
+            .expect("integer path");
+        assert_eq!(
+            result,
+            Value::LogicalArray(
+                LogicalArray::new(vec![1, 0, 0, 0, 1, 0], vec![2, 3]).expect("logical result")
+            )
+        );
+
+        let result = try_integer_comparison(&float, &integer, IntegerComparisonOp::Lt)
+            .expect("comparison")
+            .expect("integer path");
+        assert_eq!(
+            result,
+            Value::LogicalArray(
+                LogicalArray::new(vec![0, 1, 1, 1, 0, 1], vec![2, 3]).expect("logical result")
+            )
+        );
+    }
+
+    #[test]
+    fn compares_integer_storage_to_logical_arrays() {
+        let integer = array(IntegerStorage::I8(vec![0, 1]), vec![1, 2]);
+        let logical =
+            Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![1, 2]).expect("logical array"));
+        assert_eq!(
+            try_integer_comparison(&integer, &logical, IntegerComparisonOp::Eq)
+                .expect("comparison"),
             Some(Value::LogicalArray(
                 LogicalArray::new(vec![1, 1], vec![1, 2]).expect("logical result")
             ))
