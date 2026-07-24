@@ -1,6 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::{bytes_of, Pod, Zeroable};
-use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_time::Instant;
 use std::sync::Arc;
 
@@ -28,19 +28,6 @@ use crate::backend::wgpu::shaders::logical::{
 use crate::backend::wgpu::types::NumericPrecision;
 
 impl WgpuProvider {
-    fn integer_type_code(element_type: IntegerElementType) -> u32 {
-        match element_type {
-            IntegerElementType::I8 => 0,
-            IntegerElementType::I16 => 1,
-            IntegerElementType::I32 => 2,
-            IntegerElementType::I64 => 3,
-            IntegerElementType::U8 => 4,
-            IntegerElementType::U16 => 5,
-            IntegerElementType::U32 => 6,
-            IntegerElementType::U64 => 7,
-        }
-    }
-
     fn integer_comparison_exec(
         &self,
         operation: u32,
@@ -147,7 +134,7 @@ impl WgpuProvider {
                 op: operation,
                 offset: offset as u32,
                 total: len as u32,
-                integer_type: Self::integer_type_code(integer_type),
+                integer_type: super::integer::integer_type_code(integer_type),
                 _pad0: 0,
                 _pad1: 0,
                 _pad2: 0,
@@ -1283,6 +1270,21 @@ impl WgpuProvider {
         if std::env::var("RUNMAT_DISABLE_BINARY").is_ok() {
             return Err(anyhow!("binary ops disabled via RUNMAT_DISABLE_BINARY"));
         }
+        if self.get_entry_raw(a)?.integer_type.is_some()
+            || self.get_entry_raw(b)?.integer_type.is_some()
+        {
+            return match op {
+                crate::backend::wgpu::types::BinaryOpCode::Min => {
+                    self.integer_minmax_exec(true, "elem_min", a, b)
+                }
+                crate::backend::wgpu::types::BinaryOpCode::Max => {
+                    self.integer_minmax_exec(false, "elem_max", a, b)
+                }
+                _ => Err(anyhow!(
+                    "native integer gpuArray arithmetic requires a dedicated integer provider kernel"
+                )),
+            };
+        }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         let storage_a = self.effective_storage_for_entry(a, &entry_a);
@@ -2268,7 +2270,8 @@ impl WgpuProvider {
 mod tests {
     use super::*;
     use runmat_accelerate_api::{
-        AccelProvider, GpuTensorStorage, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+        AccelProvider, GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView,
+        HostIntegerTensorView, HostTensorView,
     };
 
     async fn complex_pair(
@@ -2477,6 +2480,109 @@ mod tests {
         assert!(error.to_string().contains("same class"));
         provider.free(&signed).expect("free signed handle");
         provider.free(&unsigned).expect("free unsigned handle");
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_minmax_preserves_all_classes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [3, 1];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[i8::MIN, 0, i8::MAX]),
+                HostIntegerDataView::I8(&[i8::MIN + 1, 0, i8::MAX - 1]),
+                HostIntegerDataOwned::I8(vec![i8::MIN, 0, i8::MAX - 1]),
+                HostIntegerDataOwned::I8(vec![i8::MIN + 1, 0, i8::MAX]),
+            ),
+            (
+                HostIntegerDataView::I16(&[i16::MIN, 0, i16::MAX]),
+                HostIntegerDataView::I16(&[i16::MIN + 1, 0, i16::MAX - 1]),
+                HostIntegerDataOwned::I16(vec![i16::MIN, 0, i16::MAX - 1]),
+                HostIntegerDataOwned::I16(vec![i16::MIN + 1, 0, i16::MAX]),
+            ),
+            (
+                HostIntegerDataView::I32(&[i32::MIN, 0, i32::MAX]),
+                HostIntegerDataView::I32(&[i32::MIN + 1, 0, i32::MAX - 1]),
+                HostIntegerDataOwned::I32(vec![i32::MIN, 0, i32::MAX - 1]),
+                HostIntegerDataOwned::I32(vec![i32::MIN + 1, 0, i32::MAX]),
+            ),
+            (
+                HostIntegerDataView::I64(&[i64::MIN, 0, i64::MAX]),
+                HostIntegerDataView::I64(&[i64::MIN + 1, 0, i64::MAX - 1]),
+                HostIntegerDataOwned::I64(vec![i64::MIN, 0, i64::MAX - 1]),
+                HostIntegerDataOwned::I64(vec![i64::MIN + 1, 0, i64::MAX]),
+            ),
+            (
+                HostIntegerDataView::U8(&[0, 1, u8::MAX]),
+                HostIntegerDataView::U8(&[1, 1, u8::MAX - 1]),
+                HostIntegerDataOwned::U8(vec![0, 1, u8::MAX - 1]),
+                HostIntegerDataOwned::U8(vec![1, 1, u8::MAX]),
+            ),
+            (
+                HostIntegerDataView::U16(&[0, 1, u16::MAX]),
+                HostIntegerDataView::U16(&[1, 1, u16::MAX - 1]),
+                HostIntegerDataOwned::U16(vec![0, 1, u16::MAX - 1]),
+                HostIntegerDataOwned::U16(vec![1, 1, u16::MAX]),
+            ),
+            (
+                HostIntegerDataView::U32(&[0, 1, u32::MAX]),
+                HostIntegerDataView::U32(&[1, 1, u32::MAX - 1]),
+                HostIntegerDataOwned::U32(vec![0, 1, u32::MAX - 1]),
+                HostIntegerDataOwned::U32(vec![1, 1, u32::MAX]),
+            ),
+            (
+                HostIntegerDataView::U64(&[0, 1, u64::MAX]),
+                HostIntegerDataView::U64(&[1, 1, u64::MAX - 1]),
+                HostIntegerDataOwned::U64(vec![0, 1, u64::MAX - 1]),
+                HostIntegerDataOwned::U64(vec![1, 1, u64::MAX]),
+            ),
+        ];
+
+        for (left, right, expected_min, expected_max) in cases {
+            let integer_type = left.element_type();
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &shape,
+                })
+                .expect("upload integer lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &shape,
+                })
+                .expect("upload integer rhs");
+            let minimum = provider.elem_min(&lhs, &rhs).await.expect("integer min");
+            let maximum = provider.elem_max(&lhs, &rhs).await.expect("integer max");
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&minimum),
+                Some(integer_type)
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&maximum),
+                Some(integer_type)
+            );
+            assert_eq!(
+                provider
+                    .download_integer(&minimum)
+                    .await
+                    .expect("download min")
+                    .data,
+                expected_min
+            );
+            assert_eq!(
+                provider
+                    .download_integer(&maximum)
+                    .await
+                    .expect("download max")
+                    .data,
+                expected_max
+            );
+            for handle in [&lhs, &rhs, &minimum, &maximum] {
+                provider.free(handle).expect("free minmax handle");
+            }
+        }
     }
 
     #[tokio::test]
