@@ -408,7 +408,11 @@ async fn gpu_binary_exponentiation(
 fn parse_integer_exponent(value: &Value) -> BuiltinResult<Option<i32>> {
     match value {
         Value::Int(i) => {
-            let raw = i.to_i64();
+            let raw = i.try_to_i64().ok_or_else(|| {
+                mpower_invalid_argument(
+                    "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
+                )
+            })?;
             if raw > i32::MAX as i64 || raw < i32::MIN as i64 {
                 return Err(mpower_invalid_argument(
                     "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
@@ -466,6 +470,17 @@ pub(crate) mod tests {
     use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
+    }
+
+    #[test]
+    fn typed_mpower_exponent_parser_rejects_unrepresentable_uint64() {
+        assert_eq!(
+            parse_integer_exponent(&Value::Int(IntValue::I64(-1))).expect("signed exponent"),
+            Some(-1)
+        );
+        let err = parse_integer_exponent(&Value::Int(IntValue::U64(u64::MAX)))
+            .expect_err("unrepresentable typed exponent must not saturate");
+        assert_eq!(err.identifier(), MPOWER_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -166,6 +166,16 @@ impl IntValue {
         }
     }
 
+    /// Returns the platform signed representation when it is exactly
+    /// representable.
+    ///
+    /// This is intended for signed offsets and shifts. In particular, it
+    /// rejects `uint64` values above `int64::MAX` instead of saturating them.
+    pub fn try_to_isize(&self) -> Option<isize> {
+        self.try_to_i64()
+            .and_then(|value| isize::try_from(value).ok())
+    }
+
     /// Returns the unsigned representation when it is exactly representable.
     pub fn try_to_u64(&self) -> Option<u64> {
         match self {
@@ -289,6 +299,11 @@ mod int_value_tests {
             IntValue::U64(u64::MAX).try_to_usize(),
             usize::try_from(u64::MAX).ok()
         );
+        assert_eq!(
+            IntValue::I64(isize::MIN as i64).try_to_isize(),
+            Some(isize::MIN)
+        );
+        assert_eq!(IntValue::U64(u64::MAX).try_to_isize(), None);
     }
 }
 

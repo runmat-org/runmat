@@ -397,15 +397,10 @@ fn coerce_dim_value(value: f64) -> Option<usize> {
 
 fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < isize::MIN as i64 || raw > isize::MAX as i64 {
-                return Err(circshift_invalid_shift(
-                    "circshift: shift magnitude is too large",
-                ));
-            }
-            Ok(vec![raw as isize])
-        }
+        Value::Int(i) => i
+            .try_to_isize()
+            .map(|shift| vec![shift])
+            .ok_or_else(|| circshift_invalid_shift("circshift: shift magnitude is too large")),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(circshift_invalid_shift(
@@ -482,11 +477,13 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
 fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
     match value {
         Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 1 {
+            let dim = i.try_to_usize().ok_or_else(|| {
+                circshift_invalid_dims("circshift: dimensions must be positive integers")
+            })?;
+            if dim < 1 {
                 return Err(circshift_invalid_dims("circshift: dimensions must be >= 1"));
             }
-            Ok(vec![raw as usize])
+            Ok(vec![dim])
         }
         Value::Num(n) => {
             if !n.is_finite() {
@@ -981,6 +978,31 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor};
+
+    #[test]
+    fn circshift_typed_argument_parsers_preserve_signed_values_and_ranges() {
+        assert_eq!(
+            value_to_shift_vector(&Value::Int(IntValue::I64(-1))).expect("signed shift"),
+            vec![-1]
+        );
+        let shift_err = value_to_shift_vector(&Value::Int(IntValue::U64(u64::MAX)))
+            .expect_err("unrepresentable typed shift must not saturate");
+        assert_eq!(
+            shift_err.identifier(),
+            CIRCSHIFT_ERROR_INVALID_SHIFT.identifier
+        );
+
+        assert_eq!(
+            value_to_dims_vector(&Value::Int(IntValue::U64(2))).expect("uint64 dimension"),
+            vec![2]
+        );
+        let dims_err = value_to_dims_vector(&Value::Int(IntValue::I64(-1)))
+            .expect_err("negative typed dimension must reject");
+        assert_eq!(
+            dims_err.identifier(),
+            CIRCSHIFT_ERROR_INVALID_DIMS.identifier
+        );
+    }
 
     #[test]
     fn circshift_type_preserves_tensor_shape() {

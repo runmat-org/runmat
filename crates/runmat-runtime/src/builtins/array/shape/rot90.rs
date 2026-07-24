@@ -249,12 +249,22 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
 }
 
 fn parse_rotation_steps(arg: Option<&Value>) -> crate::BuiltinResult<usize> {
-    let raw = match arg {
-        None => 1,
-        Some(value) => parse_rotation_value(value)?,
-    };
-    let modulo = ((raw % 4 + 4) % 4) as usize;
-    Ok(modulo)
+    match arg {
+        None => Ok(1),
+        Some(Value::Int(value)) => {
+            if let Some(raw) = value.try_to_i64() {
+                return Ok(((raw % 4 + 4) % 4) as usize);
+            }
+            Ok((value
+                .try_to_u64()
+                .expect("only non-negative integer values miss the signed representation")
+                % 4) as usize)
+        }
+        Some(value) => {
+            let raw = parse_rotation_value(value)?;
+            Ok(((raw % 4 + 4) % 4) as usize)
+        }
+    }
 }
 
 fn parse_rotation_value(value: &Value) -> crate::BuiltinResult<i64> {
@@ -262,7 +272,12 @@ fn parse_rotation_value(value: &Value) -> crate::BuiltinResult<i64> {
         return Ok(direction);
     }
     match value {
-        Value::Int(i) => Ok(i.to_i64()),
+        Value::Int(i) => i.try_to_i64().ok_or_else(|| {
+            rot90_error_with_message(
+                "rot90: K is outside the supported signed range",
+                &ROT90_ERROR_INVALID_ROTATION,
+            )
+        }),
         Value::Num(n) => parse_numeric_rotation(*n),
         Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
         Value::Tensor(t) => parse_tensor_rotation(t),
@@ -636,6 +651,20 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, IntegerStorage, Tensor, Type};
+
+    #[test]
+    fn rot90_rotation_parser_reduces_full_uint64_range_exactly() {
+        assert_eq!(
+            parse_rotation_steps(Some(&Value::Int(IntValue::U64(u64::MAX))))
+                .expect("uint64 rotation count"),
+            (u64::MAX % 4) as usize
+        );
+        assert_eq!(
+            parse_rotation_steps(Some(&Value::Int(IntValue::I64(-1))))
+                .expect("negative signed rotation count"),
+            3
+        );
+    }
 
     #[test]
     fn rot90_type_preserves_matrix_shape() {

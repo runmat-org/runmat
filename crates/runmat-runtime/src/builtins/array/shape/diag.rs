@@ -1106,7 +1106,12 @@ fn diag_vector_from_matrix_row_major<T: Copy>(
 
 fn scalar_to_isize(value: &Value) -> BuiltinResult<isize> {
     match value {
-        Value::Int(i) => Ok(i.to_i64() as isize),
+        Value::Int(i) => i.try_to_isize().ok_or_else(|| {
+            diag_error(
+                MESSAGE_ID_INVALID_OFFSET,
+                "diag: diagonal offset is outside the supported range",
+            )
+        }),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(diag_error(
@@ -1370,6 +1375,17 @@ mod tests {
 
     fn size_vector(rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(vec![rows as f64, cols as f64], vec![1, 2]).unwrap())
+    }
+
+    #[test]
+    fn diag_offset_parser_preserves_signed_values_and_rejects_unrepresentable_uint64() {
+        assert_eq!(
+            scalar_to_isize(&Value::Int(IntValue::I64(-1))).expect("signed offset"),
+            -1
+        );
+        let err = scalar_to_isize(&Value::Int(IntValue::U64(u64::MAX)))
+            .expect_err("unrepresentable typed offset must not saturate");
+        assert_eq!(err.identifier(), MESSAGE_ID_INVALID_OFFSET.identifier);
     }
 
     #[test]

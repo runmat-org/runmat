@@ -273,7 +273,12 @@ async fn parse_diagonal_offset(args: &[Value]) -> crate::BuiltinResult<isize> {
 
 fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
     match value {
-        Value::Int(i) => Ok(i.to_i64() as isize),
+        Value::Int(i) => i.try_to_isize().ok_or_else(|| {
+            tril_error_with_message(
+                format!("{name}: diagonal offset is outside the supported range"),
+                &TRIL_ERROR_INVALID_OFFSET,
+            )
+        }),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(tril_error_with_message(
@@ -447,6 +452,17 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Type};
+
+    #[test]
+    fn tril_offset_parser_preserves_signed_values_and_rejects_unrepresentable_uint64() {
+        assert_eq!(
+            scalar_to_isize(&Value::Int(IntValue::I64(-1)), "tril").expect("signed offset"),
+            -1
+        );
+        let err = scalar_to_isize(&Value::Int(IntValue::U64(u64::MAX)), "tril")
+            .expect_err("unrepresentable typed offset must not saturate");
+        assert_eq!(err.identifier(), TRIL_ERROR_INVALID_OFFSET.identifier);
+    }
 
     #[test]
     fn tril_type_preserves_matrix_shape() {
