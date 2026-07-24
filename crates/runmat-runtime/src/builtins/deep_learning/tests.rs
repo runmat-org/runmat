@@ -8,7 +8,7 @@ use super::sequences::*;
 use super::supervised::*;
 use super::training::*;
 use futures::executor::block_on;
-use runmat_accelerate_api::{handle_precision, handle_storage, HostTensorView};
+use runmat_accelerate_api::{handle_precision, handle_storage, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
     CellArray, LogicalArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor, Value,
 };
@@ -229,6 +229,11 @@ fn dense_feature_network_layers() -> Value {
         ],
     ))
     .unwrap();
+    let relu = block_on(relu_layer_builtin(vec![
+        Value::String("Name".into()),
+        Value::String("relu".into()),
+    ]))
+    .unwrap();
     let second = block_on(fully_connected_layer_builtin(
         Value::Num(1.0),
         vec![
@@ -241,7 +246,7 @@ fn dense_feature_network_layers() -> Value {
         ],
     ))
     .unwrap();
-    Value::Cell(CellArray::new(vec![input, first, second], 3, 1).unwrap())
+    Value::Cell(CellArray::new(vec![input, first, relu, second], 4, 1).unwrap())
 }
 
 #[test]
@@ -410,6 +415,32 @@ fn forward_rejects_unsupported_gpu_layer_before_host_gather_or_dispatch() {
         let err = block_on(forward_builtin(net, dl, vec![])).unwrap_err();
 
         assert!(err.to_string().contains("SoftmaxLayer"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn forward_rejects_complex_gpu_dlarray_before_dense_dispatch() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
+        let shape = [1usize, 2usize];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &shape,
+            })
+            .expect("upload");
+        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
+        provider.reset_telemetry();
+        let dl = block_on(dlarray_builtin(
+            Value::GpuTensor(handle),
+            vec![Value::String("CB".into())],
+        ))
+        .expect("gpu dlarray");
+
+        let err = block_on(forward_builtin(net, dl, vec![])).unwrap_err();
+
+        assert!(err.to_string().contains("real dlarray input"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
 }

@@ -5907,6 +5907,23 @@ impl AccelProvider for InProcessProvider {
         Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
     }
 
+    fn scalar_max(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
+        let storage = runmat_accelerate_api::handle_storage(a);
+        ensure!(
+            storage == GpuTensorStorage::Real,
+            "scalar_max: complex inputs are not supported"
+        );
+        let out = {
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            ensure_storage_len("scalar_max", abuf, &a.shape, &storage)?;
+            abuf.iter().map(|&value| value.max(scalar)).collect()
+        };
+        Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
+    }
+
     fn scalar_div(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
         let storage = runmat_accelerate_api::handle_storage(a);
         let out = {
