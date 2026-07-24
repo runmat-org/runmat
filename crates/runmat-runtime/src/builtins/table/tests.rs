@@ -3,6 +3,7 @@ use crate::RuntimeError;
 #[cfg(not(target_arch = "wasm32"))]
 use async_trait::async_trait;
 use futures::executor::block_on;
+use runmat_builtins::IntegerStorage;
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_filesystem::{
     DirEntry, FileHandle, FsMetadata, FsProvider, NativeFsProvider, OpenFlags, SandboxFsProvider,
@@ -1143,21 +1144,55 @@ fn readtable_variable_types_cellstr_imports_cell_column() {
 }
 
 #[test]
-fn readtable_rejects_unrepresented_import_variable_types() {
-    let path = unique_path("readtable_unsupported_variable_types");
-    fs::write(&path, "A\n1\n").expect("write sample");
-    let unsupported_integer = StringArray::new(vec!["int8".to_string()], vec![1, 1]).unwrap();
-    let err = read_table_err(
-        &path,
-        vec![
-            Value::from("VariableTypes"),
-            Value::StringArray(unsupported_integer),
-        ],
-    );
-    assert!(err
-        .message()
-        .contains("unsupported VariableTypes entry 'int8'"));
-    let _ = fs::remove_file(&path);
+fn readtable_variable_types_preserve_all_exact_integer_classes() {
+    let cases = [
+        ("int8", "127\n-128\n", IntegerStorage::I8(vec![127, -128])),
+        (
+            "int16",
+            "32767\n-32768\n",
+            IntegerStorage::I16(vec![32767, -32768]),
+        ),
+        (
+            "int32",
+            "2147483647\n-2147483648\n",
+            IntegerStorage::I32(vec![i32::MAX, i32::MIN]),
+        ),
+        (
+            "int64",
+            "9223372036854775807\n-9223372036854775808\n",
+            IntegerStorage::I64(vec![i64::MAX, i64::MIN]),
+        ),
+        ("uint8", "255\n-1\n", IntegerStorage::U8(vec![255, 0])),
+        (
+            "uint16",
+            "65535\n-1\n",
+            IntegerStorage::U16(vec![u16::MAX, 0]),
+        ),
+        (
+            "uint32",
+            "4294967295\n-1\n",
+            IntegerStorage::U32(vec![u32::MAX, 0]),
+        ),
+        (
+            "uint64",
+            "18446744073709551615\n-1\n",
+            IntegerStorage::U64(vec![u64::MAX, 0]),
+        ),
+    ];
+    for (class, values, expected) in cases {
+        let path = unique_path(&format!("readtable_{class}"));
+        fs::write(&path, format!("A\n{values}")).expect("write sample");
+        let types = StringArray::new(vec![class.to_string()], vec![1, 1]).unwrap();
+        let table = object(read_table(
+            &path,
+            vec![Value::from("VariableTypes"), Value::StringArray(types)],
+        ));
+        let Value::Tensor(column) = table_member_get(&table, &Value::from("A")).unwrap() else {
+            panic!("expected integer tensor column");
+        };
+        assert_eq!(column.integer_storage(), Some(&expected), "{class}");
+        let _ = fs::remove_file(&path);
+    }
 }
 
 #[test]

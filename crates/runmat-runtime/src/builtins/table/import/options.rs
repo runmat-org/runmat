@@ -519,6 +519,7 @@ pub(in crate::builtins::table) fn import_variable_type_label(kind: &ImportVariab
         ImportVariableType::Numeric(NumericDType::U8) => "uint8",
         ImportVariableType::Numeric(NumericDType::U16) => "uint16",
         ImportVariableType::Numeric(NumericDType::U32) => "uint32",
+        ImportVariableType::Integer(target) => target.class_name(),
         ImportVariableType::Logical => "logical",
         ImportVariableType::Text(TextImportType::String) => "string",
         ImportVariableType::Text(TextImportType::Char) => "char",
@@ -869,6 +870,7 @@ impl SpreadsheetImportOptions {
 pub(in crate::builtins::table) enum ImportVariableType {
     Auto,
     Numeric(NumericDType),
+    Integer(crate::builtins::math::elementwise::integer_cast::IntegerTarget),
     Logical,
     Text(TextImportType),
     CellStr,
@@ -883,20 +885,35 @@ impl ImportVariableType {
             "" | "auto" => Ok(Self::Auto),
             "double" => Ok(Self::Numeric(NumericDType::F64)),
             "single" => Ok(Self::Numeric(NumericDType::F32)),
-            "uint8" => Ok(Self::Numeric(NumericDType::U8)),
-            "uint16" => Ok(Self::Numeric(NumericDType::U16)),
-            "uint32" => Ok(Self::Numeric(NumericDType::U32)),
+            "int8" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I8,
+            )),
+            "int16" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I16,
+            )),
+            "int32" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I32,
+            )),
+            "int64" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I64,
+            )),
+            "uint8" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U8,
+            )),
+            "uint16" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U16,
+            )),
+            "uint32" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U32,
+            )),
+            "uint64" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U64,
+            )),
             "logical" | "bool" | "boolean" => Ok(Self::Logical),
             "string" => Ok(Self::Text(TextImportType::String)),
             "char" => Ok(Self::Text(TextImportType::Char)),
             "cellstr" => Ok(Self::CellStr),
             "categorical" => Ok(Self::Categorical),
-            "int8" | "int16" | "int32" | "int64" | "uint64" => {
-                Err(invalid_argument(format!(
-                    "readtable: unsupported VariableTypes entry '{}'; RunMat table imports currently support double, single, uint8, uint16, and uint32 numeric arrays",
-                    raw.trim()
-                )))
-            }
             "datetime" => Ok(Self::Datetime),
             "duration" => Ok(Self::Duration),
             other => Err(invalid_argument(format!(

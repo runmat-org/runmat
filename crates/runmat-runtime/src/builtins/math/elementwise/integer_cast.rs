@@ -6,7 +6,7 @@ use runmat_builtins::{
 
 use crate::builtins::common::{gpu_helpers, tensor};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum IntegerTarget {
     I8,
     I16,
@@ -19,6 +19,32 @@ pub(crate) enum IntegerTarget {
 }
 
 impl IntegerTarget {
+    pub(crate) fn class_name(self) -> &'static str {
+        match self {
+            Self::I8 => "int8",
+            Self::I16 => "int16",
+            Self::I32 => "int32",
+            Self::I64 => "int64",
+            Self::U8 => "uint8",
+            Self::U16 => "uint16",
+            Self::U32 => "uint32",
+            Self::U64 => "uint64",
+        }
+    }
+
+    pub(crate) fn cast_i128(self, value: i128) -> IntValue {
+        match self {
+            Self::I8 => IntValue::I8(value.clamp(i8::MIN as i128, i8::MAX as i128) as i8),
+            Self::I16 => IntValue::I16(value.clamp(i16::MIN as i128, i16::MAX as i128) as i16),
+            Self::I32 => IntValue::I32(value.clamp(i32::MIN as i128, i32::MAX as i128) as i32),
+            Self::I64 => IntValue::I64(value.clamp(i64::MIN as i128, i64::MAX as i128) as i64),
+            Self::U8 => IntValue::U8(value.clamp(0, u8::MAX as i128) as u8),
+            Self::U16 => IntValue::U16(value.clamp(0, u16::MAX as i128) as u16),
+            Self::U32 => IntValue::U32(value.clamp(0, u32::MAX as i128) as u32),
+            Self::U64 => IntValue::U64(value.clamp(0, u64::MAX as i128) as u64),
+        }
+    }
+
     pub(crate) fn uses_extended_scalar_precision(self) -> bool {
         matches!(self, Self::I64 | Self::U64)
     }

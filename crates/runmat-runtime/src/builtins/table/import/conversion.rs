@@ -176,12 +176,61 @@ pub(in crate::builtins::table) fn import_column(
     match requested_type.unwrap_or(ImportVariableType::Auto) {
         ImportVariableType::Auto => infer_import_column(values, options),
         ImportVariableType::Numeric(dtype) => import_numeric_column(values, options, dtype),
+        ImportVariableType::Integer(target) => import_integer_column(values, options, target),
         ImportVariableType::Logical => import_logical_column(values, options),
         ImportVariableType::Text(kind) => import_text_column(values, options, kind),
         ImportVariableType::CellStr => import_cellstr_column(values, options),
         ImportVariableType::Categorical => import_categorical_column(values, options),
         ImportVariableType::Datetime => import_datetime_column(values, options),
         ImportVariableType::Duration => import_duration_column(values, options),
+    }
+}
+
+pub(in crate::builtins::table) fn import_integer_column(
+    values: Vec<ImportCell>,
+    options: &ReadTableOptions,
+    target: crate::builtins::math::elementwise::integer_cast::IntegerTarget,
+) -> BuiltinResult<Value> {
+    let mut parsed = Vec::with_capacity(values.len());
+    for value in &values {
+        parsed.push(integer_from_import_cell(value, options, target)?);
+    }
+    Tensor::new_integer(target.storage(parsed), vec![values.len(), 1])
+        .map(Value::Tensor)
+        .map_err(|err| invalid_variable(format!("readtable: {err}")))
+}
+
+fn integer_from_import_cell(
+    value: &ImportCell,
+    options: &ReadTableOptions,
+    target: crate::builtins::math::elementwise::integer_cast::IntegerTarget,
+) -> BuiltinResult<runmat_builtins::IntValue> {
+    let numeric = |value| Ok(target.cast_scalar(value));
+    match value {
+        ImportCell::Empty => numeric(f64::NAN),
+        ImportCell::Number(value) | ImportCell::DateTime(value) => numeric(*value),
+        ImportCell::Logical(value) => numeric(f64::from(*value)),
+        ImportCell::Text(text) => {
+            let token = unquote(text.trim()).trim();
+            if options.is_missing(token) {
+                return numeric(f64::NAN);
+            }
+            if let Ok(value) = token.parse::<i128>() {
+                return Ok(target.cast_i128(value));
+            }
+            parse_numeric(token)
+                .map(|value| target.cast_scalar(value))
+                .ok_or_else(|| {
+                    invalid_variable(format!(
+                        "readtable: cannot import '{token}' as {}",
+                        target.class_name()
+                    ))
+                })
+        }
+        ImportCell::Error(text) => Err(invalid_variable(format!(
+            "readtable: cannot import spreadsheet error '{text}' as {}",
+            target.class_name()
+        ))),
     }
 }
 
