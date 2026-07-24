@@ -84,16 +84,9 @@ pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>
             parse_length_scalar(re, builtin).map(Some)
         }
         Value::Num(n) => parse_length_scalar(*n, builtin).map(Some),
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(builtin_error(
-                    builtin,
-                    format!("{builtin}: length must be non-negative"),
-                ));
-            }
-            Ok(Some(raw as usize))
-        }
+        Value::Int(i) => i.try_to_usize().map(Some).ok_or_else(|| {
+            builtin_error(builtin, format!("{builtin}: length must be non-negative"))
+        }),
         Value::Complex(re, im) => {
             if im.abs() > f64::EPSILON {
                 return Err(builtin_error(
@@ -730,16 +723,16 @@ pub fn compute_shift_dims(
 
 fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 1 {
-                return Err(builtin_error(
+        Value::Int(i) => i
+            .try_to_usize()
+            .filter(|dimension| *dimension >= 1)
+            .map(|dimension| vec![dimension])
+            .ok_or_else(|| {
+                builtin_error(
                     builtin,
                     format!("{builtin}: dimension indices must be >= 1"),
-                ));
-            }
-            Ok(vec![raw as usize])
-        }
+                )
+            }),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(builtin_error(

@@ -230,17 +230,12 @@ fn parse_num_outputs(rest: &[Value]) -> Result<Option<usize>, crate::RuntimeErro
 
 fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeError> {
     match value {
-        Value::Int(iv) => {
-            let raw = iv.to_i64();
-            if raw < 0 {
-                Err(timeit_error_with_message(
-                    TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.message,
-                    &TIMEIT_ERROR_NUM_OUTPUTS_NONNEG,
-                ))
-            } else {
-                Ok(raw as usize)
-            }
-        }
+        Value::Int(iv) => iv.try_to_usize().ok_or_else(|| {
+            timeit_error_with_message(
+                TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.message,
+                &TIMEIT_ERROR_NUM_OUTPUTS_NONNEG,
+            )
+        }),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(timeit_error_with_message(
@@ -489,6 +484,15 @@ fn parse_handle_string(text: &str) -> Result<String, crate::RuntimeError> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn output_count_preserves_representable_uint64() {
+        assert_eq!(
+            parse_non_negative_integer(&Value::Int(IntValue::U64(u64::MAX))).ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(parse_non_negative_integer(&Value::Int(IntValue::I64(-1))).is_err());
+    }
     use futures::executor::block_on;
     use runmat_builtins::{Closure, IntValue};
     use std::sync::atomic::{AtomicUsize, Ordering};

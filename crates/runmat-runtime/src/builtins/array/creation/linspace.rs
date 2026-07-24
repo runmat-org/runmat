@@ -314,13 +314,9 @@ async fn parse_count(value: &Value) -> crate::BuiltinResult<usize> {
 
 fn parse_count_host(value: &Value) -> crate::BuiltinResult<usize> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(linspace_error(&LINSPACE_ERROR_COUNT_NEGATIVE));
-            }
-            usize::try_from(raw).map_err(|_| linspace_error(&LINSPACE_ERROR_COUNT_TOO_LARGE))
-        }
+        Value::Int(i) => i
+            .try_to_usize()
+            .ok_or_else(|| linspace_error(&LINSPACE_ERROR_COUNT_NEGATIVE)),
         Value::Num(n) => parse_numeric_count(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
@@ -478,6 +474,15 @@ fn generate_complex_sequence(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn count_parser_preserves_representable_uint64() {
+        assert_eq!(
+            parse_count_host(&Value::Int(IntValue::U64(u64::MAX))).ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(parse_count_host(&Value::Int(IntValue::I64(-1))).is_err());
+    }
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};

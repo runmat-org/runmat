@@ -652,13 +652,10 @@ fn parse_length(value: &Value) -> BuiltinResult<Option<usize>> {
             }
             Ok(Some(*n as usize))
         }
-        Value::Int(i) => {
-            let val = i.to_i64();
-            if val < 0 {
-                return Err(pad_error(&PAD_ERROR_LENGTH));
-            }
-            Ok(Some(val as usize))
-        }
+        Value::Int(i) => i
+            .try_to_usize()
+            .map(Some)
+            .ok_or_else(|| pad_error(&PAD_ERROR_LENGTH)),
         _ => Ok(None),
     }
 }

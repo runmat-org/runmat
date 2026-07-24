@@ -472,15 +472,9 @@ impl PolyfitEval {
 
 fn parse_degree(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(polyfit_argument_error(
-                    "polyfit: degree must be a non-negative integer",
-                ));
-            }
-            Ok(raw as usize)
-        }
+        Value::Int(i) => i.try_to_usize().ok_or_else(|| {
+            polyfit_argument_error("polyfit: degree must be a non-negative integer")
+        }),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(polyfit_argument_error("polyfit: degree must be finite"));
@@ -1023,6 +1017,15 @@ pub fn polyfit_host_real_for_provider(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn degree_parser_preserves_representable_uint64() {
+        assert_eq!(
+            parse_degree(&Value::Int(IntValue::U64(u64::MAX))).ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(parse_degree(&Value::Int(IntValue::I64(-1))).is_err());
+    }
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage};

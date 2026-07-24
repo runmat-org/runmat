@@ -240,13 +240,9 @@ fn prefix_equal(lhs: &str, rhs: &str, limit: usize) -> bool {
 
 fn parse_prefix_length(value: Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
-            }
-            Ok(raw as usize)
-        }
+        Value::Int(i) => i
+            .try_to_usize()
+            .ok_or_else(|| strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH)),
         Value::Num(n) => parse_prefix_length_from_float(n),
         Value::Bool(b) => Ok(if b { 1 } else { 0 }),
         Value::Tensor(tensor) => {

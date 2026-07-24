@@ -888,11 +888,10 @@ fn parse_position(value: f64) -> BuiltinResult<usize> {
 }
 
 fn parse_position_int(value: IntValue) -> BuiltinResult<usize> {
-    let val = value.to_i64();
-    if val <= 0 {
-        return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_POSITION_TYPE));
-    }
-    Ok(val as usize)
+    value
+        .try_to_usize()
+        .filter(|position| *position > 0)
+        .ok_or_else(|| extract_between_error(&EXTRACT_BETWEEN_ERROR_POSITION_TYPE))
 }
 
 #[cfg(test)]

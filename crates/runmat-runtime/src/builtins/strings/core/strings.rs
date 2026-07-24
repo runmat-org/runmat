@@ -368,7 +368,10 @@ fn parse_size_values(values: Vec<Value>) -> BuiltinResult<Option<Vec<usize>>> {
 
 fn parse_single_argument(value: Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Int(iv) => Ok(vec![validate_i64_dimension(iv.to_i64())?]),
+        Value::Int(iv) => iv
+            .try_to_usize()
+            .map(|dimension| vec![dimension])
+            .ok_or_else(|| strings_error(&STRINGS_ERROR_INVALID_SIZE)),
         Value::Num(n) => Ok(vec![parse_numeric_dimension(n)?]),
         Value::Bool(b) => Ok(vec![if b { 1 } else { 0 }]),
         Value::Tensor(t) => parse_size_tensor(&t),
@@ -379,10 +382,9 @@ fn parse_single_argument(value: Value) -> BuiltinResult<Vec<usize>> {
 
 fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(iv) => {
-            let raw = iv.to_i64();
-            validate_i64_dimension(raw)
-        }
+        Value::Int(iv) => iv
+            .try_to_usize()
+            .ok_or_else(|| strings_error(&STRINGS_ERROR_INVALID_SIZE)),
         Value::Num(n) => parse_numeric_dimension(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
@@ -478,19 +480,6 @@ fn is_vector_shape(shape: &[usize]) -> bool {
         2 => shape[0] == 1 || shape[1] == 1,
         _ => shape.iter().filter(|&&d| d > 1).count() <= 1,
     }
-}
-
-fn validate_i64_dimension(raw: i64) -> BuiltinResult<usize> {
-    if raw < 0 {
-        return Err(err_nonnegative());
-    }
-    if (raw as u128) > (usize::MAX as u128) {
-        return Err(strings_error_with_message(
-            format!("{FN_NAME}: requested dimension exceeds platform limits"),
-            &STRINGS_ERROR_SIZE_OVERFLOW,
-        ));
-    }
-    Ok(raw as usize)
 }
 
 #[cfg(test)]

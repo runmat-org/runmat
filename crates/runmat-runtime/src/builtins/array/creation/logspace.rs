@@ -247,15 +247,9 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinRe
 
 async fn parse_count(value: &Value) -> crate::BuiltinResult<usize> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(builtin_error("logspace: number of points must be >= 0"));
-            }
-            usize::try_from(raw).map_err(|_| {
-                builtin_error("logspace: number of points is too large for this platform")
-            })
-        }
+        Value::Int(i) => i
+            .try_to_usize()
+            .ok_or_else(|| builtin_error("logspace: number of points must be >= 0")),
         Value::Num(n) => parse_numeric_count(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
@@ -463,6 +457,15 @@ fn complex_pow10(re: f64, im: f64) -> (f64, f64) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn count_parser_preserves_representable_uint64() {
+        assert_eq!(
+            futures::executor::block_on(parse_count(&Value::Int(IntValue::U64(u64::MAX)))).ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(futures::executor::block_on(parse_count(&Value::Int(IntValue::I64(-1)))).is_err());
+    }
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::IntValue;
