@@ -1247,27 +1247,19 @@ impl MemmapFormat {
 
 fn shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Num(v) if *v > 0.0 && v.is_finite() => Ok(vec![*v as usize, 1]),
-        Value::Int(v) => v
-            .try_to_usize()
-            .filter(|size| *size > 0)
-            .map(|size| vec![size, 1])
-            .ok_or_else(|| {
-                compat_error(
-                    "memmapfile",
-                    "memmapfile: Format shape must be a positive numeric vector",
-                )
-            }),
+        Value::Num(v) => Ok(vec![positive_platform_usize(*v, "Format shape")?, 1]),
+        Value::Int(v) => Ok(vec![positive_integer_shape_dim(v)?, 1]),
         Value::Tensor(tensor) => {
             let mut shape = Vec::with_capacity(tensor.data.len());
-            for value in &tensor.data {
-                if !value.is_finite() || *value <= 0.0 {
-                    return Err(compat_error(
-                        "memmapfile",
-                        "memmapfile: Format shape must contain positive integers",
-                    ));
+            if let Some(storage) = tensor.integer_storage() {
+                for index in 0..tensor.data.len() {
+                    let value = storage.value_at(index).expect("integer storage length");
+                    shape.push(positive_integer_shape_dim(&value)?);
                 }
-                shape.push(*value as usize);
+            } else {
+                for value in &tensor.data {
+                    shape.push(positive_platform_usize(*value, "Format shape")?);
+                }
             }
             Ok(shape)
         }
@@ -1276,6 +1268,44 @@ fn shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
             "memmapfile: Format shape must be a positive numeric vector",
         )),
     }
+}
+
+fn positive_integer_shape_dim(value: &runmat_builtins::IntValue) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .filter(|size| *size > 0)
+        .ok_or_else(|| {
+            compat_error(
+                "memmapfile",
+                "memmapfile: Format shape must contain positive integers",
+            )
+        })
+}
+
+fn positive_platform_usize(value: f64, arg: &str) -> BuiltinResult<usize> {
+    let Some(size) = nonnegative_platform_usize(value) else {
+        return Err(compat_error(
+            "memmapfile",
+            format!("memmapfile: {arg} must contain positive integers"),
+        ));
+    };
+    if size == 0 {
+        return Err(compat_error(
+            "memmapfile",
+            format!("memmapfile: {arg} must contain positive integers"),
+        ));
+    }
+    Ok(size)
+}
+
+fn nonnegative_platform_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
 }
 
 fn dtype_size(dtype: &str) -> BuiltinResult<usize> {
@@ -1383,7 +1413,9 @@ fn read_typed_value(dtype: &str, bytes: &[u8]) -> BuiltinResult<f64> {
 
 fn numeric_usize(value: &Value, name: &str, arg: &str) -> BuiltinResult<usize> {
     match value {
-        Value::Num(v) if *v >= 0.0 && v.is_finite() => Ok(*v as usize),
+        Value::Num(v) => nonnegative_platform_usize(*v).ok_or_else(|| {
+            compat_error(name, format!("{name}: {arg} must be a nonnegative integer"))
+        }),
         Value::Int(v) => v.try_to_usize().ok_or_else(|| {
             compat_error(name, format!("{name}: {arg} must be a nonnegative integer"))
         }),
@@ -1577,20 +1609,29 @@ mod tests {
 
     #[test]
     fn memmapfile_typed_shape_offset_and_repeat_parsers_are_exact() {
-        use runmat_builtins::IntValue;
+        use runmat_builtins::{IntValue, IntegerStorage};
 
         assert_eq!(
             shape_from_value(&Value::Int(IntValue::U16(7))).unwrap(),
             vec![7, 1]
         );
+        let shape = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
+            .expect("typed shape vector");
+        assert_eq!(shape_from_value(&Value::Tensor(shape)).unwrap(), vec![2, 3]);
         assert!(shape_from_value(&Value::Int(IntValue::I8(-1))).is_err());
         assert!(shape_from_value(&Value::Int(IntValue::U8(0))).is_err());
+        assert!(shape_from_value(&Value::Num(2.5)).is_err());
+        assert!(shape_from_value(&Value::Num(usize::MAX as f64 + 1.0)).is_err());
 
         assert_eq!(
             numeric_usize(&Value::Int(IntValue::U16(64)), "memmapfile", "Offset").unwrap(),
             64
         );
         assert!(numeric_usize(&Value::Int(IntValue::I8(-1)), "memmapfile", "Offset").is_err());
+        assert!(numeric_usize(&Value::Num(2.5), "memmapfile", "Offset").is_err());
+        assert!(
+            numeric_usize(&Value::Num(usize::MAX as f64 + 1.0), "memmapfile", "Offset").is_err()
+        );
 
         let maximum = numeric_usize(&Value::Int(IntValue::U64(u64::MAX)), "memmapfile", "Repeat");
         if usize::BITS == 64 {
