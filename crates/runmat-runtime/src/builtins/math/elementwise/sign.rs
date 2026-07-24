@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -126,6 +126,7 @@ fn sign_error_with_detail(
 async fn sign_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => sign_gpu(handle).await,
+        Value::Int(value) => Ok(Value::Int(sign_integer_scalar(value))),
         Value::Complex(re, im) => {
             let (re_out, im_out) = sign_complex(re, im);
             Ok(Value::Complex(re_out, im_out))
@@ -208,9 +209,55 @@ fn sign_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sign_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+    if let Some(storage) = tensor.integer_storage() {
+        return Tensor::new_integer(sign_integer_storage(storage), tensor.shape.clone())
+            .map_err(|e| sign_error_with_detail(&SIGN_ERROR_INTERNAL, e));
+    }
     let data = tensor.data.iter().map(|&x| sign_real_scalar(x)).collect();
     Tensor::new(data, tensor.shape.clone())
         .map_err(|e| sign_error_with_detail(&SIGN_ERROR_INTERNAL, e))
+}
+
+fn sign_integer_scalar(value: IntValue) -> IntValue {
+    match value {
+        IntValue::I8(value) => IntValue::I8(value.signum()),
+        IntValue::I16(value) => IntValue::I16(value.signum()),
+        IntValue::I32(value) => IntValue::I32(value.signum()),
+        IntValue::I64(value) => IntValue::I64(value.signum()),
+        IntValue::U8(value) => IntValue::U8(u8::from(value != 0)),
+        IntValue::U16(value) => IntValue::U16(u16::from(value != 0)),
+        IntValue::U32(value) => IntValue::U32(u32::from(value != 0)),
+        IntValue::U64(value) => IntValue::U64(u64::from(value != 0)),
+    }
+}
+
+fn sign_integer_storage(storage: &IntegerStorage) -> IntegerStorage {
+    match storage {
+        IntegerStorage::I8(values) => {
+            IntegerStorage::I8(values.iter().map(|value| value.signum()).collect())
+        }
+        IntegerStorage::I16(values) => {
+            IntegerStorage::I16(values.iter().map(|value| value.signum()).collect())
+        }
+        IntegerStorage::I32(values) => {
+            IntegerStorage::I32(values.iter().map(|value| value.signum()).collect())
+        }
+        IntegerStorage::I64(values) => {
+            IntegerStorage::I64(values.iter().map(|value| value.signum()).collect())
+        }
+        IntegerStorage::U8(values) => {
+            IntegerStorage::U8(values.iter().map(|value| u8::from(*value != 0)).collect())
+        }
+        IntegerStorage::U16(values) => {
+            IntegerStorage::U16(values.iter().map(|value| u16::from(*value != 0)).collect())
+        }
+        IntegerStorage::U32(values) => {
+            IntegerStorage::U32(values.iter().map(|value| u32::from(*value != 0)).collect())
+        }
+        IntegerStorage::U64(values) => {
+            IntegerStorage::U64(values.iter().map(|value| u64::from(*value != 0)).collect())
+        }
+    }
 }
 
 fn sign_char_array(ca: CharArray) -> BuiltinResult<Value> {
@@ -433,9 +480,51 @@ pub(crate) mod tests {
     fn sign_int_values() {
         let value = Value::Int(IntValue::I32(-7));
         let result = sign_builtin(value).unwrap();
-        match result {
-            Value::Num(v) => assert_eq!(v, -1.0),
-            other => panic!("expected scalar result, got {other:?}"),
+        assert_eq!(result, Value::Int(IntValue::I32(-1)));
+    }
+
+    #[test]
+    fn sign_preserves_all_typed_integer_array_classes() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![i8::MIN, 0, i8::MAX]),
+                IntegerStorage::I8(vec![-1, 0, 1]),
+            ),
+            (
+                IntegerStorage::I16(vec![i16::MIN, 0, i16::MAX]),
+                IntegerStorage::I16(vec![-1, 0, 1]),
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MIN, 0, i32::MAX]),
+                IntegerStorage::I32(vec![-1, 0, 1]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MIN, 0, i64::MAX]),
+                IntegerStorage::I64(vec![-1, 0, 1]),
+            ),
+            (
+                IntegerStorage::U8(vec![0, 1, u8::MAX]),
+                IntegerStorage::U8(vec![0, 1, 1]),
+            ),
+            (
+                IntegerStorage::U16(vec![0, 1, u16::MAX]),
+                IntegerStorage::U16(vec![0, 1, 1]),
+            ),
+            (
+                IntegerStorage::U32(vec![0, 1, u32::MAX]),
+                IntegerStorage::U32(vec![0, 1, 1]),
+            ),
+            (
+                IntegerStorage::U64(vec![0, 1, u64::MAX]),
+                IntegerStorage::U64(vec![0, 1, 1]),
+            ),
+        ];
+        for (input, expected) in cases {
+            let input = Tensor::new_integer(input, vec![1, expected.len()]).expect("tensor");
+            let Value::Tensor(result) = sign_builtin(Value::Tensor(input)).expect("sign") else {
+                panic!("expected tensor");
+            };
+            assert_eq!(result.integer_storage(), Some(&expected));
         }
     }
 
