@@ -208,6 +208,42 @@ fn feature_network_layers() -> Value {
     Value::Cell(CellArray::new(vec![input, fc, softmax], 3, 1).unwrap())
 }
 
+fn dense_feature_network_layers() -> Value {
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        vec![
+            Value::String("Name".into()),
+            Value::String("features".into()),
+        ],
+    ))
+    .unwrap();
+    let first = block_on(fully_connected_layer_builtin(
+        Value::Num(2.0),
+        vec![
+            Value::String("Name".into()),
+            Value::String("first".into()),
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![1.0, -1.0, 0.5, 2.0], vec![2, 2]).unwrap()),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::new(vec![0.25, -0.5], vec![2, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    let second = block_on(fully_connected_layer_builtin(
+        Value::Num(1.0),
+        vec![
+            Value::String("Name".into()),
+            Value::String("second".into()),
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![2.0, -0.25], vec![1, 2]).unwrap()),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    Value::Cell(CellArray::new(vec![input, first, second], 3, 1).unwrap())
+}
+
 #[test]
 fn dlnetwork_materializes_metadata_and_learnables() {
     let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
@@ -315,7 +351,46 @@ fn forward_preserves_dlarray_wrapper() {
 }
 
 #[test]
-fn forward_rejects_gpu_backed_dlarray_before_host_gather() {
+fn forward_runs_fully_connected_gpu_dlarray_without_host_gather() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
+        let cpu_input = Value::Tensor(Tensor::new(vec![1.0, 2.0, -1.0, 0.5], vec![2, 2]).unwrap());
+        let cpu = block_on(forward_builtin(net.clone(), cpu_input, vec![])).unwrap();
+        let Value::Tensor(expected) = cpu else {
+            panic!("expected CPU tensor output");
+        };
+        let shape = [2usize, 2usize];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, -1.0, 0.5],
+                shape: &shape,
+            })
+            .expect("upload");
+        provider.reset_telemetry();
+        let dl = block_on(dlarray_builtin(
+            Value::GpuTensor(handle),
+            vec![Value::String("CB".into())],
+        ))
+        .expect("gpu dlarray");
+
+        let output = block_on(forward_builtin(net, dl, vec![])).expect("GPU forward");
+        let Value::Object(output) = output else {
+            panic!("expected GPU dlarray output");
+        };
+        let Some(Value::GpuTensor(handle)) = output.properties.get("Data") else {
+            panic!("expected resident GPU output data");
+        };
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let actual =
+            crate::builtins::common::test_support::gather(Value::GpuTensor(handle.clone()))
+                .expect("gather GPU output for parity assertion");
+        assert_eq!(actual.shape, expected.shape);
+        assert_eq!(actual.data, expected.data);
+    });
+}
+
+#[test]
+fn forward_rejects_unsupported_gpu_layer_before_host_gather_or_dispatch() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
         let shape = [1usize, 2usize];
@@ -334,7 +409,7 @@ fn forward_rejects_gpu_backed_dlarray_before_host_gather() {
 
         let err = block_on(forward_builtin(net, dl, vec![])).unwrap_err();
 
-        assert!(err.to_string().contains("GPU-backed dlarray execution"));
+        assert!(err.to_string().contains("SoftmaxLayer"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
 }

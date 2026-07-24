@@ -1,3 +1,4 @@
+use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CellArray, ObjectInstance, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -60,11 +61,22 @@ pub(super) async fn forward_builtin(
             "forward: name-value options are not supported for RunMat network forward execution",
         ));
     }
-    if is_gpu_backed_dlarray(&input) {
-        return Err(unsupported_error(
-            "forward",
-            "forward: GPU-backed dlarray execution requires provider-resident deep-learning kernels",
-        ));
+    if let Some(handle) = gpu_backed_dlarray_handle(&input) {
+        let network_object = require_network_object(network, "forward")?;
+        let format = dlarray_format(&input);
+        let output = evaluate_network_gpu(&network_object, handle, "forward").await?;
+        let wrapped = object(
+            "dlarray",
+            vec![
+                (
+                    "Data",
+                    crate::builtins::common::gpu_helpers::resident_gpu_value(output),
+                ),
+                ("Format", Value::String(format.clone())),
+                ("Labels", Value::String(format)),
+            ],
+        );
+        return autodiff::annotate_dlarray_value(wrapped);
     }
     let network = crate::gather_if_needed_async(&network).await?;
     let input = crate::gather_if_needed_async(&input).await?;
@@ -96,16 +108,17 @@ pub(super) async fn forward_builtin(
     }
 }
 
-fn is_gpu_backed_dlarray(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Object(object)
-            if object.class_name == "dlarray"
-                && object
-                    .properties
-                    .get("Data")
-                    .is_some_and(crate::value_contains_gpu)
-    )
+fn gpu_backed_dlarray_handle(value: &Value) -> Option<&GpuTensorHandle> {
+    let Value::Object(object) = value else {
+        return None;
+    };
+    if object.class_name != "dlarray" {
+        return None;
+    }
+    match object.properties.get("Data") {
+        Some(Value::GpuTensor(handle)) => Some(handle),
+        _ => None,
+    }
 }
 
 pub(crate) fn is_deep_learning_network_object(object: &ObjectInstance) -> bool {
@@ -529,6 +542,199 @@ fn evaluate_network(
         ));
     }
     Ok(current)
+}
+
+/// Execute the subset of sequential feed-forward networks for which every
+/// operation is available through the acceleration provider. The complete
+/// layer sequence is validated before the first upload or dispatch so a
+/// rejected layer cannot leave behind a partially executed GPU forward pass.
+async fn evaluate_network_gpu(
+    object: &ObjectInstance,
+    input: &GpuTensorHandle,
+    function: &'static str,
+) -> BuiltinResult<GpuTensorHandle> {
+    let provider = runmat_accelerate_api::provider_for_handle(input).ok_or_else(|| {
+        unsupported_error(
+            function,
+            format!("{function}: no acceleration provider owns the GPU dlarray input"),
+        )
+    })?;
+    let layers = object
+        .properties
+        .get("Layers")
+        .cloned()
+        .map(|value| layers_from_value(value, function))
+        .transpose()?
+        .unwrap_or_default();
+    validate_gpu_forward_layers(&layers, input, function)?;
+
+    let mut current = input.clone();
+    let mut current_is_temporary = false;
+    for layer in layers {
+        let Value::Object(layer) = layer else {
+            unreachable!("validate_gpu_forward_layers accepts layer objects only");
+        };
+        if layer.class_name != "nnet.cnn.layer.FullyConnectedLayer" {
+            continue;
+        }
+
+        let weights = tensor_property(&layer, "Weights", function)?;
+        let bias = tensor_property(&layer, "Bias", function)?;
+        let weights_transposed = transpose_2d(&weights, function)?;
+        let bias_row = Tensor::new(bias.data, vec![1, weights.rows])
+            .map_err(|err| deep_learning_error(function, err))?;
+        let weights_handle = provider
+            .upload(&HostTensorView {
+                data: &weights_transposed.data,
+                shape: &weights_transposed.shape,
+            })
+            .map_err(|err| {
+                deep_learning_error(
+                    function,
+                    format!("{function}: GPU weight upload failed: {err}"),
+                )
+            })?;
+        let bias_handle = match provider.upload(&HostTensorView {
+            data: &bias_row.data,
+            shape: &bias_row.shape,
+        }) {
+            Ok(handle) => handle,
+            Err(err) => {
+                let _ = provider.free(&weights_handle);
+                if current_is_temporary {
+                    let _ = provider.free(&current);
+                }
+                return Err(deep_learning_error(
+                    function,
+                    format!("{function}: GPU bias upload failed: {err}"),
+                ));
+            }
+        };
+        let product = match provider.matmul(&current, &weights_handle).await {
+            Ok(handle) => handle,
+            Err(err) => {
+                let _ = provider.free(&weights_handle);
+                let _ = provider.free(&bias_handle);
+                if current_is_temporary {
+                    let _ = provider.free(&current);
+                }
+                return Err(deep_learning_error(
+                    function,
+                    format!("{function}: provider-resident fully connected matmul failed: {err}"),
+                ));
+            }
+        };
+        let output = match provider.elem_add(&product, &bias_handle).await {
+            Ok(handle) => handle,
+            Err(err) => {
+                let _ = provider.free(&weights_handle);
+                let _ = provider.free(&bias_handle);
+                let _ = provider.free(&product);
+                if current_is_temporary {
+                    let _ = provider.free(&current);
+                }
+                return Err(deep_learning_error(
+                    function,
+                    format!("{function}: provider-resident fully connected bias add failed: {err}"),
+                ));
+            }
+        };
+        let _ = provider.free(&weights_handle);
+        let _ = provider.free(&bias_handle);
+        let _ = provider.free(&product);
+        if current_is_temporary {
+            let _ = provider.free(&current);
+        }
+        current = output;
+        current_is_temporary = true;
+    }
+    Ok(current)
+}
+
+fn validate_gpu_forward_layers(
+    layers: &[Value],
+    input: &GpuTensorHandle,
+    function: &'static str,
+) -> BuiltinResult<()> {
+    if input.shape.len() != 2 {
+        return Err(unsupported_error(
+            function,
+            format!("{function}: provider-resident forward currently requires a 2-D dlarray input"),
+        ));
+    }
+    let mut features = input.shape[1];
+    let mut saw_input = false;
+    let mut saw_compute = false;
+    for layer in layers {
+        let Value::Object(layer) = layer else {
+            return Err(deep_learning_error(
+                function,
+                format!("{function}: network layers must be layer objects"),
+            ));
+        };
+        match layer.class_name.as_str() {
+            "nnet.cnn.layer.FeatureInputLayer" if !saw_input => {
+                let expected = feature_input_width(layer, function)?;
+                if features != expected {
+                    return Err(deep_learning_error(
+                        function,
+                        format!(
+                            "{function}: input has {features} features, but featureInputLayer expects {expected}"
+                        ),
+                    ));
+                }
+                saw_input = true;
+            }
+            "nnet.cnn.layer.FullyConnectedLayer" if saw_input => {
+                let weights = tensor_property(layer, "Weights", function)?;
+                if weights.shape.len() > 2 || weights.cols != features {
+                    return Err(deep_learning_error(
+                        function,
+                        format!(
+                            "{function}: fullyConnectedLayer Weights must be outputSize-by-{features}"
+                        ),
+                    ));
+                }
+                let bias = tensor_property(layer, "Bias", function)?;
+                if bias.data.len() != weights.rows {
+                    return Err(deep_learning_error(
+                        function,
+                        format!(
+                            "{function}: fullyConnectedLayer Bias must have {} elements",
+                            weights.rows
+                        ),
+                    ));
+                }
+                features = weights.rows;
+                saw_compute = true;
+            }
+            "nnet.cnn.layer.ClassificationOutputLayer" | "nnet.cnn.layer.RegressionOutputLayer"
+                if saw_input && saw_compute => {}
+            other => {
+                return Err(unsupported_error(
+                    function,
+                    format!(
+                        "{function}: provider-resident forward does not yet support layer type '{other}'"
+                    ),
+                ));
+            }
+        }
+    }
+    if !saw_input {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: network must start with a supported input layer"),
+        ));
+    }
+    if !saw_compute {
+        return Err(unsupported_error(
+            function,
+            format!(
+                "{function}: provider-resident forward requires at least one fullyConnectedLayer"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn fully_connected_forward(
