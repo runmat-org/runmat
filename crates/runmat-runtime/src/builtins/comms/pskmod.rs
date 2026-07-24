@@ -256,9 +256,16 @@ impl SymbolInput {
                 Self::from_tensor(tensor, order, input_type)
             }
             Value::Int(i) => {
-                let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
-                    .map_err(|e| pskmod_error(format!("pskmod: {e}")))?;
-                Self::from_tensor(tensor, order, input_type)
+                let symbol = integer_to_symbol_with_name(&i, "X")?;
+                match input_type {
+                    InputType::Integer => Ok(Self {
+                        data: vec![symbol],
+                        shape: vec![1, 1],
+                    }),
+                    InputType::Bit => {
+                        bits_to_symbols(vec![symbol_to_bit(symbol, "X")?], vec![1, 1], order)
+                    }
+                }
             }
             Value::Bool(b) => {
                 let logical = LogicalArray {
@@ -443,9 +450,18 @@ fn bits_per_symbol(order: usize) -> BuiltinResult<usize> {
 }
 
 fn parse_modulation_order(value: &Value) -> BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        let order = integer_to_symbol_with_name(value, "M")?;
+        if order < 2 || order > isize::MAX as usize {
+            return Err(pskmod_error(
+                "pskmod: M must be a positive integer greater than 1",
+            ));
+        }
+        return Ok(order);
+    }
     let number = scalar_number(value, "M")?;
     let order = number_to_symbol_with_name(number, "M")?;
-    if order < 2 {
+    if order < 2 || order > isize::MAX as usize {
         return Err(pskmod_error(
             "pskmod: M must be a positive integer greater than 1",
         ));
@@ -522,7 +538,7 @@ fn vector_to_symbols(value: &Value, name: &str) -> BuiltinResult<Vec<usize>> {
             .collect(),
         Value::LogicalArray(logical) => Ok(logical.data.iter().map(|&v| usize::from(v)).collect()),
         Value::Num(n) => Ok(vec![number_to_symbol_with_name(*n, name)?]),
-        Value::Int(i) => Ok(vec![number_to_symbol_with_name(i.to_f64(), name)?]),
+        Value::Int(i) => Ok(vec![integer_to_symbol_with_name(i, name)?]),
         Value::Bool(b) => Ok(vec![usize::from(*b)]),
         other => Err(pskmod_error(format!(
             "pskmod: {name} must be a numeric vector, got {other:?}"
@@ -564,7 +580,7 @@ fn number_to_symbol_with_name(value: f64, name: &str) -> BuiltinResult<usize> {
             "pskmod: {name} values must be nonnegative integers"
         )));
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(pskmod_error(format!(
             "pskmod: {name} value is too large for this platform"
         )));
@@ -572,8 +588,23 @@ fn number_to_symbol_with_name(value: f64, name: &str) -> BuiltinResult<usize> {
     Ok(rounded as usize)
 }
 
+fn integer_to_symbol_with_name(
+    value: &runmat_builtins::IntValue,
+    name: &str,
+) -> BuiltinResult<usize> {
+    value.try_to_usize().ok_or_else(|| {
+        pskmod_error(format!(
+            "pskmod: {name} value is too large for this platform"
+        ))
+    })
+}
+
 fn number_to_bit(value: f64, name: &str) -> BuiltinResult<u8> {
     let symbol = number_to_symbol_with_name(value, name)?;
+    symbol_to_bit(symbol, name)
+}
+
+fn symbol_to_bit(symbol: usize, name: &str) -> BuiltinResult<u8> {
     match symbol {
         0 | 1 => Ok(symbol as u8),
         _ => Err(pskmod_error(format!(
@@ -936,5 +967,30 @@ mod tests {
         ))
         .expect_err("expected plot error");
         assert!(err.to_string().contains("PlotConstellation"));
+    }
+
+    #[test]
+    fn pskmod_integer_scalars_preserve_exact_symbol_bounds() {
+        assert_eq!(
+            parse_modulation_order(&Value::Int(runmat_builtins::IntValue::U16(4))).unwrap(),
+            4
+        );
+        assert_eq!(
+            SymbolInput::from_value(
+                Value::Int(runmat_builtins::IntValue::U16(3)),
+                4,
+                InputType::Integer,
+            )
+            .unwrap()
+            .data,
+            vec![3]
+        );
+        for value in [
+            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(parse_modulation_order(&value).is_err());
+        }
     }
 }
