@@ -356,9 +356,16 @@ async fn gathered(value: Value, name: &str) -> BuiltinResult<Value> {
 }
 
 fn parse_positive_usize(name: &str, value: &Value, label: &str) -> BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return value
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                sampling_error(name, format!("{name}: {label} must be a positive integer"))
+            });
+    }
     let raw = match value {
         Value::Num(v) => *v,
-        Value::Int(i) => i.to_f64(),
         Value::Bool(v) => {
             if *v {
                 1.0
@@ -373,7 +380,12 @@ fn parse_positive_usize(name: &str, value: &Value, label: &str) -> BuiltinResult
             ));
         }
     };
-    if !raw.is_finite() || raw < 1.0 || raw.fract() != 0.0 || raw > usize::MAX as f64 {
+    if !raw.is_finite()
+        || raw < 1.0
+        || raw.fract() != 0.0
+        || raw > usize::MAX as f64
+        || (usize::BITS == 64 && raw == usize::MAX as f64)
+    {
         return Err(sampling_error(
             name,
             format!("{name}: {label} must be a positive integer"),
@@ -1180,6 +1192,14 @@ async fn parse_dividerand_args(args: Vec<Value>) -> BuiltinResult<DividerandArgs
 }
 
 fn parse_nonnegative_usize(name: &str, value: Value, label: &str) -> BuiltinResult<usize> {
+    if let Value::Int(value) = &value {
+        return value.try_to_usize().ok_or_else(|| {
+            sampling_error(
+                name,
+                format!("{name}: {label} must be a nonnegative integer"),
+            )
+        });
+    }
     let tensor = tensor::value_into_tensor_for(name, value)
         .map_err(|err| sampling_error(name, format!("{name}: {err}")))?;
     if tensor.data.len() != 1 {
@@ -1189,7 +1209,12 @@ fn parse_nonnegative_usize(name: &str, value: Value, label: &str) -> BuiltinResu
         ));
     }
     let raw = tensor.data[0];
-    if !raw.is_finite() || raw < 0.0 || raw.fract() != 0.0 || raw > usize::MAX as f64 {
+    if !raw.is_finite()
+        || raw < 0.0
+        || raw.fract() != 0.0
+        || raw > usize::MAX as f64
+        || (usize::BITS == 64 && raw == usize::MAX as f64)
+    {
         return Err(sampling_error(
             name,
             format!("{name}: {label} must be a nonnegative integer"),
@@ -2107,5 +2132,33 @@ mod tests {
         ]))
         .unwrap_err();
         assert!(err.message().contains("too many output"));
+    }
+
+    #[test]
+    fn sampling_count_parsers_preserve_typed_integers_and_reject_lossy_f64() {
+        assert_eq!(
+            parse_positive_usize("test", &Value::Int(runmat_builtins::IntValue::U16(3)), "k",)
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            parse_nonnegative_usize("test", Value::Int(runmat_builtins::IntValue::U16(0)), "Q",)
+                .unwrap(),
+            0
+        );
+        for value in [
+            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(parse_positive_usize("test", &value, "k").is_err());
+        }
+        for value in [
+            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Num(-0.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(parse_nonnegative_usize("test", value, "Q").is_err());
+        }
     }
 }
