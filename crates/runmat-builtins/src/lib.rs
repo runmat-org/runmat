@@ -174,6 +174,21 @@ impl IntValue {
         }
     }
 
+    /// Returns the exact base-10 representation without narrowing through a
+    /// signed integer or floating-point compatibility path.
+    pub fn decimal_string(&self) -> String {
+        match self {
+            IntValue::I8(value) => value.to_string(),
+            IntValue::I16(value) => value.to_string(),
+            IntValue::I32(value) => value.to_string(),
+            IntValue::I64(value) => value.to_string(),
+            IntValue::U8(value) => value.to_string(),
+            IntValue::U16(value) => value.to_string(),
+            IntValue::U32(value) => value.to_string(),
+            IntValue::U64(value) => value.to_string(),
+        }
+    }
+
     /// Add two values of the same MATLAB integer class with saturating
     /// semantics. Sparse triplet construction uses this for duplicate entries.
     pub fn saturating_add(&self, rhs: &Self) -> Result<Self, String> {
@@ -197,13 +212,33 @@ impl IntValue {
 
 #[cfg(test)]
 mod int_value_tests {
-    use super::IntValue;
+    use super::{IntValue, Value};
 
     #[test]
     fn uint64_to_f64_does_not_clamp_through_int64() {
         let value = IntValue::U64(u64::MAX);
         assert_eq!(value.to_f64(), u64::MAX as f64);
         assert!(value.to_f64() > i64::MAX as f64);
+    }
+
+    #[test]
+    fn decimal_string_preserves_full_signed_and_unsigned_range() {
+        assert_eq!(
+            IntValue::I64(i64::MIN).decimal_string(),
+            "-9223372036854775808"
+        );
+        assert_eq!(
+            IntValue::U64(u64::MAX).decimal_string(),
+            "18446744073709551615"
+        );
+        assert_eq!(
+            Value::Int(IntValue::U64(u64::MAX)).to_string(),
+            "18446744073709551615"
+        );
+        assert_eq!(
+            String::try_from(&Value::Int(IntValue::U64(u64::MAX))).expect("string conversion"),
+            "18446744073709551615"
+        );
     }
 }
 
@@ -2327,7 +2362,7 @@ impl TryFrom<&Value> for String {
                     Err("cannot convert multi-row char array to scalar string".to_string())
                 }
             }
-            Value::Int(i) => Ok(i.to_i64().to_string()),
+            Value::Int(i) => Ok(i.decimal_string()),
             Value::Num(n) => Ok(n.to_string()),
             Value::Bool(b) => Ok(b.to_string()),
             _ => Err(format!("cannot convert {v:?} to String")),
@@ -3462,7 +3497,7 @@ impl Trace for Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Int(i) => write!(f, "{}", i.to_i64()),
+            Value::Int(i) => write!(f, "{}", i.decimal_string()),
             Value::Num(n) => write!(f, "{}", format_number(*n)),
             Value::Complex(re, im) => {
                 if *im == 0.0 {

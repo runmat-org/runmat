@@ -448,9 +448,16 @@ pub(crate) struct DataMaterializedVariablePayload {
     pub(crate) is_gpu: bool,
     pub(crate) residency: &'static str,
     pub(crate) size_bytes: Option<u64>,
-    pub(crate) preview: Option<WorkspacePreviewPayload>,
+    pub(crate) preview: Option<DataArrayPreviewPayload>,
     pub(crate) value_text: String,
     pub(crate) value_json: JsonValue,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DataArrayPreviewPayload {
+    pub(crate) values: Vec<JsonValue>,
+    pub(crate) truncated: bool,
 }
 
 #[derive(Deserialize, Default)]
@@ -543,15 +550,12 @@ pub(crate) fn estimate_data_array_bytes(shape: &[usize], dtype: &str) -> u64 {
 }
 
 fn bytes_per_data_element(dtype: &str) -> usize {
-    let normalized = dtype.to_ascii_lowercase();
-    if normalized.contains("64") {
-        8
-    } else if normalized.contains("32") {
-        4
-    } else if normalized.contains("16") {
-        2
-    } else {
-        8
+    match dtype.trim().to_ascii_lowercase().as_str() {
+        "int8" | "uint8" | "logical" => 1,
+        "int16" | "uint16" => 2,
+        "int32" | "uint32" | "single" => 4,
+        "int64" | "uint64" | "double" => 8,
+        _ => 8,
     }
 }
 
@@ -852,6 +856,22 @@ mod tests {
                 { "kind": "double", "value": 2.0, "shape": [1, 1] }
             ])
         );
+    }
+
+    #[test]
+    fn data_array_size_uses_native_integer_widths() {
+        for (dtype, expected) in [
+            ("int8", 3),
+            ("uint8", 3),
+            ("int16", 6),
+            ("uint16", 6),
+            ("int32", 12),
+            ("uint32", 12),
+            ("int64", 24),
+            ("uint64", 24),
+        ] {
+            assert_eq!(estimate_data_array_bytes(&[3, 1], dtype), expected);
+        }
     }
 
     #[test]

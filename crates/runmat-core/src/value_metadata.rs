@@ -79,7 +79,13 @@ pub fn approximate_size_bytes(value: &Value) -> Option<u64> {
         Value::Num(_) | Value::Int(_) | Value::Complex(_, _) => 8,
         Value::Bool(_) => 1,
         Value::LogicalArray(arr) => arr.data.len() as u64,
-        Value::Tensor(t) => (t.data.len() * 8) as u64,
+        Value::Tensor(t) => {
+            let compatibility_view = (t.data.len() as u64).saturating_mul(8);
+            let native_integer_storage = t.integer_storage().map_or(0, |storage| {
+                (storage.len() as u64).saturating_mul(t.dtype.byte_size() as u64)
+            });
+            compatibility_view.saturating_add(native_integer_storage)
+        }
         Value::SparseTensor(s) => sparse_tensor_memory_bytes(s),
         Value::ComplexTensor(t) => (t.data.len() * 16) as u64,
         Value::String(s) => s.len() as u64,
@@ -178,17 +184,28 @@ mod tests {
     use runmat_builtins::{NumericDType, ObjectInstance, Tensor};
 
     #[test]
-    fn approximate_size_bytes_uses_f64_width_for_integer_dtypes() {
-        // Tensor.data is always Vec<f64> (8 bytes/element) regardless of dtype.
-        let u8_tensor = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![3, 1], NumericDType::U8)
-            .expect("tensor");
-        let u16_tensor = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![3, 1], NumericDType::U16)
-            .expect("tensor");
+    fn approximate_size_bytes_includes_exact_integer_storage() {
+        let cases = [
+            (NumericDType::I8, 27),
+            (NumericDType::I16, 30),
+            (NumericDType::I32, 36),
+            (NumericDType::I64, 48),
+            (NumericDType::U8, 27),
+            (NumericDType::U16, 30),
+            (NumericDType::U32, 36),
+            (NumericDType::U64, 48),
+        ];
+        for (dtype, expected_bytes) in cases {
+            let tensor =
+                Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![3, 1], dtype).expect("tensor");
+            assert_eq!(
+                approximate_size_bytes(&Value::Tensor(tensor)),
+                Some(expected_bytes)
+            );
+        }
+
         let f32_tensor = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![3, 1], NumericDType::F32)
             .expect("tensor");
-
-        assert_eq!(approximate_size_bytes(&Value::Tensor(u8_tensor)), Some(24));
-        assert_eq!(approximate_size_bytes(&Value::Tensor(u16_tensor)), Some(24));
         assert_eq!(approximate_size_bytes(&Value::Tensor(f32_tensor)), Some(24));
     }
 

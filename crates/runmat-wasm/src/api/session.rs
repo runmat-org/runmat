@@ -23,6 +23,7 @@ use runmat_runtime::builtins::plotting::{
 use runmat_runtime::builtins::wasm_registry;
 use runmat_runtime::data::{
     dataset_root, read_array_payload_async, read_array_slice_payload_async, read_manifest_async,
+    DataArrayValues,
 };
 use runmat_runtime::{
     runtime_plot_import_figure_scene_async, runtime_plot_import_figure_scene_from_path_async,
@@ -52,11 +53,11 @@ use crate::wire::errors::{
 use crate::wire::payloads::{
     compute_data_preview_slice, estimate_data_array_bytes, infer_dataset_class_name,
     parse_data_materialize_options_wire, parse_materialize_options, parse_materialize_target,
-    DataMaterializedVariablePayload, ExecutionPayload, FusionPlanPayload,
+    DataArrayPreviewPayload, DataMaterializedVariablePayload, ExecutionPayload, FusionPlanPayload,
     MaterializedVariablePayload, MemoryUsagePayload, StatsPayload, WorkspaceEntryPayload,
-    WorkspacePayload, WorkspacePreviewPayload,
+    WorkspacePayload,
 };
-use crate::wire::value::MAX_DATA_PREVIEW;
+use crate::wire::value::{integer_json_value, MAX_DATA_PREVIEW};
 
 #[wasm_bindgen]
 pub struct RunMatWasm {
@@ -1615,7 +1616,12 @@ impl RunMatWasm {
                     ))
                 })?,
             };
-        let values: Vec<f64> = payload.values.into_iter().take(limit).collect();
+        let values = data_array_preview_json(&payload.values, limit);
+        let value_text = values
+            .iter()
+            .map(json_value_text)
+            .collect::<Vec<_>>()
+            .join(", ");
         let response = DataMaterializedVariablePayload {
             name: array.to_string(),
             class_name: infer_dataset_class_name(meta.shape.len()).to_string(),
@@ -1624,16 +1630,12 @@ impl RunMatWasm {
             is_gpu: false,
             residency: WorkspaceResidency::Cpu.as_str(),
             size_bytes: Some(estimate_data_array_bytes(&meta.shape, &meta.dtype)),
-            preview: Some(WorkspacePreviewPayload {
+            preview: Some(DataArrayPreviewPayload {
                 values: values.clone(),
                 truncated: values.len() < total_elements,
             }),
-            value_text: values
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-                .join(", "),
-            value_json: JsonValue::Array(values.into_iter().map(JsonValue::from).collect()),
+            value_text,
+            value_json: JsonValue::Array(values),
         };
         serde_wasm_bindgen::to_value(&response).map_err(|err| {
             js_error(&format!(
@@ -1816,4 +1818,40 @@ impl RunMatWasm {
             clear_figure_event_callback_state();
         }
     }
+}
+
+fn data_array_preview_json(values: &DataArrayValues, limit: usize) -> Vec<JsonValue> {
+    macro_rules! integer_values {
+        ($values:expr, $variant:ident) => {
+            $values
+                .iter()
+                .take(limit)
+                .map(|value| integer_json_value(&runmat_builtins::IntValue::$variant(*value)))
+                .collect()
+        };
+    }
+
+    match values {
+        DataArrayValues::F64(values) => values
+            .iter()
+            .take(limit)
+            .copied()
+            .map(JsonValue::from)
+            .collect(),
+        DataArrayValues::I8(values) => integer_values!(values, I8),
+        DataArrayValues::I16(values) => integer_values!(values, I16),
+        DataArrayValues::I32(values) => integer_values!(values, I32),
+        DataArrayValues::I64(values) => integer_values!(values, I64),
+        DataArrayValues::U8(values) => integer_values!(values, U8),
+        DataArrayValues::U16(values) => integer_values!(values, U16),
+        DataArrayValues::U32(values) => integer_values!(values, U32),
+        DataArrayValues::U64(values) => integer_values!(values, U64),
+    }
+}
+
+fn json_value_text(value: &JsonValue) -> String {
+    value
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| value.to_string())
 }

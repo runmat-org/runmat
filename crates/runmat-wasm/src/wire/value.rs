@@ -1,4 +1,4 @@
-use runmat_builtins::{NumericDType, ObjectInstance, StructValue, Value};
+use runmat_builtins::{IntValue, ObjectInstance, StructValue, Value};
 use runmat_core::{matlab_class_name, value_shape};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 
@@ -22,7 +22,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
         Value::Int(iv) => json!({
             "kind": "int",
             "className": iv.class_name(),
-            "value": iv.to_i64(),
+            "value": integer_json_value(iv),
             "shape": scalar_shape(),
         }),
         Value::Num(n) => json!({
@@ -89,19 +89,31 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             "value": expr.to_string(),
         }),
         Value::Tensor(t) => {
-            let (preview, truncated) = preview_slice(&t.data, MAX_DATA_PREVIEW);
+            let (preview, truncated) = if let Some(storage) = t.integer_storage() {
+                let truncated = storage.len() > MAX_DATA_PREVIEW;
+                let preview = (0..storage.len().min(MAX_DATA_PREVIEW))
+                    .map(|index| {
+                        integer_json_value(
+                            &storage
+                                .value_at(index)
+                                .expect("integer storage index is valid"),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                (preview, truncated)
+            } else {
+                let (preview, truncated) = preview_slice(&t.data, MAX_DATA_PREVIEW);
+                (
+                    preview.into_iter().map(JsonValue::from).collect(),
+                    truncated,
+                )
+            };
             json!({
                 "kind": "tensor",
                 "shape": t.shape,
                 "rows": t.rows,
                 "cols": t.cols,
-                "dtype": match t.dtype {
-                    NumericDType::F64 => "double",
-                    NumericDType::F32 => "single",
-                    NumericDType::U8 => "uint8",
-                    NumericDType::U16 => "uint16",
-                    NumericDType::U32 => "uint32",
-                },
+                "dtype": t.dtype.class_name(),
                 "preview": preview,
                 "length": t.data.len(),
                 "truncated": truncated,
@@ -238,6 +250,27 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
     }
 }
 
+const MAX_SAFE_JS_INTEGER: i64 = 9_007_199_254_740_991;
+
+pub(crate) fn integer_json_value(value: &IntValue) -> JsonValue {
+    match value {
+        IntValue::I64(value) if value.unsigned_abs() > MAX_SAFE_JS_INTEGER as u64 => {
+            JsonValue::String(value.to_string())
+        }
+        IntValue::U64(value) if *value > MAX_SAFE_JS_INTEGER as u64 => {
+            JsonValue::String(value.to_string())
+        }
+        IntValue::I8(value) => JsonValue::from(*value),
+        IntValue::I16(value) => JsonValue::from(*value),
+        IntValue::I32(value) => JsonValue::from(*value),
+        IntValue::I64(value) => JsonValue::from(*value),
+        IntValue::U8(value) => JsonValue::from(*value),
+        IntValue::U16(value) => JsonValue::from(*value),
+        IntValue::U32(value) => JsonValue::from(*value),
+        IntValue::U64(value) => JsonValue::from(*value),
+    }
+}
+
 fn struct_to_json(st: &StructValue, depth: usize) -> JsonValue {
     let mut fields = JsonMap::new();
     let mut truncated = false;
@@ -325,7 +358,19 @@ fn preview_slice<T: Clone>(data: &[T], limit: usize) -> (Vec<T>, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::SparseTensor;
+    use runmat_builtins::{IntegerStorage, SparseTensor, Tensor};
+
+    #[test]
+    fn integer_json_preserves_exact_64_bit_values_and_dtype() {
+        let scalar = value_to_json(&Value::Int(IntValue::U64(u64::MAX)), 0);
+        assert_eq!(scalar["value"], "18446744073709551615");
+
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![42, u64::MAX]), vec![1, 2])
+            .expect("tensor");
+        let json = value_to_json(&Value::Tensor(tensor), 0);
+        assert_eq!(json["dtype"], "uint64");
+        assert_eq!(json["preview"], json!([42, "18446744073709551615"]));
+    }
 
     #[test]
     fn sparse_tensor_json_uses_bounded_storage_previews() {
