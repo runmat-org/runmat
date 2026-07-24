@@ -218,6 +218,9 @@ pub async fn dimension_from_value_async(
         let bound = if allow_zero { 0 } else { 1 };
         return Err(format!("{name}: dimension must be >= {bound}"));
     }
+    if !fits_platform_usize(rounded) {
+        return Err(format!("{name}: dimension is outside the supported range"));
+    }
     Ok(Some(rounded as usize))
 }
 
@@ -252,7 +255,14 @@ fn parse_numeric_dimension(value: f64) -> Result<usize, String> {
     if (rounded - value).abs() > f64::EPSILON {
         return Err("dimensions must be integers".to_string());
     }
+    if !fits_platform_usize(rounded) {
+        return Err("dimensions are outside the supported platform range".to_string());
+    }
     Ok(rounded as usize)
+}
+
+fn fits_platform_usize(value: f64) -> bool {
+    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
 }
 
 fn dims_from_tensor_values(values: &[f64], shape: &[usize]) -> Result<Option<Vec<usize>>, String> {
@@ -355,6 +365,9 @@ pub fn parse_dimension(value: &Value, name: &str) -> Result<usize, String> {
             }
             if rounded < 1.0 {
                 return Err(format!("{name}: dimension must be >= 1"));
+            }
+            if !fits_platform_usize(rounded) {
+                return Err(format!("{name}: dimension is outside the supported range"));
             }
             Ok(rounded as usize)
         }
@@ -514,6 +527,19 @@ mod dimension_tests {
             Ok(Some(3))
         );
         assert!(block_on(dims_from_value_async(&Value::Int(IntValue::I64(-1)))).is_err());
+    }
+
+    #[test]
+    fn floating_dimension_parsers_reject_values_outside_platform_range() {
+        let out_of_range = usize::MAX as f64;
+        assert!(parse_dimension(&Value::Num(out_of_range), "size").is_err());
+        assert!(block_on(dimension_from_value_async(
+            &Value::Num(out_of_range),
+            "size",
+            false
+        ))
+        .is_err());
+        assert!(block_on(dims_from_value_async(&Value::Num(out_of_range))).is_err());
     }
 }
 

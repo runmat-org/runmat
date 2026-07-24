@@ -1,4 +1,4 @@
-use runmat_builtins::Value;
+use runmat_builtins::{IntValue, Value};
 
 use crate::builtins::common::arg_tokens::ArgToken;
 use crate::builtins::common::gpu_helpers;
@@ -39,7 +39,7 @@ pub(crate) async fn parse_dims(value: &Value, builtin: &str) -> BuiltinResult<Ve
             for cell in &ca.data {
                 let coerced = match cell {
                     Value::Num(n) => coerce_positive_int(*n, builtin)?,
-                    Value::Int(i) => coerce_positive_int(i.to_f64(), builtin)?,
+                    Value::Int(i) => coerce_positive_integer(i, builtin)?,
                     _ => {
                         return Err(indexing_error(
                             builtin,
@@ -112,7 +112,22 @@ pub(crate) fn coerce_positive_int(value: f64, builtin: &str) -> BuiltinResult<us
             "Size arguments must be positive integers.",
         ));
     }
+    if !fits_platform_usize(rounded) {
+        return Err(indexing_error(
+            builtin,
+            "Size arguments exceed the maximum supported size.",
+        ));
+    }
     Ok(rounded as usize)
+}
+
+fn coerce_positive_integer(value: &IntValue, builtin: &str) -> BuiltinResult<usize> {
+    value.try_to_usize().filter(|&dim| dim >= 1).ok_or_else(|| {
+        indexing_error(
+            builtin,
+            "Size arguments must be positive integers within the supported range.",
+        )
+    })
 }
 
 pub(crate) fn dims_from_tokens(tokens: &[ArgToken]) -> Option<Vec<usize>> {
@@ -148,7 +163,14 @@ fn coerce_positive_literal(value: f64) -> Option<usize> {
     if rounded < 1.0 {
         return None;
     }
+    if !fits_platform_usize(rounded) {
+        return None;
+    }
     Some(rounded as usize)
+}
+
+fn fits_platform_usize(value: f64) -> bool {
+    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
 }
 
 /// Build column-major strides for the supplied dimensions, checking overflow.
@@ -186,6 +208,8 @@ fn indexing_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
+    use runmat_builtins::CellArray;
 
     #[test]
     fn dims_from_tokens_accepts_scalar() {
@@ -206,5 +230,37 @@ mod tests {
     fn dims_from_tokens_rejects_non_numeric() {
         let dims = dims_from_tokens(&[ArgToken::Vector(vec![ArgToken::String("bad".to_string())])]);
         assert_eq!(dims, None);
+    }
+
+    #[test]
+    fn parse_dims_preserves_typed_cell_dimensions_exactly() {
+        let dims = block_on(parse_dims(
+            &Value::Cell(
+                CellArray::new(
+                    vec![
+                        Value::Int(IntValue::U8(2)),
+                        Value::Int(IntValue::U64(9_007_199_254_740_993)),
+                    ],
+                    1,
+                    2,
+                )
+                .expect("cell"),
+            ),
+            "zeros",
+        ))
+        .expect("dimensions");
+
+        assert_eq!(dims, vec![2, 9_007_199_254_740_993]);
+        assert!(block_on(parse_dims(
+            &Value::Cell(CellArray::new(vec![Value::Int(IntValue::I8(-1))], 1, 1).expect("cell"),),
+            "zeros",
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn numeric_dimension_coercion_rejects_out_of_range_float_values() {
+        assert!(coerce_positive_int(usize::MAX as f64, "zeros").is_err());
+        assert!(dims_from_tokens(&[ArgToken::Number(usize::MAX as f64)]).is_none());
     }
 }
