@@ -20,7 +20,7 @@ use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
+    CellArray, CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -363,9 +363,24 @@ async fn parse_single_factor(value: &Value, position: usize) -> crate::BuiltinRe
 fn parse_host_factor(value: &Value, position: usize) -> crate::BuiltinResult<RepFactor> {
     match value {
         Value::Num(n) => Ok(RepFactor::Scalar(coerce_count(*n, position)?)),
-        Value::Int(i) => Ok(RepFactor::Scalar(coerce_count(i.to_f64(), position)?)),
+        Value::Int(i) => Ok(RepFactor::Scalar(coerce_integer_count(i, position)?)),
         Value::Bool(b) => Ok(RepFactor::Scalar(if *b { 1 } else { 0 })),
         Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                if storage.len() == 1 {
+                    return Ok(RepFactor::Scalar(coerce_integer_count(
+                        &storage.value_at(0).expect("one-element integer storage"),
+                        position,
+                    )?));
+                }
+                ensure_vector_shape(&tensor.shape, position)?;
+                return storage
+                    .exact_values()
+                    .iter()
+                    .map(|value| coerce_integer_count(value, position))
+                    .collect::<crate::BuiltinResult<Vec<_>>>()
+                    .map(RepFactor::Vector);
+            }
             if tensor.data.len() == 1 {
                 Ok(RepFactor::Scalar(coerce_count(tensor.data[0], position)?))
             } else {
@@ -422,12 +437,20 @@ fn coerce_count(value: f64, position: usize) -> crate::BuiltinResult<usize> {
             "repelem: replication count at argument {position} must be non-negative"
         )));
     }
-    if rounded > (usize::MAX as f64) {
+    if rounded >= (usize::MAX as f64) + 1.0 {
         return Err(repelem_invalid_factors(format!(
             "repelem: replication count at argument {position} exceeds the maximum supported size"
         )));
     }
     Ok(rounded as usize)
+}
+
+fn coerce_integer_count(value: &IntValue, position: usize) -> crate::BuiltinResult<usize> {
+    value.try_to_usize().ok_or_else(|| {
+        repelem_invalid_factors(format!(
+            "repelem: replication count at argument {position} must be a non-negative platform integer"
+        ))
+    })
 }
 
 /// Determine which axis to replicate along when `repelem(v, n)` is called with
@@ -690,7 +713,10 @@ fn expand_axis(
             let total = size.checked_mul(*m).ok_or_else(|| {
                 repelem_invalid_factors("repelem: requested output exceeds maximum size")
             })?;
-            let mut table = Vec::with_capacity(total);
+            let mut table = Vec::new();
+            table.try_reserve_exact(total).map_err(|_| {
+                repelem_invalid_factors("repelem: requested output exceeds maximum size")
+            })?;
             for i in 0..size {
                 for _ in 0..*m {
                     table.push(i);
@@ -712,7 +738,10 @@ fn expand_axis(
                 .ok_or_else(|| {
                     repelem_invalid_factors("repelem: requested output exceeds maximum size")
                 })?;
-            let mut table = Vec::with_capacity(total);
+            let mut table = Vec::new();
+            table.try_reserve_exact(total).map_err(|_| {
+                repelem_invalid_factors("repelem: requested output exceeds maximum size")
+            })?;
             for (i, &count) in v.iter().enumerate() {
                 for _ in 0..count {
                     table.push(i);
@@ -787,7 +816,9 @@ fn repelem_column_major<T: Clone>(
     }
 
     let src_strides = column_major_strides(&input_shape);
-    let mut out = Vec::with_capacity(new_total);
+    let mut out = Vec::new();
+    out.try_reserve_exact(new_total)
+        .map_err(|_| repelem_invalid_factors("repelem: requested output exceeds maximum size"))?;
     for idx in 0..new_total {
         let mut rem = idx;
         let mut src_index = 0usize;
@@ -822,7 +853,9 @@ fn repelem_row_major<T: Clone>(
     if total == 0 {
         return Ok((Vec::new(), new_rows, new_cols));
     }
-    let mut out = Vec::with_capacity(total);
+    let mut out = Vec::new();
+    out.try_reserve_exact(total)
+        .map_err(|_| repelem_invalid_factors("repelem: requested output exceeds maximum size"))?;
     for r in 0..new_rows {
         let src_row = plan.row_table[r];
         for c in 0..new_cols {
@@ -1341,6 +1374,41 @@ pub(crate) mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn typed_replication_factors_are_parsed_without_f64_rounding() {
+        let exact = 9_007_199_254_740_993_u64;
+        let scalar = parse_host_factor(&Value::Int(IntValue::U64(exact)), 1).unwrap();
+        assert!(matches!(scalar, RepFactor::Scalar(value) if value == exact as usize));
+
+        let vector = Tensor::new_integer(IntegerStorage::U64(vec![1, exact]), vec![1, 2]).unwrap();
+        let factors = parse_host_factor(&Value::Tensor(vector), 1).unwrap();
+        assert!(matches!(factors, RepFactor::Vector(values) if values == vec![1, exact as usize]));
+
+        let err = parse_host_factor(&Value::Int(IntValue::I64(-1)), 1)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("non-negative"), "unexpected error: {err}");
+
+        let err = parse_host_factor(&Value::Num((usize::MAX as f64) + 1.0), 1)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("maximum supported size"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn unallocatable_typed_factor_returns_error() {
+        let err = repelem_builtin(
+            Value::Int(IntValue::U8(1)),
+            vec![Value::Int(IntValue::U64(u64::MAX))],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("maximum size"), "unexpected error: {err}");
     }
 
     #[test]
