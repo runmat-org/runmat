@@ -547,8 +547,21 @@ fn build_truecolor_image_surface(
     let scale = match tensor.dtype {
         NumericDType::U8 => 1.0f32 / 255.0,
         NumericDType::U16 => 1.0f32 / 65535.0,
-        NumericDType::U32 => 1.0f32 / (u32::MAX as f32),
         NumericDType::F32 | NumericDType::F64 => 1.0,
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U32
+        | NumericDType::U64 => {
+            return Err(image_error_with_detail(
+                &IMAGE_ERROR_INVALID_ARGUMENT,
+                format!(
+                    "truecolor image data does not support {} values",
+                    tensor.dtype.class_name()
+                ),
+            ));
+        }
     };
     let mut grid = vec![vec![glam::Vec4::ZERO; cols]; rows];
     for row in 0..rows {

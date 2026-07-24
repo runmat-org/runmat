@@ -1508,9 +1508,14 @@ fn tensor_to_bit_buffer(
         ),
         None => {
             let class = match tensor.dtype {
+                NumericDType::I8 => Some(IntegerClass::I8),
+                NumericDType::I16 => Some(IntegerClass::I16),
+                NumericDType::I32 => Some(IntegerClass::I32),
+                NumericDType::I64 => Some(IntegerClass::I64),
                 NumericDType::U8 => Some(IntegerClass::U8),
                 NumericDType::U16 => Some(IntegerClass::U16),
                 NumericDType::U32 => Some(IntegerClass::U32),
+                NumericDType::U64 => Some(IntegerClass::U64),
                 NumericDType::F32 | NumericDType::F64 => None,
             };
             let data = tensor
@@ -1744,9 +1749,14 @@ impl IntegerClass {
 
     fn from_dtype(dtype: NumericDType) -> BuiltinResult<Self> {
         match dtype {
+            NumericDType::I8 => Ok(Self::I8),
+            NumericDType::I16 => Ok(Self::I16),
+            NumericDType::I32 => Ok(Self::I32),
+            NumericDType::I64 => Ok(Self::I64),
             NumericDType::U8 => Ok(Self::U8),
             NumericDType::U16 => Ok(Self::U16),
             NumericDType::U32 => Ok(Self::U32),
+            NumericDType::U64 => Ok(Self::U64),
             NumericDType::F32 | NumericDType::F64 => Err(error_with_detail(
                 IDIVIDE_NAME,
                 &ERROR_INVALID_INPUT,
@@ -2161,6 +2171,22 @@ fn swap_tensor_scalar(value: f64, dtype: NumericDType) -> BuiltinResult<f64> {
     Ok(match dtype {
         NumericDType::F64 => f64::from_bits(value.to_bits().swap_bytes()),
         NumericDType::F32 => f32::from_bits((value as f32).to_bits().swap_bytes()) as f64,
+        NumericDType::I8 => {
+            validate_signed_scalar(value, i8::MIN as f64, i8::MAX as f64)?;
+            value
+        }
+        NumericDType::I16 => {
+            validate_signed_scalar(value, i16::MIN as f64, i16::MAX as f64)?;
+            f64::from((value as i16).swap_bytes())
+        }
+        NumericDType::I32 => {
+            validate_signed_scalar(value, i32::MIN as f64, i32::MAX as f64)?;
+            (value as i32).swap_bytes() as f64
+        }
+        NumericDType::I64 => {
+            validate_signed_scalar(value, i64::MIN as f64, i64::MAX as f64)?;
+            (value as i64).swap_bytes() as f64
+        }
         NumericDType::U8 => {
             validate_unsigned_scalar(value, u8::MAX as f64)?;
             value
@@ -2173,11 +2199,27 @@ fn swap_tensor_scalar(value: f64, dtype: NumericDType) -> BuiltinResult<f64> {
             validate_unsigned_scalar(value, u32::MAX as f64)?;
             (value as u32).swap_bytes() as f64
         }
+        NumericDType::U64 => {
+            validate_unsigned_scalar(value, u64::MAX as f64)?;
+            (value as u64).swap_bytes() as f64
+        }
     })
 }
 
 fn validate_unsigned_scalar(value: f64, max: f64) -> BuiltinResult<()> {
     if value.is_finite() && value.fract() == 0.0 && (0.0..=max).contains(&value) {
+        Ok(())
+    } else {
+        Err(error_with_detail(
+            SWAPBYTES_NAME,
+            &ERROR_INVALID_INPUT,
+            "integer tensor values must be finite and within dtype range",
+        ))
+    }
+}
+
+fn validate_signed_scalar(value: f64, min: f64, max: f64) -> BuiltinResult<()> {
+    if value.is_finite() && value.fract() == 0.0 && (min..=max).contains(&value) {
         Ok(())
     } else {
         Err(error_with_detail(

@@ -350,7 +350,14 @@ async fn build_output(parsed: ParsedRandn) -> crate::BuiltinResult<Value> {
         RandnTemplate::Double => match parsed.dtype {
             NumericDType::F64 => randn_double(&parsed.shape),
             NumericDType::F32 => randn_single(&parsed.shape),
-            NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => randn_double(&parsed.shape),
+            NumericDType::I8
+            | NumericDType::I16
+            | NumericDType::I32
+            | NumericDType::I64
+            | NumericDType::U8
+            | NumericDType::U16
+            | NumericDType::U32
+            | NumericDType::U64 => randn_double(&parsed.shape),
         },
         RandnTemplate::Like(proto) => randn_like(&proto, &parsed.shape).await,
     }
@@ -409,7 +416,14 @@ async fn randn_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
             None => match t.dtype {
                 NumericDType::F32 => randn_single(shape),
                 NumericDType::F64 => randn_double(shape),
-                NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => randn_double(shape),
+                NumericDType::I8
+                | NumericDType::I16
+                | NumericDType::I32
+                | NumericDType::I64
+                | NumericDType::U8
+                | NumericDType::U16
+                | NumericDType::U32
+                | NumericDType::U64 => randn_double(shape),
             },
         },
         Value::Int(value) => randn_integer_like(&IntegerStorage::from_scalar(value.clone()), shape),

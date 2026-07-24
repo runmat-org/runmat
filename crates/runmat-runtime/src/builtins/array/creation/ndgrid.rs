@@ -293,9 +293,15 @@ fn annotate_provider_output(handle: &GpuTensorHandle, class: OutputClass) {
             runmat_accelerate_api::set_handle_logical(handle, false);
             let precision = match dtype {
                 NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
-                NumericDType::F64 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
-                    runmat_accelerate_api::ProviderPrecision::F64
-                }
+                NumericDType::F64
+                | NumericDType::I8
+                | NumericDType::I16
+                | NumericDType::I32
+                | NumericDType::I64
+                | NumericDType::U8
+                | NumericDType::U16
+                | NumericDType::U32
+                | NumericDType::U64 => runmat_accelerate_api::ProviderPrecision::F64,
             };
             runmat_accelerate_api::set_handle_precision(handle, precision);
         }
@@ -892,9 +898,14 @@ fn to_gpu_tensor_value(tensor: Tensor, device_id: u32) -> BuiltinResult<Value> {
                 let precision = match tensor.dtype {
                     NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
                     NumericDType::F64
+                    | NumericDType::I8
+                    | NumericDType::I16
+                    | NumericDType::I32
+                    | NumericDType::I64
                     | NumericDType::U8
                     | NumericDType::U16
-                    | NumericDType::U32 => runmat_accelerate_api::ProviderPrecision::F64,
+                    | NumericDType::U32
+                    | NumericDType::U64 => runmat_accelerate_api::ProviderPrecision::F64,
                 };
                 runmat_accelerate_api::set_handle_precision(&handle, precision);
                 return Ok(Value::GpuTensor(handle));

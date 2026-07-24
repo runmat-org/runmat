@@ -30,14 +30,40 @@ pub fn ones(shape: &[usize]) -> Result<Tensor, String> {
 
 /// Construct a zero-filled tensor with an explicit dtype flag.
 pub fn zeros_with_dtype(shape: &[usize], dtype: NumericDType) -> Result<Tensor, String> {
-    Tensor::new_with_dtype(vec![0.0; element_count(shape)], shape.to_vec(), dtype)
+    integer_tensor_with_value(shape, dtype, false)
+        .unwrap_or_else(|| {
+            Tensor::new_with_dtype(vec![0.0; element_count(shape)], shape.to_vec(), dtype)
+        })
         .map_err(|e| format!("tensor zeros: {e}"))
 }
 
 /// Construct a one-filled tensor with an explicit dtype flag.
 pub fn ones_with_dtype(shape: &[usize], dtype: NumericDType) -> Result<Tensor, String> {
-    Tensor::new_with_dtype(vec![1.0; element_count(shape)], shape.to_vec(), dtype)
+    integer_tensor_with_value(shape, dtype, true)
+        .unwrap_or_else(|| {
+            Tensor::new_with_dtype(vec![1.0; element_count(shape)], shape.to_vec(), dtype)
+        })
         .map_err(|e| format!("tensor ones: {e}"))
+}
+
+fn integer_tensor_with_value(
+    shape: &[usize],
+    dtype: NumericDType,
+    ones: bool,
+) -> Option<Result<Tensor, String>> {
+    let len = element_count(shape);
+    let storage = match dtype {
+        NumericDType::I8 => IntegerStorage::I8(vec![if ones { 1 } else { 0 }; len]),
+        NumericDType::I16 => IntegerStorage::I16(vec![if ones { 1 } else { 0 }; len]),
+        NumericDType::I32 => IntegerStorage::I32(vec![if ones { 1 } else { 0 }; len]),
+        NumericDType::I64 => IntegerStorage::I64(vec![if ones { 1 } else { 0 }; len]),
+        NumericDType::U8 => IntegerStorage::U8(vec![if ones { 1 } else { 0 }; len]),
+        NumericDType::U16 => IntegerStorage::U16(vec![if ones { 1 } else { 0 }; len]),
+        NumericDType::U32 => IntegerStorage::U32(vec![if ones { 1 } else { 0 }; len]),
+        NumericDType::U64 => IntegerStorage::U64(vec![if ones { 1 } else { 0 }; len]),
+        NumericDType::F32 | NumericDType::F64 => return None,
+    };
+    Some(Tensor::new_integer(storage, shape.to_vec()))
 }
 
 /// Converts floating-point values to an exact integer tensor using the
@@ -361,34 +387,80 @@ pub fn clamp_u32(value: f64) -> f64 {
 pub fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
     match dtype {
         NumericDType::F64 => {
+            tensor.integer_data = None;
             tensor.dtype = NumericDType::F64;
         }
         NumericDType::F32 => {
+            tensor.integer_data = None;
             for value in &mut tensor.data {
                 *value = (*value as f32) as f64;
             }
             tensor.dtype = NumericDType::F32;
         }
-        NumericDType::U8 => {
-            for value in &mut tensor.data {
-                *value = clamp_u8(*value);
-            }
-            tensor.dtype = NumericDType::U8;
-        }
-        NumericDType::U16 => {
-            for value in &mut tensor.data {
-                *value = clamp_u16(*value);
-            }
-            tensor.dtype = NumericDType::U16;
-        }
-        NumericDType::U32 => {
-            for value in &mut tensor.data {
-                *value = clamp_u32(*value);
-            }
-            tensor.dtype = NumericDType::U32;
+        integer_dtype => {
+            let shape = tensor.shape.clone();
+            let values = std::mem::take(&mut tensor.data);
+            let prototype = match integer_dtype {
+                NumericDType::I8 => IntegerStorage::I8(Vec::new()),
+                NumericDType::I16 => IntegerStorage::I16(Vec::new()),
+                NumericDType::I32 => IntegerStorage::I32(Vec::new()),
+                NumericDType::I64 => IntegerStorage::I64(Vec::new()),
+                NumericDType::U8 => IntegerStorage::U8(Vec::new()),
+                NumericDType::U16 => IntegerStorage::U16(Vec::new()),
+                NumericDType::U32 => IntegerStorage::U32(Vec::new()),
+                NumericDType::U64 => IntegerStorage::U64(Vec::new()),
+                NumericDType::F32 | NumericDType::F64 => unreachable!(),
+            };
+            return integer_tensor_from_f64_like(&prototype, values, &shape)
+                .expect("dtype coercion preserves the tensor element count");
         }
     }
     tensor
+}
+
+#[cfg(test)]
+mod dtype_tests {
+    use super::{coerce_tensor_dtype, ones_with_dtype, zeros_with_dtype};
+    use runmat_builtins::{IntegerStorage, NumericDType, Tensor};
+
+    #[test]
+    fn dtype_directed_constructors_materialize_all_integer_classes() {
+        let cases = [
+            (NumericDType::I8, IntegerStorage::I8(vec![0, 0])),
+            (NumericDType::I16, IntegerStorage::I16(vec![0, 0])),
+            (NumericDType::I32, IntegerStorage::I32(vec![0, 0])),
+            (NumericDType::I64, IntegerStorage::I64(vec![0, 0])),
+            (NumericDType::U8, IntegerStorage::U8(vec![0, 0])),
+            (NumericDType::U16, IntegerStorage::U16(vec![0, 0])),
+            (NumericDType::U32, IntegerStorage::U32(vec![0, 0])),
+            (NumericDType::U64, IntegerStorage::U64(vec![0, 0])),
+        ];
+
+        for (dtype, expected_zeros) in cases {
+            let zeros = zeros_with_dtype(&[1, 2], dtype).expect("zeros");
+            assert_eq!(zeros.dtype, dtype);
+            assert_eq!(zeros.integer_storage(), Some(&expected_zeros));
+
+            let ones = ones_with_dtype(&[1, 2], dtype).expect("ones");
+            assert_eq!(ones.dtype, dtype);
+            assert_eq!(ones.integer_storage(), Some(&expected_zeros.ones_like(2)));
+        }
+    }
+
+    #[test]
+    fn coercion_creates_exact_storage_and_float_conversion_clears_it() {
+        let input = Tensor::new(vec![-2.4, 2.6], vec![1, 2]).expect("input");
+        let typed = coerce_tensor_dtype(input, NumericDType::I16);
+        assert_eq!(typed.dtype, NumericDType::I16);
+        assert_eq!(
+            typed.integer_storage(),
+            Some(&IntegerStorage::I16(vec![-2, 3]))
+        );
+
+        let float = coerce_tensor_dtype(typed, NumericDType::F64);
+        assert_eq!(float.dtype, NumericDType::F64);
+        assert!(float.integer_storage().is_none());
+    }
 }
 
 /// Align two numeric tensors for a binary element-wise operation with scalar broadcasting.

@@ -289,9 +289,14 @@ impl LcmInput {
         let class = match tensor.dtype {
             NumericDType::F64 => NumericClass::Double,
             NumericDType::F32 => NumericClass::Single,
+            NumericDType::I8 => NumericClass::I8,
+            NumericDType::I16 => NumericClass::I16,
+            NumericDType::I32 => NumericClass::I32,
+            NumericDType::I64 => NumericClass::I64,
             NumericDType::U8 => NumericClass::U8,
             NumericDType::U16 => NumericClass::U16,
             NumericDType::U32 => NumericClass::U32,
+            NumericDType::U64 => NumericClass::U64,
         };
         let data = tensor
             .data

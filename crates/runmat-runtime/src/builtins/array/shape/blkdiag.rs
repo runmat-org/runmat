@@ -1179,9 +1179,15 @@ fn upload_gpu_result(value: Value) -> BuiltinResult<Value> {
 fn tensor_precision(dtype: NumericDType) -> runmat_accelerate_api::ProviderPrecision {
     match dtype {
         NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
-        NumericDType::F64 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
-            runmat_accelerate_api::ProviderPrecision::F64
-        }
+        NumericDType::F64
+        | NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => runmat_accelerate_api::ProviderPrecision::F64,
     }
 }
 

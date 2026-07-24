@@ -193,6 +193,11 @@ async fn im2uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
 fn im2uint16_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = match tensor.dtype {
         NumericDType::U16 => tensor.data,
+        NumericDType::I16 => tensor
+            .data
+            .iter()
+            .map(|&value| value - i16::MIN as f64)
+            .collect(),
         NumericDType::U8 => tensor.data.iter().map(|&value| value * 257.0).collect(),
         NumericDType::U32 => tensor
             .data
@@ -204,6 +209,12 @@ fn im2uint16_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(|&value| common::unit_to_dtype(common::clamp01(value), NumericDType::U16))
             .collect(),
+        NumericDType::I8 | NumericDType::I32 | NumericDType::I64 | NumericDType::U64 => {
+            return Err(im2uint16_error_with_detail(
+                &IM2UINT16_ERROR_UNSUPPORTED_INPUT_TYPE,
+                format!("unsupported image class {}", tensor.dtype.class_name()),
+            ));
+        }
     };
     common::tensor_with_dtype(data, tensor.shape, NumericDType::U16, NAME)
 }
@@ -212,7 +223,7 @@ fn im2uint16_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{IntegerStorage, LogicalArray};
 
     fn call(value: Value) -> Value {
         block_on(im2uint16_builtin(value, Vec::new())).expect("im2uint16")
@@ -231,6 +242,20 @@ mod tests {
         };
         assert_eq!(out.dtype, NumericDType::U16);
         assert_eq!(out.data, vec![0.0, 65535.0]);
+    }
+
+    #[test]
+    fn converts_int16_tensor_to_uint16_range_with_exact_output_storage() {
+        let input =
+            Tensor::new_integer(IntegerStorage::I16(vec![i16::MIN, i16::MAX]), vec![1, 2]).unwrap();
+        let Value::Tensor(out) = call(Value::Tensor(input)) else {
+            panic!("expected tensor");
+        };
+        assert_eq!(out.dtype, NumericDType::U16);
+        assert_eq!(
+            out.integer_storage(),
+            Some(&IntegerStorage::U16(vec![0, u16::MAX]))
+        );
     }
 
     #[test]

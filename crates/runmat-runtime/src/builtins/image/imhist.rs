@@ -444,9 +444,22 @@ impl GrayscaleInput {
             return Self::from_integer_values(tensor.data, class_min, class_max);
         }
         match tensor.dtype {
+            NumericDType::I8 => {
+                Self::from_integer_values(tensor.data, i8::MIN as f64, i8::MAX as f64)
+            }
+            NumericDType::I16 => {
+                Self::from_integer_values(tensor.data, i16::MIN as f64, i16::MAX as f64)
+            }
+            NumericDType::I32 => {
+                Self::from_integer_values(tensor.data, i32::MIN as f64, i32::MAX as f64)
+            }
+            NumericDType::I64 => {
+                Self::from_integer_values(tensor.data, i64::MIN as f64, i64::MAX as f64)
+            }
             NumericDType::U8 => Self::from_integer_values(tensor.data, 0.0, 255.0),
             NumericDType::U16 => Self::from_integer_values(tensor.data, 0.0, 65535.0),
             NumericDType::U32 => Self::from_integer_values(tensor.data, 0.0, u32::MAX as f64),
+            NumericDType::U64 => Self::from_integer_values(tensor.data, 0.0, u64::MAX as f64),
             NumericDType::F32 | NumericDType::F64 => {
                 Self::from_float_values(tensor.data, tensor.dtype, &tensor.shape)
             }

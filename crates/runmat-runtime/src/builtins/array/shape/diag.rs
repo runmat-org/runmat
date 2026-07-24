@@ -1233,33 +1233,7 @@ fn cast_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> BuiltinResult<Tenso
     if tensor.dtype == dtype {
         return Ok(tensor);
     }
-
-    let data = match dtype {
-        NumericDType::F32 => tensor
-            .data
-            .iter()
-            .map(|value| (*value as f32) as f64)
-            .collect(),
-        NumericDType::F64 => tensor.data.clone(),
-        NumericDType::U8 => tensor
-            .data
-            .iter()
-            .map(|value| tensor::clamp_u8(*value))
-            .collect(),
-        NumericDType::U16 => tensor
-            .data
-            .iter()
-            .map(|value| tensor::clamp_u16(*value))
-            .collect(),
-        NumericDType::U32 => tensor
-            .data
-            .iter()
-            .map(|value| tensor::clamp_u32(*value))
-            .collect(),
-    };
-
-    Tensor::new_with_dtype(data, tensor.shape.clone(), dtype)
-        .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
+    Ok(tensor::coerce_tensor_dtype(tensor, dtype))
 }
 
 fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {

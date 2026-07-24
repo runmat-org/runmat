@@ -739,9 +739,15 @@ fn broadcast_page_dims(lhs: &[usize], rhs: &[usize]) -> BuiltinResult<Vec<usize>
 fn precision_for_dtype(dtype: NumericDType) -> ProviderPrecision {
     match dtype {
         NumericDType::F32 => ProviderPrecision::F32,
-        NumericDType::F64 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
-            ProviderPrecision::F64
-        }
+        NumericDType::F64
+        | NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => ProviderPrecision::F64,
     }
 }
 

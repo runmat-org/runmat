@@ -1,6 +1,6 @@
 use anyhow::Result;
 use runmat_accelerate_api::{provider_for_handle, ProviderPrecision};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{IntegerStorage, Tensor, Value};
 
 use super::{WorkspaceMaterializeOptions, WorkspaceSliceOptions};
 
@@ -12,25 +12,47 @@ pub(crate) fn slice_value_for_preview(
 ) -> Option<Value> {
     match value {
         Value::Tensor(tensor) => {
-            let data = gather_tensor_slice(tensor, slice);
-            if data.is_empty() {
-                return None;
-            }
             let mut shape = slice.shape.clone();
             if shape.is_empty() {
                 shape.push(1);
             }
-            let rows = shape.first().copied().unwrap_or(1);
-            let cols = shape.get(1).copied().unwrap_or(1);
-            Some(Value::Tensor(Tensor {
-                data,
-                shape,
-                rows,
-                cols,
-                dtype: tensor.dtype,
-            }))
+            if let Some(storage) = gather_integer_tensor_slice(tensor, slice) {
+                return Tensor::new_integer(storage, shape).ok().map(Value::Tensor);
+            }
+
+            let data = gather_tensor_slice(tensor, slice);
+            if data.is_empty() {
+                return None;
+            }
+            Tensor::new_with_dtype(data, shape, tensor.dtype)
+                .ok()
+                .map(Value::Tensor)
         }
         _ => None,
+    }
+}
+
+fn gather_integer_tensor_slice(
+    tensor: &Tensor,
+    slice: &WorkspaceSliceOptions,
+) -> Option<IntegerStorage> {
+    let storage = tensor.integer_storage()?;
+    let total: usize = slice.shape.iter().product();
+    if total == 0 {
+        return None;
+    }
+    let mut values = Vec::with_capacity(total);
+    let mut coords = vec![0usize; tensor.shape.len()];
+    visit_slice_coords(&tensor.shape, slice, 0, &mut coords, &mut |coords| {
+        let index = column_major_index(&tensor.shape, coords);
+        if let Some(value) = storage.value_at(index) {
+            values.push(value);
+        }
+    });
+    if values.len() == total {
+        storage.from_same_class_values(values).ok()
+    } else {
+        None
     }
 }
 
@@ -196,4 +218,32 @@ pub(crate) async fn gather_gpu_preview_values(
     let _ = provider.free(&gathered);
 
     Ok(Some((host.data, truncated)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_slice_preserves_exact_uint64_storage() {
+        let values = vec![0, 1, 9_007_199_254_740_993, u64::MAX];
+        let tensor = Tensor::new_integer(IntegerStorage::U64(values.clone()), vec![2, 2])
+            .expect("typed tensor");
+        let slice = WorkspaceSliceOptions {
+            start: vec![0, 1],
+            shape: vec![2, 1],
+        };
+
+        let Value::Tensor(preview) =
+            slice_value_for_preview(&Value::Tensor(tensor), &slice).expect("preview")
+        else {
+            panic!("expected tensor preview");
+        };
+
+        assert_eq!(preview.shape, vec![2, 1]);
+        assert_eq!(
+            preview.integer_storage(),
+            Some(&IntegerStorage::U64(vec![values[2], values[3]]))
+        );
+    }
 }

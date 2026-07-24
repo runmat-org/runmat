@@ -512,7 +512,14 @@ async fn rand_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value
             None => match t.dtype {
                 NumericDType::F32 => rand_single(shape),
                 NumericDType::F64 => rand_double(shape),
-                NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => rand_double(shape),
+                NumericDType::I8
+                | NumericDType::I16
+                | NumericDType::I32
+                | NumericDType::I64
+                | NumericDType::U8
+                | NumericDType::U16
+                | NumericDType::U32
+                | NumericDType::U64 => rand_double(shape),
             },
         },
         Value::Int(value) => rand_integer_like(&IntegerStorage::from_scalar(value.clone()), shape),
@@ -604,7 +611,14 @@ fn try_gpu_uniform(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult
     let precision = match dtype {
         NumericDType::F32 => ProviderPrecision::F32,
         NumericDType::F64 => ProviderPrecision::F64,
-        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => {
             log_rand_fallback(shape, dtype, "integer-dtype");
             return Ok(None);
         }

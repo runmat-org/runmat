@@ -576,9 +576,14 @@ fn tensor_class(dtype: NumericDType) -> CoefficientClass {
     match dtype {
         NumericDType::F64 => CoefficientClass::Double,
         NumericDType::F32 => CoefficientClass::Single,
+        NumericDType::I8 => CoefficientClass::I8,
+        NumericDType::I16 => CoefficientClass::I16,
+        NumericDType::I32 => CoefficientClass::I32,
+        NumericDType::I64 => CoefficientClass::I64,
         NumericDType::U8 => CoefficientClass::U8,
         NumericDType::U16 => CoefficientClass::U16,
         NumericDType::U32 => CoefficientClass::U32,
+        NumericDType::U64 => CoefficientClass::U64,
     }
 }
 

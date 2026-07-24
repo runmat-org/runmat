@@ -482,9 +482,15 @@ async fn nan_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value>
         }
         Value::Tensor(t) => match t.dtype {
             NumericDType::F32 => nan_single(shape),
-            NumericDType::F64 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
-                nan_double(shape)
-            }
+            NumericDType::F64
+            | NumericDType::I8
+            | NumericDType::I16
+            | NumericDType::I32
+            | NumericDType::I64
+            | NumericDType::U8
+            | NumericDType::U16
+            | NumericDType::U32
+            | NumericDType::U64 => nan_double(shape),
         },
         Value::SparseTensor(_) => nan_double(shape),
         Value::Int(_) => Err(nan_error(&NAN_ERROR_INTEGER_LIKE_PROTOTYPE)),
@@ -557,7 +563,14 @@ fn nan_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult<O
     let precision = match dtype {
         NumericDType::F32 => ProviderPrecision::F32,
         NumericDType::F64 => ProviderPrecision::F64,
-        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => return Ok(None),
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => return Ok(None),
     };
     if provider.precision() != precision {
         return Ok(None);

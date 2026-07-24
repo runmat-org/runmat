@@ -196,6 +196,11 @@ async fn im2uint8_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value
 fn im2uint8_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = match tensor.dtype {
         NumericDType::U8 => tensor.data,
+        NumericDType::I16 => tensor
+            .data
+            .iter()
+            .map(|&value| common::clamp_round((value - i16::MIN as f64) / 257.0, 255.0))
+            .collect(),
         NumericDType::U16 => tensor
             .data
             .iter()
@@ -211,6 +216,12 @@ fn im2uint8_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(|&value| common::unit_to_dtype(common::clamp01(value), NumericDType::U8))
             .collect(),
+        NumericDType::I8 | NumericDType::I32 | NumericDType::I64 | NumericDType::U64 => {
+            return Err(im2uint8_error_with_detail(
+                &IM2UINT8_ERROR_UNSUPPORTED_INPUT_TYPE,
+                format!("unsupported image class {}", tensor.dtype.class_name()),
+            ));
+        }
     };
     common::tensor_with_dtype(data, tensor.shape, NumericDType::U8, NAME)
 }
@@ -219,7 +230,7 @@ fn im2uint8_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{IntegerStorage, LogicalArray};
 
     fn call(value: Value) -> Value {
         block_on(im2uint8_builtin(value, Vec::new())).expect("im2uint8")
@@ -239,6 +250,20 @@ mod tests {
         };
         assert_eq!(out.dtype, NumericDType::U8);
         assert_eq!(out.data, vec![0.0, 255.0]);
+    }
+
+    #[test]
+    fn converts_int16_tensor_to_uint8_range_with_exact_output_storage() {
+        let input =
+            Tensor::new_integer(IntegerStorage::I16(vec![i16::MIN, i16::MAX]), vec![1, 2]).unwrap();
+        let Value::Tensor(out) = call(Value::Tensor(input)) else {
+            panic!("expected tensor");
+        };
+        assert_eq!(out.dtype, NumericDType::U8);
+        assert_eq!(
+            out.integer_storage(),
+            Some(&IntegerStorage::U8(vec![0, 255]))
+        );
     }
 
     #[test]

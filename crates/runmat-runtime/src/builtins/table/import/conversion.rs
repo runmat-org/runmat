@@ -279,6 +279,10 @@ pub(in crate::builtins::table) fn cast_import_numeric(value: f64, dtype: Numeric
     match dtype {
         NumericDType::F64 => value,
         NumericDType::F32 => (value as f32) as f64,
+        NumericDType::I8 => value.round().clamp(i8::MIN as f64, i8::MAX as f64),
+        NumericDType::I16 => value.round().clamp(i16::MIN as f64, i16::MAX as f64),
+        NumericDType::I32 => value.round().clamp(i32::MIN as f64, i32::MAX as f64),
+        NumericDType::I64 => value.round().clamp(i64::MIN as f64, i64::MAX as f64),
         NumericDType::U8 => {
             if value.is_finite() {
                 value.round().clamp(0.0, u8::MAX as f64)
@@ -296,6 +300,13 @@ pub(in crate::builtins::table) fn cast_import_numeric(value: f64, dtype: Numeric
         NumericDType::U32 => {
             if value.is_finite() {
                 value.round().clamp(0.0, u32::MAX as f64)
+            } else {
+                0.0
+            }
+        }
+        NumericDType::U64 => {
+            if value.is_finite() {
+                value.round().clamp(0.0, u64::MAX as f64)
             } else {
                 0.0
             }

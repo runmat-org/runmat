@@ -149,6 +149,21 @@ async fn rgb2gray_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
 }
 
 fn rgb2gray_tensor(rgb: &Tensor) -> BuiltinResult<Tensor> {
+    if !matches!(
+        rgb.dtype,
+        NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
+    ) {
+        return Err(rgb2gray_map_error(
+            common::builtin_error(
+                NAME,
+                format!(
+                    "rgb2gray: unsupported truecolor class {}",
+                    rgb.dtype.class_name()
+                ),
+            ),
+            &RGB2GRAY_ERROR_INVALID_INPUT,
+        ));
+    }
     let common::ColorLayout::Truecolor { rows, cols } = common::truecolor_layout(rgb, NAME)? else {
         unreachable!();
     };
@@ -161,10 +176,7 @@ fn rgb2gray_tensor(rgb: &Tensor) -> BuiltinResult<Tensor> {
         let gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
         *out = common::unit_to_dtype(gray, rgb.dtype);
     }
-    let dtype = match rgb.dtype {
-        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 | NumericDType::F32 => rgb.dtype,
-        NumericDType::F64 => NumericDType::F64,
-    };
+    let dtype = rgb.dtype;
     common::tensor_with_dtype(data, vec![rows, cols], dtype, NAME)
 }
 
@@ -211,6 +223,16 @@ mod tests {
         assert_eq!(out.dtype, NumericDType::U16);
         assert_eq!(out.shape, vec![2, 1]);
         assert_eq!(out.data, vec![19588.0, 38469.0]);
+    }
+
+    #[test]
+    fn rejects_int16_truecolor_images() {
+        let rgb =
+            Tensor::new_with_dtype(vec![0.0, 0.0, 0.0], vec![1, 1, 3], NumericDType::I16).unwrap();
+        let err = block_on(rgb2gray_builtin(Value::Tensor(rgb), Vec::new()))
+            .expect_err("int16 truecolor is not a supported MATLAB rgb2gray input class");
+        assert_eq!(err.identifier(), RGB2GRAY_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains("int16"));
     }
 
     #[test]

@@ -1248,8 +1248,15 @@ async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<
 async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
     match dtype {
         NumericDType::F64 => Ok(value),
-        NumericDType::F32 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => match value
-        {
+        NumericDType::F32
+        | NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => match value {
             Value::Tensor(tensor) => {
                 let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))

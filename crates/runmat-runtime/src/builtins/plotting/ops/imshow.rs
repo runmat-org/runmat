@@ -426,9 +426,14 @@ fn expand_degenerate_limits(lo: f64, hi: f64) -> (f64, f64) {
 
 fn dtype_default_limits(dtype: NumericDType) -> (f64, f64) {
     match dtype {
+        NumericDType::I8 => (i8::MIN as f64, i8::MAX as f64),
+        NumericDType::I16 => (i16::MIN as f64, i16::MAX as f64),
+        NumericDType::I32 => (i32::MIN as f64, i32::MAX as f64),
+        NumericDType::I64 => (i64::MIN as f64, i64::MAX as f64),
         NumericDType::U8 => (0.0, 255.0),
         NumericDType::U16 => (0.0, 65535.0),
         NumericDType::U32 => (0.0, u32::MAX as f64),
+        NumericDType::U64 => (0.0, u64::MAX as f64),
         NumericDType::F32 | NumericDType::F64 => (0.0, 1.0),
     }
 }
@@ -473,8 +478,18 @@ fn build_truecolor_image_surface(
     let scale = match tensor.dtype {
         NumericDType::U8 => 1.0f32 / 255.0,
         NumericDType::U16 => 1.0f32 / 65535.0,
-        NumericDType::U32 => 1.0f32 / (u32::MAX as f32),
         NumericDType::F32 | NumericDType::F64 => 1.0,
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U32
+        | NumericDType::U64 => {
+            return Err(imshow_error(format!(
+                "imshow: truecolor image data does not support {} values",
+                tensor.dtype.class_name()
+            )));
+        }
     };
     let mut grid = vec![vec![glam::Vec4::ZERO; image_rows]; image_cols];
     for row in 0..image_rows {
@@ -780,6 +795,42 @@ mod tests {
         assert_eq!(
             get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap(),
             Value::String("image".into())
+        );
+    }
+
+    #[test]
+    fn grayscale_integer_classes_use_their_representable_display_ranges() {
+        assert_eq!(
+            dtype_default_limits(NumericDType::I8),
+            (i8::MIN as f64, i8::MAX as f64)
+        );
+        assert_eq!(
+            dtype_default_limits(NumericDType::I16),
+            (i16::MIN as f64, i16::MAX as f64)
+        );
+        assert_eq!(
+            dtype_default_limits(NumericDType::I32),
+            (i32::MIN as f64, i32::MAX as f64)
+        );
+        assert_eq!(
+            dtype_default_limits(NumericDType::I64),
+            (i64::MIN as f64, i64::MAX as f64)
+        );
+        assert_eq!(
+            dtype_default_limits(NumericDType::U8),
+            (0.0, u8::MAX as f64)
+        );
+        assert_eq!(
+            dtype_default_limits(NumericDType::U16),
+            (0.0, u16::MAX as f64)
+        );
+        assert_eq!(
+            dtype_default_limits(NumericDType::U32),
+            (0.0, u32::MAX as f64)
+        );
+        assert_eq!(
+            dtype_default_limits(NumericDType::U64),
+            (0.0, u64::MAX as f64)
         );
     }
 

@@ -455,11 +455,16 @@ async fn ones_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value
             None => match t.dtype {
                 NumericDType::F32 => ones_single(shape),
                 NumericDType::F64 => ones_double(shape),
-                NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
-                    tensor::ones_with_dtype(shape, t.dtype)
-                        .map(Value::Tensor)
-                        .map_err(|e| builtin_error(format!("ones: {e}")))
-                }
+                NumericDType::I8
+                | NumericDType::I16
+                | NumericDType::I32
+                | NumericDType::I64
+                | NumericDType::U8
+                | NumericDType::U16
+                | NumericDType::U32
+                | NumericDType::U64 => tensor::ones_with_dtype(shape, t.dtype)
+                    .map(Value::Tensor)
+                    .map_err(|e| builtin_error(format!("ones: {e}"))),
             },
         },
         Value::Int(value) => ones_integer_like(&IntegerStorage::from_scalar(value.clone()), shape),

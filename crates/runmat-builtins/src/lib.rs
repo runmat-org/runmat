@@ -245,9 +245,14 @@ impl Default for StructValue {
 pub enum NumericDType {
     F64,
     F32,
+    I8,
+    I16,
+    I32,
+    I64,
     U8,
     U16,
     U32,
+    U64,
 }
 
 /// Exact homogeneous backing storage for MATLAB integer arrays.
@@ -268,6 +273,20 @@ pub enum IntegerStorage {
 }
 
 impl IntegerStorage {
+    /// Returns the logical MATLAB class represented by this exact buffer.
+    pub fn numeric_dtype(&self) -> NumericDType {
+        match self {
+            Self::I8(_) => NumericDType::I8,
+            Self::I16(_) => NumericDType::I16,
+            Self::I32(_) => NumericDType::I32,
+            Self::I64(_) => NumericDType::I64,
+            Self::U8(_) => NumericDType::U8,
+            Self::U16(_) => NumericDType::U16,
+            Self::U32(_) => NumericDType::U32,
+            Self::U64(_) => NumericDType::U64,
+        }
+    }
+
     /// Construct a one-element buffer preserving the scalar's MATLAB integer
     /// class.
     pub fn from_scalar(value: IntValue) -> Self {
@@ -552,9 +571,14 @@ impl NumericDType {
         match self {
             NumericDType::F64 => "double",
             NumericDType::F32 => "single",
+            NumericDType::I8 => "int8",
+            NumericDType::I16 => "int16",
+            NumericDType::I32 => "int32",
+            NumericDType::I64 => "int64",
             NumericDType::U8 => "uint8",
             NumericDType::U16 => "uint16",
             NumericDType::U32 => "uint32",
+            NumericDType::U64 => "uint64",
         }
     }
 
@@ -562,16 +586,23 @@ impl NumericDType {
         match self {
             NumericDType::F64 => 8,
             NumericDType::F32 => 4,
+            NumericDType::I8 => 1,
+            NumericDType::I16 => 2,
+            NumericDType::I32 => 4,
+            NumericDType::I64 => 8,
             NumericDType::U8 => 1,
             NumericDType::U16 => 2,
             NumericDType::U32 => 4,
+            NumericDType::U64 => 8,
         }
     }
 }
 
 #[cfg(test)]
 mod integer_storage_tests {
-    use super::{ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
+    use super::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, Tensor,
+    };
 
     #[test]
     fn uint64_tensor_keeps_exact_backing_values() {
@@ -583,6 +614,42 @@ mod integer_storage_tests {
             Some(&IntegerStorage::U64(vec![0, u64::MAX]))
         );
         assert_eq!(tensor.data[1], u64::MAX as f64);
+    }
+
+    #[test]
+    fn integer_tensor_reports_its_exact_matlab_dtype() {
+        let cases = [
+            (IntegerStorage::I8(vec![0]), NumericDType::I8),
+            (IntegerStorage::I16(vec![0]), NumericDType::I16),
+            (IntegerStorage::I32(vec![0]), NumericDType::I32),
+            (IntegerStorage::I64(vec![0]), NumericDType::I64),
+            (IntegerStorage::U8(vec![0]), NumericDType::U8),
+            (IntegerStorage::U16(vec![0]), NumericDType::U16),
+            (IntegerStorage::U32(vec![0]), NumericDType::U32),
+            (IntegerStorage::U64(vec![0]), NumericDType::U64),
+        ];
+
+        for (storage, dtype) in cases {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+            assert_eq!(tensor.dtype, dtype);
+            assert_eq!(
+                tensor.dtype.class_name(),
+                tensor.integer_storage().unwrap().class_name()
+            );
+        }
+    }
+
+    #[test]
+    fn typed_constructor_materializes_exact_integer_storage() {
+        let tensor =
+            Tensor::new_with_dtype(vec![-2.2, 12.8, 99_999.0], vec![1, 3], NumericDType::I16)
+                .expect("typed tensor");
+
+        assert_eq!(tensor.dtype, NumericDType::I16);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::I16(vec![-2, 13, i16::MAX]))
+        );
     }
 
     #[test]
@@ -918,6 +985,13 @@ impl Tensor {
         shape: Vec<usize>,
         dtype: NumericDType,
     ) -> Result<Self, String> {
+        if let Some(prototype) = integer_storage_prototype(dtype) {
+            let values = data
+                .into_iter()
+                .map(|value| prototype.cast_f64_assignment(value))
+                .collect();
+            return Self::new_integer(prototype.from_same_class_values(values)?, shape);
+        }
         let mut t = Self::new(data, shape)?;
         t.dtype = dtype;
         Ok(t)
@@ -945,15 +1019,14 @@ impl Tensor {
         } else {
             (0, 0)
         };
+        let dtype = storage.numeric_dtype();
         Ok(Tensor {
             data: storage.to_f64_vec(),
             integer_data: Some(storage),
             shape,
             rows,
             cols,
-            // Legacy dtype consumers do not yet represent the complete
-            // integer class matrix. Integer-aware consumers inspect storage.
-            dtype: NumericDType::F64,
+            dtype,
         })
     }
 
@@ -1084,6 +1157,20 @@ impl Tensor {
         }
     }
     // No-compat constructors: prefer new/new_2d/zeros/zeros2/ones/ones2
+}
+
+fn integer_storage_prototype(dtype: NumericDType) -> Option<IntegerStorage> {
+    match dtype {
+        NumericDType::I8 => Some(IntegerStorage::I8(Vec::new())),
+        NumericDType::I16 => Some(IntegerStorage::I16(Vec::new())),
+        NumericDType::I32 => Some(IntegerStorage::I32(Vec::new())),
+        NumericDType::I64 => Some(IntegerStorage::I64(Vec::new())),
+        NumericDType::U8 => Some(IntegerStorage::U8(Vec::new())),
+        NumericDType::U16 => Some(IntegerStorage::U16(Vec::new())),
+        NumericDType::U32 => Some(IntegerStorage::U32(Vec::new())),
+        NumericDType::U64 => Some(IntegerStorage::U64(Vec::new())),
+        NumericDType::F64 | NumericDType::F32 => None,
+    }
 }
 
 impl SparseTensor {

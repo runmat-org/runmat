@@ -41,7 +41,14 @@ pub fn provider_supports_dtype(provider: &dyn AccelProvider, dtype: NumericDType
     match dtype {
         NumericDType::F32 => true,
         NumericDType::F64 => provider.precision() == ProviderPrecision::F64,
-        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => false,
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => false,
     }
 }
 
@@ -70,7 +77,14 @@ pub fn ensure_provider_supports_dtype(
                     .to_string()
             }
             NumericDType::F32 => "active provider does not support f32 kernels".to_string(),
-            NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
+            NumericDType::I8
+            | NumericDType::I16
+            | NumericDType::I32
+            | NumericDType::I64
+            | NumericDType::U8
+            | NumericDType::U16
+            | NumericDType::U32
+            | NumericDType::U64 => {
                 format!(
                     "active provider does not support {} kernels",
                     dtype.class_name()

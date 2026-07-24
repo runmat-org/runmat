@@ -169,9 +169,14 @@ fn scalar_from_tensor(tensor: Tensor) -> BuiltinResult<PrimeRequest> {
     }
     let output = match tensor.dtype {
         NumericDType::F32 => OutputKind::F32,
+        NumericDType::I8 => OutputKind::I8,
+        NumericDType::I16 => OutputKind::I16,
+        NumericDType::I32 => OutputKind::I32,
+        NumericDType::I64 => OutputKind::I64,
         NumericDType::U8 => OutputKind::U8,
         NumericDType::U16 => OutputKind::U16,
         NumericDType::U32 => OutputKind::U32,
+        NumericDType::U64 => OutputKind::U64,
         NumericDType::F64 => OutputKind::F64,
     };
     scalar_from_f64(tensor.data[0], output)

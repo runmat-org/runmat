@@ -559,11 +559,16 @@ async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
             None => match t.dtype {
                 NumericDType::F32 => zeros_single(shape),
                 NumericDType::F64 => zeros_double(shape),
-                NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
-                    tensor::zeros_with_dtype(shape, t.dtype)
-                        .map(Value::Tensor)
-                        .map_err(|e| builtin_error(format!("zeros: {e}")))
-                }
+                NumericDType::I8
+                | NumericDType::I16
+                | NumericDType::I32
+                | NumericDType::I64
+                | NumericDType::U8
+                | NumericDType::U16
+                | NumericDType::U32
+                | NumericDType::U64 => tensor::zeros_with_dtype(shape, t.dtype)
+                    .map(Value::Tensor)
+                    .map_err(|e| builtin_error(format!("zeros: {e}"))),
             },
         },
         Value::Int(value) => zeros_integer_like(&IntegerStorage::from_scalar(value.clone()), shape),
@@ -643,7 +648,14 @@ fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult
     let precision = match dtype {
         NumericDType::F32 => ProviderPrecision::F32,
         NumericDType::F64 => ProviderPrecision::F64,
-        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => {
             log_zeros_fallback(shape, dtype, "integer-dtype");
             return Ok(None);
         }

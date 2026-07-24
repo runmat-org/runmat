@@ -714,9 +714,14 @@ fn map_index(value: f64, dtype: NumericDType, map_rows: usize) -> BuiltinResult<
 
 fn value_to_u8(value: f64, dtype: NumericDType) -> u8 {
     let scaled = match dtype {
+        NumericDType::I8 => (value - i8::MIN as f64) / u8::MAX as f64 * 255.0,
+        NumericDType::I16 => (value - i16::MIN as f64) / u16::MAX as f64 * 255.0,
+        NumericDType::I32 => (value - i32::MIN as f64) / u32::MAX as f64 * 255.0,
+        NumericDType::I64 => (value - i64::MIN as f64) / u64::MAX as f64 * 255.0,
         NumericDType::U8 => value,
         NumericDType::U16 => value / 257.0,
         NumericDType::U32 => value / (u32::MAX as f64) * 255.0,
+        NumericDType::U64 => value / (u64::MAX as f64) * 255.0,
         NumericDType::F64 | NumericDType::F32 => value.clamp(0.0, 1.0) * 255.0,
     };
     if scaled.is_nan() {
@@ -728,9 +733,14 @@ fn value_to_u8(value: f64, dtype: NumericDType) -> u8 {
 
 fn value_to_u16(value: f64, dtype: NumericDType) -> u16 {
     let scaled = match dtype {
+        NumericDType::I8 => (value - i8::MIN as f64) / u8::MAX as f64 * 65535.0,
+        NumericDType::I16 => (value - i16::MIN as f64) / u16::MAX as f64 * 65535.0,
+        NumericDType::I32 => (value - i32::MIN as f64) / u32::MAX as f64 * 65535.0,
+        NumericDType::I64 => (value - i64::MIN as f64) / u64::MAX as f64 * 65535.0,
         NumericDType::U16 => value,
         NumericDType::U8 => value * 257.0,
         NumericDType::U32 => value / (u32::MAX as f64) * 65535.0,
+        NumericDType::U64 => value / (u64::MAX as f64) * 65535.0,
         NumericDType::F64 | NumericDType::F32 => value.clamp(0.0, 1.0) * 65535.0,
     };
     if scaled.is_nan() {

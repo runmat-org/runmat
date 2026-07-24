@@ -1,4 +1,4 @@
-use runmat_builtins::{IntValue, NumericDType, Tensor, Type, Value};
+use runmat_builtins::{NumericDType, Tensor, Type, Value};
 
 use crate::builtins::common::{map_control_flow_with_builtin, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -50,16 +50,20 @@ pub(crate) async fn gather_tensor(name: &'static str, value: Value) -> BuiltinRe
 
 pub(crate) fn image_value_from_tensor(tensor: Tensor) -> Value {
     if tensor.data.len() == 1 {
+        if let Some(storage) = tensor.integer_storage() {
+            return Value::Int(storage.value_at(0).expect("integer image scalar"));
+        }
         match tensor.dtype {
-            NumericDType::U8 => Value::Int(IntValue::U8(clamp_round(tensor.data[0], 255.0) as u8)),
-            NumericDType::U16 => {
-                Value::Int(IntValue::U16(clamp_round(tensor.data[0], 65535.0) as u16))
-            }
-            NumericDType::U32 => Value::Int(IntValue::U32(clamp_round(
-                tensor.data[0],
-                u32::MAX as f64,
-            ) as u32)),
-            NumericDType::F32 | NumericDType::F64 => Value::Num(tensor.data[0]),
+            NumericDType::F32
+            | NumericDType::F64
+            | NumericDType::I8
+            | NumericDType::I16
+            | NumericDType::I32
+            | NumericDType::I64
+            | NumericDType::U8
+            | NumericDType::U16
+            | NumericDType::U32
+            | NumericDType::U64 => Value::Num(tensor.data[0]),
         }
     } else {
         Value::Tensor(tensor)
@@ -72,7 +76,8 @@ pub(crate) fn tensor_with_dtype(
     dtype: NumericDType,
     name: &'static str,
 ) -> BuiltinResult<Tensor> {
-    Tensor::new_with_dtype(data, shape, dtype).map_err(|err| builtin_error(name, err))
+    let tensor = Tensor::new(data, shape).map_err(|err| builtin_error(name, err))?;
+    Ok(tensor::coerce_tensor_dtype(tensor, dtype))
 }
 
 pub(crate) fn color_layout(tensor: &Tensor, name: &'static str) -> BuiltinResult<ColorLayout> {
@@ -134,27 +139,50 @@ pub(crate) fn grayscale_shape(
 
 pub(crate) fn dtype_max(dtype: NumericDType) -> f64 {
     match dtype {
+        NumericDType::I8 => i8::MAX as f64,
+        NumericDType::I16 => i16::MAX as f64,
+        NumericDType::I32 => i32::MAX as f64,
+        NumericDType::I64 => i64::MAX as f64,
         NumericDType::U8 => 255.0,
         NumericDType::U16 => 65535.0,
         NumericDType::U32 => u32::MAX as f64,
+        NumericDType::U64 => u64::MAX as f64,
         NumericDType::F32 | NumericDType::F64 => 1.0,
     }
 }
 
 pub(crate) fn unit_value(value: f64, dtype: NumericDType) -> f64 {
     match dtype {
+        NumericDType::I8 => (value - i8::MIN as f64) / (u8::MAX as f64),
+        NumericDType::I16 => (value - i16::MIN as f64) / (u16::MAX as f64),
+        NumericDType::I32 => (value - i32::MIN as f64) / (u32::MAX as f64),
+        NumericDType::I64 => (value - i64::MIN as f64) / (u64::MAX as f64),
         NumericDType::U8 => value / 255.0,
         NumericDType::U16 => value / 65535.0,
         NumericDType::U32 => value / (u32::MAX as f64),
+        NumericDType::U64 => value / (u64::MAX as f64),
         NumericDType::F32 | NumericDType::F64 => value,
     }
 }
 
 pub(crate) fn unit_to_dtype(value: f64, dtype: NumericDType) -> f64 {
     match dtype {
+        NumericDType::I8 => (value * u8::MAX as f64 + i8::MIN as f64)
+            .round()
+            .clamp(i8::MIN as f64, i8::MAX as f64),
+        NumericDType::I16 => (value * u16::MAX as f64 + i16::MIN as f64)
+            .round()
+            .clamp(i16::MIN as f64, i16::MAX as f64),
+        NumericDType::I32 => (value * u32::MAX as f64 + i32::MIN as f64)
+            .round()
+            .clamp(i32::MIN as f64, i32::MAX as f64),
+        NumericDType::I64 => (value * u64::MAX as f64 + i64::MIN as f64)
+            .round()
+            .clamp(i64::MIN as f64, i64::MAX as f64),
         NumericDType::U8 => clamp_round(value * 255.0, 255.0),
         NumericDType::U16 => clamp_round(value * 65535.0, 65535.0),
         NumericDType::U32 => clamp_round(value * (u32::MAX as f64), u32::MAX as f64),
+        NumericDType::U64 => clamp_round(value * u64::MAX as f64, u64::MAX as f64),
         NumericDType::F32 => (value as f32) as f64,
         NumericDType::F64 => value,
     }
@@ -179,9 +207,15 @@ pub(crate) fn clamp_round(value: f64, max: f64) -> f64 {
 pub(crate) fn image_output_dtype(input: NumericDType) -> NumericDType {
     match input {
         NumericDType::F32 => NumericDType::F32,
-        NumericDType::F64 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
-            NumericDType::F64
-        }
+        NumericDType::F64
+        | NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => NumericDType::F64,
     }
 }
 
