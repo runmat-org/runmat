@@ -16,6 +16,7 @@ const BITAND_NAME: &str = "bitand";
 const BITCMP_NAME: &str = "bitcmp";
 const BITGET_NAME: &str = "bitget";
 const BITOR_NAME: &str = "bitor";
+const BITSET_NAME: &str = "bitset";
 const BITXOR_NAME: &str = "bitxor";
 const BITSHIFT_NAME: &str = "bitshift";
 const IDIVIDE_NAME: &str = "idivide";
@@ -77,6 +78,47 @@ const BITGET_INPUTS: [BuiltinParamDescriptor; 2] = [
         arity: BuiltinParamArity::Required,
         default: None,
         description: "One-based bit position.",
+    },
+];
+
+const BITSET_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer-valued input.",
+    },
+    BuiltinParamDescriptor {
+        name: "bit",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based bit position.",
+    },
+];
+
+const BITSET_INPUTS_VALUE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer-valued input.",
+    },
+    BuiltinParamDescriptor {
+        name: "bit",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based bit position.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: Some("1"),
+        description: "Zero clears the bit; any finite nonzero value sets it.",
     },
 ];
 
@@ -172,6 +214,19 @@ const BITGET_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDesc
     inputs: &BITGET_INPUTS,
     outputs: &OUTPUT,
 }];
+
+const BITSET_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = bitset(A, bit)",
+        inputs: &BITSET_INPUTS,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = bitset(A, bit, V)",
+        inputs: &BITSET_INPUTS_VALUE,
+        outputs: &OUTPUT,
+    },
+];
 
 const IDIVIDE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
@@ -269,6 +324,13 @@ pub const BITGET_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+pub const BITSET_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &BITSET_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
 pub const IDIVIDE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &IDIVIDE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -344,6 +406,64 @@ async fn bitget_builtin(value: Value, bit: Value) -> BuiltinResult<Value> {
         data.push((input.data[input_index] >> (position as u32 - 1)) & 1);
     }
     value_from_bits(data, plan.output_shape().to_vec(), input.class, BITGET_NAME)
+}
+
+#[runtime_builtin(
+    name = "bitset",
+    category = "logical/bit",
+    summary = "Set or clear one-based bit positions in integer-valued scalars and arrays.",
+    keywords = "bitset,bitwise,bit,integer,uint32",
+    accel = "gather",
+    descriptor(crate::builtins::logical::bit::integer::BITSET_DESCRIPTOR),
+    builtin_path = "crate::builtins::logical::bit::integer"
+)]
+async fn bitset_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if !(2..=3).contains(&args.len()) {
+        return Err(error_with_detail(
+            BITSET_NAME,
+            &ERROR_INVALID_INPUT,
+            "expected A, bit, and an optional V input",
+        ));
+    }
+    let mut args = args.into_iter();
+    let input = bit_buffer_from(BITSET_NAME, args.next().expect("A")).await?;
+    let positions = shift_buffer_from(args.next().expect("bit")).await?;
+    let values = match args.next() {
+        Some(value) => bit_value_buffer_from(value).await?,
+        None => BitValueBuffer {
+            data: vec![true],
+            shape: vec![1, 1],
+        },
+    };
+    let input_positions = BroadcastPlan::new(&input.shape, &positions.shape)
+        .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    let input_position_indices = input_positions
+        .iter()
+        .map(|(_, input_index, position_index)| (input_index, position_index))
+        .collect::<Vec<_>>();
+    let plan = BroadcastPlan::new(input_positions.output_shape(), &values.shape)
+        .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    let width = input.class.map_or(64, IntegerClass::bit_width);
+    let mut data = Vec::with_capacity(plan.len());
+    for (_, input_position_index, value_index) in plan.iter() {
+        let (input_index, position_index) = input_position_indices[input_position_index];
+        let position = positions.data[position_index];
+        if !(1..=i128::from(width)).contains(&position) {
+            return Err(error_with_detail(
+                BITSET_NAME,
+                &ERROR_INVALID_INPUT,
+                format!("bit position {position} must be between 1 and {width}"),
+            ));
+        }
+        let mask = 1_u64 << (position as u32 - 1);
+        let current = input.data[input_index];
+        data.push(if values.data[value_index] {
+            current | mask
+        } else {
+            current & !mask
+        });
+    }
+    value_from_bits(data, plan.output_shape().to_vec(), input.class, BITSET_NAME)
 }
 
 #[runtime_builtin(
@@ -507,6 +627,11 @@ struct ShiftBuffer {
     shape: Vec<usize>,
 }
 
+struct BitValueBuffer {
+    data: Vec<bool>,
+    shape: Vec<usize>,
+}
+
 async fn bit_buffer_from(name: &'static str, value: Value) -> BuiltinResult<BitBuffer> {
     match value {
         Value::Num(value) => Ok(BitBuffer {
@@ -550,6 +675,10 @@ async fn bit_buffer_from(name: &'static str, value: Value) -> BuiltinResult<BitB
 
 async fn shift_buffer_from(value: Value) -> BuiltinResult<ShiftBuffer> {
     match value {
+        Value::Bool(value) => Ok(ShiftBuffer {
+            data: vec![i128::from(value)],
+            shape: vec![1, 1],
+        }),
         Value::Num(value) => Ok(ShiftBuffer {
             data: vec![double_to_shift(value)?],
             shape: vec![1, 1],
@@ -574,6 +703,70 @@ async fn shift_buffer_from(value: Value) -> BuiltinResult<ShiftBuffer> {
             &ERROR_INVALID_INPUT,
             format!("bitshift: unsupported shift input {other:?}"),
         )),
+    }
+}
+
+async fn bit_value_buffer_from(value: Value) -> BuiltinResult<BitValueBuffer> {
+    match value {
+        Value::Bool(value) => Ok(BitValueBuffer {
+            data: vec![value],
+            shape: vec![1, 1],
+        }),
+        Value::Num(value) => Ok(BitValueBuffer {
+            data: vec![finite_nonzero_bit_value(value)?],
+            shape: vec![1, 1],
+        }),
+        Value::Int(value) => Ok(BitValueBuffer {
+            data: vec![int_value_to_i128(&value) != 0],
+            shape: vec![1, 1],
+        }),
+        Value::Tensor(tensor) => tensor_to_bit_value_buffer(tensor),
+        Value::LogicalArray(array) => Ok(BitValueBuffer {
+            data: array.data.into_iter().map(|value| value != 0).collect(),
+            shape: array.shape,
+        }),
+        Value::GpuTensor(handle) => {
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_INVALID_INPUT, err))?;
+            tensor_to_bit_value_buffer(tensor)
+        }
+        other => Err(error_with_detail(
+            BITSET_NAME,
+            &ERROR_INVALID_INPUT,
+            format!("bitset: unsupported bit value {other:?}"),
+        )),
+    }
+}
+
+fn tensor_to_bit_value_buffer(tensor: Tensor) -> BuiltinResult<BitValueBuffer> {
+    let data = match tensor.integer_storage() {
+        Some(storage) => storage
+            .exact_values()
+            .iter()
+            .map(|value| int_value_to_i128(value) != 0)
+            .collect(),
+        None => tensor
+            .data
+            .into_iter()
+            .map(finite_nonzero_bit_value)
+            .collect::<BuiltinResult<Vec<_>>>()?,
+    };
+    Ok(BitValueBuffer {
+        data,
+        shape: tensor.shape,
+    })
+}
+
+fn finite_nonzero_bit_value(value: f64) -> BuiltinResult<bool> {
+    if value.is_finite() {
+        Ok(value != 0.0)
+    } else {
+        Err(error_with_detail(
+            BITSET_NAME,
+            &ERROR_INVALID_INPUT,
+            "bit values must be finite numeric or logical values",
+        ))
     }
 }
 
@@ -1481,6 +1674,106 @@ mod tests {
             crate::dispatcher::call_builtin(
                 BITGET_NAME,
                 &[Value::Int(IntValue::U8(0b1010)), Value::Num(2.0)],
+            )
+            .expect("runtime dispatch"),
+            Value::Int(IntValue::U8(1))
+        );
+    }
+
+    #[test]
+    fn bitset_preserves_all_native_integer_scalar_classes() {
+        let cases = [
+            (IntValue::I8(0), IntValue::I8(2)),
+            (IntValue::I16(0), IntValue::I16(2)),
+            (IntValue::I32(0), IntValue::I32(2)),
+            (IntValue::I64(0), IntValue::I64(2)),
+            (IntValue::U8(0), IntValue::U8(2)),
+            (IntValue::U16(0), IntValue::U16(2)),
+            (IntValue::U32(0), IntValue::U32(2)),
+            (IntValue::U64(0), IntValue::U64(2)),
+        ];
+        for (input, expected) in cases {
+            let actual =
+                block_on(bitset_builtin(vec![Value::Int(input), Value::Num(2.0)])).expect("bitset");
+            assert_eq!(actual, Value::Int(expected));
+        }
+    }
+
+    #[test]
+    fn bitset_supports_explicit_set_clear_and_uint64_high_bits() {
+        assert_eq!(
+            block_on(bitset_builtin(vec![
+                Value::Int(IntValue::U8(0b1111)),
+                Value::Num(3.0),
+                Value::Num(0.0),
+            ]))
+            .expect("clear bit"),
+            Value::Int(IntValue::U8(0b1011))
+        );
+        assert_eq!(
+            block_on(bitset_builtin(vec![
+                Value::Int(IntValue::I8(0)),
+                Value::Num(8.0),
+                Value::Bool(true),
+            ]))
+            .expect("set signed high bit"),
+            Value::Int(IntValue::I8(i8::MIN))
+        );
+        assert_eq!(
+            block_on(bitset_builtin(vec![
+                Value::Int(IntValue::U64(0)),
+                Value::Num(64.0),
+                Value::Num(0.5),
+            ]))
+            .expect("set uint64 high bit"),
+            Value::Int(IntValue::U64(1_u64 << 63))
+        );
+    }
+
+    #[test]
+    fn bitset_broadcasts_input_positions_and_values() {
+        let input =
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 0]), vec![1, 2]).expect("input");
+        let positions = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("positions");
+        let values = Tensor::new(vec![1.0, 0.0], vec![1, 2]).expect("values");
+        let Value::Tensor(output) = block_on(bitset_builtin(vec![
+            Value::Tensor(input),
+            Value::Tensor(positions),
+            Value::Tensor(values),
+        ]))
+        .expect("bitset") else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U16(vec![1, 2, 0, 0]))
+        );
+    }
+
+    #[test]
+    fn bitset_rejects_invalid_positions_nonfinite_values_and_dispatches() {
+        for position in [0.0, -1.0, 9.0] {
+            let error = block_on(bitset_builtin(vec![
+                Value::Int(IntValue::U8(0)),
+                Value::Num(position),
+            ]))
+            .expect_err("invalid position");
+            assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+        }
+        let error = block_on(bitset_builtin(vec![
+            Value::Int(IntValue::U8(0)),
+            Value::Num(1.0),
+            Value::Num(f64::NAN),
+        ]))
+        .expect_err("nonfinite bit value");
+        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+
+        assert!(runmat_builtins::builtin_function_by_name(BITSET_NAME).is_some());
+        assert_eq!(
+            crate::dispatcher::call_builtin(
+                BITSET_NAME,
+                &[Value::Int(IntValue::U8(0)), Value::Num(1.0)],
             )
             .expect("runtime dispatch"),
             Value::Int(IntValue::U8(1))
