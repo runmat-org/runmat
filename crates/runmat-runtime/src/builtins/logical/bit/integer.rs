@@ -14,6 +14,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BITAND_NAME: &str = "bitand";
 const BITOR_NAME: &str = "bitor";
+const BITXOR_NAME: &str = "bitxor";
 const BITSHIFT_NAME: &str = "bitshift";
 const IDIVIDE_NAME: &str = "idivide";
 const SWAPBYTES_NAME: &str = "swapbytes";
@@ -121,6 +122,12 @@ const BITOR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     outputs: &OUTPUT,
 }];
 
+const BITXOR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "C = bitxor(A, B)",
+    inputs: &BINARY_INPUTS,
+    outputs: &OUTPUT,
+}];
+
 const BITSHIFT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "C = bitshift(A, K)",
     inputs: &BITSHIFT_INPUTS,
@@ -195,6 +202,13 @@ pub const BITOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+pub const BITXOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &BITXOR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
 pub const BITSHIFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &BITSHIFT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -240,6 +254,19 @@ async fn bitand_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 )]
 async fn bitor_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     binary_bitwise(BITOR_NAME, lhs, rhs, |a, b| a | b).await
+}
+
+#[runtime_builtin(
+    name = "bitxor",
+    category = "logical/bit",
+    summary = "Compute bitwise XOR for integer-valued scalars and arrays.",
+    keywords = "bitxor,bitwise,xor,integer,uint32",
+    accel = "gather",
+    descriptor(crate::builtins::logical::bit::integer::BITXOR_DESCRIPTOR),
+    builtin_path = "crate::builtins::logical::bit::integer"
+)]
+async fn bitxor_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    binary_bitwise(BITXOR_NAME, lhs, rhs, |a, b| a ^ b).await
 }
 
 #[runtime_builtin(
@@ -1199,6 +1226,92 @@ mod tests {
             high,
             Value::Int(IntValue::U64((1_u64 << 63) | (1_u64 << 60)))
         );
+    }
+
+    #[test]
+    fn bitxor_preserves_all_native_integer_scalar_classes() {
+        let cases = [
+            (IntValue::I8(-5), IntValue::I8(6), IntValue::I8(-3)),
+            (IntValue::I16(-5), IntValue::I16(6), IntValue::I16(-3)),
+            (IntValue::I32(-5), IntValue::I32(6), IntValue::I32(-3)),
+            (IntValue::I64(-5), IntValue::I64(6), IntValue::I64(-3)),
+            (
+                IntValue::U8(0b1010),
+                IntValue::U8(0b0110),
+                IntValue::U8(0b1100),
+            ),
+            (
+                IntValue::U16(0b1010),
+                IntValue::U16(0b0110),
+                IntValue::U16(0b1100),
+            ),
+            (
+                IntValue::U32(0b1010),
+                IntValue::U32(0b0110),
+                IntValue::U32(0b1100),
+            ),
+            (
+                IntValue::U64(0b1010),
+                IntValue::U64(0b0110),
+                IntValue::U64(0b1100),
+            ),
+        ];
+        for (left, right, expected) in cases {
+            let actual =
+                block_on(bitxor_builtin(Value::Int(left), Value::Int(right))).expect("bitxor");
+            assert_eq!(actual, Value::Int(expected));
+        }
+    }
+
+    #[test]
+    fn bitxor_broadcasts_exact_uint64_storage_without_losing_high_bits() {
+        let left =
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
+                .expect("left");
+        let Value::Tensor(output) = block_on(bitxor_builtin(
+            Value::Tensor(left),
+            Value::Int(IntValue::U64(1_u64 << 60)),
+        ))
+        .expect("bitxor") else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                (1_u64 << 63) | (1_u64 << 60),
+                u64::MAX ^ (1_u64 << 60),
+            ]))
+        );
+    }
+
+    #[test]
+    fn bitxor_follows_binary_integer_class_rules_and_is_registered() {
+        assert!(runmat_builtins::builtin_function_by_name(BITXOR_NAME).is_some());
+        assert_eq!(
+            crate::dispatcher::call_builtin(
+                BITXOR_NAME,
+                &[
+                    Value::Int(IntValue::U8(0b1010)),
+                    Value::Int(IntValue::U8(0b0110))
+                ],
+            )
+            .expect("runtime dispatch"),
+            Value::Int(IntValue::U8(0b1100))
+        );
+        assert_eq!(
+            block_on(bitxor_builtin(
+                Value::Int(IntValue::U16(0b1010)),
+                Value::Num(6.0),
+            ))
+            .expect("scalar double bitxor"),
+            Value::Int(IntValue::U16(0b1100))
+        );
+        let error = block_on(bitxor_builtin(
+            Value::Int(IntValue::U8(1)),
+            Value::Int(IntValue::U16(1)),
+        ))
+        .expect_err("mixed integer classes must fail");
+        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]
