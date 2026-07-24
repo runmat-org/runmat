@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, Tensor, Type, Value,
+    IntValue, IntegerStorage, NumericDType, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -164,12 +164,32 @@ impl NumericClass {
             Self::I8 | Self::I16 | Self::I32 | Self::I64 | Self::U64 => None,
         }
     }
+
+    fn from_integer_storage(storage: &IntegerStorage) -> Self {
+        match storage {
+            IntegerStorage::I8(_) => Self::I8,
+            IntegerStorage::I16(_) => Self::I16,
+            IntegerStorage::I32(_) => Self::I32,
+            IntegerStorage::I64(_) => Self::I64,
+            IntegerStorage::U8(_) => Self::U8,
+            IntegerStorage::U16(_) => Self::U16,
+            IntegerStorage::U32(_) => Self::U32,
+            IntegerStorage::U64(_) => Self::U64,
+        }
+    }
 }
 
 struct LcmInput {
     data: Vec<u128>,
     shape: Vec<usize>,
     class: NumericClass,
+    native_integer_storage: bool,
+}
+
+#[derive(Clone, Copy)]
+struct LcmOutput {
+    class: NumericClass,
+    native_integer_storage: bool,
 }
 
 impl LcmInput {
@@ -183,6 +203,7 @@ impl LcmInput {
                 data: vec![positive_integer_from_f64(value)?],
                 shape: vec![1, 1],
                 class: NumericClass::Double,
+                native_integer_storage: false,
             }),
             Value::Int(value) => Self::from_int_value(value),
             Value::Tensor(tensor) => Self::from_tensor(tensor),
@@ -246,10 +267,25 @@ impl LcmInput {
             data: vec![data],
             shape: vec![1, 1],
             class,
+            native_integer_storage: true,
         })
     }
 
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
+        if let Some(storage) = tensor.integer_storage() {
+            let class = NumericClass::from_integer_storage(storage);
+            let data = storage
+                .exact_values()
+                .into_iter()
+                .map(positive_integer_from_int_value)
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            return Ok(Self {
+                data,
+                shape: tensor.shape,
+                class,
+                native_integer_storage: true,
+            });
+        }
         let class = match tensor.dtype {
             NumericDType::F64 => NumericClass::Double,
             NumericDType::F32 => NumericClass::Single,
@@ -266,7 +302,21 @@ impl LcmInput {
             data,
             shape: tensor.shape,
             class,
+            native_integer_storage: false,
         })
+    }
+}
+
+fn positive_integer_from_int_value(value: IntValue) -> BuiltinResult<u128> {
+    match value {
+        IntValue::I8(value) => positive_integer_from_i128(i128::from(value)),
+        IntValue::I16(value) => positive_integer_from_i128(i128::from(value)),
+        IntValue::I32(value) => positive_integer_from_i128(i128::from(value)),
+        IntValue::I64(value) => positive_integer_from_i128(i128::from(value)),
+        IntValue::U8(value) => positive_integer_from_u128(u128::from(value)),
+        IntValue::U16(value) => positive_integer_from_u128(u128::from(value)),
+        IntValue::U32(value) => positive_integer_from_u128(u128::from(value)),
+        IntValue::U64(value) => positive_integer_from_u128(u128::from(value)),
     }
 }
 
@@ -315,29 +365,41 @@ impl SameSizeOrScalarPlan {
     }
 }
 
-fn resolve_output_kind(left: &LcmInput, right: &LcmInput) -> BuiltinResult<NumericClass> {
-    match (left.class, right.class) {
-        (a, b) if a == b => Ok(a),
+fn resolve_output_kind(left: &LcmInput, right: &LcmInput) -> BuiltinResult<LcmOutput> {
+    let (class, native_integer_storage) = match (left.class, right.class) {
+        (a, b) if a == b => (
+            a,
+            left.native_integer_storage || right.native_integer_storage,
+        ),
         (NumericClass::Double, NumericClass::Single)
-        | (NumericClass::Single, NumericClass::Double) => Ok(NumericClass::Single),
-        (integer, NumericClass::Double) if integer.is_integer() && right.is_scalar() => Ok(integer),
-        (NumericClass::Double, integer) if integer.is_integer() && left.is_scalar() => Ok(integer),
-        (a, b) if a.is_integer() && b.is_integer() => Err(error_with_detail(
-            &LCM_ERROR_INVALID_INPUT,
-            "integer inputs must have the same class",
-        )),
-        _ => Err(error_with_detail(
-            &LCM_ERROR_INVALID_INPUT,
-            "integer inputs can only be paired with the same class or a double scalar",
-        )),
-    }
+        | (NumericClass::Single, NumericClass::Double) => (NumericClass::Single, false),
+        (integer, NumericClass::Double) if integer.is_integer() && right.is_scalar() => {
+            (integer, left.native_integer_storage)
+        }
+        (NumericClass::Double, integer) if integer.is_integer() && left.is_scalar() => {
+            (integer, right.native_integer_storage)
+        }
+        (a, b) if a.is_integer() && b.is_integer() => {
+            return Err(error_with_detail(
+                &LCM_ERROR_INVALID_INPUT,
+                "integer inputs must have the same class",
+            ));
+        }
+        _ => {
+            return Err(error_with_detail(
+                &LCM_ERROR_INVALID_INPUT,
+                "integer inputs can only be paired with the same class or a double scalar",
+            ));
+        }
+    };
+    Ok(LcmOutput {
+        class,
+        native_integer_storage,
+    })
 }
 
-fn value_from_lcms(
-    data: Vec<u128>,
-    shape: Vec<usize>,
-    class: NumericClass,
-) -> BuiltinResult<Value> {
+fn value_from_lcms(data: Vec<u128>, shape: Vec<usize>, output: LcmOutput) -> BuiltinResult<Value> {
+    let class = output.class;
     for &value in &data {
         if value > class.max_value() {
             return Err(error_with_detail(
@@ -363,12 +425,14 @@ fn value_from_lcms(
         };
     }
 
-    let dtype = class.tensor_dtype().ok_or_else(|| {
-        error_with_detail(
-            &LCM_ERROR_INVALID_INPUT,
-            "array output for this integer class is not supported by RunMat tensors",
-        )
-    })?;
+    if output.native_integer_storage {
+        return Tensor::new_integer(integer_storage_from_lcms(data, class), shape)
+            .map(Value::Tensor)
+            .map_err(|err| error_with_detail(&LCM_ERROR_INTERNAL, err));
+    }
+    let dtype = class
+        .tensor_dtype()
+        .expect("floating LCM output classes have a tensor dtype");
     Tensor::new_with_dtype(
         data.into_iter()
             .map(|value| match class {
@@ -381,6 +445,34 @@ fn value_from_lcms(
     )
     .map(Value::Tensor)
     .map_err(|err| error_with_detail(&LCM_ERROR_INTERNAL, err))
+}
+
+fn integer_storage_from_lcms(data: Vec<u128>, class: NumericClass) -> IntegerStorage {
+    match class {
+        NumericClass::I8 => IntegerStorage::I8(data.into_iter().map(|value| value as i8).collect()),
+        NumericClass::I16 => {
+            IntegerStorage::I16(data.into_iter().map(|value| value as i16).collect())
+        }
+        NumericClass::I32 => {
+            IntegerStorage::I32(data.into_iter().map(|value| value as i32).collect())
+        }
+        NumericClass::I64 => {
+            IntegerStorage::I64(data.into_iter().map(|value| value as i64).collect())
+        }
+        NumericClass::U8 => IntegerStorage::U8(data.into_iter().map(|value| value as u8).collect()),
+        NumericClass::U16 => {
+            IntegerStorage::U16(data.into_iter().map(|value| value as u16).collect())
+        }
+        NumericClass::U32 => {
+            IntegerStorage::U32(data.into_iter().map(|value| value as u32).collect())
+        }
+        NumericClass::U64 => {
+            IntegerStorage::U64(data.into_iter().map(|value| value as u64).collect())
+        }
+        NumericClass::Double | NumericClass::Single => {
+            unreachable!("integer storage requires an integer output class")
+        }
+    }
 }
 
 fn positive_integer_from_i128(value: i128) -> BuiltinResult<u128> {
@@ -496,6 +588,78 @@ mod tests {
                 assert_eq!(tensor.dtype, NumericDType::U32);
                 assert_eq!(tensor.data, vec![30.0, 30.0, 105.0]);
             }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lcm_preserves_all_native_integer_tensor_classes() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![6, 10]),
+                IntegerStorage::I8(vec![30, 30]),
+            ),
+            (
+                IntegerStorage::I16(vec![6, 10]),
+                IntegerStorage::I16(vec![30, 30]),
+            ),
+            (
+                IntegerStorage::I32(vec![6, 10]),
+                IntegerStorage::I32(vec![30, 30]),
+            ),
+            (
+                IntegerStorage::I64(vec![6, 10]),
+                IntegerStorage::I64(vec![30, 30]),
+            ),
+            (
+                IntegerStorage::U8(vec![6, 10]),
+                IntegerStorage::U8(vec![30, 30]),
+            ),
+            (
+                IntegerStorage::U16(vec![6, 10]),
+                IntegerStorage::U16(vec![30, 30]),
+            ),
+            (
+                IntegerStorage::U32(vec![6, 10]),
+                IntegerStorage::U32(vec![30, 30]),
+            ),
+            (
+                IntegerStorage::U64(vec![6, 10]),
+                IntegerStorage::U64(vec![30, 30]),
+            ),
+        ];
+
+        for (input, expected) in cases {
+            let input = Tensor::new_integer(input, vec![1, 2]).expect("native integer tensor");
+            let out = block_on(lcm_builtin(Value::Tensor(input), Value::Num(15.0)))
+                .expect("integer tensor with double scalar");
+            match out {
+                Value::Tensor(tensor) => {
+                    assert_eq!(tensor.shape, vec![1, 2]);
+                    assert_eq!(tensor.integer_storage(), Some(&expected));
+                }
+                other => panic!("expected tensor, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn lcm_uses_exact_native_uint64_tensor_values() {
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_995]),
+            vec![1, 2],
+        )
+        .expect("native uint64 tensor");
+        let out = block_on(lcm_builtin(Value::Tensor(input), Value::Num(1.0)))
+            .expect("lcm with identity");
+        match out {
+            Value::Tensor(tensor) => assert_eq!(
+                tensor.integer_storage(),
+                Some(&IntegerStorage::U64(vec![
+                    9_007_199_254_740_993,
+                    9_007_199_254_740_995,
+                ]))
+            ),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
