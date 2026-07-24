@@ -430,6 +430,20 @@ impl IntegerStorage {
         }
     }
 
+    /// Allocates ones while preserving this integer class.
+    pub fn ones_like(&self, len: usize) -> Self {
+        match self {
+            Self::I8(_) => Self::I8(vec![1; len]),
+            Self::I16(_) => Self::I16(vec![1; len]),
+            Self::I32(_) => Self::I32(vec![1; len]),
+            Self::I64(_) => Self::I64(vec![1; len]),
+            Self::U8(_) => Self::U8(vec![1; len]),
+            Self::U16(_) => Self::U16(vec![1; len]),
+            Self::U32(_) => Self::U32(vec![1; len]),
+            Self::U64(_) => Self::U64(vec![1; len]),
+        }
+    }
+
     /// Stores a same-class exact scalar without floating-point conversion.
     pub fn set_value(&mut self, index: usize, value: IntValue) -> Result<(), String> {
         match (self, value) {

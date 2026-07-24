@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, Value,
+    ComplexTensor, IntegerStorage, LogicalArray, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -450,19 +450,32 @@ async fn ones_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value
                 .map_err(|e| builtin_error(format!("ones: {e}")))
         }
         Value::GpuTensor(handle) => ones_like_gpu(handle, shape).await,
-        Value::Tensor(t) => match t.dtype {
-            NumericDType::F32 => ones_single(shape),
-            NumericDType::F64 => ones_double(shape),
-            NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
-                tensor::ones_with_dtype(shape, t.dtype)
-                    .map(Value::Tensor)
-                    .map_err(|e| builtin_error(format!("ones: {e}")))
-            }
+        Value::Tensor(t) => match t.integer_storage() {
+            Some(storage) => ones_integer_like(storage, shape),
+            None => match t.dtype {
+                NumericDType::F32 => ones_single(shape),
+                NumericDType::F64 => ones_double(shape),
+                NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
+                    tensor::ones_with_dtype(shape, t.dtype)
+                        .map(Value::Tensor)
+                        .map_err(|e| builtin_error(format!("ones: {e}")))
+                }
+            },
         },
-        Value::Num(_) | Value::Int(_) => ones_double(shape),
+        Value::Int(value) => ones_integer_like(&IntegerStorage::from_scalar(value.clone()), shape),
+        Value::Num(_) => ones_double(shape),
         Value::CharArray(_) | Value::Cell(_) => ones_double(shape),
         _ => ones_double(shape),
     }
+}
+
+fn ones_integer_like(storage: &IntegerStorage, shape: &[usize]) -> crate::BuiltinResult<Value> {
+    let tensor = runmat_builtins::Tensor::new_integer(
+        storage.ones_like(tensor::element_count(shape)),
+        shape.to_vec(),
+    )
+    .map_err(|e| builtin_error(format!("ones: {e}")))?;
+    Ok(tensor::tensor_into_value(tensor))
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -562,7 +575,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -666,6 +679,48 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn ones_like_preserves_every_exact_integer_class() {
+        let storages = vec![
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let prototype = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("prototype");
+            let result = block_on(ones_builtin(vec![
+                Value::from("like"),
+                Value::Tensor(prototype),
+            ]))
+            .expect("ones like");
+            let Value::Tensor(output) = result else {
+                panic!("expected integer tensor");
+            };
+            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.integer_storage(), Some(&storage.ones_like(2)));
+        }
+
+        let result = block_on(ones_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::Int(IntValue::U64(u64::MAX)),
+        ]))
+        .expect("integer scalar prototype");
+        let Value::Tensor(output) = result else {
+            panic!("expected uint64 tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1; 4]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

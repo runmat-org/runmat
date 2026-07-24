@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, Tensor, Type, Value,
+    ComplexTensor, IntegerStorage, LogicalArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -387,7 +387,12 @@ async fn eye_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
         Value::LogicalArray(_) | Value::Bool(_) => eye_logical(shape),
         Value::ComplexTensor(_) | Value::Complex(_, _) => eye_complex(shape),
         Value::GpuTensor(handle) => eye_like_gpu(handle, shape).await,
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => eye_double(shape),
+        Value::Tensor(tensor) => match tensor.integer_storage() {
+            Some(storage) => eye_integer_like(storage, shape),
+            None => eye_double(shape),
+        },
+        Value::Int(value) => eye_integer_like(&IntegerStorage::from_scalar(value.clone()), shape),
+        Value::Num(_) => eye_double(shape),
         Value::CharArray(_) | Value::Cell(_) => eye_double(shape),
         other => {
             let gathered = crate::dispatcher::gather_if_needed_async(other)
@@ -396,6 +401,22 @@ async fn eye_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
             eye_like(&gathered, shape).await
         }
     }
+}
+
+fn eye_integer_like(storage: &IntegerStorage, shape: &[usize]) -> Result<Value, String> {
+    let shape = shape.to_vec();
+    let mut values = storage.zeros_like(tensor::element_count(&shape));
+    let one = storage
+        .ones_like(1)
+        .value_at(0)
+        .expect("one-element integer storage has a value");
+    visit_identity_positions(&shape, |index| {
+        values
+            .set_value(index, one.clone())
+            .expect("identity index and integer class are valid");
+    });
+    let tensor = Tensor::new_integer(values, shape).map_err(|e| format!("eye: {e}"))?;
+    Ok(tensor::tensor_into_value(tensor))
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -553,7 +574,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Type;
+    use runmat_builtins::{IntValue, IntegerStorage, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -714,6 +735,54 @@ pub(crate) mod tests {
             }
             other => panic!("expected logical array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn eye_like_preserves_every_exact_integer_class() {
+        let storages = vec![
+            IntegerStorage::I8(vec![i8::MIN]),
+            IntegerStorage::I16(vec![i16::MIN]),
+            IntegerStorage::I32(vec![i32::MIN]),
+            IntegerStorage::I64(vec![i64::MIN]),
+            IntegerStorage::U8(vec![u8::MAX]),
+            IntegerStorage::U16(vec![u16::MAX]),
+            IntegerStorage::U32(vec![u32::MAX]),
+            IntegerStorage::U64(vec![u64::MAX]),
+        ];
+
+        for storage in storages {
+            let prototype = Tensor::new_integer(storage.clone(), vec![1, 1]).expect("prototype");
+            let result = block_on(eye_builtin(vec![
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::from("like"),
+                Value::Tensor(prototype),
+            ]))
+            .expect("eye like");
+            let Value::Tensor(output) = result else {
+                panic!("expected integer tensor");
+            };
+            let mut expected = storage.zeros_like(6);
+            let one = storage.ones_like(1).value_at(0).expect("one");
+            expected.set_value(0, one.clone()).expect("first diagonal");
+            expected.set_value(3, one).expect("second diagonal");
+            assert_eq!(output.shape, vec![2, 3]);
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+
+        let result = block_on(eye_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::Int(IntValue::I64(i64::MAX)),
+        ]))
+        .expect("integer scalar prototype");
+        let Value::Tensor(output) = result else {
+            panic!("expected int64 tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I64(vec![1, 0, 0, 1]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

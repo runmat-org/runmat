@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, SparseTensor, Value,
+    ComplexTensor, IntegerStorage, LogicalArray, SparseTensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::sync::OnceLock;
@@ -554,19 +554,32 @@ async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
         }
         Value::GpuTensor(handle) => zeros_like_gpu(handle, shape).await,
         Value::SparseTensor(sparse) => zeros_sparse_like(sparse, shape),
-        Value::Tensor(t) => match t.dtype {
-            NumericDType::F32 => zeros_single(shape),
-            NumericDType::F64 => zeros_double(shape),
-            NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
-                tensor::zeros_with_dtype(shape, t.dtype)
-                    .map(Value::Tensor)
-                    .map_err(|e| builtin_error(format!("zeros: {e}")))
-            }
+        Value::Tensor(t) => match t.integer_storage() {
+            Some(storage) => zeros_integer_like(storage, shape),
+            None => match t.dtype {
+                NumericDType::F32 => zeros_single(shape),
+                NumericDType::F64 => zeros_double(shape),
+                NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
+                    tensor::zeros_with_dtype(shape, t.dtype)
+                        .map(Value::Tensor)
+                        .map_err(|e| builtin_error(format!("zeros: {e}")))
+                }
+            },
         },
-        Value::Num(_) | Value::Int(_) => zeros_double(shape),
+        Value::Int(value) => zeros_integer_like(&IntegerStorage::from_scalar(value.clone()), shape),
+        Value::Num(_) => zeros_double(shape),
         Value::CharArray(_) | Value::Cell(_) => zeros_double(shape),
         _ => zeros_double(shape),
     }
+}
+
+fn zeros_integer_like(storage: &IntegerStorage, shape: &[usize]) -> crate::BuiltinResult<Value> {
+    let tensor = runmat_builtins::Tensor::new_integer(
+        storage.zeros_like(tensor::element_count(shape)),
+        shape.to_vec(),
+    )
+    .map_err(|e| builtin_error(format!("zeros: {e}")))?;
+    Ok(tensor::tensor_into_value(tensor))
 }
 
 fn zeros_sparse_like(proto: &SparseTensor, shape: &[usize]) -> crate::BuiltinResult<Value> {
@@ -739,7 +752,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{SparseTensor, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, SparseTensor, Tensor};
 
     fn clear_accel_provider_state() -> test_support::AccelTestGuard {
         test_support::accel_test_lock()
@@ -887,6 +900,49 @@ pub(crate) mod tests {
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 2]);
         assert!(tensor.data.iter().all(|&x| x == 0.0));
+    }
+
+    #[test]
+    fn zeros_like_preserves_every_exact_integer_class() {
+        let _guard = clear_accel_provider_state();
+        let storages = vec![
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let prototype = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("prototype");
+            let result = block_on(zeros_builtin(vec![
+                Value::from("like"),
+                Value::Tensor(prototype),
+            ]))
+            .expect("zeros like");
+            let Value::Tensor(output) = result else {
+                panic!("expected integer tensor");
+            };
+            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.integer_storage(), Some(&storage.zeros_like(2)));
+        }
+
+        let result = block_on(zeros_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::Int(IntValue::I64(i64::MAX)),
+        ]))
+        .expect("integer scalar prototype");
+        let Value::Tensor(output) = result else {
+            panic!("expected int64 tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I64(vec![0; 4]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
