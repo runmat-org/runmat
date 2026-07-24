@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, StructValue, Tensor, Value,
+    IntegerStorage, NumericDType, StructValue, Tensor, Value,
 };
 use runmat_filesystem as fs;
 use runmat_macros::runtime_builtin;
@@ -731,33 +731,137 @@ fn decode_wave_samples(bytes: &[u8], options: AudioreadOptions) -> Result<Decode
         None => (0, total_frames),
     };
     let frame_count = end_frame_exclusive - start_frame;
+    let data = &bytes[parsed.data_offset..parsed.data_offset + parsed.data_len];
+    let shape = vec![frame_count, channels];
+    let samples = if options.native {
+        if let Some(storage) = native_pcm_storage(
+            fmt,
+            data,
+            channels,
+            start_frame,
+            end_frame_exclusive,
+            block_align,
+            bytes_per_channel,
+        )? {
+            Tensor::new_integer(storage, shape)
+                .map_err(|err| format!("decoded audio tensor shape is invalid: {err}"))?
+        } else {
+            let out = collect_wave_samples(
+                data,
+                channels,
+                start_frame,
+                end_frame_exclusive,
+                block_align,
+                bytes_per_channel,
+                |sample_bytes| decode_wave_sample(sample_bytes, fmt, true),
+            )?;
+            Tensor::new_with_dtype(out, shape, native_wave_dtype(fmt))
+                .map_err(|err| format!("decoded audio tensor shape is invalid: {err}"))?
+        }
+    } else {
+        let out = collect_wave_samples(
+            data,
+            channels,
+            start_frame,
+            end_frame_exclusive,
+            block_align,
+            bytes_per_channel,
+            |sample_bytes| decode_wave_sample(sample_bytes, fmt, false),
+        )?;
+        Tensor::new_with_dtype(out, shape, NumericDType::F64)
+            .map_err(|err| format!("decoded audio tensor shape is invalid: {err}"))?
+    };
+    Ok(DecodedAudio {
+        samples,
+        sample_rate: fmt.sample_rate as f64,
+    })
+}
+
+fn collect_wave_samples<T>(
+    data: &[u8],
+    channels: usize,
+    start_frame: usize,
+    end_frame_exclusive: usize,
+    block_align: usize,
+    bytes_per_channel: usize,
+    mut decode: impl FnMut(&[u8]) -> Result<T, String>,
+) -> Result<Vec<T>, String> {
+    let frame_count = end_frame_exclusive - start_frame;
     let sample_count = frame_count
         .checked_mul(channels)
         .ok_or_else(|| "decoded audio dimensions overflow platform limits".to_string())?;
     let mut out = Vec::with_capacity(sample_count);
-    let data = &bytes[parsed.data_offset..parsed.data_offset + parsed.data_len];
-    let native_dtype = if options.native {
-        native_wave_dtype(fmt)
-    } else {
-        NumericDType::F64
-    };
     for channel in 0..channels {
         for frame in start_frame..end_frame_exclusive {
             let sample_offset = frame
                 .checked_mul(block_align)
                 .and_then(|base| base.checked_add(channel * bytes_per_channel))
                 .ok_or_else(|| "sample offset overflows platform limits".to_string())?;
-            let sample_bytes = &data[sample_offset..sample_offset + bytes_per_channel];
-            let value = decode_wave_sample(sample_bytes, fmt, options.native)?;
-            out.push(value);
+            out.push(decode(
+                &data[sample_offset..sample_offset + bytes_per_channel],
+            )?);
         }
     }
-    let samples = Tensor::new_with_dtype(out, vec![frame_count, channels], native_dtype)
-        .map_err(|err| format!("decoded audio tensor shape is invalid: {err}"))?;
-    Ok(DecodedAudio {
-        samples,
-        sample_rate: fmt.sample_rate as f64,
-    })
+    Ok(out)
+}
+
+fn native_pcm_storage(
+    fmt: WaveFormat,
+    data: &[u8],
+    channels: usize,
+    start_frame: usize,
+    end_frame_exclusive: usize,
+    block_align: usize,
+    bytes_per_channel: usize,
+) -> Result<Option<IntegerStorage>, String> {
+    if fmt.effective_format_tag() != 0x0001 {
+        return Ok(None);
+    }
+    let storage = match fmt.effective_bits_per_sample() {
+        8 => IntegerStorage::U8(collect_wave_samples(
+            data,
+            channels,
+            start_frame,
+            end_frame_exclusive,
+            block_align,
+            bytes_per_channel,
+            |sample| Ok(sample[0]),
+        )?),
+        16 => IntegerStorage::I16(collect_wave_samples(
+            data,
+            channels,
+            start_frame,
+            end_frame_exclusive,
+            block_align,
+            bytes_per_channel,
+            |sample| Ok(i16::from_le_bytes([sample[0], sample[1]])),
+        )?),
+        // MATLAB returns 24-bit PCM as an int32 whose valid bits are left-aligned.
+        24 => IntegerStorage::I32(collect_wave_samples(
+            data,
+            channels,
+            start_frame,
+            end_frame_exclusive,
+            block_align,
+            bytes_per_channel,
+            |sample| Ok(sign_extend_24(sample) << 8),
+        )?),
+        32 => IntegerStorage::I32(collect_wave_samples(
+            data,
+            channels,
+            start_frame,
+            end_frame_exclusive,
+            block_align,
+            bytes_per_channel,
+            |sample| {
+                Ok(i32::from_le_bytes([
+                    sample[0], sample[1], sample[2], sample[3],
+                ]))
+            },
+        )?),
+        _ => return Ok(None),
+    };
+    Ok(Some(storage))
 }
 
 fn native_wave_dtype(fmt: WaveFormat) -> NumericDType {
@@ -1621,12 +1725,38 @@ mod tests {
         wav_with_payload(sample_rate, channels, 8, 1, samples_interleaved)
     }
 
+    fn pcm24_wav(sample_rate: u32, channels: u16, samples_interleaved: &[i32]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        for sample in samples_interleaved {
+            assert!((-8_388_608..=8_388_607).contains(sample));
+            let bytes = sample.to_le_bytes();
+            payload.extend_from_slice(&bytes[..3]);
+        }
+        wav_with_payload(sample_rate, channels, 24, 1, &payload)
+    }
+
+    fn pcm32_wav(sample_rate: u32, channels: u16, samples_interleaved: &[i32]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        for sample in samples_interleaved {
+            payload.extend_from_slice(&sample.to_le_bytes());
+        }
+        wav_with_payload(sample_rate, channels, 32, 1, &payload)
+    }
+
     fn float32_wav(sample_rate: u32, channels: u16, samples_interleaved: &[f32]) -> Vec<u8> {
         let mut payload = Vec::new();
         for sample in samples_interleaved {
             payload.extend_from_slice(&sample.to_le_bytes());
         }
         wav_with_payload(sample_rate, channels, 32, 3, &payload)
+    }
+
+    fn float64_wav(sample_rate: u32, channels: u16, samples_interleaved: &[f64]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        for sample in samples_interleaved {
+            payload.extend_from_slice(&sample.to_le_bytes());
+        }
+        wav_with_payload(sample_rate, channels, 64, 3, &payload)
     }
 
     fn rf64_pcm16_wav(sample_rate: u32, channels: u16, samples_interleaved: &[i16]) -> Vec<u8> {
@@ -1901,7 +2031,7 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn audioread_native_uint8_preserves_dtype_and_values() {
+    fn audioread_native_pcm8_uses_exact_uint8_storage() {
         let _lock = runmat_filesystem::provider_override_lock();
         let path = temp_path("wav");
         fs::write(&path, pcm8_wav(11_025, 1, &[0, 128, 255])).expect("write fixture");
@@ -1914,8 +2044,102 @@ mod tests {
             .expect("audioread"),
         );
 
-        assert_eq!(y.dtype, NumericDType::U8);
         assert_eq!(y.data, vec![0.0, 128.0, 255.0]);
+        assert_eq!(
+            y.integer_storage(),
+            Some(&IntegerStorage::U8(vec![0, 128, 255]))
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_pcm16_preserves_exact_storage_and_channel_order() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, pcm16_wav(44_100, 2, &[i16::MIN, i16::MAX, -2, 3]))
+            .expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::from("native")],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.shape, vec![2, 2]);
+        assert_eq!(
+            y.integer_storage(),
+            Some(&IntegerStorage::I16(vec![i16::MIN, -2, i16::MAX, 3]))
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_pcm16_preserves_exact_storage_for_sample_ranges() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, pcm16_wav(8_000, 1, &[i16::MIN, -4, 5, i16::MAX])).expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![
+                    Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).expect("range")),
+                    Value::from("native"),
+                ],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.shape, vec![2, 1]);
+        assert_eq!(y.integer_storage(), Some(&IntegerStorage::I16(vec![-4, 5])));
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_pcm24_left_aligns_into_exact_int32_storage() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, pcm24_wav(8_000, 1, &[-8_388_608, 0, 8_388_607])).expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::from("native")],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(
+            y.integer_storage(),
+            Some(&IntegerStorage::I32(vec![i32::MIN, 0, 2_147_483_392]))
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_pcm32_preserves_int32_extrema() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, pcm32_wav(8_000, 1, &[i32::MIN, 0, i32::MAX])).expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::from("native")],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(
+            y.integer_storage(),
+            Some(&IntegerStorage::I32(vec![i32::MIN, 0, i32::MAX]))
+        );
         let _ = fs::remove_file(path);
     }
 
@@ -1935,6 +2159,48 @@ mod tests {
         );
 
         assert_eq!(y.shape, vec![3, 1]);
+        assert_eq!(y.data, vec![-0.25, 0.0, 0.5]);
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_float32_wave_remains_single() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, float32_wav(48_000, 1, &[-0.25, 0.0, 0.5])).expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::from("native")],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.dtype, NumericDType::F32);
+        assert!(y.integer_storage().is_none());
+        assert_eq!(y.data, vec![-0.25, 0.0, 0.5]);
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_float64_wave_remains_double() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, float64_wav(48_000, 1, &[-0.25, 0.0, 0.5])).expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::from("native")],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.dtype, NumericDType::F64);
+        assert!(y.integer_storage().is_none());
         assert_eq!(y.data, vec![-0.25, 0.0, 0.5]);
         let _ = fs::remove_file(path);
     }
