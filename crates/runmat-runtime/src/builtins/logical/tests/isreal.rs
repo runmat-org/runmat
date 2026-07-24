@@ -140,7 +140,10 @@ fn isreal_host(value: Value) -> BuiltinResult<Value> {
         Value::SparseTensor(_) => true,
         Value::LogicalArray(_) => true,
         Value::CharArray(_) => true,
-        Value::Symbolic(_) => true,
+        // FIXME: Symbolic expressions should be inspected for complex markers (e.g., 'i', 'j')
+        // to accurately detect complex-valued symbolic expressions. Currently, we conservatively
+        // assume all symbolic values are real, which may misclassify expressions like sym('1+2i').
+        Value::Symbolic(_) | Value::SymbolicArray(_) => true,
         Value::Complex(_, _) => false,
         Value::ComplexTensor(_) => false,
         Value::String(_) => false,

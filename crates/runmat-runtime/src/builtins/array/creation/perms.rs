@@ -159,6 +159,7 @@ fn evaluate_host(value: Value) -> BuiltinResult<Value> {
         Value::Cell(cell) => perms_cells(cell),
         Value::SparseTensor(_)
         | Value::Symbolic(_)
+        | Value::SymbolicArray(_)
         | Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)

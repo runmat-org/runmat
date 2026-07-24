@@ -84,6 +84,35 @@ pub(crate) fn format_type_info(value: &Value) -> String {
                 format!("{}x{} matrix", m.rows(), m.cols())
             }
         }
+        Value::Symbolic(_) => "sym scalar".to_string(),
+        Value::SymbolicArray(array) => {
+            let is_scalar = array.shape.is_empty() || array.shape == [1] || array.shape == [1, 1];
+            if is_scalar {
+                "sym scalar".to_string()
+            } else if array.shape.len() > 2 {
+                let shape = array
+                    .shape
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("x");
+                format!("{shape} sym array")
+            } else {
+                let (rows, cols) = if array.shape.len() == 1 {
+                    (1, array.shape[0])
+                } else {
+                    (
+                        array.shape.first().copied().unwrap_or(1),
+                        array.shape.get(1).copied().unwrap_or(1),
+                    )
+                };
+                if rows == 1 || cols == 1 {
+                    format!("{}x{} sym vector", rows, cols)
+                } else {
+                    format!("{}x{} sym matrix", rows, cols)
+                }
+            }
+        }
         Value::Cell(cells) => {
             if cells.data.len() == 1 {
                 "1x1 cell".to_string()
@@ -305,5 +334,39 @@ pub(crate) fn workspace_entry(name: &str, value: &Value) -> WorkspaceEntry {
         preview,
         residency,
         preview_token: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{SymbolicArray, SymbolicExpr};
+
+    #[test]
+    fn symbolic_nd_array_is_not_labeled_scalar() {
+        let array = SymbolicArray::new(
+            vec![SymbolicExpr::variable("x"), SymbolicExpr::variable("y")],
+            vec![1, 1, 2],
+        )
+        .expect("symbolic array");
+
+        assert_eq!(
+            format_type_info(&Value::SymbolicArray(array)),
+            "1x1x2 sym array"
+        );
+    }
+
+    #[test]
+    fn symbolic_one_dimensional_array_is_row_vector() {
+        let array = SymbolicArray::new(
+            vec![SymbolicExpr::variable("x"), SymbolicExpr::variable("y")],
+            vec![2],
+        )
+        .expect("symbolic array");
+
+        assert_eq!(
+            format_type_info(&Value::SymbolicArray(array)),
+            "1x2 sym vector"
+        );
     }
 }

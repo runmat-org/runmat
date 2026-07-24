@@ -14,6 +14,14 @@ pub fn numeric_unary_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+pub fn symbolic_numeric_unary_type(args: &[Type], context: &ResolveContext) -> Type {
+    if matches!(args.first(), Some(Type::Symbolic)) {
+        Type::Symbolic
+    } else {
+        numeric_unary_type(args, context)
+    }
+}
+
 pub fn numeric_binary_type(args: &[Type], context: &ResolveContext) -> Type {
     let lhs = args.get(0);
     let rhs = args.get(1);
@@ -120,6 +128,12 @@ mod tests {
             &ctx,
         );
         assert_eq!(out, Type::Num);
+    }
+
+    #[test]
+    fn symbolic_numeric_unary_returns_symbolic() {
+        let out = symbolic_numeric_unary_type(&[Type::Symbolic], &ResolveContext::new(Vec::new()));
+        assert_eq!(out, Type::Symbolic);
     }
 
     #[test]

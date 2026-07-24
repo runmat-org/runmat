@@ -36,6 +36,10 @@ fn has_num(values: &[runmat_builtins::Value], expected: f64) -> bool {
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - expected).abs() < 1e-9))
 }
 
+fn numeric_workspace_value(values: &[runmat_builtins::Value], expected: f64) -> bool {
+    has_num(values, expected)
+}
+
 fn has_object_class(values: &[runmat_builtins::Value], class_name: &str) -> bool {
     values.iter().any(|v| match v {
         runmat_builtins::Value::Object(obj) => obj.class_name == class_name,
@@ -125,6 +129,82 @@ fn has_object_string_property(
         }
         _ => false,
     })
+}
+
+#[test]
+fn min_max_row_vector_after_linear_assignment_reduce_to_scalars_for_fprintf() {
+    execute_source(
+        r#"
+        a = single(zeros(1, 3));
+        a(1) = single(0.3);
+        a(2) = single(0.1);
+        a(3) = single(0.5);
+        mn = min(a);
+        mx = max(a);
+        mn_size = size(mn);
+        mx_size = size(mx);
+        fprintf('%.4f', mn);
+        fprintf('%.4f', mx);
+        "#,
+    );
+}
+
+#[test]
+fn input_parser_parses_varargin_name_value_pair() {
+    let vars = execute_source(
+        r#"
+        y = f('scale', 4);
+        function y = f(varargin)
+            p = inputParser;
+            addParameter(p, 'scale', 2);
+            parse(p, varargin{:});
+            y = p.Results.scale;
+        end
+        "#,
+    );
+    assert!(
+        numeric_workspace_value(&vars, 4.0),
+        "expected parsed scale override; vars={vars:?}"
+    );
+}
+
+#[test]
+fn input_parser_preserves_defaults_for_omitted_parameters() {
+    let vars = execute_source(
+        r#"
+        y = f('scale', 4);
+        function y = f(varargin)
+            p = inputParser;
+            addParameter(p, 'scale', 2);
+            addParameter(p, 'offset', 10);
+            parse(p, varargin{:});
+            y = p.Results.scale + p.Results.offset;
+        end
+        "#,
+    );
+    assert!(
+        numeric_workspace_value(&vars, 14.0),
+        "expected override plus default; vars={vars:?}"
+    );
+}
+
+#[test]
+fn input_parser_accepts_string_scalar_parameter_names() {
+    let vars = execute_source(
+        r#"
+        y = f("scale", 4);
+        function y = f(varargin)
+            p = inputParser;
+            addParameter(p, "scale", 2);
+            parse(p, varargin{:});
+            y = p.Results.scale;
+        end
+        "#,
+    );
+    assert!(
+        numeric_workspace_value(&vars, 4.0),
+        "expected parsed string scalar name; vars={vars:?}"
+    );
 }
 
 fn assert_import_ambiguity_error(err: &runmat_runtime::RuntimeError) {

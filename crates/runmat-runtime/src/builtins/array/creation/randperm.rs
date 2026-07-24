@@ -559,9 +559,11 @@ pub(crate) mod tests {
         block_on(super::randperm_builtin(args))
     }
 
-    fn reset_rng_clean() {
+    fn reset_rng_clean() -> impl Drop {
+        let guard = random::test_guard();
         runmat_accelerate_api::clear_provider();
         random::reset_rng();
+        guard
     }
 
     fn expected_randperm(n: usize, k: usize) -> Vec<f64> {
@@ -598,7 +600,7 @@ pub(crate) mod tests {
     #[test]
     fn randperm_full_permutation_matches_expected_sequence() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let args = vec![Value::from(5)];
         let result = randperm_builtin(args).expect("randperm");
         let gathered = test_support::gather(result).expect("gather");
@@ -621,7 +623,7 @@ pub(crate) mod tests {
     #[test]
     fn randperm_partial_selection_is_unique_and_sorted() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let args = vec![Value::from(10), Value::from(4)];
         let result = randperm_builtin(args).expect("randperm");
         let gathered = test_support::gather(result).expect("gather");
@@ -676,7 +678,7 @@ pub(crate) mod tests {
     #[test]
     fn randperm_accepts_double_keyword() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let args = vec![Value::from(5), Value::from("double")];
         let result = randperm_builtin(args).expect("randperm");
         let gathered = test_support::gather(result).expect("gather");
@@ -689,7 +691,7 @@ pub(crate) mod tests {
     #[test]
     fn randperm_like_tensor_matches_host_output() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let proto_tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
         let args = vec![
             Value::from(4),

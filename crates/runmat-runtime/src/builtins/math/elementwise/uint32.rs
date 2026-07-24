@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, IntegerStorage, Tensor, Value,
+    CharArray, IntValue, IntegerStorage, SymbolicArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -145,6 +145,7 @@ async fn uint32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             .numeric_constant_value()
             .map(|value| Value::Int(IntValue::U32(cast_scalar_to_uint32(value))))
             .ok_or_else(|| conversion_error("sym")),
+        Value::SymbolicArray(array) => uint32_from_symbolic_array(array),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),
@@ -159,6 +160,22 @@ async fn uint32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::MException(_) => Err(conversion_error("MException")),
         Value::OutputList(_) => Err(conversion_error("OutputList")),
     }
+}
+
+fn uint32_from_symbolic_array(array: SymbolicArray) -> BuiltinResult<Value> {
+    let values = array
+        .data
+        .into_iter()
+        .map(|expression| {
+            expression
+                .numeric_constant_value()
+                .map(cast_scalar_to_uint32)
+                .ok_or_else(|| conversion_error("sym"))
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    Tensor::new_integer(IntegerStorage::U32(values), array.shape)
+        .map(Value::Tensor)
+        .map_err(|error| error_with_detail(&ERROR_INTERNAL, error))
 }
 
 fn from_char_array(chars: CharArray) -> BuiltinResult<Value> {

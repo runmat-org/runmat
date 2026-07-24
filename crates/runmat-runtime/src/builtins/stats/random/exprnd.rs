@@ -240,15 +240,17 @@ mod tests {
     use crate::builtins::common::random;
     use futures::executor::block_on;
 
-    fn reset() {
+    fn reset() -> impl Drop {
+        let guard = random::test_guard();
         runmat_accelerate_api::clear_provider();
         random::reset_rng();
+        guard
     }
 
     #[test]
     fn exprnd_scalar_deterministic() {
         let _guard = random::test_guard();
-        reset();
+        let _guard = reset();
         let result = block_on(exprnd_builtin(vec![Value::Num(2.0)])).expect("exprnd");
         let expected = random::expected_exponential_sequence(2.0, 1)[0];
         match result {
@@ -263,7 +265,7 @@ mod tests {
     #[test]
     fn exprnd_matrix_dims() {
         let _guard = random::test_guard();
-        reset();
+        let _guard = reset();
         let args = vec![Value::Num(1.0), Value::Num(3.0), Value::Num(4.0)];
         let result = block_on(exprnd_builtin(args)).expect("exprnd");
         match result {
@@ -278,7 +280,7 @@ mod tests {
     #[test]
     fn exprnd_size_vec() {
         let _guard = random::test_guard();
-        reset();
+        let _guard = reset();
         let size = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
         let args = vec![Value::Num(1.0), Value::Tensor(size)];
         let result = block_on(exprnd_builtin(args)).expect("exprnd");
@@ -311,7 +313,7 @@ mod tests {
     #[test]
     fn exprnd_distribution_mean() {
         let _guard = random::test_guard();
-        reset();
+        let _guard = reset();
         let mu = 3.0_f64;
         let n = 50_000_usize;
         let args = vec![Value::Num(mu), Value::Num(n as f64), Value::Num(1.0)];

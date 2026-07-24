@@ -235,6 +235,7 @@ async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::ClassRef(_)
         | Value::MException(_)
         | Value::Symbolic(_)
+        | Value::SymbolicArray(_)
         | Value::OutputList(_) => Err(fliplr_error_descriptor(&FLIPLR_ERROR_UNSUPPORTED_INPUT)),
     }
 }

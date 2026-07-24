@@ -813,6 +813,7 @@ fn type_name(value: &Value) -> &'static str {
         Value::StringArray(_) => "string array",
         Value::CharArray(_) => "char array",
         Value::Symbolic(_) => "sym",
+        Value::SymbolicArray(_) => "symbolic array",
         Value::Tensor(_) => "numeric array",
         Value::SparseTensor(_) => "sparse array",
         Value::ComplexTensor(_) => "complex array",

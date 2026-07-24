@@ -650,6 +650,7 @@ fn describe_value_kind(value: &Value) -> String {
         Value::LogicalArray(_) => "logical array".to_string(),
         Value::String(_) => "string scalar".to_string(),
         Value::Symbolic(_) => "symbolic scalar".to_string(),
+        Value::SymbolicArray(_) => "symbolic array".to_string(),
         Value::StringArray(_) => "string array".to_string(),
         Value::CharArray(_) => "char array".to_string(),
         Value::Tensor(_) => "numeric tensor".to_string(),

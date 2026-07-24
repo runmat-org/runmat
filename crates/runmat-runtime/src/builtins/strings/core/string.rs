@@ -533,6 +533,14 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
             values: vec![Value::String(expr.to_string())],
             shape: vec![1, 1],
         }),
+        Value::SymbolicArray(array) => Ok(ArgumentData {
+            values: array
+                .data
+                .into_iter()
+                .map(|expr| Value::String(expr.to_string()))
+                .collect(),
+            shape: array.shape,
+        }),
         Value::Num(n) => Ok(ArgumentData {
             values: vec![Value::Num(n)],
             shape: vec![1, 1],
@@ -689,6 +697,11 @@ async fn convert_to_string_array(
         Value::StringArray(sa) => Ok(sa),
         Value::CharArray(ca) => char_array_to_string_array(ca, encoding),
         Value::Symbolic(expr) => string_scalar(expr.to_string()),
+        Value::SymbolicArray(array) => StringArray::new(
+            array.data.into_iter().map(|expr| expr.to_string()).collect(),
+            array.shape,
+        )
+        .map_err(|e| string_flow(format!("string: {e}"))),
         Value::Tensor(tensor) => tensor_to_string_array(tensor),
         Value::SparseTensor(sparse) => {
             ensure_sparse_dense_conversion(&sparse, "dense string array")?;

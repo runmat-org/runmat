@@ -6842,7 +6842,7 @@ impl AccelProvider for InProcessProvider {
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out = if dim <= 1 {
+            let out = if dim == 0 {
                 let mut v = vec![1.0f64; cols];
                 for c in 0..cols {
                     let mut prod = 1.0;
@@ -6867,7 +6867,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            let shape = if dim <= 1 {
+            let shape = if dim == 0 {
                 vec![1, cols]
             } else {
                 vec![rows, 1]
@@ -6920,7 +6920,7 @@ impl AccelProvider for InProcessProvider {
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out = if dim <= 1 {
+            let out = if dim == 0 {
                 let mut v = vec![0.0f64; cols];
                 for c in 0..cols {
                     let mut s = 0.0;
@@ -6944,7 +6944,7 @@ impl AccelProvider for InProcessProvider {
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, out);
-            let shape = if dim <= 1 {
+            let shape = if dim == 0 {
                 vec![1, cols]
             } else {
                 vec![rows, 1]
@@ -7208,7 +7208,7 @@ impl AccelProvider for InProcessProvider {
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
             let mut scratch = Vec::<f64>::with_capacity(rows.max(cols));
-            let out = if dim <= 1 {
+            let out = if dim == 0 {
                 let mut v = vec![f64::NAN; cols];
                 for c in 0..cols {
                     scratch.clear();
@@ -7254,7 +7254,7 @@ impl AccelProvider for InProcessProvider {
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, out);
-            let shape = if dim <= 1 {
+            let shape = if dim == 0 {
                 vec![1, cols]
             } else {
                 vec![rows, 1]
@@ -7313,7 +7313,7 @@ impl AccelProvider for InProcessProvider {
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let (vals, inds, vshape) = if dim <= 1 {
+            let (vals, inds, vshape) = if dim == 0 {
                 let mut m: Vec<f64> = vec![f64::INFINITY; cols];
                 let mut idx: Vec<f64> = vec![1.0; cols];
                 for c in 0..cols {
@@ -7399,7 +7399,7 @@ impl AccelProvider for InProcessProvider {
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let (vals, inds, vshape) = if dim <= 1 {
+            let (vals, inds, vshape) = if dim == 0 {
                 let mut m: Vec<f64> = vec![f64::NEG_INFINITY; cols];
                 let mut idx: Vec<f64> = vec![1.0; cols];
                 for c in 0..cols {
@@ -8897,6 +8897,61 @@ mod tests {
             .expect_err("invalid covariance");
 
         assert!(err.to_string().contains("symmetric"));
+    }
+
+    #[test]
+    fn reduce_dim1_reduces_row_vector_to_scalar() {
+        let provider = InProcessProvider::new();
+        let data = [3.0, 1.0, 5.0];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &data,
+                shape: &[1, 3],
+            })
+            .expect("upload");
+
+        let min_result =
+            futures::executor::block_on(provider.reduce_min_dim(&handle, 1)).expect("min dim1");
+        let min_values =
+            futures::executor::block_on(provider.download(&min_result.values)).expect("min values");
+        let min_indices = futures::executor::block_on(provider.download(&min_result.indices))
+            .expect("min indices");
+        assert_eq!(min_values.shape, vec![1, 1]);
+        assert_eq!(min_values.data, vec![1.0]);
+        assert_eq!(min_indices.shape, vec![1, 1]);
+        assert_eq!(min_indices.data, vec![2.0]);
+
+        let max_result =
+            futures::executor::block_on(provider.reduce_max_dim(&handle, 1)).expect("max dim1");
+        let max_values =
+            futures::executor::block_on(provider.download(&max_result.values)).expect("max values");
+        let max_indices = futures::executor::block_on(provider.download(&max_result.indices))
+            .expect("max indices");
+        assert_eq!(max_values.shape, vec![1, 1]);
+        assert_eq!(max_values.data, vec![5.0]);
+        assert_eq!(max_indices.shape, vec![1, 1]);
+        assert_eq!(max_indices.data, vec![3.0]);
+
+        let prod_result =
+            futures::executor::block_on(provider.reduce_prod_dim(&handle, 1)).expect("prod dim1");
+        let prod_values =
+            futures::executor::block_on(provider.download(&prod_result)).expect("prod values");
+        assert_eq!(prod_values.shape, vec![1, 1]);
+        assert_eq!(prod_values.data, vec![15.0]);
+
+        let mean_result =
+            futures::executor::block_on(provider.reduce_mean_dim(&handle, 1)).expect("mean dim1");
+        let mean_values =
+            futures::executor::block_on(provider.download(&mean_result)).expect("mean values");
+        assert_eq!(mean_values.shape, vec![1, 1]);
+        assert_eq!(mean_values.data, vec![3.0]);
+
+        let median_result = futures::executor::block_on(provider.reduce_median_dim(&handle, 1))
+            .expect("median dim1");
+        let median_values =
+            futures::executor::block_on(provider.download(&median_result)).expect("median values");
+        assert_eq!(median_values.shape, vec![1, 1]);
+        assert_eq!(median_values.data, vec![3.0]);
     }
 
     #[test]

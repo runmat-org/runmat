@@ -862,9 +862,11 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::LogicalArray;
 
-    fn reset_rng_clean() {
+    fn reset_rng_clean() -> impl Drop {
+        let guard = random::test_guard();
         runmat_accelerate_api::clear_provider();
         random::reset_rng();
+        guard
     }
 
     fn expected_sequence(bounds: &Bounds, count: usize) -> Vec<i64> {
@@ -886,7 +888,7 @@ pub(crate) mod tests {
     #[test]
     fn randi_default_scalar() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let result = block_on(randi_builtin(vec![Value::Num(6.0)])).expect("randi");
         let expected = expected_sequence(&Bounds::new(1, 6).unwrap(), 1)[0] as f64;
         match result {
@@ -921,7 +923,7 @@ pub(crate) mod tests {
     #[test]
     fn randi_range_with_dims() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let bounds = Tensor::new(vec![3.0, 8.0], vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(bounds), Value::Num(2.0), Value::Num(3.0)];
         let result = block_on(randi_builtin(args)).expect("randi");
@@ -941,7 +943,7 @@ pub(crate) mod tests {
     #[test]
     fn randi_like_tensor() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let proto = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
         let args = vec![Value::Num(5.0), Value::from("like"), Value::Tensor(proto)];
         let result = block_on(randi_builtin(args)).expect("randi");
@@ -960,7 +962,7 @@ pub(crate) mod tests {
     #[test]
     fn randi_logical_output() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let bounds = Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap();
         let args = vec![
             Value::Tensor(bounds),
@@ -995,7 +997,7 @@ pub(crate) mod tests {
     #[test]
     fn randi_like_logical_prototype() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let proto = LogicalArray::zeros(vec![2, 3]);
         let bounds = Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap();
         let args = vec![

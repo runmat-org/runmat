@@ -252,7 +252,9 @@ async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
             Err(fftshift_error(&FFTSHIFT_ERROR_INVALID_INPUT))
         }
-        Value::Symbolic(_) => Err(fftshift_error(&FFTSHIFT_ERROR_INVALID_INPUT)),
+        Value::Symbolic(_) | Value::SymbolicArray(_) => {
+            Err(fftshift_error(&FFTSHIFT_ERROR_INVALID_INPUT))
+        }
         Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)

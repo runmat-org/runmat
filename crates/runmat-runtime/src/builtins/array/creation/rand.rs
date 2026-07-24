@@ -661,16 +661,18 @@ pub(crate) mod tests {
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
 
-    fn reset_rng_clean() {
+    fn reset_rng_clean() -> impl Drop {
+        let guard = random::test_guard();
         runmat_accelerate_api::clear_provider();
         random::reset_rng();
+        guard
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_default_scalar() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let result = block_on(rand_builtin(Vec::new())).expect("rand");
         let expected = random::expected_uniform_sequence(1)[0];
         match result {
@@ -701,7 +703,7 @@ pub(crate) mod tests {
     #[test]
     fn rand_square_from_single_dimension() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let args = vec![Value::Num(3.0)];
         let result = block_on(rand_builtin(args)).expect("rand");
         match result {
@@ -721,7 +723,7 @@ pub(crate) mod tests {
     #[test]
     fn rand_legacy_seed_string_resets_sequence_and_queries_seed() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let seed_result = block_on(rand_builtin(vec![Value::from("seed"), Value::Num(2026.0)]))
             .expect("rand seed");
         assert!(matches!(seed_result, Value::Tensor(t) if t.shape == vec![0, 0]));
@@ -764,7 +766,7 @@ pub(crate) mod tests {
     #[test]
     fn rand_legacy_seed_literal_restarts_sequence() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         block_on(rand_builtin(vec![Value::from("seed"), Value::Num(2026.0)])).expect("rand seed");
         let first = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(4.0)])).expect("rand");
         block_on(rand_builtin(vec![Value::from("seed"), Value::Num(2026.0)]))
@@ -784,7 +786,7 @@ pub(crate) mod tests {
     #[test]
     fn rand_legacy_seed_char_array_resets_sequence() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let seed_keyword = Value::CharArray(runmat_builtins::CharArray::new_row("seed"));
         block_on(rand_builtin(vec![seed_keyword.clone(), Value::Num(17.0)]))
             .expect("rand char seed");
@@ -804,7 +806,7 @@ pub(crate) mod tests {
     #[test]
     fn rand_legacy_seed_rejects_invalid_seed_values() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let err = block_on(rand_builtin(vec![Value::from("seed"), Value::Num(-1.0)]))
             .expect_err("negative seed");
         assert!(err.message().contains("non-negative"));
@@ -829,7 +831,7 @@ pub(crate) mod tests {
     #[test]
     fn rand_like_tensor_infers_shape() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         let result = block_on(rand_builtin(args)).expect("rand");
@@ -849,7 +851,7 @@ pub(crate) mod tests {
     #[test]
     fn rand_single_matrix_has_f32_dtype() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("single")];
         let result = block_on(rand_builtin(args)).expect("rand single");
         match result {
@@ -875,7 +877,7 @@ pub(crate) mod tests {
     #[test]
     fn rand_like_complex_produces_complex_tensor() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let args = vec![
             Value::Num(2.0),
             Value::Num(2.0),
@@ -900,7 +902,7 @@ pub(crate) mod tests {
     #[test]
     fn rand_gpuarray_keyword_produces_valid_output() {
         let _guard = random::test_guard();
-        reset_rng_clean();
+        let _guard = reset_rng_clean();
         let args = vec![Value::Num(3.0), Value::Num(4.0), Value::from("gpuArray")];
         let result = block_on(rand_builtin(args)).expect("rand gpuArray");
         match result {

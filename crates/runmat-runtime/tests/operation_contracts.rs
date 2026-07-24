@@ -2198,6 +2198,10 @@ fn analysis_run_nonlinear_prep_reference_errors_are_typed() {
 
 #[test]
 fn analysis_run_nonlinear_stale_prep_reference_is_typed() {
+    // Study execution and this test share the process-wide prep artifact store.
+    // Hold the same lock used by study workflow tests so resetting the store
+    // cannot invalidate an in-flight study's freshly prepared artifact.
+    let _study_artifact_env_guard = study_artifact_env_guard();
     runmat_runtime::geometry::reset_prep_artifact_store_for_tests();
     let _prep_latest_guard = EnvVarRestoreGuard {
         key: "RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION",

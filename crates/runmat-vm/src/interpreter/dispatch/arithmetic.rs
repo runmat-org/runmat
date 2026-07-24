@@ -202,7 +202,13 @@ pub async fn dispatch_arithmetic(
                 call_operator_method,
                 call_right_operator_method_ordered,
                 |a, b| async move {
-                    if matches!((&a, &b), (Value::Symbolic(_), _) | (_, Value::Symbolic(_))) {
+                    if matches!(
+                        (&a, &b),
+                        (Value::Symbolic(_), _)
+                            | (_, Value::Symbolic(_))
+                            | (Value::SymbolicArray(_), _)
+                            | (_, Value::SymbolicArray(_))
+                    ) {
                         let args = [a, b];
                         return runmat_runtime::call_builtin_async("power", &args).await;
                     }

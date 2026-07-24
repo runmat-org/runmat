@@ -1,6 +1,6 @@
 //! Shared exact host-side conversion support for MATLAB integer cast builtins.
 
-use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+use runmat_builtins::{IntValue, IntegerStorage, SymbolicArray, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, tensor};
 
@@ -214,6 +214,7 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
             .numeric_constant_value()
             .map(|value| Value::Int(target.cast_scalar(value)))
             .ok_or_else(|| CastError::Unsupported("sym".to_string())),
+        Value::SymbolicArray(array) => cast_symbolic_array(target, array),
         Value::Cell(_) => Err(CastError::Unsupported("cell".to_string())),
         Value::Struct(_) => Err(CastError::Unsupported("struct".to_string())),
         Value::Object(object) => Err(CastError::Unsupported(object.class_name)),
@@ -228,6 +229,22 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
         Value::MException(_) => Err(CastError::Unsupported("MException".to_string())),
         Value::OutputList(_) => Err(CastError::Unsupported("OutputList".to_string())),
     }
+}
+
+fn cast_symbolic_array(target: IntegerTarget, array: SymbolicArray) -> Result<Value, CastError> {
+    let values = array
+        .data
+        .into_iter()
+        .map(|expression| {
+            expression
+                .numeric_constant_value()
+                .map(|value| target.cast_scalar(value))
+                .ok_or_else(|| CastError::Unsupported("sym".to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Tensor::new_integer(target.storage(values), array.shape)
+        .map(Value::Tensor)
+        .map_err(CastError::Internal)
 }
 
 fn cast_tensor_value(target: IntegerTarget, tensor: Tensor) -> Result<Value, CastError> {
@@ -291,6 +308,7 @@ pub(crate) fn integer_values(storage: IntegerStorage) -> Vec<IntValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::SymbolicExpr;
 
     #[test]
     fn uint64_to_int64_array_saturates_without_f64_rounding() {
@@ -318,5 +336,43 @@ mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![0, i64::MAX as u64]))
         );
+    }
+
+    #[test]
+    fn symbolic_constant_array_cast_preserves_shape_and_exact_integer_storage() {
+        let source = SymbolicArray::new(
+            vec![SymbolicExpr::constant(-2.4), SymbolicExpr::constant(3.6)],
+            vec![1, 2],
+        )
+        .expect("symbolic array");
+
+        let output = match futures::executor::block_on(cast_value(
+            Value::SymbolicArray(source),
+            IntegerTarget::I16,
+        )) {
+            Ok(output) => output,
+            Err(_) => panic!("constant symbolic array should convert to int16"),
+        };
+        let Value::Tensor(tensor) = output else {
+            panic!("expected exact integer tensor");
+        };
+        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::I16(vec![-2, 4]))
+        );
+    }
+
+    #[test]
+    fn symbolic_variable_array_cast_reports_unsupported_symbolic_input() {
+        let source = SymbolicArray::new(vec![SymbolicExpr::variable("x")], vec![1, 1])
+            .expect("symbolic array");
+
+        let error = futures::executor::block_on(cast_value(
+            Value::SymbolicArray(source),
+            IntegerTarget::U8,
+        ))
+        .expect_err("symbolic variable must not be coerced to a number");
+        assert!(matches!(error, CastError::Unsupported(kind) if kind == "sym"));
     }
 }

@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, SparseTensor, StringArray, Tensor, Value,
+    CellArray, CharArray, LogicalArray, SparseTensor, StringArray, SymbolicArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -223,6 +223,7 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
         Value::CharArray(ca) => Ok(char_array_rows(ca)),
         Value::String(s) => Ok(vec![s.chars().collect()]),
         Value::Symbolic(expr) => Ok(vec![expr.to_string().chars().collect()]),
+        Value::SymbolicArray(array) => symbolic_array_rows(array),
         Value::StringArray(sa) => string_array_rows(sa),
         Value::Num(n) => Ok(vec![vec![number_to_char(*n)?]]),
         Value::Int(i) => {
@@ -294,6 +295,27 @@ fn string_array_rows(sa: &StringArray) -> BuiltinResult<Vec<Vec<char>>> {
         }
     }
     Ok(rows)
+}
+
+fn symbolic_array_rows(array: &SymbolicArray) -> BuiltinResult<Vec<Vec<char>>> {
+    ensure_two_dimensional(&array.shape, "char")?;
+    let (rows, cols) = infer_rows_cols(&array.shape, array.data.len());
+    if rows == 0 {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::with_capacity(rows);
+    for r in 0..rows {
+        let mut row = Vec::new();
+        for c in 0..cols {
+            if cols == 0 {
+                continue;
+            }
+            let idx = r + c * rows;
+            row.extend(array.data[idx].to_string().chars());
+        }
+        out.push(row);
+    }
+    Ok(out)
 }
 
 fn tensor_rows(t: &Tensor) -> BuiltinResult<Vec<Vec<char>>> {
@@ -452,7 +474,7 @@ fn infer_rows_cols(shape: &[usize], len: usize) -> (usize, usize) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, SymbolicArray, SymbolicExpr, Type};
 
     fn char_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::char_builtin(rest))
@@ -636,6 +658,79 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 4);
                 assert_eq!(ca.cols, 4);
                 assert_eq!(ca.data, "c0r0c0r1c1r0c1r1".chars().collect::<Vec<char>>());
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn char_symbolic_array_preserves_matrix_rows() {
+        let array = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("x"),
+                SymbolicExpr::variable("z"),
+                SymbolicExpr::variable("y"),
+                SymbolicExpr::variable("w"),
+            ],
+            vec![2, 2],
+        )
+        .expect("symbolic array");
+
+        let result = char_builtin(vec![Value::SymbolicArray(array)]).expect("char");
+
+        match result {
+            Value::CharArray(ca) => {
+                assert_eq!(ca.rows, 2);
+                assert_eq!(ca.cols, 2);
+                assert_eq!(ca.data, vec!['x', 'y', 'z', 'w']);
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn char_symbolic_array_pads_multi_character_rows() {
+        let array = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("x1"),
+                SymbolicExpr::variable("y"),
+                SymbolicExpr::variable("theta"),
+                SymbolicExpr::variable("z"),
+            ],
+            vec![2, 2],
+        )
+        .expect("symbolic array");
+
+        let result = char_builtin(vec![Value::SymbolicArray(array)]).expect("char");
+
+        match result {
+            Value::CharArray(ca) => {
+                assert_eq!(ca.rows, 2);
+                assert_eq!(ca.cols, 7);
+                assert_eq!(ca.data.iter().collect::<String>(), "x1thetayz     ");
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn char_symbolic_one_dimensional_array_is_row_vector() {
+        let array = SymbolicArray::new(
+            vec![SymbolicExpr::variable("x"), SymbolicExpr::variable("y")],
+            vec![2],
+        )
+        .expect("symbolic array");
+
+        let result = char_builtin(vec![Value::SymbolicArray(array)]).expect("char");
+
+        match result {
+            Value::CharArray(ca) => {
+                assert_eq!(ca.rows, 1);
+                assert_eq!(ca.cols, 2);
+                assert_eq!(ca.data, vec!['x', 'y']);
             }
             other => panic!("expected char array, got {other:?}"),
         }

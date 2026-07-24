@@ -208,6 +208,7 @@ pub fn is_scalarish_for_division(value: &Value) -> bool {
         | Value::Complex(_, _)
         | Value::Bool(_)
         | Value::Symbolic(_) => true,
+        Value::SymbolicArray(array) => is_scalar_shape(&array.shape),
         Value::LogicalArray(arr) => is_scalar_shape(&arr.shape),
         Value::Tensor(tensor) => is_scalar_shape(&tensor.shape),
         Value::ComplexTensor(tensor) => is_scalar_shape(&tensor.shape),

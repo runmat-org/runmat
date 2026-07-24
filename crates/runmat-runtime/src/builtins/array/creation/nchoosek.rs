@@ -330,6 +330,7 @@ fn combinations_value(value: Value, k: usize) -> BuiltinResult<Value> {
         | Value::Cell(_)
         | Value::SparseTensor(_)
         | Value::Symbolic(_)
+        | Value::SymbolicArray(_)
         | Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)

@@ -136,7 +136,7 @@ async fn full_builtin(value: Value) -> BuiltinResult<Value> {
         | Value::CharArray(_)
         | Value::GpuTensor(_)) => Ok(passthrough),
         Value::String(_) | Value::StringArray(_) => Err(invalid_input("string")),
-        Value::Symbolic(_) => Err(invalid_input("sym")),
+        Value::Symbolic(_) | Value::SymbolicArray(_) => Err(invalid_input("sym")),
         Value::Cell(_) => Err(invalid_input("cell")),
         Value::Struct(_) => Err(invalid_input("struct")),
         Value::Object(obj) => Err(invalid_input(&obj.class_name)),

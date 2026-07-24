@@ -196,15 +196,17 @@ mod tests {
     use crate::builtins::common::random;
     use futures::executor::block_on;
 
-    fn reset() {
+    fn reset() -> impl Drop {
+        let guard = random::test_guard();
         runmat_accelerate_api::clear_provider();
         random::reset_rng();
+        guard
     }
 
     #[test]
     fn trnd_scalar_is_deterministic_and_finite() {
         let _guard = random::test_guard();
-        reset();
+        let _guard = reset();
         let result = block_on(trnd_builtin(vec![Value::Num(10.0)])).expect("trnd");
         match result {
             Value::Num(value) => assert!(value.is_finite()),
@@ -215,7 +217,7 @@ mod tests {
     #[test]
     fn trnd_accepts_size_forms() {
         let _guard = random::test_guard();
-        reset();
+        let _guard = reset();
         let out = block_on(trnd_builtin(vec![
             Value::Num(5.0),
             Value::Num(3.0),
@@ -264,7 +266,7 @@ mod tests {
     #[test]
     fn trnd_distribution_has_heavier_tails_than_normal() {
         let _guard = random::test_guard();
-        reset();
+        let _guard = reset();
         let n = 20_000;
         let out = block_on(trnd_builtin(vec![
             Value::Num(3.0),

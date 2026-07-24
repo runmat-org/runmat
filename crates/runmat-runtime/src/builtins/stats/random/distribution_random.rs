@@ -408,15 +408,17 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
 
-    fn reset() {
+    fn reset() -> impl Drop {
+        let guard = random::test_guard();
         runmat_accelerate_api::clear_provider();
         random::reset_rng();
+        guard
     }
 
     #[test]
     fn gamrnd_accepts_broadcast_and_size_forms() {
         let _guard = random::test_guard();
-        reset();
+        let _guard = reset();
         let out = block_on(gamrnd::gamrnd_builtin(vec![
             Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap()),
             Value::Num(2.0),
@@ -446,7 +448,7 @@ mod tests {
     #[test]
     fn binornd_accepts_array_parameters_and_rejects_fractional_trials() {
         let _guard = random::test_guard();
-        reset();
+        let _guard = reset();
         let out = block_on(binornd::binornd_builtin(vec![
             Value::Tensor(Tensor::new(vec![5.0, 10.0], vec![1, 2]).unwrap()),
             Value::Num(0.5),
@@ -472,7 +474,7 @@ mod tests {
     #[test]
     fn binornd_large_trial_counts_use_bounded_sampler() {
         let _guard = random::test_guard();
-        reset();
+        let _guard = reset();
         let out = block_on(binornd::binornd_builtin(vec![
             Value::Num(1.0e12),
             Value::Num(0.5),
@@ -490,7 +492,7 @@ mod tests {
     #[test]
     fn nonscalar_parameters_must_match_explicit_size() {
         let _guard = random::test_guard();
-        reset();
+        let _guard = reset();
         let err = block_on(gamrnd::gamrnd_builtin(vec![
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
@@ -504,7 +506,7 @@ mod tests {
     #[test]
     fn wblrnd_accepts_size_and_positive_parameters() {
         let _guard = random::test_guard();
-        reset();
+        let _guard = reset();
         let out = block_on(wblrnd::wblrnd_builtin(vec![
             Value::Num(4.0),
             Value::Num(3.0),
