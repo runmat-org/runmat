@@ -2766,23 +2766,28 @@ pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector_prese
 }
 
 fn parse_positive_integer(value: &Value, fn_name: &str) -> BuiltinResult<usize> {
-    let n = match value {
-        Value::Num(n) => *n,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
-        other => {
-            return Err(text_analytics_error(
-                fn_name,
-                format!("{fn_name}: length must be a positive integer scalar, got {other:?}"),
-            ))
-        }
+    let parsed = match value {
+        Value::Num(value) => positive_platform_usize(*value),
+        Value::Int(value) => value.try_to_usize().filter(|value| *value > 0),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => positive_platform_usize(tensor.data[0]),
+        _ => None,
     };
-    if !n.is_finite() || n <= 0.0 || n.fract() != 0.0 {
-        return Err(text_analytics_error(
+    parsed.ok_or_else(|| {
+        text_analytics_error(
             fn_name,
-            format!("{fn_name}: length must be a positive integer, got {n}"),
-        ));
+            format!("{fn_name}: length must be a positive integer scalar, got {value:?}"),
+        )
+    })
+}
+
+fn positive_platform_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 {
+        return None;
     }
-    Ok(n as usize)
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
 }
 
 #[cfg(test)]
@@ -3622,5 +3627,20 @@ mod tests {
         let fractional =
             run_remove_short(docs, Value::Num(1.5)).expect_err("expected fractional rejection");
         assert!(fractional.to_string().contains("positive integer"));
+    }
+
+    #[test]
+    fn text_analytics_lengths_preserve_typed_integers_and_validate_f64_bounds() {
+        assert_eq!(
+            parse_positive_integer(&Value::Int(runmat_builtins::IntValue::U16(3)), "test").unwrap(),
+            3
+        );
+        for value in [
+            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(parse_positive_integer(&value, "test").is_err());
+        }
     }
 }

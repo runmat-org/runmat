@@ -2492,24 +2492,18 @@ fn int_value_to_f64(value: &runmat_builtins::IntValue) -> f64 {
 }
 
 fn parse_positive_integer(value: &Value, fn_name: &str) -> BuiltinResult<usize> {
-    let n = match value {
-        Value::Num(value) => *value,
-        Value::Int(value) => int_value_to_f64(value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
-        other => {
-            return Err(embedding_error(
-                fn_name,
-                format!("{fn_name}: expected positive integer scalar, got {other:?}"),
-            ));
-        }
+    let parsed = match value {
+        Value::Num(value) => positive_platform_usize(*value),
+        Value::Int(value) => value.try_to_usize().filter(|value| *value > 0),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => positive_platform_usize(tensor.data[0]),
+        _ => None,
     };
-    if !n.is_finite() || n < 1.0 || n.fract() != 0.0 {
-        return Err(embedding_error(
+    parsed.ok_or_else(|| {
+        embedding_error(
             fn_name,
-            format!("{fn_name}: expected positive integer scalar, got {n}"),
-        ));
-    }
-    Ok(n as usize)
+            format!("{fn_name}: expected positive integer scalar, got {value:?}"),
+        )
+    })
 }
 
 fn is_numeric_scalar(value: &Value) -> bool {
@@ -3388,5 +3382,20 @@ mod tests {
             err.to_string().contains("expected positive integer scalar"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn embedding_counts_preserve_typed_integers_and_validate_f64_bounds() {
+        assert_eq!(
+            parse_positive_integer(&Value::Int(runmat_builtins::IntValue::U16(3)), "test").unwrap(),
+            3
+        );
+        for value in [
+            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(parse_positive_integer(&value, "test").is_err());
+        }
     }
 }
