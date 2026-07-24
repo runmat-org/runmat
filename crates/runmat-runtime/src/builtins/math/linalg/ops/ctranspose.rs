@@ -573,6 +573,13 @@ fn ctranspose_order(rank: usize) -> Vec<usize> {
 fn ctranspose_tensor_matrix(tensor: &Tensor) -> BuiltinResult<Tensor> {
     let rows = tensor.rows();
     let cols = tensor.cols();
+    if let Some(storage) = tensor.integer_storage() {
+        return Tensor::new_integer(
+            transpose_integer_storage(storage.clone(), rows, cols),
+            vec![cols, rows],
+        )
+        .map_err(|e| internal_error(format!("{NAME}: {e}")));
+    }
     if tensor.data.is_empty() {
         return Tensor::new(Vec::new(), vec![cols, rows])
             .map_err(|e| internal_error(format!("{NAME}: {e}")));
@@ -660,6 +667,41 @@ pub(crate) mod tests {
             IntegerStorage::I64(vec![i64::MIN, 3, 5, 2, 4, i64::MAX])
         );
         assert_eq!(storage.imag, IntegerStorage::I64(vec![1, 3, 5, 2, 4, 6]));
+    }
+
+    #[test]
+    fn ctranspose_preserves_typed_real_integer_storage_exactly() {
+        let input = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, 2, 3, 4, 5, i64::MAX]),
+            vec![2, 3],
+        )
+        .expect("tensor");
+
+        let Value::Tensor(result) = call_ctranspose(Value::Tensor(input)).expect("ctranspose")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I64(vec![i64::MIN, 3, 5, 2, 4, i64::MAX]))
+        );
+    }
+
+    #[test]
+    fn ctranspose_preserves_empty_typed_real_integer_storage() {
+        let input =
+            Tensor::new_integer(IntegerStorage::U64(Vec::new()), vec![0, 3]).expect("tensor");
+
+        let Value::Tensor(result) = call_ctranspose(Value::Tensor(input)).expect("ctranspose")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(result.shape, vec![3, 0]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(Vec::new()))
+        );
     }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {
