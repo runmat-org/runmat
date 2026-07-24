@@ -85,7 +85,7 @@ fn apply_integer_remainder_scalar(
                 exact_integer_remainder(scalar, value, operation)
             }
         } else if integer.target.uses_extended_scalar_precision() {
-            extended_integer_remainder(value, scalar, integer_is_left, operation, builtin)?
+            extended_integer_remainder(value, scalar, integer_is_left, operation)?
         } else if integer_is_left {
             integer
                 .target
@@ -104,11 +104,13 @@ fn extended_integer_remainder(
     scalar: f64,
     integer_is_left: bool,
     operation: IntegerRemainderOp,
-    builtin: &str,
 ) -> Result<IntValue, String> {
     let Some(scalar) = Extended::from_f64(scalar) else {
-        return Err(format!(
-            "{builtin}: non-finite scalar double is not supported with 64-bit integers"
+        return Ok(nonfinite_integer_remainder(
+            integer,
+            scalar,
+            integer_is_left,
+            operation,
         ));
     };
     let integer_extended = extended_from_int_value(&integer);
@@ -135,6 +137,52 @@ fn extended_integer_remainder(
         remainder = dividend.subtract(&divisor.multiply(&extended_from_bigint(&quotient_integer)));
     }
     extended_to_integer_like(remainder, &integer)
+}
+
+fn nonfinite_integer_remainder(
+    integer: IntValue,
+    scalar: f64,
+    integer_is_left: bool,
+    operation: IntegerRemainderOp,
+) -> IntValue {
+    let target = IntegerTarget::from_int_value(&integer);
+    if scalar.is_nan() || !integer_is_left {
+        return target.cast_scalar(f64::NAN);
+    }
+
+    match operation {
+        IntegerRemainderOp::Rem => integer,
+        IntegerRemainderOp::Mod
+            if integer_is_zero(&integer)
+                || integer_is_negative(&integer) == scalar.is_sign_negative() =>
+        {
+            integer
+        }
+        IntegerRemainderOp::Mod => target.cast_scalar(scalar),
+    }
+}
+
+fn integer_is_zero(value: &IntValue) -> bool {
+    match value {
+        IntValue::I8(value) => *value == 0,
+        IntValue::I16(value) => *value == 0,
+        IntValue::I32(value) => *value == 0,
+        IntValue::I64(value) => *value == 0,
+        IntValue::U8(value) => *value == 0,
+        IntValue::U16(value) => *value == 0,
+        IntValue::U32(value) => *value == 0,
+        IntValue::U64(value) => *value == 0,
+    }
+}
+
+fn integer_is_negative(value: &IntValue) -> bool {
+    match value {
+        IntValue::I8(value) => *value < 0,
+        IntValue::I16(value) => *value < 0,
+        IntValue::I32(value) => *value < 0,
+        IntValue::I64(value) => *value < 0,
+        IntValue::U8(_) | IntValue::U16(_) | IntValue::U32(_) | IntValue::U64(_) => false,
+    }
 }
 
 fn extended_from_int_value(value: &IntValue) -> Extended {
@@ -1199,6 +1247,59 @@ mod tests {
         .expect("integer modulus")
         .expect("integer path");
         assert_eq!(mod_zero, Value::Int(IntValue::I8(7)));
+    }
+
+    #[test]
+    fn nonfinite_scalar_double_remainders_keep_64_bit_integer_paths() {
+        let rem_infinity = try_integer_remainder(
+            &Value::Int(IntValue::I64(i64::MAX)),
+            &Value::Num(f64::INFINITY),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(rem_infinity, Value::Int(IntValue::I64(i64::MAX)));
+
+        let mod_infinity = try_integer_remainder(
+            &Value::Int(IntValue::U64(u64::MAX)),
+            &Value::Num(f64::INFINITY),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(mod_infinity, Value::Int(IntValue::U64(u64::MAX)));
+
+        let opposite_sign_modulus = try_integer_remainder(
+            &Value::Int(IntValue::I64(-3)),
+            &Value::Num(f64::INFINITY),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(opposite_sign_modulus, Value::Int(IntValue::I64(i64::MAX)));
+
+        let nan_remainder = try_integer_remainder(
+            &Value::Int(IntValue::I64(3)),
+            &Value::Num(f64::NAN),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(nan_remainder, Value::Int(IntValue::I64(0)));
+
+        let reverse_infinity = try_integer_remainder(
+            &Value::Num(f64::INFINITY),
+            &Value::Int(IntValue::U64(3)),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(reverse_infinity, Value::Int(IntValue::U64(0)));
     }
 
     #[test]
