@@ -27,3 +27,22 @@ fn tensor_scalar_gt_mask_feeds_elementwise_multiply() {
             if shape == &vec![2, 2] && data == &vec![0.0, 30.0, 20.0, 0.0]
     )));
 }
+
+#[test]
+fn uint64_comparisons_do_not_round_through_double() {
+    let vars = execute_source(
+        r#"
+        a = uint64(9007199254740992) + uint64(1);
+        equal_rounded = a == 9007199254740992;
+        not_equal_rounded = a ~= 9007199254740992;
+        greater_than_rounded = a > 9007199254740992;
+        "#,
+    )
+    .expect("exact uint64 comparisons should execute");
+
+    assert!(vars.contains(&Value::Num(0.0)), "equality must be false");
+    assert!(
+        vars.contains(&Value::Num(1.0)),
+        "inequality and ordering must be true"
+    );
+}
