@@ -342,6 +342,35 @@ fn bitset_supports_explicit_set_clear_and_uint64_high_bits() {
 }
 
 #[test]
+fn bitset_sparse_scalar_forms_preserve_or_materialize_from_zero_semantics() {
+    let sparse =
+        runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 2.0])
+            .expect("sparse");
+    let Value::SparseTensor(cleared) = block_on(bitset_builtin(vec![
+        Value::SparseTensor(sparse.clone()),
+        Value::Num(1.0),
+        Value::Num(0.0),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("sparse clear") else {
+        panic!("clearing preserves sparse storage");
+    };
+    assert_eq!(cleared.get(0, 0), Some(2.0));
+    assert_eq!(cleared.get(1, 1), Some(2.0));
+
+    let Value::Tensor(set) = block_on(bitset_builtin(vec![
+        Value::SparseTensor(sparse),
+        Value::Num(1.0),
+        Value::Num(1.0),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("sparse set") else {
+        panic!("setting implicit zero materializes");
+    };
+    assert_eq!(set.data, vec![3.0, 1.0, 1.0, 3.0]);
+}
+
+#[test]
 fn bitset_broadcasts_input_positions_and_values() {
     let input = Tensor::new_integer(IntegerStorage::U16(vec![0, 0]), vec![1, 2]).expect("input");
     let positions = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("positions");

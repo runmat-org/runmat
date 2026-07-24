@@ -690,6 +690,9 @@ async fn sparse_bitget(
 )]
 async fn bitset_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let (value, bit, value_to_set, assumed) = bitset_args(args)?;
+    if let Value::SparseTensor(sparse) = value {
+        return sparse_bitset(sparse, bit, value_to_set, assumed).await;
+    }
     let input = bit_buffer_from(BITSET_NAME, value, assumed).await?;
     let positions = shift_buffer_from(bit).await?;
     let values = match value_to_set {
@@ -734,6 +737,56 @@ async fn bitset_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         input.output_class,
         BITSET_NAME,
     )
+}
+
+async fn sparse_bitset(
+    sparse: runmat_builtins::SparseTensor,
+    bit: Value,
+    value_to_set: Option<Value>,
+    assumed: Option<IntegerClass>,
+) -> BuiltinResult<Value> {
+    if sparse.integer_storage().is_some() {
+        return Err(error_with_detail(
+            BITSET_NAME,
+            &ERROR_INVALID_INPUT,
+            "typed sparse integer storage is a RunMat extension and is not supported by bitset",
+        ));
+    }
+    let positions = shift_buffer_from(bit).await?;
+    let values = match value_to_set {
+        Some(value) => bit_value_buffer_from(value).await?,
+        None => BitValueBuffer {
+            data: vec![true],
+            shape: vec![1, 1],
+        },
+    };
+    if positions.data.len() != 1 || values.data.len() != 1 {
+        return Err(error_with_detail(
+            BITSET_NAME,
+            &ERROR_INVALID_INPUT,
+            "sparse bitset currently requires scalar bit and V inputs",
+        ));
+    }
+    let class = assumed;
+    let width = class.map_or(64, IntegerClass::bit_width);
+    let position = positions.data[0];
+    if !(1..=i128::from(width)).contains(&position) {
+        return Err(error_with_detail(
+            BITSET_NAME,
+            &ERROR_INVALID_INPUT,
+            format!("bit position {position} must be between 1 and {width}"),
+        ));
+    }
+    let mask = 1_u64 << (position as u32 - 1);
+    let set = values.data[0];
+    map_sparse_real_values(&sparse, BITSET_NAME, |value| {
+        let bits = double_to_bits(BITSET_NAME, value, class)?;
+        let result = if set { bits | mask } else { bits & !mask };
+        Ok(match class {
+            Some(class) => int_value_to_i128(&class.value_from_bits(result)) as f64,
+            None => result as f64,
+        })
+    })
 }
 
 #[runtime_builtin(
