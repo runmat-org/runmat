@@ -14,6 +14,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BITAND_NAME: &str = "bitand";
 const BITCMP_NAME: &str = "bitcmp";
+const BITGET_NAME: &str = "bitget";
 const BITOR_NAME: &str = "bitor";
 const BITXOR_NAME: &str = "bitxor";
 const BITSHIFT_NAME: &str = "bitshift";
@@ -59,6 +60,23 @@ const BITSHIFT_INPUTS: [BuiltinParamDescriptor; 2] = [
         arity: BuiltinParamArity::Required,
         default: None,
         description: "Shift count; positive shifts left and negative shifts right.",
+    },
+];
+
+const BITGET_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer-valued input.",
+    },
+    BuiltinParamDescriptor {
+        name: "bit",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based bit position.",
     },
 ];
 
@@ -146,6 +164,12 @@ const BITXOR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDesc
 const BITSHIFT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "C = bitshift(A, K)",
     inputs: &BITSHIFT_INPUTS,
+    outputs: &OUTPUT,
+}];
+
+const BITGET_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "B = bitget(A, bit)",
+    inputs: &BITGET_INPUTS,
     outputs: &OUTPUT,
 }];
 
@@ -238,6 +262,13 @@ pub const BITSHIFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+pub const BITGET_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &BITGET_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
 pub const IDIVIDE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &IDIVIDE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -283,6 +314,36 @@ async fn bitcmp_builtin(value: Value) -> BuiltinResult<Value> {
         input.class,
         BITCMP_NAME,
     )
+}
+
+#[runtime_builtin(
+    name = "bitget",
+    category = "logical/bit",
+    summary = "Get one-based bit positions from integer-valued scalars and arrays.",
+    keywords = "bitget,bitwise,bit,integer,uint32",
+    accel = "gather",
+    descriptor(crate::builtins::logical::bit::integer::BITGET_DESCRIPTOR),
+    builtin_path = "crate::builtins::logical::bit::integer"
+)]
+async fn bitget_builtin(value: Value, bit: Value) -> BuiltinResult<Value> {
+    let input = bit_buffer_from(BITGET_NAME, value).await?;
+    let positions = shift_buffer_from(bit).await?;
+    let plan = BroadcastPlan::new(&input.shape, &positions.shape)
+        .map_err(|err| error_with_detail(BITGET_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    let width = input.class.map_or(64, IntegerClass::bit_width);
+    let mut data = Vec::with_capacity(plan.len());
+    for (_, input_index, bit_index) in plan.iter() {
+        let position = positions.data[bit_index];
+        if !(1..=i128::from(width)).contains(&position) {
+            return Err(error_with_detail(
+                BITGET_NAME,
+                &ERROR_INVALID_INPUT,
+                format!("bit position {position} must be between 1 and {width}"),
+            ));
+        }
+        data.push((input.data[input_index] >> (position as u32 - 1)) & 1);
+    }
+    value_from_bits(data, plan.output_shape().to_vec(), input.class, BITGET_NAME)
 }
 
 #[runtime_builtin(
@@ -1349,6 +1410,80 @@ mod tests {
             crate::dispatcher::call_builtin(BITCMP_NAME, &[Value::Int(IntValue::U8(0b0101))])
                 .expect("runtime dispatch"),
             Value::Int(IntValue::U8(0b1111_1010))
+        );
+    }
+
+    #[test]
+    fn bitget_preserves_all_native_integer_scalar_classes() {
+        let cases = [
+            (IntValue::I8(-1), IntValue::I8(1)),
+            (IntValue::I16(-1), IntValue::I16(1)),
+            (IntValue::I32(-1), IntValue::I32(1)),
+            (IntValue::I64(-1), IntValue::I64(1)),
+            (IntValue::U8(0b1010), IntValue::U8(0)),
+            (IntValue::U16(0b1010), IntValue::U16(0)),
+            (IntValue::U32(0b1010), IntValue::U32(0)),
+            (IntValue::U64(0b1010), IntValue::U64(0)),
+        ];
+        for (input, expected) in cases {
+            let actual =
+                block_on(bitget_builtin(Value::Int(input), Value::Num(1.0))).expect("bitget");
+            assert_eq!(actual, Value::Int(expected));
+        }
+    }
+
+    #[test]
+    fn bitget_broadcasts_positions_and_preserves_uint64_storage() {
+        let input =
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63]), vec![1, 1]).expect("input");
+        let positions = Tensor::new(vec![1.0, 63.0, 64.0], vec![1, 3]).expect("positions");
+        let Value::Tensor(output) = block_on(bitget_builtin(
+            Value::Tensor(input),
+            Value::Tensor(positions),
+        ))
+        .expect("bitget") else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![0, 0, 1]))
+        );
+    }
+
+    #[test]
+    fn bitget_handles_signed_bits_double_output_and_invalid_positions() {
+        assert_eq!(
+            block_on(bitget_builtin(
+                Value::Int(IntValue::I8(-29)),
+                Value::Num(8.0)
+            ))
+            .expect("signed bit"),
+            Value::Int(IntValue::I8(1))
+        );
+        assert_eq!(
+            block_on(bitget_builtin(Value::Num(8.0), Value::Num(4.0))).expect("double bit"),
+            Value::Num(1.0)
+        );
+        for position in [0.0, -1.0, 9.0] {
+            let error = block_on(bitget_builtin(
+                Value::Int(IntValue::U8(1)),
+                Value::Num(position),
+            ))
+            .expect_err("invalid bit position");
+            assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+        }
+    }
+
+    #[test]
+    fn bitget_is_registered_and_dispatches() {
+        assert!(runmat_builtins::builtin_function_by_name(BITGET_NAME).is_some());
+        assert_eq!(
+            crate::dispatcher::call_builtin(
+                BITGET_NAME,
+                &[Value::Int(IntValue::U8(0b1010)), Value::Num(2.0)],
+            )
+            .expect("runtime dispatch"),
+            Value::Int(IntValue::U8(1))
         );
     }
 
