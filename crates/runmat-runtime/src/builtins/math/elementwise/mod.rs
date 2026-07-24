@@ -37,6 +37,7 @@ pub(crate) mod rescale;
 pub(crate) mod sign;
 pub(crate) mod single;
 pub(crate) mod sparse;
+pub(crate) mod sparse_integer;
 pub(crate) mod sqrt;
 pub(crate) mod times;
 pub(crate) mod uint16;

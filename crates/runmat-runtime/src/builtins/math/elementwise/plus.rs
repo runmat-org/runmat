@@ -18,6 +18,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::elementwise::sparse::{try_sparse_binary, SparseBinaryOp};
+use crate::builtins::math::elementwise::sparse_integer::try_typed_sparse_integer_binary;
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -664,6 +665,11 @@ fn plus_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if let Some(result) = symbolic_binary(&lhs, &rhs, SymbolicBinaryOp::Add) {
         return Ok(result);
     }
+    if let Some(result) =
+        try_typed_sparse_integer_binary(&lhs, &rhs, SparseBinaryOp::Add, BUILTIN_NAME)
+    {
+        return result;
+    }
     if let Some(result) = try_sparse_binary(&lhs, &rhs, SparseBinaryOp::Add, BUILTIN_NAME) {
         return result;
     }
@@ -845,7 +851,8 @@ pub(crate) mod tests {
     }
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+        CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext,
+        SparseTensor, Tensor, Type,
     };
 
     const EPS: f64 = 1e-12;
@@ -922,6 +929,43 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn plus_typed_sparse_uint64_uses_exact_sparse_route() {
+        let lhs = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        )
+        .unwrap();
+        let rhs = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![1, 0],
+            IntegerStorage::U64(vec![7, 1]),
+        )
+        .unwrap();
+        let Value::SparseTensor(result) = plus_builtin(
+            Value::SparseTensor(lhs),
+            Value::SparseTensor(rhs),
+            Vec::new(),
+        )
+        .expect("plus") else {
+            panic!("expected typed sparse result");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                7,
+                1,
+                u64::MAX
+            ]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
