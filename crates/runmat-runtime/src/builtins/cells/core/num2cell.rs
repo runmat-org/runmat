@@ -5,8 +5,8 @@ use std::collections::HashSet;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, StringArray, Tensor,
-    Value,
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+    LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -110,20 +110,25 @@ async fn num2cell_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value
 
 fn num2cell_value(value: Value, grouped_dims: &[usize]) -> BuiltinResult<Value> {
     match value {
-        Value::Tensor(tensor) => num2cell_array(
-            tensor.shape.clone(),
-            grouped_dims,
-            |coords| Value::Num(tensor.data[linear_col_major(coords, &tensor.shape)]),
-            |shape, coords| {
-                let data = coords
-                    .iter()
-                    .map(|coord| tensor.data[linear_col_major(coord, &tensor.shape)])
-                    .collect();
-                Tensor::new(data, shape.to_vec())
-                    .map(Value::Tensor)
-                    .map_err(|err| error(&ERROR_INTERNAL, format!("num2cell: {err}")))
-            },
-        ),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage().cloned() {
+                return num2cell_typed_integer(tensor.shape, storage, grouped_dims);
+            }
+            num2cell_array(
+                tensor.shape.clone(),
+                grouped_dims,
+                |coords| Value::Num(tensor.data[linear_col_major(coords, &tensor.shape)]),
+                |shape, coords| {
+                    let data = coords
+                        .iter()
+                        .map(|coord| tensor.data[linear_col_major(coord, &tensor.shape)])
+                        .collect();
+                    Tensor::new(data, shape.to_vec())
+                        .map(Value::Tensor)
+                        .map_err(|err| error(&ERROR_INTERNAL, format!("num2cell: {err}")))
+                },
+            )
+        }
         Value::ComplexTensor(tensor) => {
             if let Some(storage) = tensor.integer_data {
                 return num2cell_typed_complex_integer(tensor.shape, storage, grouped_dims);
@@ -206,6 +211,44 @@ fn num2cell_value(value: Value, grouped_dims: &[usize]) -> BuiltinResult<Value> 
             "num2cell: grouped dimensions require an array input",
         )),
     }
+}
+
+fn num2cell_typed_integer(
+    shape: Vec<usize>,
+    storage: IntegerStorage,
+    grouped_dims: &[usize],
+) -> BuiltinResult<Value> {
+    num2cell_array(
+        shape.clone(),
+        grouped_dims,
+        |coords| {
+            let index = linear_col_major(coords, &shape);
+            typed_integer_cell_value(&storage, vec![1, 1], [index])
+                .expect("valid typed integer scalar cell")
+        },
+        |slice_shape, coords| {
+            let indices = coords.iter().map(|coord| linear_col_major(coord, &shape));
+            typed_integer_cell_value(&storage, slice_shape.to_vec(), indices)
+        },
+    )
+}
+
+fn typed_integer_cell_value(
+    storage: &IntegerStorage,
+    shape: Vec<usize>,
+    indices: impl IntoIterator<Item = usize>,
+) -> BuiltinResult<Value> {
+    let storage = storage
+        .from_exact_values_like(
+            indices
+                .into_iter()
+                .map(|index| storage.value_at(index).expect("index is in bounds"))
+                .collect(),
+        )
+        .map_err(|err| error(&ERROR_INTERNAL, format!("num2cell: {err}")))?;
+    Tensor::new_integer(storage, shape)
+        .map(crate::builtins::common::tensor::tensor_into_value)
+        .map_err(|err| error(&ERROR_INTERNAL, format!("num2cell: {err}")))
 }
 
 fn num2cell_typed_complex_integer(
@@ -356,10 +399,16 @@ fn parse_dims(value: &Value) -> BuiltinResult<Vec<usize>> {
     let mut dims = Vec::new();
     match value {
         Value::Num(value) => dims.push(parse_dim(*value)?),
-        Value::Int(value) => dims.push(parse_dim(value.to_f64())?),
+        Value::Int(value) => dims.push(parse_integer_dim(value)?),
         Value::Tensor(tensor) => {
-            for &value in &tensor.data {
-                dims.push(parse_dim(value)?);
+            if let Some(storage) = tensor.integer_storage() {
+                for value in storage.exact_values() {
+                    dims.push(parse_integer_dim(&value)?);
+                }
+            } else {
+                for &value in &tensor.data {
+                    dims.push(parse_dim(value)?);
+                }
             }
         }
         _ => {
@@ -375,13 +424,29 @@ fn parse_dims(value: &Value) -> BuiltinResult<Vec<usize>> {
 }
 
 fn parse_dim(value: f64) -> BuiltinResult<usize> {
-    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
+    if !value.is_finite()
+        || value < 1.0
+        || value.fract() != 0.0
+        || value >= (usize::MAX as f64) + 1.0
+    {
         return Err(error(
             &ERROR_INVALID_INPUT,
             "num2cell: dims must contain positive integers",
         ));
     }
     Ok(value as usize)
+}
+
+fn parse_integer_dim(value: &IntValue) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .filter(|value| *value >= 1)
+        .ok_or_else(|| {
+            error(
+                &ERROR_INVALID_INPUT,
+                "num2cell: dims must contain positive integers",
+            )
+        })
 }
 
 fn coords_row_major(mut linear: usize, shape: &[usize]) -> Vec<usize> {
@@ -491,5 +556,67 @@ mod tests {
         };
         assert_eq!(ignored_dim.shape, vec![1, 2]);
         assert_eq!(ignored_dim.get(0, 1).unwrap(), Value::Num(2.0));
+    }
+
+    #[test]
+    fn typed_integer_cells_preserve_scalars_and_grouped_blocks() {
+        let matrix = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX - 2, u64::MAX - 1, u64::MAX, 7]),
+            vec![2, 2],
+        )
+        .unwrap();
+        let scalars =
+            block_on(num2cell_builtin(Value::Tensor(matrix.clone()), Vec::new())).unwrap();
+        let Value::Cell(scalars) = scalars else {
+            panic!("expected scalar cells");
+        };
+        assert_eq!(
+            scalars.get(0, 1).unwrap(),
+            Value::Int(IntValue::U64(u64::MAX))
+        );
+
+        let grouped = block_on(num2cell_builtin(
+            Value::Tensor(matrix),
+            vec![Value::Int(IntValue::U8(1))],
+        ))
+        .unwrap();
+        let Value::Cell(grouped) = grouped else {
+            panic!("expected grouped cells");
+        };
+        let Value::Tensor(block) = &grouped.data[0] else {
+            panic!("expected typed integer block");
+        };
+        assert_eq!(
+            block.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX - 2, u64::MAX - 1]))
+        );
+    }
+
+    #[test]
+    fn negative_typed_dims_error() {
+        let input = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let dims = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
+        let err = block_on(num2cell_builtin(
+            Value::Tensor(input),
+            vec![Value::Tensor(dims)],
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("positive integers"),
+            "unexpected error message: {err}"
+        );
+
+        let input = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let err = block_on(num2cell_builtin(
+            Value::Tensor(input),
+            vec![Value::Num((usize::MAX as f64) + 1.0)],
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("positive integers"),
+            "unexpected error message: {err}"
+        );
     }
 }

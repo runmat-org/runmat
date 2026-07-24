@@ -102,6 +102,14 @@ fn build_structs(cells: CellArray, fields: Vec<String>, dim: usize) -> BuiltinRe
     }
     let rank = cells.shape.len().max(dim);
     let mut shape = cells.shape.clone();
+    shape
+        .try_reserve_exact(rank.saturating_sub(shape.len()))
+        .map_err(|_| {
+            error(
+                &ERROR_INVALID_INPUT,
+                "cell2struct: dim exceeds platform limits",
+            )
+        })?;
     shape.resize(rank, 1);
     let field_dim = dim - 1;
     if shape[field_dim] != fields.len() {
@@ -117,7 +125,15 @@ fn build_structs(cells: CellArray, fields: Vec<String>, dim: usize) -> BuiltinRe
 
     let mut out_shape = shape.clone();
     out_shape[field_dim] = 1;
-    if out_shape.iter().product::<usize>() == 1 {
+    let output_count = out_shape.iter().try_fold(1usize, |count, extent| {
+        count.checked_mul(*extent).ok_or_else(|| {
+            error(
+                &ERROR_INVALID_INPUT,
+                "cell2struct: output shape exceeds platform limits",
+            )
+        })
+    })?;
+    if output_count == 1 {
         let mut st = StructValue::new();
         for (field_idx, field) in fields.iter().enumerate() {
             let mut coords = vec![0usize; rank];
@@ -130,9 +146,14 @@ fn build_structs(cells: CellArray, fields: Vec<String>, dim: usize) -> BuiltinRe
         return Ok(Value::Struct(st));
     }
 
-    let count = out_shape.iter().product::<usize>();
-    let mut structs = Vec::with_capacity(count);
-    for out_linear in 0..count {
+    let mut structs = Vec::new();
+    structs.try_reserve_exact(output_count).map_err(|_| {
+        error(
+            &ERROR_INVALID_INPUT,
+            "cell2struct: output shape exceeds platform limits",
+        )
+    })?;
+    for out_linear in 0..output_count {
         let out_coords = coords_col_major(out_linear, &out_shape);
         let mut st = StructValue::new();
         for (field_idx, field) in fields.iter().enumerate() {
@@ -203,8 +224,18 @@ fn field_name_scalar(value: &Value) -> BuiltinResult<String> {
 
 fn parse_dim(value: &Value) -> BuiltinResult<usize> {
     let raw = match value {
-        Value::Num(value) if value.is_finite() => *value,
-        Value::Int(value) => value.to_f64(),
+        Value::Num(value) if value.is_finite() && *value < (usize::MAX as f64) + 1.0 => *value,
+        Value::Int(value) => {
+            return value
+                .try_to_usize()
+                .filter(|value| *value >= 1)
+                .ok_or_else(|| {
+                    error(
+                        &ERROR_INVALID_INPUT,
+                        "cell2struct: dim must be a positive integer",
+                    )
+                });
+        }
         _ => {
             return Err(error(
                 &ERROR_INVALID_INPUT,
@@ -292,6 +323,31 @@ mod tests {
         );
         assert!(
             matches!(&out.data[1], Value::Struct(st) if st.fields.get("name") == Some(&Value::from("Grace")))
+        );
+    }
+
+    #[test]
+    fn typed_integer_dimensions_are_exactly_validated() {
+        let cells = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
+        let fields = CellArray::new(vec![Value::from("id")], 1, 1).unwrap();
+        let out = cell2struct_builtin(
+            Value::Cell(cells.clone()),
+            Value::Cell(fields.clone()),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+        )
+        .unwrap();
+        assert!(matches!(out, Value::Struct(_)));
+
+        let err = cell2struct_builtin(
+            Value::Cell(cells),
+            Value::Cell(fields),
+            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("platform limits"),
+            "unexpected error message: {err}"
         );
     }
 }

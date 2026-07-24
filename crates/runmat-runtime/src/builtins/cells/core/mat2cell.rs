@@ -3,7 +3,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, StringArray, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+    StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -298,6 +299,9 @@ impl Mat2CellInput {
     fn extract(&self, start: &[usize], sizes: &[usize]) -> BuiltinResult<Value> {
         match &self.kind {
             Mat2CellKind::Tensor(t) => {
+                if let Some(storage) = t.integer_storage() {
+                    return extract_typed_integer_block(storage, &self.base_shape, start, sizes);
+                }
                 let data = copy_block(&t.data, &self.base_shape, start, sizes)?;
                 let shape = adjust_output_shape(sizes);
                 let tensor = Tensor::new(data, shape).map_err(|e| {
@@ -362,6 +366,28 @@ impl Mat2CellInput {
             Mat2CellKind::Char(ca) => slice_char_array(ca, start, sizes),
         }
     }
+}
+
+fn extract_typed_integer_block(
+    storage: &IntegerStorage,
+    base_shape: &[usize],
+    start: &[usize],
+    sizes: &[usize],
+) -> BuiltinResult<Value> {
+    let storage = storage
+        .from_exact_values_like(copy_block(
+            &storage.exact_values(),
+            base_shape,
+            start,
+            sizes,
+        )?)
+        .map_err(|e| {
+            mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+        })?;
+    let tensor = Tensor::new_integer(storage, adjust_output_shape(sizes)).map_err(|e| {
+        mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+    })?;
+    Ok(tensor::tensor_into_value(tensor))
 }
 
 fn extract_typed_complex_integer_block(
@@ -482,7 +508,7 @@ fn parse_partition_vector(
     dim_size: usize,
     dim_index: usize,
 ) -> BuiltinResult<Vec<usize>> {
-    let numbers = extract_numeric_vector(value).ok_or_else(|| {
+    let numbers = extract_partition_entries(value).ok_or_else(|| {
         mat2cell_error_with_message(
             format!(
                 "mat2cell: size arguments must be numeric for dimension {}",
@@ -507,39 +533,8 @@ fn parse_partition_vector(
 
     let mut total: usize = 0;
     let mut parts = Vec::with_capacity(numbers.len());
-    for (idx, n) in numbers.iter().enumerate() {
-        if !n.is_finite() {
-            return Err(mat2cell_error_with_message(
-                format!(
-                    "mat2cell: size entries must be finite (dimension {}, index {})",
-                    dim_index,
-                    idx + 1
-                ),
-                &MAT2CELL_ERROR_INVALID_PARTITION,
-            ));
-        }
-        let rounded = n.round();
-        if (rounded - n).abs() > f64::EPSILON {
-            return Err(mat2cell_error_with_message(
-                format!(
-                    "mat2cell: size entries must be integers (dimension {}, index {})",
-                    dim_index,
-                    idx + 1
-                ),
-                &MAT2CELL_ERROR_INVALID_PARTITION,
-            ));
-        }
-        if rounded < 0.0 {
-            return Err(mat2cell_error_with_message(
-                format!(
-                    "mat2cell: size entries must be non-negative (dimension {}, index {})",
-                    dim_index,
-                    idx + 1
-                ),
-                &MAT2CELL_ERROR_INVALID_PARTITION,
-            ));
-        }
-        let value = rounded as usize;
+    for (idx, entry) in numbers.iter().enumerate() {
+        let value = partition_entry_to_usize(entry, dim_index, idx + 1)?;
         total = total.checked_add(value).ok_or_else(|| {
             mat2cell_error_with_message(
                 "mat2cell: partition sum exceeds platform limits",
@@ -561,14 +556,29 @@ fn parse_partition_vector(
     Ok(parts)
 }
 
-fn extract_numeric_vector(value: &Value) -> Option<Vec<f64>> {
+enum PartitionEntry {
+    Float(f64),
+    Integer(IntValue),
+}
+
+fn extract_partition_entries(value: &Value) -> Option<Vec<PartitionEntry>> {
     match value {
-        Value::Num(n) => Some(vec![*n]),
-        Value::Int(i) => Some(vec![i.to_f64()]),
-        Value::Bool(b) => Some(vec![if *b { 1.0 } else { 0.0 }]),
+        Value::Num(n) => Some(vec![PartitionEntry::Float(*n)]),
+        Value::Int(i) => Some(vec![PartitionEntry::Integer(i.clone())]),
+        Value::Bool(b) => Some(vec![PartitionEntry::Float(if *b { 1.0 } else { 0.0 })]),
         Value::Tensor(t) => {
             if is_vector_shape(&t.shape) {
-                Some(t.data.clone())
+                if let Some(storage) = t.integer_storage() {
+                    Some(
+                        storage
+                            .exact_values()
+                            .into_iter()
+                            .map(PartitionEntry::Integer)
+                            .collect(),
+                    )
+                } else {
+                    Some(t.data.iter().copied().map(PartitionEntry::Float).collect())
+                }
             } else {
                 None
             }
@@ -578,7 +588,7 @@ fn extract_numeric_vector(value: &Value) -> Option<Vec<f64>> {
                 Some(
                     arr.data
                         .iter()
-                        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                        .map(|&b| PartitionEntry::Float(if b != 0 { 1.0 } else { 0.0 }))
                         .collect(),
                 )
             } else {
@@ -586,6 +596,41 @@ fn extract_numeric_vector(value: &Value) -> Option<Vec<f64>> {
             }
         }
         _ => None,
+    }
+}
+
+fn partition_entry_to_usize(
+    entry: &PartitionEntry,
+    dim_index: usize,
+    entry_index: usize,
+) -> BuiltinResult<usize> {
+    let invalid = |detail: &str| {
+        mat2cell_error_with_message(
+            format!(
+                "mat2cell: size entries must be {detail} (dimension {dim_index}, index {entry_index})"
+            ),
+            &MAT2CELL_ERROR_INVALID_PARTITION,
+        )
+    };
+    match entry {
+        PartitionEntry::Integer(value) => value
+            .try_to_usize()
+            .ok_or_else(|| invalid("non-negative platform integers")),
+        PartitionEntry::Float(value) => {
+            if !value.is_finite() {
+                return Err(invalid("finite"));
+            }
+            if value.fract() != 0.0 {
+                return Err(invalid("integers"));
+            }
+            if *value < 0.0 {
+                return Err(invalid("non-negative"));
+            }
+            if *value >= (usize::MAX as f64) + 1.0 {
+                return Err(invalid("within platform limits"));
+            }
+            Ok(*value as usize)
+        }
     }
 }
 
@@ -1033,6 +1078,50 @@ pub(crate) mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("integers"), "unexpected error message: {err}");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn typed_integer_blocks_and_partitions_preserve_exact_values() {
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
+            vec![2, 1],
+        )
+        .unwrap();
+        let partitions = Tensor::new_integer(IntegerStorage::U8(vec![1, 1]), vec![2, 1]).unwrap();
+        let result =
+            mat2cell_builtin(Value::Tensor(input), vec![Value::Tensor(partitions)]).unwrap();
+        let Value::Cell(cells) = result else {
+            panic!("expected cell array");
+        };
+        assert_eq!(cells.shape, vec![2, 1]);
+        assert_eq!(cells.data[0], Value::Int(IntValue::U64(u64::MAX - 1)));
+        assert_eq!(cells.data[1], Value::Int(IntValue::U64(u64::MAX)));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn typed_partition_entries_are_checked_without_f64_truncation() {
+        let input = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let partitions =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
+        let err = mat2cell_builtin(Value::Tensor(input), vec![Value::Tensor(partitions)])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("18446744073709551615"),
+            "unexpected error message: {err}"
+        );
+
+        let input = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let partitions = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
+        let err = mat2cell_builtin(Value::Tensor(input), vec![Value::Tensor(partitions)])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("non-negative"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
