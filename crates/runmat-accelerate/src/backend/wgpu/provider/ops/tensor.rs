@@ -156,7 +156,7 @@ impl WgpuProvider {
             {
                 GpuTensorStorage::ComplexInterleaved
             } else {
-                entry.storage.clone()
+                entry.storage
             };
             let lane_factor = match storage {
                 GpuTensorStorage::Real => 1usize,
@@ -212,7 +212,7 @@ impl WgpuProvider {
         {
             GpuTensorStorage::ComplexInterleaved
         } else {
-            entry.storage.clone()
+            entry.storage
         };
         let lane_factor = match storage {
             GpuTensorStorage::Real => 1usize,
@@ -228,7 +228,7 @@ impl WgpuProvider {
             entry.len / lane_factor
         );
         entry.shape = new_shape.to_vec();
-        entry.storage = storage.clone();
+        entry.storage = storage;
         let mut updated = handle.clone();
         updated.shape = new_shape.to_vec();
         runmat_accelerate_api::set_handle_storage(&updated, storage);
@@ -818,7 +818,7 @@ impl WgpuProvider {
             if runmat_accelerate_api::handle_storage(a) == GpuTensorStorage::ComplexInterleaved {
                 GpuTensorStorage::ComplexInterleaved
             } else {
-                entry.storage.clone()
+                entry.storage
             };
 
         if storage == GpuTensorStorage::ComplexInterleaved {

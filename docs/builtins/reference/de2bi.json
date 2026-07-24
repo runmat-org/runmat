@@ -1,0 +1,79 @@
+{
+  "title": "de2bi",
+  "category": "comms/conversion",
+  "keywords": [
+    "de2bi",
+    "decimal",
+    "binary",
+    "base",
+    "communications",
+    "right-msb",
+    "left-msb"
+  ],
+  "summary": "Convert nonnegative decimal integers to binary or base-p digit rows in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "gpuArray inputs are gathered to the host for MATLAB-compatible integer validation and digit expansion."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::comms::binary_conversion::tests",
+    "integration": "runmat-vm/tests/comms.rs"
+  },
+  "description": "`de2bi(D)` converts decimal integers to rows of binary digits. Matrix inputs are converted in column-major `D(:)` order. Omitted width uses the minimum number of columns needed for the largest input. `de2bi(D, N, P, FLG)` selects the width, base, and digit ordering.",
+  "behaviors": [
+    "`D` may be a scalar, vector, logical array, or numeric matrix; matrix inputs are flattened in column-major order.",
+    "`D` values must be finite nonnegative integers in RunMat's exact integer range.",
+    "`N` specifies the number of output digit columns. If `N` is omitted or `[]`, RunMat chooses the minimum width needed for the maximum input value.",
+    "If a supplied `N` is too small to represent an input value in base `P`, RunMat raises an error.",
+    "`P` must be an integer greater than one and defaults to 2.",
+    "`'right-msb'` is the default and stores the least significant digit in column 1.",
+    "`'left-msb'` stores the most significant digit in column 1."
+  ],
+  "examples": [
+    {
+      "description": "Minimum-width binary expansion",
+      "input": "b = de2bi([0; 1; 2; 5])",
+      "output": "b = [0 0 0; 1 0 0; 0 1 0; 1 0 1]"
+    },
+    {
+      "description": "Fixed-width left-MSB binary expansion",
+      "input": "b = de2bi(5, 4, 'left-msb')",
+      "output": "b = [0 1 0 1]"
+    },
+    {
+      "description": "Base-3 expansion",
+      "input": "b = de2bi(21, 4, 3, 'left-msb')",
+      "output": "b = [0 2 1 0]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How does de2bi choose the number of columns?",
+      "answer": "When `N` is omitted, RunMat chooses the minimum width required by the largest input value in the selected base, with zero represented using one digit."
+    },
+    {
+      "question": "Can I pass a base without a width?",
+      "answer": "Yes. Use an empty width placeholder, for example `de2bi(D, [], 3)`."
+    }
+  ],
+  "links": [
+    {
+      "label": "bi2de",
+      "url": "./bi2de"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/comms/binary_conversion.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/comms/binary_conversion.rs"
+  }
+}

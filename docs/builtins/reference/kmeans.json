@@ -1,0 +1,94 @@
+{
+  "title": "kmeans",
+  "category": "stats/ml",
+  "keywords": [
+    "kmeans",
+    "k-means",
+    "clustering",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Partition observations into k clusters with k-means clustering.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Clustering runs on CPU because it is iterative and metadata-heavy."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::kmeans::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`kmeans(X,k)` clusters the rows of a numeric observation matrix into `k` clusters. It supports MATLAB-style multi-output use: `[idx,C,sumd,D] = kmeans(...)`.",
+  "behaviors": [
+    "`X` must be a real numeric vector or 2-D matrix. Matrix rows are observations; row and column vectors are treated as one-dimensional observations.",
+    "Rows containing `NaN` are omitted from fitting and receive `NaN` in the returned `idx` and `D` outputs. `Inf` values are rejected.",
+    "The default distance is `\"sqeuclidean\"`. Supported distances are `\"sqeuclidean\"`, `\"cityblock\"`, `\"cosine\"`, `\"correlation\"`, and `\"hamming\"`.",
+    "`Start` supports `\"plus\"`, `\"sample\"`, `\"uniform\"`, `\"cluster\"`, a numeric `k`-by-`p` start matrix, or a numeric `k`-by-`p`-by-`r` array of replicate starts.",
+    "When `Start` is numeric, `k` can be `[]`; RunMat infers the cluster count from the first dimension of the start matrix or array.",
+    "`Replicates` runs multiple starts and returns the result with the smallest finite within-cluster objective. Numeric 3-D starts set the replicate count from their third dimension.",
+    "`MaxIter` limits Lloyd iterations. `EmptyAction` supports `\"singleton\"`, `\"error\"`, and `\"drop\"`.",
+    "`Display` is accepted for script compatibility. `OnlinePhase=\"on\"` runs an additional bounded batch-refinement phase in the CPU runtime.",
+    "`Options` accepts statset-style structs. `MaxIter` and `Display` fields are honored; parallel stream fields are rejected when enabled because RunMat's CPU implementation is single-process.",
+    "For `\"cityblock\"` and `\"hamming\"`, RunMat updates centroids with component-wise medians. Other distances use mean centroids in the metric's transformed space.",
+    "Outputs are `idx`, centroid matrix `C`, per-cluster distance sums `sumd`, and the observation-by-cluster distance matrix `D`."
+  ],
+  "examples": [
+    {
+      "description": "Cluster a two-group data set",
+      "input": "X = [0 0; 0.2 0.1; 9.8 9.9; 10 10.1];\n[idx,C,sumd,D] = kmeans(X, 2, 'Start', [0 0; 10 10])",
+      "output": "`idx` assigns the first two rows to one cluster and the last two rows to the other; `C` contains two centroids."
+    },
+    {
+      "description": "Use cityblock distance",
+      "input": "idx = kmeans(X, 2, 'Distance', 'cityblock', 'Replicates', 3)",
+      "output": "RunMat runs three starts and returns the best cityblock clustering."
+    },
+    {
+      "description": "Infer k from numeric starts",
+      "input": "[idx,C] = kmeans(X, [], 'Start', [0 0; 10 10])",
+      "output": "RunMat infers two clusters from the two rows of the start matrix."
+    },
+    {
+      "description": "Treat missing rows consistently",
+      "input": "idx = kmeans([1; 2; NaN; 20], 2)",
+      "output": "The third `idx` element is `NaN`; the complete rows are clustered normally."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does RunMat match MATLAB's exact random starts?",
+      "answer": "No. RunMat uses its own deterministic RNG stream behind `rng`, so output shapes and semantics match MATLAB but stochastic starts are not bit-for-bit identical."
+    },
+    {
+      "question": "Are custom distance functions supported?",
+      "answer": "No. RunMat supports the common named distances and rejects custom function-handle distances explicitly."
+    }
+  ],
+  "links": [
+    {
+      "label": "pdist",
+      "url": "./pdist"
+    },
+    {
+      "label": "pdist2",
+      "url": "./pdist2"
+    },
+    {
+      "label": "fitctree",
+      "url": "./fitctree"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/kmeans.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/kmeans.rs"
+  }
+}

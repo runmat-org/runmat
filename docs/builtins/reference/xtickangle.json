@@ -1,0 +1,75 @@
+{
+  "title": "xtickangle",
+  "category": "plotting",
+  "keywords": [
+    "xtickangle",
+    "tick angle",
+    "tick label rotation",
+    "plotting",
+    "axes"
+  ],
+  "summary": "Query or set X-axis tick label rotation.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`xtickangle` updates host-side axes metadata only and does not execute numeric GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": "plot-core",
+  "tested": {
+    "unit": "builtins::plotting::xtickangle::tests",
+    "vm": "runmat-vm plotting::tickangle_dispatches_and_round_trips_properties"
+  },
+  "description": "`xtickangle` returns or updates the X-axis tick label rotation in degrees for the current axes or specified axes handles.",
+  "signatures": [
+    "angle = xtickangle()",
+    "xtickangle(angle)",
+    "angle = xtickangle(ax)",
+    "xtickangle(ax, angle)"
+  ],
+  "behaviors": [
+    "`xtickangle()` returns the current X tick label rotation, defaulting to `0`.",
+    "`xtickangle(angle)` sets the current axes X tick label rotation in degrees.",
+    "`xtickangle(ax)` queries a scalar axes handle without changing the current axes.",
+    "`xtickangle(ax, angle)` accepts a scalar axes handle or numeric array of axes handles and sets each target.",
+    "The function shares state with `XTickLabelRotation` on axes and `TickLabelRotation` on the X-axis ruler returned by `get(ax, 'XAxis')`."
+  ],
+  "examples": [
+    {
+      "description": "Rotate X tick labels",
+      "input": "plot(1:3);\nxtickangle(45);\nxtickangle()",
+      "output": "ans = 45"
+    },
+    {
+      "description": "Target a specific axes",
+      "input": "ax = subplot(1, 2, 1);\nxtickangle(ax, -30);",
+      "output": ""
+    }
+  ],
+  "gpu_residency": "`xtickangle` only reads and writes axes metadata. It does not inspect, gather, or transform GPU-resident plot data.",
+  "links": [
+    {
+      "label": "ytickangle",
+      "url": "./ytickangle"
+    },
+    {
+      "label": "xticklabels",
+      "url": "./xticklabels"
+    },
+    {
+      "label": "xticks",
+      "url": "./xticks"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/plotting/ops/xtickangle.rs",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/xtickangle.rs"
+  }
+}

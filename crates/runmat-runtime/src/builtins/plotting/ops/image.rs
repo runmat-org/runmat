@@ -254,11 +254,15 @@ pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             build_truecolor_image_surface_gpu(&handle, &x_axis, &y_axis, rows, cols, channels)
                 .map_err(map_image_invalid_argument)?
         }
-        ImageInputKind::Indexed(input) => {
-            build_indexed_image_surface(&input, &x_axis, &y_axis, style.colormap, color_limits)
-                .await
-                .map_err(map_image_invalid_argument)?
-        }
+        ImageInputKind::Indexed(input) => build_indexed_image_surface(
+            &input,
+            &x_axis,
+            &y_axis,
+            style.colormap.clone(),
+            color_limits,
+        )
+        .await
+        .map_err(map_image_invalid_argument)?,
     };
 
     surface = surface.with_flatten_z(true).with_image_mode(true);
@@ -498,7 +502,7 @@ pub(crate) async fn build_indexed_image_surface(
                 &c_gpu,
                 min_z,
                 max_z,
-                colormap,
+                colormap.clone(),
                 1.0,
                 true,
             )
@@ -543,6 +547,7 @@ fn build_truecolor_image_surface(
     let scale = match tensor.dtype {
         NumericDType::U8 => 1.0f32 / 255.0,
         NumericDType::U16 => 1.0f32 / 65535.0,
+        NumericDType::U32 => 1.0f32 / (u32::MAX as f32),
         NumericDType::F32 | NumericDType::F64 => 1.0,
     };
     let mut grid = vec![vec![glam::Vec4::ZERO; cols]; rows];
@@ -585,6 +590,7 @@ mod tests {
     fn truecolor_tensor() -> Tensor {
         Tensor {
             data: vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
+            integer_data: None,
             shape: vec![2, 2, 3],
             rows: 2,
             cols: 2,
@@ -621,6 +627,7 @@ mod tests {
         let _ = clear_figure(None);
         let c = Tensor {
             data: (1..=12).map(|v| v as f64).collect(),
+            integer_data: None,
             shape: vec![3, 4],
             rows: 3,
             cols: 4,
@@ -629,6 +636,7 @@ mod tests {
         let _ = futures::executor::block_on(image_builtin(vec![
             Value::Tensor(Tensor {
                 data: vec![10.0, 20.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -636,6 +644,7 @@ mod tests {
             }),
             Value::Tensor(Tensor {
                 data: vec![1.0, 5.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,

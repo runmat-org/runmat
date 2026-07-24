@@ -42,6 +42,7 @@
     "Complex operands follow the analytic rule `(a + ib) .* (c + id) = (ac - bd) + i(ad + bc)`.",
     "Empty dimensions propagate naturally—if either operand has a zero-sized dimension after broadcasting, the result is empty with the broadcasted shape.",
     "Integer inputs currently promote to double precision, mirroring the behaviour of other RunMat arithmetic builtins.",
+    "Sparse real matrices interoperate with sparse, dense, logical, character, scalar, and complex operands. Sparse-sparse, sparse-scalar, and same-shape dense products preserve real sparse storage; complex products return full complex storage because RunMat does not yet have a complex sparse storage class.",
     "The optional `'like'` prototype makes the output adopt the residency (host or GPU) and complexity characteristics of the prototype, which is particularly useful for keeping implicit-expansion expressions on the device."
   ],
   "examples": [
@@ -113,6 +114,10 @@
     {
       "question": "Can I mix complex and real operands?",
       "answer": "Absolutely. The result is complex, with broadcasting rules identical to MATLAB."
+    },
+    {
+      "question": "Does `times` preserve sparse matrices?",
+      "answer": "Sparse-sparse, sparse-scalar, and same-shape dense element-wise products preserve real sparse storage. Products with complex operands return full complex storage until RunMat has a complex sparse representation."
     },
     {
       "question": "What about string arrays?",

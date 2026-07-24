@@ -1,6 +1,8 @@
 use crate::backend::wgpu::bindings::{storage_read_entry, storage_read_write_entry, uniform_entry};
 use crate::backend::wgpu::types::NumericPrecision;
 use std::borrow::Cow;
+use std::ops::Deref;
+use std::sync::{Arc, OnceLock};
 
 // Shader aliases
 const BINARY_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::BINARY_SHADER_F64;
@@ -9,8 +11,8 @@ const BINARY_BROADCAST_SHADER_F64: &str =
     crate::backend::wgpu::shaders::elementwise::BINARY_BROADCAST_SHADER_F64;
 const BINARY_BROADCAST_SHADER_F32: &str =
     crate::backend::wgpu::shaders::elementwise::BINARY_BROADCAST_SHADER_F32;
-const UNARY_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::UNARY_SHADER_F64;
-const UNARY_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::UNARY_SHADER_F32;
+const UNARY_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::UNARY_LAYOUT_SHADER_F64;
+const UNARY_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::UNARY_LAYOUT_SHADER_F32;
 const SCALAR_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::SCALAR_SHADER_F64;
 const SCALAR_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::SCALAR_SHADER_F32;
 const TRANSPOSE_SHADER_F64: &str = crate::backend::wgpu::shaders::transpose::TRANSPOSE_SHADER_F64;
@@ -65,8 +67,14 @@ const DIFF_SHADER_F64: &str = crate::backend::wgpu::shaders::diff::DIFF_SHADER_F
 const DIFF_SHADER_F32: &str = crate::backend::wgpu::shaders::diff::DIFF_SHADER_F32;
 const GRADIENT_SHADER_F64: &str = crate::backend::wgpu::shaders::gradient::GRADIENT_SHADER_F64;
 const GRADIENT_SHADER_F32: &str = crate::backend::wgpu::shaders::gradient::GRADIENT_SHADER_F32;
+const GRADIENT_COORDINATES_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::gradient::GRADIENT_COORDINATES_SHADER_F64;
+const GRADIENT_COORDINATES_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::gradient::GRADIENT_COORDINATES_SHADER_F32;
 const CUMSUM_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMSUM_SHADER_F64;
 const CUMSUM_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMSUM_SHADER_F32;
+const TRAPEZOID_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::TRAPEZOID_SHADER_F64;
+const TRAPEZOID_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::TRAPEZOID_SHADER_F32;
 const REPMAT_SHADER_F64: &str = crate::backend::wgpu::shaders::repmat::REPMAT_SHADER_F64;
 const REPMAT_SHADER_F32: &str = crate::backend::wgpu::shaders::repmat::REPMAT_SHADER_F32;
 const KRON_SHADER_F64: &str = crate::backend::wgpu::shaders::kron::KRON_SHADER_F64;
@@ -97,6 +105,10 @@ const QR_POWER_ITER_CHOL_SHADER: &str =
     crate::backend::wgpu::shaders::qr_power_iter::QR_POWER_ITER_CHOL_SHADER;
 const CONV1D_SHADER_F64: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F64;
 const CONV1D_SHADER_F32: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F32;
+const MOVING_WINDOW_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::moving_window::MOVING_WINDOW_SHADER_F64;
+const MOVING_WINDOW_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::moving_window::MOVING_WINDOW_SHADER_F32;
 const REDUCE_GLOBAL_SHADER_F64: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_GLOBAL_SHADER_F64;
 const REDUCE_GLOBAL_SHADER_F32: &str =
@@ -165,6 +177,8 @@ const TRIU_SHADER_F64: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F
 const TRIU_SHADER_F32: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F32;
 const IMFILTER_SHADER_F64: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F64;
 const IMFILTER_SHADER_F32: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F32;
+const INTERP1_SHADER_F64: &str = crate::backend::wgpu::shaders::interp1::INTERP1_SHADER_F64;
+const INTERP1_SHADER_F32: &str = crate::backend::wgpu::shaders::interp1::INTERP1_SHADER_F32;
 #[cfg(not(target_os = "windows"))]
 const IMAGE_NORMALIZE_SHADER_F64: &str =
     crate::backend::wgpu::shaders::image_normalize::IMAGE_NORMALIZE_SHADER_F64;
@@ -206,9 +220,44 @@ const LINEAR_SCATTER_SHADER_F64: &str =
 const LINEAR_SCATTER_SHADER_F32: &str =
     crate::backend::wgpu::shaders::index_select::LINEAR_SCATTER_SHADER_F32;
 
-pub struct PipelineBundle {
+pub struct CompiledPipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
     pub layout: wgpu::BindGroupLayout,
+}
+
+/// A compute pipeline compiled on first use.
+///
+/// WGPU adapter creation is deliberately kept separate from shader compilation.
+/// Some drivers advertise a precision feature but fail while compiling a
+/// particular shader. Compiling every RunMat shader during provider startup
+/// therefore allowed an unused operation to prevent the entire provider from
+/// starting. Each operation now pays its compilation cost only when it is first
+/// invoked, and [`OnceLock`] coalesces concurrent first use.
+pub struct PipelineBundle {
+    compiled: OnceLock<CompiledPipelineBundle>,
+    device: Arc<wgpu::Device>,
+    layout_label: &'static str,
+    shader_label: &'static str,
+    pipeline_label: &'static str,
+    entries: Vec<wgpu::BindGroupLayoutEntry>,
+    shader_source: Cow<'static, str>,
+}
+
+impl Deref for PipelineBundle {
+    type Target = CompiledPipelineBundle;
+
+    fn deref(&self) -> &Self::Target {
+        self.compiled.get_or_init(|| {
+            compile_pipeline(
+                &self.device,
+                self.layout_label,
+                self.shader_label,
+                self.pipeline_label,
+                &self.entries,
+                &self.shader_source,
+            )
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -229,9 +278,12 @@ pub struct WgpuPipelines {
     pub flip: PipelineBundle,
     pub diff: PipelineBundle,
     pub gradient: PipelineBundle,
+    pub gradient_coordinates: PipelineBundle,
     pub conv1d: PipelineBundle,
     pub filter: PipelineBundle,
+    pub moving_window: PipelineBundle,
     pub cumsum: PipelineBundle,
+    pub trapezoid: PipelineBundle,
     pub cumprod: PipelineBundle,
     pub cummin: PipelineBundle,
     pub cummax: PipelineBundle,
@@ -285,6 +337,7 @@ pub struct WgpuPipelines {
     pub polyval: PipelineBundle,
     pub polyder: PipelineBundle,
     pub polyint: PipelineBundle,
+    pub interp1: PipelineBundle,
     pub diag_from_vector: PipelineBundle,
     pub diag_extract: PipelineBundle,
     pub gather_linear: PipelineBundle,
@@ -298,7 +351,7 @@ pub struct WgpuPipelines {
 
 impl WgpuPipelines {
     pub fn new(
-        device: &wgpu::Device,
+        device: &Arc<wgpu::Device>,
         precision: NumericPrecision,
         image_norm_bootstrap: ImageNormalizeBootstrap,
     ) -> Self {
@@ -456,6 +509,22 @@ impl WgpuPipelines {
             },
         );
 
+        let moving_window = create_pipeline(
+            device,
+            "runmat-moving-window-layout",
+            "runmat-moving-window-shader",
+            "runmat-moving-window-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => MOVING_WINDOW_SHADER_F64,
+                NumericPrecision::F32 => MOVING_WINDOW_SHADER_F32,
+            },
+        );
+
         let diff = create_pipeline(
             device,
             "runmat-diff-layout",
@@ -488,6 +557,23 @@ impl WgpuPipelines {
             },
         );
 
+        let gradient_coordinates = create_pipeline(
+            device,
+            "runmat-gradient-coordinates-layout",
+            "runmat-gradient-coordinates-shader",
+            "runmat-gradient-coordinates-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+                storage_read_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => GRADIENT_COORDINATES_SHADER_F64,
+                NumericPrecision::F32 => GRADIENT_COORDINATES_SHADER_F32,
+            },
+        );
+
         let cumsum = create_pipeline(
             device,
             "runmat-cumsum-layout",
@@ -501,6 +587,23 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => CUMSUM_SHADER_F64,
                 NumericPrecision::F32 => CUMSUM_SHADER_F32,
+            },
+        );
+
+        let trapezoid = create_pipeline(
+            device,
+            "runmat-trapezoid-layout",
+            "runmat-trapezoid-shader",
+            "runmat-trapezoid-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+                storage_read_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => TRAPEZOID_SHADER_F64,
+                NumericPrecision::F32 => TRAPEZOID_SHADER_F32,
             },
         );
 
@@ -1293,7 +1396,7 @@ impl WgpuPipelines {
                 storage_read_entry(3),
                 storage_read_write_entry(4),
             ],
-            &image_norm_source,
+            image_norm_source,
         );
 
         let polyval = create_pipeline(
@@ -1374,6 +1477,24 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => DIAG_EXTRACT_SHADER_F64,
                 NumericPrecision::F32 => DIAG_EXTRACT_SHADER_F32,
+            },
+        );
+
+        let interp1 = create_pipeline(
+            device,
+            "runmat-interp1-layout",
+            "runmat-interp1-shader",
+            "runmat-interp1-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_write_entry(3),
+                uniform_entry(4),
+            ],
+            match precision {
+                NumericPrecision::F64 => INTERP1_SHADER_F64,
+                NumericPrecision::F32 => INTERP1_SHADER_F32,
             },
         );
 
@@ -1506,9 +1627,12 @@ impl WgpuPipelines {
             flip,
             diff,
             gradient,
+            gradient_coordinates,
             conv1d,
             filter,
+            moving_window,
             cumsum,
+            trapezoid,
             cumprod,
             cummin,
             cummax,
@@ -1562,6 +1686,7 @@ impl WgpuPipelines {
             polyval,
             polyder,
             polyint,
+            interp1,
             diag_from_vector,
             diag_extract,
             gather_linear,
@@ -1586,17 +1711,36 @@ fn substitute_tokens(src: &str, wg: u32, tile: u32) -> Cow<'_, str> {
     }
 }
 
-pub fn create_pipeline(
+fn create_pipeline(
+    device: &Arc<wgpu::Device>,
+    layout_label: &'static str,
+    shader_label: &'static str,
+    pipeline_label: &'static str,
+    entries: Vec<wgpu::BindGroupLayoutEntry>,
+    shader_source: impl Into<Cow<'static, str>>,
+) -> PipelineBundle {
+    PipelineBundle {
+        compiled: OnceLock::new(),
+        device: Arc::clone(device),
+        layout_label,
+        shader_label,
+        pipeline_label,
+        entries,
+        shader_source: shader_source.into(),
+    }
+}
+
+fn compile_pipeline(
     device: &wgpu::Device,
     layout_label: &str,
     shader_label: &str,
     pipeline_label: &str,
-    entries: Vec<wgpu::BindGroupLayoutEntry>,
+    entries: &[wgpu::BindGroupLayoutEntry],
     shader_source: &str,
-) -> PipelineBundle {
+) -> CompiledPipelineBundle {
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some(layout_label),
-        entries: &entries,
+        entries,
     });
     let wg = crate::backend::wgpu::config::effective_workgroup_size();
     let mt = crate::backend::wgpu::config::effective_matmul_tile();
@@ -1621,7 +1765,7 @@ pub fn create_pipeline(
         },
     );
 
-    PipelineBundle { pipeline, layout }
+    CompiledPipelineBundle { pipeline, layout }
 }
 
 pub fn create_shader_module(device: &wgpu::Device, label: &str, wgsl: &str) -> wgpu::ShaderModule {

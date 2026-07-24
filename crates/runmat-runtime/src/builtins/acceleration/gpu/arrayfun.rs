@@ -569,14 +569,6 @@ fn maybe_upload_uniform(
     if !has_gpu_input {
         return Ok(value);
     }
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if matches!(gpu_device_id, Some(id) if id != 0) {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     let _ = gpu_device_id; // may be used only in cfg(test)
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
@@ -1000,17 +992,6 @@ async fn try_gpu_fast_path(
         return Ok(None);
     }
 
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if inputs
-            .iter()
-            .any(|v| matches!(v, Value::GpuTensor(h) if h.device_id != 0))
-        {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),

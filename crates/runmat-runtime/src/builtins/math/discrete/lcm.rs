@@ -1,0 +1,581 @@
+//! MATLAB-compatible `lcm` builtin.
+
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, NumericDType, Tensor, Type, Value,
+};
+use runmat_macros::runtime_builtin;
+
+use crate::builtins::common::gpu_helpers;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const BUILTIN_NAME: &str = "lcm";
+
+const LCM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "L",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Least common multiples of A and B.",
+}];
+
+const LCM_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Real positive integer scalar, vector, or array.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Real positive integer scalar, vector, or array.",
+    },
+];
+
+const LCM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "L = lcm(A, B)",
+    inputs: &LCM_INPUTS,
+    outputs: &LCM_OUTPUT,
+}];
+
+const LCM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LCM.INVALID_INPUT",
+    identifier: Some("RunMat:lcm:InvalidInput"),
+    when: "Inputs are not real positive integer numeric values, or integer class mixing is unsupported.",
+    message: "lcm: invalid input",
+};
+
+const LCM_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LCM.SIZE_MISMATCH",
+    identifier: Some("RunMat:lcm:SizeMismatch"),
+    when: "Inputs are neither the same size nor scalar-expandable.",
+    message: "lcm: input sizes are not compatible",
+};
+
+const LCM_ERROR_OVERFLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LCM.OVERFLOW",
+    identifier: Some("RunMat:lcm:Overflow"),
+    when: "The least common multiple cannot be represented in the output numeric class.",
+    message: "lcm: result overflows output type",
+};
+
+const LCM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LCM.INTERNAL",
+    identifier: Some("RunMat:lcm:Internal"),
+    when: "GPU gather or tensor construction fails.",
+    message: "lcm: internal error",
+};
+
+const LCM_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    LCM_ERROR_INVALID_INPUT,
+    LCM_ERROR_SIZE_MISMATCH,
+    LCM_ERROR_OVERFLOW,
+    LCM_ERROR_INTERNAL,
+];
+
+pub const LCM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LCM_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LCM_ERRORS,
+};
+
+fn lcm_type(args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
+    if args.iter().all(|ty| matches!(ty, Type::Int)) {
+        Type::Int
+    } else if args.iter().all(|ty| matches!(ty, Type::Num | Type::Int)) {
+        Type::Num
+    } else {
+        Type::tensor()
+    }
+}
+
+#[runtime_builtin(
+    name = "lcm",
+    category = "math/discrete",
+    summary = "Compute least common multiples for positive integer inputs.",
+    keywords = "lcm,least common multiple,integer,number theory,discrete",
+    accel = "gather",
+    type_resolver(lcm_type),
+    descriptor(crate::builtins::math::discrete::lcm::LCM_DESCRIPTOR),
+    builtin_path = "crate::builtins::math::discrete::lcm"
+)]
+async fn lcm_builtin(left: Value, right: Value) -> BuiltinResult<Value> {
+    let left = LcmInput::from_value(left).await?;
+    let right = LcmInput::from_value(right).await?;
+    let output_kind = resolve_output_kind(&left, &right)?;
+    let plan = SameSizeOrScalarPlan::new(&left, &right)?;
+    let mut out = Vec::with_capacity(plan.len());
+    for (left_idx, right_idx) in plan.iter() {
+        out.push(lcm_u128(left.data[left_idx], right.data[right_idx]));
+    }
+    value_from_lcms(out, plan.output_shape, output_kind)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NumericClass {
+    Double,
+    Single,
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+}
+
+impl NumericClass {
+    fn is_float(self) -> bool {
+        matches!(self, Self::Double | Self::Single)
+    }
+
+    fn is_integer(self) -> bool {
+        !self.is_float()
+    }
+
+    fn max_value(self) -> u128 {
+        match self {
+            Self::Double | Self::Single => u128::MAX,
+            Self::I8 => i8::MAX as u128,
+            Self::I16 => i16::MAX as u128,
+            Self::I32 => i32::MAX as u128,
+            Self::I64 => i64::MAX as u128,
+            Self::U8 => u8::MAX as u128,
+            Self::U16 => u16::MAX as u128,
+            Self::U32 => u32::MAX as u128,
+            Self::U64 => u64::MAX as u128,
+        }
+    }
+
+    fn tensor_dtype(self) -> Option<NumericDType> {
+        match self {
+            Self::Double => Some(NumericDType::F64),
+            Self::Single => Some(NumericDType::F32),
+            Self::U8 => Some(NumericDType::U8),
+            Self::U16 => Some(NumericDType::U16),
+            Self::U32 => Some(NumericDType::U32),
+            Self::I8 | Self::I16 | Self::I32 | Self::I64 | Self::U64 => None,
+        }
+    }
+}
+
+struct LcmInput {
+    data: Vec<u128>,
+    shape: Vec<usize>,
+    class: NumericClass,
+}
+
+impl LcmInput {
+    fn is_scalar(&self) -> bool {
+        self.data.len() == 1 && element_count(&self.shape) == 1
+    }
+
+    async fn from_value(value: Value) -> BuiltinResult<Self> {
+        match value {
+            Value::Num(value) => Ok(Self {
+                data: vec![positive_integer_from_f64(value)?],
+                shape: vec![1, 1],
+                class: NumericClass::Double,
+            }),
+            Value::Int(value) => Self::from_int_value(value),
+            Value::Tensor(tensor) => Self::from_tensor(tensor),
+            Value::GpuTensor(handle) => {
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
+                    .map_err(|err| error_with_detail(&LCM_ERROR_INTERNAL, err))?;
+                Self::from_tensor(tensor)
+            }
+            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(error_with_detail(
+                &LCM_ERROR_INVALID_INPUT,
+                "inputs must be real",
+            )),
+            Value::Bool(_) | Value::LogicalArray(_) => Err(error_with_detail(
+                &LCM_ERROR_INVALID_INPUT,
+                "logical inputs are not numeric integer classes for lcm",
+            )),
+            other => Err(error_with_detail(
+                &LCM_ERROR_INVALID_INPUT,
+                format!("unsupported input type {other:?}"),
+            )),
+        }
+    }
+
+    fn from_int_value(value: IntValue) -> BuiltinResult<Self> {
+        let (data, class) = match value {
+            IntValue::I8(value) => (
+                positive_integer_from_i128(i128::from(value))?,
+                NumericClass::I8,
+            ),
+            IntValue::I16(value) => (
+                positive_integer_from_i128(i128::from(value))?,
+                NumericClass::I16,
+            ),
+            IntValue::I32(value) => (
+                positive_integer_from_i128(i128::from(value))?,
+                NumericClass::I32,
+            ),
+            IntValue::I64(value) => (
+                positive_integer_from_i128(i128::from(value))?,
+                NumericClass::I64,
+            ),
+            IntValue::U8(value) => (
+                positive_integer_from_u128(u128::from(value))?,
+                NumericClass::U8,
+            ),
+            IntValue::U16(value) => (
+                positive_integer_from_u128(u128::from(value))?,
+                NumericClass::U16,
+            ),
+            IntValue::U32(value) => (
+                positive_integer_from_u128(u128::from(value))?,
+                NumericClass::U32,
+            ),
+            IntValue::U64(value) => (
+                positive_integer_from_u128(u128::from(value))?,
+                NumericClass::U64,
+            ),
+        };
+        Ok(Self {
+            data: vec![data],
+            shape: vec![1, 1],
+            class,
+        })
+    }
+
+    fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
+        let class = match tensor.dtype {
+            NumericDType::F64 => NumericClass::Double,
+            NumericDType::F32 => NumericClass::Single,
+            NumericDType::U8 => NumericClass::U8,
+            NumericDType::U16 => NumericClass::U16,
+            NumericDType::U32 => NumericClass::U32,
+        };
+        let data = tensor
+            .data
+            .into_iter()
+            .map(positive_integer_from_f64)
+            .collect::<BuiltinResult<Vec<_>>>()?;
+        Ok(Self {
+            data,
+            shape: tensor.shape,
+            class,
+        })
+    }
+}
+
+struct SameSizeOrScalarPlan {
+    output_shape: Vec<usize>,
+    len: usize,
+    left_scalar: bool,
+    right_scalar: bool,
+}
+
+impl SameSizeOrScalarPlan {
+    fn new(left: &LcmInput, right: &LcmInput) -> BuiltinResult<Self> {
+        let left_scalar = left.is_scalar();
+        let right_scalar = right.is_scalar();
+        let output_shape = if left.shape == right.shape {
+            left.shape.clone()
+        } else if left_scalar {
+            right.shape.clone()
+        } else if right_scalar {
+            left.shape.clone()
+        } else {
+            return Err(error_with_detail(
+                &LCM_ERROR_SIZE_MISMATCH,
+                "inputs must be the same size or one input must be scalar",
+            ));
+        };
+        Ok(Self {
+            len: element_count(&output_shape),
+            output_shape,
+            left_scalar,
+            right_scalar,
+        })
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        (0..self.len).map(|idx| {
+            (
+                if self.left_scalar { 0 } else { idx },
+                if self.right_scalar { 0 } else { idx },
+            )
+        })
+    }
+}
+
+fn resolve_output_kind(left: &LcmInput, right: &LcmInput) -> BuiltinResult<NumericClass> {
+    match (left.class, right.class) {
+        (a, b) if a == b => Ok(a),
+        (NumericClass::Double, NumericClass::Single)
+        | (NumericClass::Single, NumericClass::Double) => Ok(NumericClass::Single),
+        (integer, NumericClass::Double) if integer.is_integer() && right.is_scalar() => Ok(integer),
+        (NumericClass::Double, integer) if integer.is_integer() && left.is_scalar() => Ok(integer),
+        (a, b) if a.is_integer() && b.is_integer() => Err(error_with_detail(
+            &LCM_ERROR_INVALID_INPUT,
+            "integer inputs must have the same class",
+        )),
+        _ => Err(error_with_detail(
+            &LCM_ERROR_INVALID_INPUT,
+            "integer inputs can only be paired with the same class or a double scalar",
+        )),
+    }
+}
+
+fn value_from_lcms(
+    data: Vec<u128>,
+    shape: Vec<usize>,
+    class: NumericClass,
+) -> BuiltinResult<Value> {
+    for &value in &data {
+        if value > class.max_value() {
+            return Err(error_with_detail(
+                &LCM_ERROR_OVERFLOW,
+                "result exceeds output class range",
+            ));
+        }
+    }
+
+    if data.len() == 1 && element_count(&shape) == 1 {
+        let value = data[0];
+        return match class {
+            NumericClass::Double => Ok(Value::Num(value as f64)),
+            NumericClass::Single => Ok(Value::Num((value as f32) as f64)),
+            NumericClass::I8 => Ok(Value::Int(IntValue::I8(value as i8))),
+            NumericClass::I16 => Ok(Value::Int(IntValue::I16(value as i16))),
+            NumericClass::I32 => Ok(Value::Int(IntValue::I32(value as i32))),
+            NumericClass::I64 => Ok(Value::Int(IntValue::I64(value as i64))),
+            NumericClass::U8 => Ok(Value::Int(IntValue::U8(value as u8))),
+            NumericClass::U16 => Ok(Value::Int(IntValue::U16(value as u16))),
+            NumericClass::U32 => Ok(Value::Int(IntValue::U32(value as u32))),
+            NumericClass::U64 => Ok(Value::Int(IntValue::U64(value as u64))),
+        };
+    }
+
+    let dtype = class.tensor_dtype().ok_or_else(|| {
+        error_with_detail(
+            &LCM_ERROR_INVALID_INPUT,
+            "array output for this integer class is not supported by RunMat tensors",
+        )
+    })?;
+    Tensor::new_with_dtype(
+        data.into_iter()
+            .map(|value| match class {
+                NumericClass::Single => (value as f32) as f64,
+                _ => value as f64,
+            })
+            .collect(),
+        shape,
+        dtype,
+    )
+    .map(Value::Tensor)
+    .map_err(|err| error_with_detail(&LCM_ERROR_INTERNAL, err))
+}
+
+fn positive_integer_from_i128(value: i128) -> BuiltinResult<u128> {
+    if value <= 0 {
+        return Err(error_with_detail(
+            &LCM_ERROR_INVALID_INPUT,
+            "inputs must be positive integers",
+        ));
+    }
+    Ok(value as u128)
+}
+
+fn positive_integer_from_u128(value: u128) -> BuiltinResult<u128> {
+    if value == 0 {
+        return Err(error_with_detail(
+            &LCM_ERROR_INVALID_INPUT,
+            "inputs must be positive integers",
+        ));
+    }
+    Ok(value)
+}
+
+fn positive_integer_from_f64(value: f64) -> BuiltinResult<u128> {
+    if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 {
+        return Err(error_with_detail(
+            &LCM_ERROR_INVALID_INPUT,
+            "inputs must be finite positive integers",
+        ));
+    }
+    if value > u64::MAX as f64 {
+        return Err(error_with_detail(
+            &LCM_ERROR_INVALID_INPUT,
+            "input is too large",
+        ));
+    }
+    Ok(value as u128)
+}
+
+fn lcm_u128(left: u128, right: u128) -> u128 {
+    left / gcd_u128(left, right) * right
+}
+
+fn gcd_u128(mut left: u128, mut right: u128) -> u128 {
+    while right != 0 {
+        let rem = left % right;
+        left = right;
+        right = rem;
+    }
+    left
+}
+
+fn element_count(shape: &[usize]) -> usize {
+    shape.iter().copied().product()
+}
+
+fn error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {detail}", error.message)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+
+    #[test]
+    fn lcm_double_array_and_scalar() {
+        let input = Tensor::new(vec![5.0, 17.0, 10.0, 60.0], vec![2, 2]).unwrap();
+        let out = block_on(lcm_builtin(Value::Tensor(input), Value::Num(45.0))).expect("lcm");
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 2]);
+                assert_eq!(tensor.dtype, NumericDType::F64);
+                assert_eq!(tensor.data, vec![45.0, 765.0, 90.0, 180.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lcm_preserves_unsigned_integer_class() {
+        let left = Tensor::new_with_dtype(vec![255.0, 511.0, 15.0], vec![1, 3], NumericDType::U16)
+            .unwrap();
+        let right =
+            Tensor::new_with_dtype(vec![15.0, 127.0, 1023.0], vec![1, 3], NumericDType::U16)
+                .unwrap();
+        let out = block_on(lcm_builtin(Value::Tensor(left), Value::Tensor(right))).expect("lcm");
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.dtype, NumericDType::U16);
+                assert_eq!(tensor.data, vec![255.0, 64897.0, 5115.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lcm_integer_array_accepts_double_scalar_and_keeps_integer_class() {
+        let left =
+            Tensor::new_with_dtype(vec![6.0, 10.0, 21.0], vec![1, 3], NumericDType::U32).unwrap();
+        let out = block_on(lcm_builtin(Value::Tensor(left), Value::Num(15.0))).expect("lcm");
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.dtype, NumericDType::U32);
+                assert_eq!(tensor.data, vec![30.0, 30.0, 105.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lcm_scalar_integer_output_preserves_width() {
+        let out = block_on(lcm_builtin(
+            Value::Int(IntValue::U8(12)),
+            Value::Int(IntValue::U8(18)),
+        ))
+        .expect("lcm");
+        assert_eq!(out, Value::Int(IntValue::U8(36)));
+    }
+
+    #[test]
+    fn lcm_rejects_zero_negative_fractional_and_complex() {
+        for value in [
+            Value::Num(0.0),
+            Value::Num(-2.0),
+            Value::Num(2.5),
+            Value::Complex(2.0, 0.0),
+        ] {
+            let err = block_on(lcm_builtin(value, Value::Num(3.0))).expect_err("invalid input");
+            assert_eq!(err.identifier(), LCM_ERROR_INVALID_INPUT.identifier);
+        }
+    }
+
+    #[test]
+    fn lcm_rejects_mismatched_shapes_and_integer_classes() {
+        let left = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let right = Tensor::new(vec![5.0, 7.0, 11.0], vec![1, 3]).unwrap();
+        let err = block_on(lcm_builtin(Value::Tensor(left), Value::Tensor(right)))
+            .expect_err("shape mismatch");
+        assert_eq!(err.identifier(), LCM_ERROR_SIZE_MISMATCH.identifier);
+
+        let left = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
+        let right = Tensor::new(vec![5.0, 7.0, 11.0], vec![1, 3]).unwrap();
+        let err = block_on(lcm_builtin(Value::Tensor(left), Value::Tensor(right)))
+            .expect_err("implicit expansion is not supported for lcm");
+        assert_eq!(err.identifier(), LCM_ERROR_SIZE_MISMATCH.identifier);
+
+        let err = block_on(lcm_builtin(
+            Value::Int(IntValue::U8(2)),
+            Value::Int(IntValue::U16(4)),
+        ))
+        .expect_err("integer class mismatch");
+        assert_eq!(err.identifier(), LCM_ERROR_INVALID_INPUT.identifier);
+
+        let single_scalar =
+            Tensor::new_with_dtype(vec![3.0], vec![1, 1], NumericDType::F32).unwrap();
+        let err = block_on(lcm_builtin(
+            Value::Int(IntValue::U16(2)),
+            Value::Tensor(single_scalar),
+        ))
+        .expect_err("integer plus single scalar is not permitted");
+        assert_eq!(err.identifier(), LCM_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn lcm_rejects_integer_overflow() {
+        let err = block_on(lcm_builtin(
+            Value::Int(IntValue::U8(200)),
+            Value::Int(IntValue::U8(201)),
+        ))
+        .expect_err("overflow");
+        assert_eq!(err.identifier(), LCM_ERROR_OVERFLOW.identifier);
+    }
+
+    #[test]
+    fn lcm_single_output_rounds_through_single_precision() {
+        let left =
+            Tensor::new_with_dtype(vec![16_777_217.0, 3.0], vec![1, 2], NumericDType::F32).unwrap();
+        let right = Tensor::new_with_dtype(vec![1.0, 5.0], vec![1, 2], NumericDType::F32).unwrap();
+        let out = block_on(lcm_builtin(Value::Tensor(left), Value::Tensor(right))).expect("lcm");
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.dtype, NumericDType::F32);
+                assert_eq!(tensor.data, vec![(16_777_217_u128 as f32) as f64, 15.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+}

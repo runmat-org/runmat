@@ -347,19 +347,21 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                 .map(|part| part.0.clone())
                 .collect::<Vec<_>>()
                 .join(".");
-            let mut super_class = class.super_class.and_then(|class_id| {
-                hir.classes
-                    .iter()
-                    .find(|candidate| candidate.id == class_id)
-                    .map(|super_class| {
-                        super_class
-                            .name
-                            .0
-                            .iter()
-                            .map(|part| part.0.clone())
-                            .collect::<Vec<_>>()
-                            .join(".")
-                    })
+            let mut super_class = class.builtin_super_class.clone().or_else(|| {
+                class.super_class.and_then(|class_id| {
+                    hir.classes
+                        .iter()
+                        .find(|candidate| candidate.id == class_id)
+                        .map(|super_class| {
+                            super_class
+                                .name
+                                .0
+                                .iter()
+                                .map(|part| part.0.clone())
+                                .collect::<Vec<_>>()
+                                .join(".")
+                        })
+                })
             });
             if super_class.is_none() && matches!(class.kind, runmat_hir::ClassKind::Handle) {
                 super_class = Some("handle".to_string());

@@ -588,6 +588,31 @@ fn cummin_host(
     direction: CumminDirection,
     nan_mode: CumminNanMode,
 ) -> BuiltinResult<CumminEvaluation> {
+    match value {
+        Value::Int(value) => {
+            let storage =
+                crate::builtins::math::reduction::integer_native::storage_from_scalar(&value);
+            integer_cummin(&storage, vec![1, 1], dim.unwrap_or(1), direction)
+        }
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
+            integer_cummin(
+                tensor.integer_storage().expect("checked integer storage"),
+                tensor.shape.clone(),
+                target_dim,
+                direction,
+            )
+        }
+        other => cummin_host_floating(other, dim, direction, nan_mode),
+    }
+}
+
+fn cummin_host_floating(
+    value: Value,
+    dim: Option<usize>,
+    direction: CumminDirection,
+    nan_mode: CumminNanMode,
+) -> BuiltinResult<CumminEvaluation> {
     let tensor = tensor::value_into_tensor_for("cummin", value)
         .map_err(|err| cummin_error_with_detail(&CUMMIN_ERROR_INVALID_INPUT, err))?;
     let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
@@ -598,20 +623,39 @@ fn cummin_host(
     })
 }
 
+fn integer_cummin(
+    storage: &runmat_builtins::IntegerStorage,
+    shape: Vec<usize>,
+    dim: usize,
+    direction: CumminDirection,
+) -> BuiltinResult<CumminEvaluation> {
+    let result = crate::builtins::math::reduction::integer_native::cumulative_extrema(
+        storage,
+        &shape,
+        dim,
+        match direction {
+            CumminDirection::Forward => {
+                crate::builtins::math::reduction::integer_native::CumulativeDirection::Forward
+            }
+            CumminDirection::Reverse => {
+                crate::builtins::math::reduction::integer_native::CumulativeDirection::Reverse
+            }
+        },
+        crate::builtins::math::reduction::integer_native::CumulativeExtremaDirection::Min,
+    )
+    .map_err(|error| cummin_internal_error(&error))?;
+    Ok(CumminEvaluation {
+        values: result.values,
+        indices: result.indices,
+    })
+}
+
 async fn cummin_gpu(
     handle: GpuTensorHandle,
     dim: Option<usize>,
     direction: CumminDirection,
     nan_mode: CumminNanMode,
 ) -> BuiltinResult<CumminEvaluation> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     if let Some(target) = dim {
         if target == 0 {
             return Err(cummin_error_with_detail(
@@ -1137,6 +1181,30 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         assert_eq!(values, Value::Num(7.0));
         assert_eq!(indices, Value::Num(1.0));
+    }
+
+    #[test]
+    fn cummin_integer_storage_and_indices_remain_exact() {
+        let input = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 4, 5, 3]),
+            vec![2, 2],
+        )
+        .unwrap();
+        let (values, indices) = evaluate(Value::Tensor(input), &[]).unwrap().into_pair();
+        assert_eq!(
+            values,
+            Value::Tensor(
+                Tensor::new_integer(
+                    runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 4, 5, 3]),
+                    vec![2, 2]
+                )
+                .unwrap()
+            )
+        );
+        assert_eq!(
+            indices,
+            Value::Tensor(Tensor::new(vec![1.0, 2.0, 1.0, 2.0], vec![2, 2]).unwrap())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1,0 +1,118 @@
+{
+  "title": "gammaln",
+  "category": "math/elementwise",
+  "keywords": [
+    "gammaln",
+    "gamma",
+    "log gamma",
+    "special function",
+    "elementwise",
+    "gpu"
+  ],
+  "summary": "Compute the natural logarithm of the gamma function element-wise in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses the provider unary_gammaln hook after proving real GPU inputs are nonnegative; falls back to host evaluation when the hook is unavailable."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::gammaln::tests",
+    "integration": "builtins::math::elementwise::gammaln::tests::gammaln_gpu_provider_roundtrip"
+  },
+  "description": "`Y = gammaln(A)` evaluates `log(gamma(A))` for real nonnegative inputs while avoiding the overflow that can occur when computing `gamma(A)` first.",
+  "behaviors": [
+    "`gammaln(A)` applies the log-gamma function element-by-element while preserving the input tensor shape.",
+    "Double inputs return double results; single tensors preserve single dtype metadata with single-rounded output values.",
+    "`gammaln(0)` returns `Inf`; `gammaln(Inf)` returns `Inf`; `gammaln(NaN)` returns `NaN`.",
+    "Scalar integer, logical, and character inputs are promoted through RunMat's ordinary numeric coercion path for compatibility with existing elementwise builtins.",
+    "Negative, complex, string, and sparse inputs produce stable typed errors.",
+    "Real GPU tensors stay on device when the provider implements `unary_gammaln`; otherwise RunMat gathers the tensor, evaluates on the host, and returns a host value with the computed results."
+  ],
+  "examples": [
+    {
+      "description": "Evaluate the log-gamma function at a scalar",
+      "input": "y = gammaln(5)",
+      "output": "y = 3.1781"
+    },
+    {
+      "description": "Evaluate a half-integer input",
+      "input": "y = gammaln(0.5)",
+      "output": "y = 0.5724"
+    },
+    {
+      "description": "Apply gammaln element-wise to an array",
+      "input": "A = [0.5 1 2 5];\nY = gammaln(A)",
+      "output": "Y = [0.5724 0 0 3.1781]"
+    },
+    {
+      "description": "Avoid gamma overflow for large inputs",
+      "input": "y = gammaln(171)",
+      "output": "y = 706.5731"
+    },
+    {
+      "description": "Run gammaln on GPU data",
+      "input": "G = gpuArray([0.5 1 5]);\nout = gammaln(G);\nresult = gather(out)",
+      "output": "result = [0.5724 0 3.1781]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why use `gammaln(A)` instead of `log(gamma(A))`?",
+      "answer": "`gammaln` evaluates the logarithm directly, so large positive inputs can remain finite even when `gamma(A)` would overflow before the logarithm is taken."
+    },
+    {
+      "question": "Does `gammaln` support complex or negative inputs?",
+      "answer": "No. MATLAB documents `gammaln` for real nonnegative input, and RunMat reports typed errors for complex and negative values."
+    },
+    {
+      "question": "Can `gammaln` run on GPU arrays?",
+      "answer": "Yes for real nonnegative tensors. The WGPU backend evaluates `gammaln` on device; other providers may fall back to host evaluation if they do not expose `unary_gammaln`."
+    }
+  ],
+  "related": [
+    {
+      "label": "gamma",
+      "url": "./gamma"
+    },
+    {
+      "label": "log",
+      "url": "./log"
+    },
+    {
+      "label": "factorial",
+      "url": "./factorial"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": [
+    {
+      "label": "`crates/runmat-runtime/src/builtins/math/elementwise/gammaln.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gammaln.rs"
+    }
+  ],
+  "gpu_residency": "Yes when the active provider implements `unary_gammaln` for real-valued gpuArray inputs. Providers without that hook trigger a host fallback, so the computed result is returned as a host tensor rather than a resident gpuArray.",
+  "implementation_notes": [
+    "CPU evaluation uses a log-Lanczos approximation and the reflection identity for positive inputs below 0.5.",
+    "The WGPU backend uses the same log-Lanczos form for f32 and f64 precision.",
+    "RunMat validates the real nonnegative domain before executing provider kernels so negative inputs produce stable domain errors."
+  ]
+}

@@ -367,6 +367,7 @@ async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
     runmat_accelerate_api::set_handle_precision(&handle, final_precision);
 
     runmat_accelerate_api::set_handle_logical(&handle, prepared.logical);
+    runmat_accelerate_api::set_handle_class_name(&handle, dtype.class_name());
 
     Ok(Value::GpuTensor(handle))
 }
@@ -402,6 +403,22 @@ impl DataClass {
             "uint64" => Some(Self::UInt64),
             "gpuarray" => None, // compatibility no-op
             _ => None,
+        }
+    }
+
+    fn class_name(self) -> &'static str {
+        match self {
+            Self::Double => "double",
+            Self::Single => "single",
+            Self::Logical => "logical",
+            Self::Int8 => "int8",
+            Self::Int16 => "int16",
+            Self::Int32 => "int32",
+            Self::Int64 => "int64",
+            Self::UInt8 => "uint8",
+            Self::UInt16 => "uint16",
+            Self::UInt32 => "uint32",
+            Self::UInt64 => "uint64",
         }
     }
 }
@@ -561,6 +578,9 @@ fn resolve_dtype(value: &Value, options: &ParsedOptions) -> BuiltinResult<DataCl
     if let Some(prototype) = options.prototype.as_ref() {
         return infer_dtype_from_prototype(prototype);
     }
+    if let Value::GpuTensor(handle) = value {
+        return dtype_from_gpu_handle(handle);
+    }
     if value_defaults_to_logical(value) {
         return Ok(DataClass::Logical);
     }
@@ -569,13 +589,7 @@ fn resolve_dtype(value: &Value, options: &ParsedOptions) -> BuiltinResult<DataCl
 
 fn infer_dtype_from_prototype(proto: &Value) -> BuiltinResult<DataClass> {
     match proto {
-        Value::GpuTensor(handle) => {
-            if runmat_accelerate_api::handle_is_logical(handle) {
-                Ok(DataClass::Logical)
-            } else {
-                Ok(DataClass::Double)
-            }
-        }
+        Value::GpuTensor(handle) => dtype_from_gpu_handle(handle),
         Value::LogicalArray(_) | Value::Bool(_) => Ok(DataClass::Logical),
         Value::Int(int) => Ok(match int {
             IntValue::I8(_) => DataClass::Int8,
@@ -605,6 +619,24 @@ fn infer_dtype_from_prototype(proto: &Value) -> BuiltinResult<DataClass> {
             &GPUARRAY_ERROR_LIKE_PROTOTYPE,
         )),
     }
+}
+
+fn dtype_from_gpu_handle(handle: &GpuTensorHandle) -> BuiltinResult<DataClass> {
+    if runmat_accelerate_api::handle_is_logical(handle) {
+        return Ok(DataClass::Logical);
+    }
+    if let Some(class_name) = runmat_accelerate_api::handle_class_name(handle) {
+        if let Some(dtype) = DataClass::from_tag(class_name.trim().to_ascii_lowercase().as_str()) {
+            return Ok(dtype);
+        }
+    }
+    let precision = runmat_accelerate_api::handle_precision(handle).or_else(|| {
+        runmat_accelerate_api::provider_for_handle(handle).map(|provider| provider.precision())
+    });
+    Ok(match precision {
+        Some(ProviderPrecision::F32) => DataClass::Single,
+        Some(ProviderPrecision::F64) | None => DataClass::Double,
+    })
 }
 
 fn value_defaults_to_logical(value: &Value) -> bool {

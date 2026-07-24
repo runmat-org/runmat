@@ -1,0 +1,60 @@
+{
+  "title": "hgsave",
+  "category": "plotting",
+  "keywords": [
+    "hgsave",
+    "graphics save",
+    "fig",
+    "plotting"
+  ],
+  "summary": "Save figures, or parent figures of graphics handles, as RunMat FIG files.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`hgsave` persists RunMat figure scenes; child graphics handles resolve to their parent figure."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": "plot-core",
+  "tested": {
+    "unit": "builtins::plotting::figure_persistence::tests",
+    "integration": "hgsave/hgload round-trip tests"
+  },
+  "description": "`hgsave` saves the current figure, a figure handle, or the parent figures of graphics handles to RunMat FIG files. RunMat FIG persistence is figure-scene based; arbitrary graphics-subtree FIG files are not emitted yet.",
+  "behaviors": [
+    "`hgsave(filename)` saves the current figure and appends `.fig` when needed.",
+    "`hgsave(h, filename)` accepts scalar handles and handle arrays, deduplicating handles that resolve to the same parent figure.",
+    "Version options `-v6`, `-v7`, and `-v7.3` are accepted for MATLAB compatibility and map to RunMat's FIG scene format."
+  ],
+  "examples": [
+    {
+      "description": "Save a graphics hierarchy",
+      "input": "plot(1:4);\nhgsave(gcf, \"legacy_plot.fig\");"
+    }
+  ],
+  "links": [
+    {
+      "label": "hgload",
+      "url": "./hgload"
+    },
+    {
+      "label": "savefig",
+      "url": "./savefig"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/figure_persistence.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/figure_persistence.rs"
+  },
+  "gpu_residency": "`hgsave` is an I/O sink and returns a host logical status.",
+  "gpu_behavior": [
+    "No numeric GPU kernel is launched.",
+    "Saved figures use the same scene exporter as `savefig`."
+  ]
+}

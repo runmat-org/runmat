@@ -1,0 +1,66 @@
+{
+  "title": "mvnrnd",
+  "category": "stats/random",
+  "keywords": ["mvnrnd", "multivariate normal", "gaussian", "random", "statistics"],
+  "summary": "Generate multivariate normal random samples.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "Sampling currently runs on the host RNG path. GPU inputs are gathered to host."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::random::mvnrnd::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`mvnrnd(mu,Sigma)` draws rows from one or more multivariate normal distributions. `mu` supplies mean vectors and `Sigma` supplies covariance matrices.",
+  "behaviors": [
+    "`mu` can be a scalar, a vector, or an m-by-d matrix with one mean vector per row. A d-by-1 column vector is treated as d one-dimensional means.",
+    "`Sigma` can be a d-by-d covariance matrix, a 1-by-d diagonal-variance vector, a d-by-d-by-m array of covariance pages, or a 1-by-d-by-m array of diagonal-variance pages.",
+    "`mvnrnd(mu,Sigma,n)` draws `n` rows when `mu` is a single mean vector and `Sigma` has one covariance page; `n` must be a positive scalar integer.",
+    "Without `n`, RunMat draws one row for each row of `mu`, each page of `Sigma`, or their shared row/page count.",
+    "A single covariance matrix is reused for all rows of matrix `mu`; a single mean vector is reused for all covariance pages.",
+    "`Sigma` must be symmetric positive semidefinite. Positive-definite covariances use Cholesky; singular semidefinite covariances use a symmetric eigen factor.",
+    "All inputs must be real finite numeric values, and outputs are double precision with observations in rows."
+  ],
+  "examples": [
+    {
+      "description": "Draw five bivariate samples",
+      "input": "rng('default');\nR = mvnrnd([1 2], [4 1; 1 9], 5)"
+    },
+    {
+      "description": "Use one covariance page per mean row",
+      "input": "mu = [0 0; 10 20];\nSigma = cat(3, eye(2), [4 0; 0 9]);\nR = mvnrnd(mu, Sigma)"
+    },
+    {
+      "description": "Use diagonal variances",
+      "input": "R = mvnrnd([1 2], [4 9], 5)"
+    },
+    {
+      "description": "Draw from a singular covariance",
+      "input": "R = mvnrnd([0 0], [1 1; 1 1], 3)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does mvnrnd use the same RNG as randn and normrnd?",
+      "answer": "Yes. RunMat draws standard normal variates from the shared deterministic RNG state, so `rng` controls reproducibility."
+    },
+    {
+      "question": "Does RunMat require Sigma to be positive definite?",
+      "answer": "No. Positive semidefinite covariance matrices are accepted. Negative eigenvalues outside numerical tolerance raise an error."
+    }
+  ],
+  "links": [
+    { "label": "normrnd", "url": "./normrnd" },
+    { "label": "randn", "url": "./randn" },
+    { "label": "rng", "url": "./rng" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/random/mvnrnd.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/mvnrnd.rs"
+  }
+}

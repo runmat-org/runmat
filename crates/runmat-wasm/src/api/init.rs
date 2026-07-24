@@ -17,7 +17,6 @@ use crate::runtime::gpu::{
     validate_webgpu_runtime, GpuStatus,
 };
 use crate::runtime::logging::{init_logging_once, set_log_filter_override};
-use crate::runtime::snapshot::resolve_snapshot_bytes;
 use crate::wire::errors::{init_error, init_error_with_details, js_value_to_string, InitErrorCode};
 
 #[wasm_bindgen(js_name = initRunMat)]
@@ -50,13 +49,6 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     #[cfg(target_arch = "wasm32")]
     {
         if !options.is_null() && !options.is_undefined() {
-            if let Ok(stream_value) =
-                js_sys::Reflect::get(&options, &JsValue::from_str("snapshotStream"))
-            {
-                if !stream_value.is_null() && !stream_value.is_undefined() {
-                    parsed_opts.snapshot_stream = Some(stream_value);
-                }
-            }
             if let Ok(emitter_value) =
                 js_sys::Reflect::get(&options, &JsValue::from_str("telemetryEmitter"))
             {
@@ -77,17 +69,8 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
 
     let config = SessionConfig::from_options(&parsed_opts);
     config.apply_env_overrides();
-    let snapshot_seed = resolve_snapshot_bytes(&parsed_opts).await.map_err(|err| {
-        let message = js_value_to_string(err.clone());
-        init_error_with_details(InitErrorCode::SnapshotResolution, message, Some(err))
-    })?;
-
-    let mut session = runmat_core::RunMatSession::with_snapshot_bytes(
-        config.enable_jit,
-        config.verbose,
-        snapshot_seed.as_deref(),
-    )
-    .map_err(|err| {
+    let mut session = runmat_core::RunMatSession::with_options(config.enable_jit, config.verbose)
+        .map_err(|err| {
         init_error(
             InitErrorCode::SessionCreation,
             format!("Failed to initialize RunMat session: {err}"),
@@ -181,13 +164,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         session.set_telemetry_sink(telemetry_sink.clone());
     }
 
-    Ok(RunMatWasm::new(
-        session,
-        snapshot_seed,
-        config,
-        gpu_status,
-        telemetry_sink,
-    ))
+    Ok(RunMatWasm::new(session, config, gpu_status, telemetry_sink))
 }
 
 #[cfg(target_arch = "wasm32")]

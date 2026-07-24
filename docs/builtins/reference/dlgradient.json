@@ -1,0 +1,33 @@
+{
+  "title": "dlgradient",
+  "category": "deep_learning",
+  "keywords": ["dlgradient", "deep learning", "automatic differentiation", "custom training"],
+  "summary": "Differentiate a traced scalar dlarray loss.",
+  "description": "`dlgradient(loss, targets...)` backpropagates through the bounded automatic-differentiation tape installed by `dlfeval`.",
+  "behaviors": [
+    "`dlgradient` must be called inside a `dlfeval` callback and `loss` must be a scalar traced `dlarray` value.",
+    "Host `dlarray` elementwise `plus`, `minus`, `times`, `rdivide`, matrix `mtimes`, and scalar `sum(...,'all')` participate in the tape.",
+    "Supported `dlnetwork` forward passes trace fully-connected, ReLU, ELU, and softmax layers and return gradients for matching `Learnables` trees.",
+    "Learnables structs, tables, cells, and `dlnetwork` objects preserve `Layer` and `Parameter` metadata while replacing `Value` entries with gradient `dlarray` values.",
+    "Implicit-expansion gradients are supported for scalar broadcasts; higher-rank broadcast-gradient reductions, custom layers, recurrent/stateful layers, and complex/autodiff over sparse data are unsupported."
+  ],
+  "examples": [
+    {
+      "description": "Differentiate a custom loss",
+      "input": "[loss,gradients] = dlfeval(@modelLoss, net, X, T)\nfunction [loss,gradients] = modelLoss(net,X,T)\n    Y = forward(net,X);\n    loss = sum((Y - T).^2,'all');\n    gradients = dlgradient(loss, net.Learnables);\nend",
+      "output": "gradients matches the learnables tree shape."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "gradients = dlgradient(loss, targets...)\n[g1,g2] = dlgradient(loss, target1, target2)",
+      "output": "Gradient trees matching the requested targets."
+    }
+  },
+  "gpu_residency": "GPU-backed `dlarray` autodiff is rejected with an explicit provider-gap error. Plain GPU array math remains available outside the Deep Learning tape where the relevant builtin/provider hooks support it.",
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/deep_learning/autodiff.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/autodiff.rs"
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "title": "cosineSimilarity",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "cosineSimilarity",
+    "text analytics",
+    "similarity",
+    "tf-idf",
+    "bagOfWords",
+    "bagOfNgrams"
+  ],
+  "summary": "Compute cosine similarity between documents, bag models, or numeric matrix rows.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`cosineSimilarity` builds host sparse similarity matrices from text-model metadata or numeric rows. Provider-resident sparse output is not available in this slice."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::similarity::tests",
+    "integration": null
+  },
+  "description": "`cosineSimilarity` compares rows of numeric matrices directly, or compares `tokenizedDocument`, `bagOfWords`, and `bagOfNgrams` inputs using tf-idf weighting derived from the first document or bag input.",
+  "behaviors": [
+    "`cosineSimilarity(M)` returns pairwise row cosine similarities for the rows of `M` as a real sparse matrix.",
+    "`cosineSimilarity(M1, M2)` returns an `m1`-by-`m2` sparse matrix comparing each row of `M1` to each row of `M2`; both matrices must have the same number of columns.",
+    "`cosineSimilarity(documents)` accepts RunMat `tokenizedDocument` objects and raw row word vectors; non-tokenized arrays must be row vectors representing one document.",
+    "`cosineSimilarity(documents, queries)` encodes query documents using the vocabulary and inverse-document-frequency weights derived from `documents`.",
+    "`cosineSimilarity(bag)` and `cosineSimilarity(bag, queries)` accept RunMat `bagOfWords` and `bagOfNgrams` compatibility objects and use their stored counts and terms.",
+    "Real numeric and text-model results are returned as RunMat `SparseTensor` values. Zero-norm rows produce stored `NaN` similarities, matching the mathematical undefined cosine case.",
+    "Complex matrix inputs use the Hermitian inner product. RunMat does not yet have a complex sparse value type, so complex results are returned as a dense `ComplexTensor` compatibility fallback rather than MATLAB's sparse complex matrix representation.",
+    "`gpuArray` inputs are gathered before evaluation because RunMat sparse output is currently host-resident and provider-resident sparse similarity kernels are tracked by the GPU fast-path audit."
+  ],
+  "examples": [
+    {
+      "description": "Compare Numeric Rows",
+      "input": "S = cosineSimilarity([1 0; 1 1])",
+      "output": "`S` is a sparse 2-by-2 matrix of row cosine similarities."
+    },
+    {
+      "description": "Compare Documents Against Queries",
+      "input": "documents = tokenizedDocument([\"alpha beta\"; \"beta gamma\"]);\nqueries = tokenizedDocument(\"alpha\");\nS = cosineSimilarity(documents, queries)",
+      "output": "`S` contains the similarity between each document and the query document."
+    },
+    {
+      "description": "Compare A Bag Model",
+      "input": "bag = bagOfWords(tokenizedDocument([\"alpha beta\"; \"beta gamma\"]));\nS = cosineSimilarity(bag)",
+      "output": "`S` compares the bag rows using tf-idf weights derived from the bag counts."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `cosineSimilarity` return a sparse matrix?",
+      "answer": "Yes for real numeric, document, and bag inputs. Complex numeric inputs currently return a dense complex matrix because RunMat does not yet expose complex sparse storage."
+    },
+    {
+      "question": "Can query documents contain words not in the first input?",
+      "answer": "Yes. Query words or n-grams outside the first input's vocabulary are ignored, matching the fixed-vocabulary comparison model."
+    },
+    {
+      "question": "Does `cosineSimilarity` execute on the GPU?",
+      "answer": "No. The current implementation returns host sparse values. Provider-resident sparse output and GPU cosine kernels belong to the queued GPU fast-path audit."
+    }
+  ],
+  "links": [
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "bagOfWords",
+      "url": "./bagOfWords"
+    },
+    {
+      "label": "bagOfNgrams",
+      "url": "./bagOfNgrams"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "S = cosineSimilarity(documents)\nS = cosineSimilarity(documents, queries)\nS = cosineSimilarity(bag)\nS = cosineSimilarity(bag, queries)\nS = cosineSimilarity(M)\nS = cosineSimilarity(M1, M2)",
+      "output": "`S` is a sparse similarity matrix for real inputs, or a dense complex matrix for complex matrix inputs."
+    },
+    "points": [
+      "Document and bag forms use tf-idf weights from the first input.",
+      "Query documents are encoded against the first input's vocabulary or n-gram set.",
+      "Matrix inputs compare rows and must have equal column counts."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/similarity.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/similarity.rs"
+  },
+  "gpu_residency": "`cosineSimilarity` currently gathers provider inputs and returns host sparse output because RunMat sparse values are host-resident."
+}

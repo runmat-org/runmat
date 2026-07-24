@@ -1,0 +1,12 @@
+{
+  "title": "findgroups",
+  "category": "array/grouping",
+  "keywords": ["findgroups", "groups", "table", "categorical"],
+  "summary": "Find groups and return group numbers.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Grouping runs on the host."},
+  "tested": {"unit": "builtins::array::grouping::tests"},
+  "description": "`G = findgroups(A)` assigns one-based group IDs to matching nonmissing values in `A`; missing values receive NaN group IDs.",
+  "behaviors": ["Supports numeric, logical, string, cell, categorical, datetime/duration, multiple grouping inputs, and table variable grouping.", "Group IDs are assigned in sorted group-key order."],
+  "examples": [{"description": "Group strings", "input": "G = findgroups([\"b\";\"a\";\"b\"])", "output": "G = [2; 1; 2]"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/array/grouping.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/grouping.rs"}
+}

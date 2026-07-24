@@ -588,6 +588,31 @@ fn cummax_host(
     direction: CummaxDirection,
     nan_mode: CummaxNanMode,
 ) -> BuiltinResult<CummaxEvaluation> {
+    match value {
+        Value::Int(value) => {
+            let storage =
+                crate::builtins::math::reduction::integer_native::storage_from_scalar(&value);
+            integer_cummax(&storage, vec![1, 1], dim.unwrap_or(1), direction)
+        }
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
+            integer_cummax(
+                tensor.integer_storage().expect("checked integer storage"),
+                tensor.shape.clone(),
+                target_dim,
+                direction,
+            )
+        }
+        other => cummax_host_floating(other, dim, direction, nan_mode),
+    }
+}
+
+fn cummax_host_floating(
+    value: Value,
+    dim: Option<usize>,
+    direction: CummaxDirection,
+    nan_mode: CummaxNanMode,
+) -> BuiltinResult<CummaxEvaluation> {
     let tensor = tensor::value_into_tensor_for("cummax", value)
         .map_err(|err| cummax_error_with_detail(&CUMMAX_ERROR_INVALID_INPUT, err))?;
     let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
@@ -598,20 +623,39 @@ fn cummax_host(
     })
 }
 
+fn integer_cummax(
+    storage: &runmat_builtins::IntegerStorage,
+    shape: Vec<usize>,
+    dim: usize,
+    direction: CummaxDirection,
+) -> BuiltinResult<CummaxEvaluation> {
+    let result = crate::builtins::math::reduction::integer_native::cumulative_extrema(
+        storage,
+        &shape,
+        dim,
+        match direction {
+            CummaxDirection::Forward => {
+                crate::builtins::math::reduction::integer_native::CumulativeDirection::Forward
+            }
+            CummaxDirection::Reverse => {
+                crate::builtins::math::reduction::integer_native::CumulativeDirection::Reverse
+            }
+        },
+        crate::builtins::math::reduction::integer_native::CumulativeExtremaDirection::Max,
+    )
+    .map_err(|error| cummax_internal_error(&error))?;
+    Ok(CummaxEvaluation {
+        values: result.values,
+        indices: result.indices,
+    })
+}
+
 async fn cummax_gpu(
     handle: GpuTensorHandle,
     dim: Option<usize>,
     direction: CummaxDirection,
     nan_mode: CummaxNanMode,
 ) -> BuiltinResult<CummaxEvaluation> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     if let Some(target) = dim {
         if target == 0 {
             return Err(cummax_error_with_detail(
@@ -1137,6 +1181,32 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         assert_eq!(values, Value::Num(7.0));
         assert_eq!(indices, Value::Num(1.0));
+    }
+
+    #[test]
+    fn cummax_integer_storage_and_reverse_indices_remain_exact() {
+        let input = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![i64::MIN, -4, -5, -3]),
+            vec![2, 2],
+        )
+        .unwrap();
+        let (values, indices) = evaluate(Value::Tensor(input), &[Value::from("reverse")])
+            .unwrap()
+            .into_pair();
+        assert_eq!(
+            values,
+            Value::Tensor(
+                Tensor::new_integer(
+                    runmat_builtins::IntegerStorage::I64(vec![-4, -4, -3, -3]),
+                    vec![2, 2]
+                )
+                .unwrap()
+            )
+        );
+        assert_eq!(
+            indices,
+            Value::Tensor(Tensor::new(vec![2.0, 2.0, 2.0, 2.0], vec![2, 2]).unwrap())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

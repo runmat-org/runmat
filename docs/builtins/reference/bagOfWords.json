@@ -1,0 +1,99 @@
+{
+  "title": "bagOfWords",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "bagOfWords",
+    "text analytics",
+    "word counts",
+    "vocabulary",
+    "documents"
+  ],
+  "summary": "Create bag-of-words model objects.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`bagOfWords` builds host text-model metadata and currently stores dense host counts."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::documents::tests",
+    "integration": null
+  },
+  "description": "`bagOfWords(documents)` creates a lightweight RunMat `bagOfWords` object from a `tokenizedDocument` compatibility object. `bagOfWords(uniqueWords, counts)` creates a model from an explicit vocabulary and count matrix.",
+  "behaviors": [
+    "`bagOfWords` with no input creates an empty model.",
+    "`bagOfWords(documents)` accepts RunMat `tokenizedDocument` objects created by `tokenizedDocument`.",
+    "`bagOfWords(words)` accepts a word vector as a single-document model.",
+    "`bagOfWords(uniqueWords, counts)` accepts a word vector and a numeric count matrix whose columns match the vocabulary length.",
+    "`uniqueWords` must not contain duplicate nonmissing words. Missing string entries are ignored along with their corresponding count columns.",
+    "The returned object stores `Vocabulary`, `Counts`, `NumWords`, and `NumDocuments` properties.",
+    "Counts are stored as a dense host tensor with one row per document and one column per vocabulary word. Very large dense count matrices are rejected with a controlled error until native sparse bag storage is implemented.",
+    "Native sparse bag storage and sparse-preserving GPU residency remain outside this slice.",
+    "Vocabulary order follows first token appearance for document input and the supplied order for explicit `uniqueWords` input."
+  ],
+  "examples": [
+    {
+      "description": "Create A Bag From Documents",
+      "input": "documents = tokenizedDocument([\"alpha beta\"; \"beta gamma\"]);\nbag = bagOfWords(documents)",
+      "output": "`bag.NumDocuments` is `2`, and `bag.Counts` has one column for each unique token."
+    },
+    {
+      "description": "Create A Bag From Counts",
+      "input": "bag = bagOfWords([\"alpha\" \"beta\"], [2 1; 0 3])",
+      "output": "`bag.Vocabulary` is `[\"alpha\" \"beta\"]`, and `bag.Counts` is the supplied `2 x 2` count matrix."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `bagOfWords` use sparse matrices?",
+      "answer": "Not in this slice. The compatibility object stores dense host counts and rejects very large dense count matrices. Sparse storage and provider-resident sparse paths remain broader runtime/model work."
+    },
+    {
+      "question": "Can `bagOfWords` consume raw document strings directly?",
+      "answer": "No. Raw document arrays should first be converted with `tokenizedDocument`. A raw word vector is accepted as a single-document model."
+    },
+    {
+      "question": "Does `bagOfWords` execute on the GPU?",
+      "answer": "No. It builds a host text-model object and does not use a `runmat-accelerate` provider path."
+    }
+  ],
+  "links": [
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "removeShortWords",
+      "url": "./removeShortWords"
+    },
+    {
+      "label": "stopWords",
+      "url": "./stopWords"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "bag = bagOfWords\nbag = bagOfWords(documents)\nbag = bagOfWords(words)\nbag = bagOfWords(uniqueWords, counts)",
+      "output": "`bag` is a `bagOfWords` compatibility object."
+    },
+    "points": [
+      "`documents` must be a RunMat `tokenizedDocument` object.",
+      "`counts` must be a nonnegative integer-valued numeric matrix.",
+      "The number of columns in `counts` must match the number of vocabulary words."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs"
+  },
+  "gpu_residency": "`bagOfWords` stores host text-model metadata and dense host counts in this slice."
+}

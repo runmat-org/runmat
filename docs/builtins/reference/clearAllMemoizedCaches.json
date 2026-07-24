@@ -1,0 +1,66 @@
+{
+  "title": "clearAllMemoizedCaches",
+  "category": "introspection",
+  "keywords": [
+    "clearAllMemoizedCaches",
+    "memoize",
+    "MemoizedFunction",
+    "cache"
+  ],
+  "summary": "Clear all MemoizedFunction caches in the current runtime thread.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side cache bookkeeping only."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::memoize",
+    "integration": "clearAllMemoizedCaches resets all registered MemoizedFunction caches"
+  },
+  "description": "`clearAllMemoizedCaches` removes cached entries and resets counters for every `MemoizedFunction` registered in the current runtime thread.",
+  "behaviors": [
+    "Clears all memoized-function caches known to the runtime.",
+    "Preserves the `MemoizedFunction` objects and their properties.",
+    "The operation returns zero internally and suppresses automatic output in statement form."
+  ],
+  "examples": [
+    {
+      "description": "Clear every memoized cache",
+      "input": "f = memoize(@sin);\ng = memoize(@cos);\nf(1); g(1);\nclearAllMemoizedCaches",
+      "output": "% Both caches are empty."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does this remove MemoizedFunction objects?",
+      "answer": "No. Existing objects remain valid; only their cache entries and counters are reset."
+    }
+  ],
+  "links": [
+    {
+      "label": "memoize",
+      "url": "./memoize"
+    },
+    {
+      "label": "clearCache",
+      "url": "./clearCache"
+    },
+    {
+      "label": "stats",
+      "url": "./stats"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/memoize.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/memoize.rs"
+  }
+}

@@ -716,6 +716,7 @@ fn value_to_u8(value: f64, dtype: NumericDType) -> u8 {
     let scaled = match dtype {
         NumericDType::U8 => value,
         NumericDType::U16 => value / 257.0,
+        NumericDType::U32 => value / (u32::MAX as f64) * 255.0,
         NumericDType::F64 | NumericDType::F32 => value.clamp(0.0, 1.0) * 255.0,
     };
     if scaled.is_nan() {
@@ -729,6 +730,7 @@ fn value_to_u16(value: f64, dtype: NumericDType) -> u16 {
     let scaled = match dtype {
         NumericDType::U16 => value,
         NumericDType::U8 => value * 257.0,
+        NumericDType::U32 => value / (u32::MAX as f64) * 65535.0,
         NumericDType::F64 | NumericDType::F32 => value.clamp(0.0, 1.0) * 65535.0,
     };
     if scaled.is_nan() {

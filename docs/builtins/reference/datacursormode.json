@@ -1,0 +1,73 @@
+{
+  "title": "datacursormode",
+  "category": "plotting",
+  "keywords": [
+    "datacursormode",
+    "data cursor",
+    "data tips",
+    "interactive plotting"
+  ],
+  "summary": "Control data cursor interaction mode for figures.",
+  "status": "done",
+  "version_added": "0.5.3",
+  "tests": {
+    "unit": "builtins::plotting::datacursormode::tests"
+  },
+  "description": "`datacursormode` toggles or configures MATLAB-compatible data cursor mode state. It returns a live data cursor manager object whose common properties can be read or updated through `get` and `set`.",
+  "syntax": [
+    "datacursormode",
+    "datacursormode(option)",
+    "datacursormode(fig, option)",
+    "dcm = datacursormode",
+    "dcm = datacursormode(fig)"
+  ],
+  "arguments": [
+    {
+      "name": "option",
+      "type": "'on' | 'off' | 'toggle'",
+      "description": "Data cursor mode command."
+    },
+    {
+      "name": "fig",
+      "type": "figure handle",
+      "description": "Target figure handle."
+    }
+  ],
+  "examples": [
+    {
+      "description": "Enable data cursor mode",
+      "input": "plot(1:10);\ndatacursormode on;",
+      "output": "% Data cursor mode is enabled"
+    },
+    {
+      "description": "Use the data cursor manager object",
+      "input": "dcm = datacursormode;\nset(dcm, 'DisplayStyle', 'window', 'SnapToDataVertex', 'off');\nget(dcm, 'DisplayStyle')",
+      "output": "ans = 'window'"
+    }
+  ],
+  "notes": [
+    "Statement-form `datacursormode()` toggles data cursor mode. Output-form `dcm = datacursormode()` returns a data cursor manager object.",
+    "The data cursor manager object supports `Enable`, `SnapToDataVertex`, `DisplayStyle`, `UpdateFcn`, and `FigureHandle` properties."
+  ],
+  "gpu_residency": "`datacursormode` mutates plotting interaction metadata only. It does not gather or copy GPU-resident plot data.",
+  "related": [
+    {
+      "label": "dataTipTextRow",
+      "url": "./dataTipTextRow"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "implemented_in": [
+    {
+      "label": "crates/runmat-runtime/src/builtins/plotting/ops/datacursormode.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/datacursormode.rs"
+    }
+  ]
+}

@@ -483,6 +483,14 @@ impl GenerationalAllocator {
             .is_some_and(|epoch| *epoch == handle.epoch())
     }
 
+    pub fn has_live_allocations(&self) -> bool {
+        !self.live_ptrs.is_empty()
+    }
+
+    pub fn generation_count(&self) -> usize {
+        self.generations.len()
+    }
+
     pub fn handle_for_live_ptr(&self, ptr: *const u8) -> Option<GcHandle> {
         let epoch = self.live_epochs.get(&ptr).copied()?;
         value_handle_from_ptr(ptr.cast::<Value>(), epoch).ok()

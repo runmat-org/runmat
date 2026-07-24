@@ -181,10 +181,7 @@ pub(crate) fn active_device_struct() -> BuiltinResult<StructValue> {
 fn build_struct(info: &ApiDeviceInfo, precision: ProviderPrecision) -> StructValue {
     let mut st = StructValue::new();
     st.insert("device_id", Value::Int(IntValue::U32(info.device_id)));
-    st.insert(
-        "index",
-        Value::Int(IntValue::U32(info.device_id.saturating_add(1))),
-    );
+    st.insert("index", Value::Int(IntValue::U32(1)));
     st.insert("name", Value::String(info.name.clone()));
     st.insert("vendor", Value::String(info.vendor.clone()));
     if let Some(backend) = info.backend.as_ref() {

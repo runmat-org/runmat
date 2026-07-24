@@ -33,7 +33,7 @@
     "Logical scalars and arrays report `\"logical\"`. Character arrays return `\"char\"`, while string scalars or arrays return `\"string\"`.",
     "Cell arrays, structs, and user-defined `classdef` objects report `\"cell\"`, `\"struct\"`, or the class name that defined the object.",
     "Function handles and anonymous closures both report `\"function_handle\"`. Listeners return `\"event.listener\"`.",
-    "`gpuArray` values report `\"gpuArray\"` without gathering data. Use `classUnderlying` if you need the element type of the device array.",
+    "`gpuArray` values report `\"gpuArray\"` without gathering data. Use `underlyingType` if you need the element type of the device array.",
     "Handle objects, including deleted handles, return the class name that introduced the handle. Metadata-only values such as `classref(\"Point\")` report `\"meta.class\"`."
   ],
   "examples": [
@@ -101,6 +101,14 @@
     {
       "label": "isa",
       "url": "./isa"
+    },
+    {
+      "label": "underlyingType",
+      "url": "./underlyingType"
+    },
+    {
+      "label": "isUnderlyingType",
+      "url": "./isUnderlyingType"
     },
     {
       "label": "isnumeric",

@@ -1,0 +1,64 @@
+{
+  "title": "dbtype",
+  "category": "introspection",
+  "keywords": ["dbtype", "debug", "source", "line numbers"],
+  "summary": "Display MATLAB source text with line numbers.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side source-file I/O only."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": null,
+    "integration": "debugger_command_forms_rewrite_to_string_args"
+  },
+  "description": "`dbtype` resolves a MATLAB source file through the active filesystem/search-path layer and writes numbered source lines to the command stream.",
+  "behaviors": [
+    "`dbtype file` displays the entire source file with line numbers.",
+    "`dbtype file start:end` displays an inclusive line range.",
+    "The file argument may be a path, an `.m` file, or a bare function/script name resolvable on the RunMat path.",
+    "Builtins cannot be displayed because there is no MATLAB source file to show."
+  ],
+  "examples": [
+    {
+      "description": "Display a file",
+      "input": "dbtype myscript.m"
+    },
+    {
+      "description": "Display selected lines",
+      "input": "dbtype myscript.m 3:8"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can `dbtype` display Rust builtin source?",
+      "answer": "No. It displays MATLAB source files found by the RunMat filesystem/search path."
+    }
+  ],
+  "links": [
+    {
+      "label": "which",
+      "url": "./which"
+    },
+    {
+      "label": "dbstack",
+      "url": "./dbstack"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/debugging.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/debugging.rs"
+  },
+  "gpu_behavior": [
+    "`dbtype` is a host-side source display command and is excluded from GPU execution and fusion."
+  ]
+}

@@ -41,6 +41,7 @@ fn tf_variable_control_workflow_runs_through_vm_dispatch() {
         z = zero(zsys);
         sys_ss = ss([0 1; -4 -0.5], [0; 1], [1 0], 0);
         pss = pole(sys_ss);
+        [pz_p, pz_z] = pzmap(zsys);
         [wn, zeta, dp] = damp(T);
         stable = isstable(T);
         ss = dcgain(T);
@@ -56,6 +57,11 @@ fn tf_variable_control_workflow_runs_through_vm_dispatch() {
         assert(length(z) == 2);
         assert(any(abs(z + 1) < 1e-6));
         assert(any(abs(z + 2) < 1e-6));
+        assert(length(pz_p) == 1);
+        assert(abs(pz_p + 4) < 1e-6);
+        assert(length(pz_z) == 2);
+        assert(any(abs(pz_z + 1) < 1e-6));
+        assert(any(abs(pz_z + 2) < 1e-6));
         assert(length(pss) == 2);
         assert(length(wn) == length(dp));
         assert(length(zeta) == length(dp));
@@ -64,6 +70,33 @@ fn tf_variable_control_workflow_runs_through_vm_dispatch() {
         assert(hn(1) == 2);
         assert(hd(1) == 1);
         assert(hd(2) == 0);
+    "#;
+    execute_source(program).unwrap();
+}
+
+#[test]
+fn lqr_matrix_and_state_space_forms_run_through_vm_dispatch() {
+    let program = r#"
+        A = [0 1; 0 0];
+        B = [0; 1];
+        Q = eye(2);
+        R = 1;
+        [K, S, e] = lqr(A, B, Q, R);
+        sys = ss(A, B, [1 0], 0);
+        Ksys = lqr(sys, Q, R);
+        assert(abs(K(1) - 1) < 1e-8);
+        assert(abs(K(2) - sqrt(3)) < 1e-8);
+        assert(abs(S(1,1) - sqrt(3)) < 1e-8);
+        assert(abs(S(1,2) - 1) < 1e-8);
+        assert(length(e) == 2);
+        assert(all(real(e) < 0));
+        assert(all(abs(Ksys - K) < 1e-8));
+        sysd = ss([1 0.1; 0 1], [0.005; 0.1], [1 0], 0, 0.1);
+        [Kd, Sd, ed] = lqr(sysd, Q, R);
+        assert(length(ed) == 2);
+        assert(all(abs(ed) < 1));
+        assert(all(isfinite(Kd)));
+        assert(all(isfinite(Sd)));
     "#;
     execute_source(program).unwrap();
 }
@@ -234,6 +267,15 @@ fn step_statement_form_plots_without_error() {
     let program = r#"
         H = tf(1, [1 1]);
         step(H);
+    "#;
+    execute_source(program).unwrap();
+}
+
+#[test]
+fn pzmap_statement_form_plots_without_error() {
+    let program = r#"
+        H = tf([1 2], [1 3 4]);
+        pzmap(H);
     "#;
     execute_source(program).unwrap();
 }

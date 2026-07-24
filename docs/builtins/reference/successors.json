@@ -1,0 +1,11 @@
+{
+  "title": "successors",
+  "category": "graph",
+  "keywords": ["successors", "digraph", "graph", "nodes"],
+  "summary": "Return successor nodes.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`successors(G,node)` returns outgoing neighbors for digraphs and adjacent neighbors for undirected graphs.",
+  "signatures": [{"label": "S = successors(G, node)", "description": "Return successor nodes."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

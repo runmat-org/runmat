@@ -1,0 +1,30 @@
+{
+  "title": "dlupdate",
+  "category": "deep_learning",
+  "keywords": ["dlupdate", "deep learning", "model update"],
+  "summary": "Apply a function handle across matching Deep Learning parameter trees.",
+  "description": "`dlupdate(fun,args...)` recursively applies a function handle to matching leaves in one or more parameter trees and reconstructs the output tree shape.",
+  "behaviors": [
+    "The first argument must be a function handle, bound function handle, method function handle, external function handle, or closure.",
+    "Struct fields and cell elements are traversed recursively; matching inputs must have the same container shape and field names.",
+    "Structs, tables, and timetables that look like Deep Learning learnables containers with `Layer`, `Parameter`, and `Value` entries preserve `Layer` and `Parameter` metadata and apply the callback only to entries in `Value`.",
+    "`dlarray` compatibility objects are treated as leaf parameter values, so callbacks can preserve or replace the wrapper intentionally.",
+    "The requested output count is forwarded to the callback for each leaf, and each callback output is reconstructed as its own output tree.",
+    "`dlnetwork` objects are traversed through their `Learnables` metadata and rebuilt with updated fully-connected layer weights and bias. Arbitrary custom model objects remain unsupported."
+  ],
+  "examples": [
+    {
+      "description": "Update Struct Parameters",
+      "input": "net = dlupdate(@plus, net, gradients)",
+      "output": "A dlnetwork, struct, cell, table, or dlarray-compatible tree with updated leaves."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "out = dlupdate(fun, args...)",
+      "output": "Updated parameter tree."
+    }
+  },
+  "gpu_residency": "`dlupdate` itself is a tree traversal and callback-dispatch helper and does not gather parameter trees before callback dispatch. GPU residency is preserved when the callback accepts and returns provider-resident values; model-wide provider kernels remain tracked by the queued GPU fast-path audit."
+}

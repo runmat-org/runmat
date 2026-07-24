@@ -1,0 +1,39 @@
+{
+  "title": "randsample",
+  "category": "stats/random",
+  "keywords": ["randsample", "random", "sample", "replacement", "weights", "statistics"],
+  "summary": "Randomly sample from an integer range or population vector.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host for compatibility until provider sampling hooks exist."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::random::sampling::tests", "integration": null },
+  "description": "`randsample(n,k)` samples from integers `1:n`. `randsample(population,k)` samples from a population vector. Replacement and weights are supported with `randsample(...,replacement,w)`.",
+  "behaviors": [
+    "Samples without replacement by default.",
+    "When the first argument is a numeric scalar, it is treated as the upper limit `n`.",
+    "Population vectors preserve their row or column orientation.",
+    "Weights are supported for sampling with replacement, matching MATLAB's documented restriction.",
+    "Numeric, logical, string, and char population vectors are supported."
+  ],
+  "examples": [
+    { "description": "Sample unique integers", "input": "y = randsample(20, 10)" },
+    { "description": "Sample with replacement and weights", "input": "y = randsample(population, 5, true, weights)" }
+  ],
+  "faqs": [
+    {
+      "question": "How is randsample different from datasample?",
+      "answer": "`randsample(n,k)` is specialized for integer ranges and population vectors. Use `datasample` to sample along dimensions of arrays."
+    }
+  ],
+  "links": [{ "label": "datasample", "url": "./datasample" }, { "label": "randperm", "url": "./randperm" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/random/sampling.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/sampling.rs"
+  }
+}

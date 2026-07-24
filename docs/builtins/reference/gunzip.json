@@ -1,0 +1,35 @@
+{
+  "title": "gunzip",
+  "category": "io/archive",
+  "keywords": [
+    "gunzip"
+  ],
+  "summary": "Decompress gzip files.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::archive::gzip::tests",
+    "integration": null
+  },
+  "description": "Decompress gzip files.",
+  "behaviors": [
+    "Decompresses scalar file paths, string arrays, and cell arrays of gzip file paths.",
+    "Supports HTTP and HTTPS gzip URLs through the shared RunMat HTTP transport.",
+    "Writes decompressed files beside local inputs by default or under the supplied output folder, and returns a cell array of output paths."
+  ],
+  "examples": [],
+  "faqs": [],
+  "links": []
+}

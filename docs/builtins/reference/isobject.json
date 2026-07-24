@@ -1,0 +1,95 @@
+{
+  "title": "isobject",
+  "category": "introspection",
+  "keywords": [
+    "isobject",
+    "object",
+    "handle",
+    "classdef",
+    "type checking"
+  ],
+  "summary": "Return true when a value is a MATLAB object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Metadata-only predicate. gpuArray values are MATLAB objects and remain resident while the host logical result is returned."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::isobject::tests",
+    "integration": null
+  },
+  "description": "`isobject(A)` returns true when `A` is represented as a MATLAB class object in RunMat, including value objects, handle objects, listeners, metaclass references, and `MException` values. Plotting handles are still represented by RunMat's numeric graphics-handle compatibility layer, so use `ishandle`/graphics APIs for those until graphics handles move to object values.",
+  "behaviors": [
+    "Value-class and handle-class instances return `logical(1)`.",
+    "Runtime object values such as event listeners, metaclass references, MException instances, and gpuArray handles return `logical(1)` because they expose MATLAB class/object semantics.",
+    "Numeric, logical, character, string, cell, struct, and function-handle values return `logical(0)`.",
+    "Current RunMat plotting handles are numeric compatibility handles rather than `Value::HandleObject` instances, so `isobject` does not treat figure, axes, or plot-child handles as objects yet.",
+    "The predicate does not inspect object properties or call user code."
+  ],
+  "examples": [
+    {
+      "description": "Check ordinary numeric data",
+      "input": "tf = isobject(42)",
+      "output": "tf = logical(0)"
+    },
+    {
+      "description": "Check a class object",
+      "input": "obj = classref(\"Point\").origin();\ntf = isobject(obj)",
+      "output": "tf = logical(1)"
+    },
+    {
+      "description": "Function handles are not objects",
+      "input": "tf = isobject(@sin)",
+      "output": "tf = logical(0)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `isobject` call class methods?",
+      "answer": "No. It only inspects runtime type metadata and never invokes user-defined code."
+    },
+    {
+      "question": "Are structs objects?",
+      "answer": "No. MATLAB structs are data containers, not class objects, so `isobject(struct(...))` returns false."
+    },
+    {
+      "question": "What about gpuArray?",
+      "answer": "A gpuArray is represented by a GPU-resident handle in RunMat and follows MATLAB's object classification, so `isobject(gpuArray(...))` returns true without gathering the buffer."
+    },
+    {
+      "question": "What about graphics handles?",
+      "answer": "RunMat currently represents figure, axes, and plot-child handles as numeric compatibility handles. Use `ishandle`, `get`, `set`, and graphics query functions for those handles; object-valued graphics handles require a broader graphics-handle representation change."
+    }
+  ],
+  "links": [
+    {
+      "label": "class",
+      "url": "./class"
+    },
+    {
+      "label": "isa",
+      "url": "./isa"
+    },
+    {
+      "label": "isstring",
+      "url": "./isstring"
+    },
+    {
+      "label": "ishandle",
+      "url": "./ishandle"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/isobject.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/isobject.rs"
+  }
+}

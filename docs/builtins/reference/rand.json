@@ -30,14 +30,15 @@
     "unit": "builtins::array::rand::tests",
     "integration": "builtins::array::rand::tests::rand_gpu_like_uniform"
   },
-  "description": "`rand` produces uniformly distributed pseudorandom numbers over the open interval (0, 1). It supports MATLAB-compatible size forms, class selection, and `'like'` prototypes that control output type and residency.",
+  "description": "`rand` produces uniformly distributed pseudorandom numbers over the open interval (0, 1). It supports MATLAB-compatible size forms, class selection, `'like'` prototypes that control output type and residency, and the legacy `rand('seed', seed)` control form.",
   "behaviors": [
     "`rand()` returns a scalar double drawn from `U(0, 1)`.",
     "`rand(n)` returns an `n × n` double matrix.",
     "`rand(m, n, ...)` returns a dense double array of the requested dimensions.",
     "`rand(sz)` accepts a size vector (row or column) and returns a tensor whose shape is `sz`.",
     "`rand(A)` or `rand(___, 'like', A)` matches the shape and residency of `A`, including GPU tensors when an acceleration provider is active.",
-    "`rand(___, 'double')` leaves the output as double precision (default). `'single'` returns single-precision results that mirror MATLAB's behaviour."
+    "`rand(___, 'double')` leaves the output as double precision (default). `'single'` returns single-precision results that mirror MATLAB's behaviour.",
+    "`rand('seed', seed)` and `rand(\"seed\", seed)` accept non-negative integer scalar seeds and reset RunMat's shared pseudorandom stream. `rand('seed')` queries a restorable legacy state token for the current stream position; passing that token back to `rand('seed', token)` restores subsequent draws. This legacy control form also synchronizes the active acceleration provider's RNG state when provider hooks are available."
   ],
   "examples": [
     {
@@ -54,6 +55,11 @@
       "description": "Creating a 128x128 matrix of random numbers on a GPU",
       "input": "G = rand(128, 128)",
       "output": "H = [0.8147 0.9134 0.1270 0.9058 0.6324 0.0975 0.1270 0.0975 0.2785; 0.9134 0.6324 0.0975 0.2785 0.0975 0.1270 0.9058 0.6324 0.0975]"
+    },
+    {
+      "description": "Use legacy seed syntax",
+      "input": "rand('seed', 2026);\na = rand(1, 4);\ns = rand('seed');\nb = rand(1, 4);\nrand('seed', s);\nc = rand(1, 4);",
+      "output": "b and c contain the same values because s restores the post-a stream position."
     }
   ],
   "faqs": [
@@ -92,6 +98,10 @@
     {
       "question": "What if I call `rand` with no arguments?",
       "answer": "`rand()` returns a scalar double drawn from `U(0, 1)`."
+    },
+    {
+      "question": "Should I use `rand('seed', seed)` or `rng(seed)`?",
+      "answer": "`rng(seed)` is the preferred modern spelling. `rand('seed', seed)` remains supported for legacy MATLAB scripts and maps to RunMat's shared random generator state. `rand('seed')` returns an opaque numeric state token intended for same-session save/restore workflows."
     }
   ],
   "links": [

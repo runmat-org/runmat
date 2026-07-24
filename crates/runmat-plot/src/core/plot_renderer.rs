@@ -4,12 +4,13 @@
 //! interactive plotting windows and static file exports, ensuring consistent
 //! high-quality output across all use cases.
 
-use crate::core::renderer::Vertex;
+use crate::core::renderer::{DirectUniforms, Vertex};
 use crate::core::{
     BoundingBox, Camera, CameraViewPreset, ClipPolicy, DepthMode, Scene, WgpuRenderer,
 };
 use crate::geometry_scene::{
     GeometryScene, GeometrySceneCacheKey, GeometrySceneOverlay, GeometryScenePresentation,
+    GeometrySceneViewPreset,
 };
 use crate::plots::figure::{LegendEntry, TextStyle};
 use crate::plots::surface::ColorMap;
@@ -494,7 +495,7 @@ impl PlotRenderer {
         self.last_axes_view_bounds = None;
         // Initialize axes cameras for subplot grid
         let (rows, cols) = figure.axes_grid();
-        let num_axes = rows.max(1) * cols.max(1);
+        let num_axes = figure.axes_count();
         let axes_view_contract = Self::axes_view_contract_for_figure(&figure);
         let axes_view_contract_changed =
             self.last_axes_view_contract.as_ref() != Some(&axes_view_contract);
@@ -583,7 +584,7 @@ impl PlotRenderer {
     pub fn set_geometry_scene_with_presentation(
         &mut self,
         geometry_scene: GeometryScene,
-        presentation: GeometryScenePresentation,
+        mut presentation: GeometryScenePresentation,
     ) {
         let cache_key = geometry_scene.cache_key();
         let same_scene_identity = self
@@ -591,6 +592,9 @@ impl PlotRenderer {
             .as_ref()
             .map(|key| key.scene_id.as_str())
             == Some(cache_key.scene_id.as_str());
+        if same_scene_identity {
+            self.preserve_geometry_scene_state_when_unspecified(&mut presentation);
+        }
         let preserved_camera = same_scene_identity
             .then(|| self.axes_cameras.first().cloned())
             .flatten();
@@ -655,19 +659,7 @@ impl PlotRenderer {
         self.axes_applied_view_revisions.clear();
         self.axes_applied_view_revisions.push(None);
 
-        for (index, chunk) in geometry_scene.chunks.iter().enumerate() {
-            let node_id = geometry_scene.chunk_node_id(index, &chunk.chunk_id);
-            if !chunk.owner_node_ids.is_empty() {
-                self.geometry_node_owner_ids
-                    .insert(node_id, chunk.owner_node_ids.clone());
-            }
-        }
-
-        for node in geometry_scene.nodes_with_presentation(&self.geometry_presentation) {
-            self.scene.add_node(node);
-        }
-        self.apply_geometry_xray_to_nodes();
-        self.apply_geometry_visibility_filter();
+        self.rebuild_geometry_scene_nodes(&geometry_scene);
 
         if preserved_camera.is_none() {
             let mut camera = Camera::new();
@@ -709,7 +701,8 @@ impl PlotRenderer {
             device: &self.wgpu_renderer.device,
             queue: &self.wgpu_renderer.queue,
         };
-        let view_bounds = self.axes_view_bounds_for_count(rows.max(1) * cols.max(1));
+        let axes_count = figure.axes_count();
+        let view_bounds = self.axes_view_bounds_for_count(axes_count);
         let viewport_hint = if axes_plot_sizes_px.is_some() || rows.max(1) * cols.max(1) <= 1 {
             Some(viewport_px)
         } else {
@@ -724,7 +717,7 @@ impl PlotRenderer {
 
         for (node_id_counter, (axes_index, render_data)) in render_data_list.into_iter().enumerate()
         {
-            let axes_index = axes_index.min(rows * cols - 1);
+            let axes_index = axes_index.min(axes_count.saturating_sub(1));
             // Create scene node for this plot element
             let node = SceneNode {
                 id: node_id_counter as u64,
@@ -755,10 +748,31 @@ impl PlotRenderer {
         &mut self,
         axes_plot_sizes_px: &[(u32, u32)],
     ) {
-        let normalized: Vec<(u32, u32)> = axes_plot_sizes_px
+        let mut normalized: Vec<(u32, u32)> = axes_plot_sizes_px
             .iter()
             .map(|&(w, h)| (w.max(1), h.max(1)))
             .collect();
+        let Some(figure) = self.last_figure.clone() else {
+            let view_bounds = self.axes_view_bounds_for_count(normalized.len().max(1));
+            self.last_axes_plot_sizes_px = Some(normalized);
+            self.last_axes_view_bounds = Some(view_bounds);
+            return;
+        };
+        let axes_count = figure.axes_count();
+        if normalized.len() < axes_count {
+            let grid_len = normalized.len().max(1);
+            for axes_index in normalized.len()..axes_count {
+                let parent = figure
+                    .axes_overlay_parent(axes_index)
+                    .unwrap_or(axes_index)
+                    .min(grid_len - 1);
+                let size = normalized.get(parent).copied().unwrap_or((
+                    self.wgpu_renderer.surface_config.width.max(1),
+                    self.wgpu_renderer.surface_config.height.max(1),
+                ));
+                normalized.push(size);
+            }
+        }
         if normalized.iter().any(|&(w, h)| w < 2 || h < 2) {
             log::debug!(
                 target: "runmat_plot.viewport_rebuild",
@@ -767,17 +781,12 @@ impl PlotRenderer {
             );
             return;
         }
-        let view_bounds = self.axes_view_bounds_for_count(normalized.len().max(1));
+        let view_bounds = self.axes_view_bounds_for_count(axes_count);
         if self.last_axes_plot_sizes_px.as_ref() == Some(&normalized)
             && self.last_axes_view_bounds.as_ref() == Some(&view_bounds)
         {
             return;
         }
-        let Some(figure) = self.last_figure.clone() else {
-            self.last_axes_plot_sizes_px = Some(normalized);
-            self.last_axes_view_bounds = Some(view_bounds);
-            return;
-        };
         self.scene.clear();
         self.scene_buffer_cache.borrow_mut().clear();
         self.add_figure_to_scene_with_axes_plot_sizes(figure, Some(&normalized));
@@ -797,6 +806,13 @@ impl PlotRenderer {
         (0..axes_count)
             .map(|idx| self.view_bounds_for_axes(idx))
             .collect()
+    }
+
+    fn direct_log_flags_for_axes(&self, axes_index: usize) -> [u32; 2] {
+        [
+            u32::from(self.overlay_x_log_for_axes(axes_index)),
+            u32::from(self.overlay_y_log_for_axes(axes_index)),
+        ]
     }
 
     fn refit_2d_cameras_to_scene_bounds(&mut self) {
@@ -908,7 +924,7 @@ impl PlotRenderer {
         self.figure_x_log = figure.x_log;
         self.figure_y_log = figure.y_log;
         self.figure_axis_equal = figure.axis_equal;
-        self.figure_colormap = figure.colormap;
+        self.figure_colormap = figure.colormap.clone();
         self.figure_colorbar_enabled = figure.colorbar_enabled;
         // Cache categorical labels for overlay
         if let Some((is_x, labels)) = figure.categorical_axis_labels() {
@@ -966,19 +982,50 @@ impl PlotRenderer {
                     y_min = yl;
                     y_max = yr;
                 }
-                if meta.axis_equal {
-                    let cx = (x_min + x_max) * 0.5;
-                    let cy = (y_min + y_max) * 0.5;
-                    let size = (x_max - x_min).abs().max((y_max - y_min).abs()).max(0.1);
-                    x_min = cx - size * 0.5;
-                    x_max = cx + size * 0.5;
-                    y_min = cy - size * 0.5;
-                    y_max = cy + size * 0.5;
+                if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
+                    (x_min, x_max, y_min, y_max) = data_aspect_adjusted_bounds(
+                        x_min,
+                        x_max,
+                        y_min,
+                        y_max,
+                        meta.data_aspect_ratio,
+                    );
                 }
+            }
+        }
+        if let Some(meta) = self
+            .last_figure
+            .as_ref()
+            .and_then(|fig| fig.axes_metadata(axes_index))
+        {
+            if meta.x_log {
+                (x_min, x_max) = Self::positive_log_bounds(x_min, x_max);
+            }
+            if meta.y_log {
+                (y_min, y_max) = Self::positive_log_bounds(y_min, y_max);
             }
         }
 
         Some((x_min, x_max, y_min, y_max))
+    }
+
+    fn positive_log_bounds(lo: f64, hi: f64) -> (f64, f64) {
+        if lo.is_finite() && hi.is_finite() && lo > 0.0 && hi > 0.0 && lo != hi {
+            return (lo, hi);
+        }
+        let upper = if hi.is_finite() && hi > 0.0 {
+            hi
+        } else if lo.is_finite() && lo > 0.0 {
+            lo
+        } else {
+            1.0
+        };
+        let lower = (upper / 1000.0).max(f64::MIN_POSITIVE);
+        if lower < upper {
+            (lower, upper)
+        } else {
+            (upper * 0.1, upper * 10.0)
+        }
     }
 
     fn apply_3d_display_limits_to_bounds(
@@ -1002,6 +1049,9 @@ impl PlotRenderer {
         if let Some((lo, hi)) = meta.z_limits {
             min.z = lo as f32;
             max.z = hi as f32;
+        }
+        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
+            (min, max) = data_aspect_adjusted_bounds_3d(min, max, meta.data_aspect_ratio);
         }
         BoundingBox { min, max }
     }
@@ -1446,13 +1496,15 @@ impl PlotRenderer {
 
         // data_bounds passed in from caller: (x_min, y_min, x_max, y_max)
         let (x_min, y_min, x_max, y_max) = (0.0_f64, 0.0_f64, 1.0_f64, 1.0_f64);
-        self.wgpu_renderer.update_direct_uniforms(
-            [x_min as f32, y_min as f32],
-            [x_max as f32, y_max as f32],
-            [ndc_left, ndc_bottom],
-            [ndc_right, ndc_top],
-            [sw, sh],
-        );
+        self.wgpu_renderer
+            .update_direct_uniforms(DirectUniforms::new(
+                [x_min as f32, y_min as f32],
+                [x_max as f32, y_max as f32],
+                [ndc_left, ndc_bottom],
+                [ndc_right, ndc_top],
+                [sw, sh],
+                [0, 0],
+            ));
 
         // Continue with specific pipelines below (implementation omitted here)
         drop(render_pass);
@@ -1565,13 +1617,15 @@ impl PlotRenderer {
                 config.width,
                 config.height
             );
-            self.wgpu_renderer.update_direct_uniforms(
-                [x_min as f32, y_min as f32],
-                [x_max as f32, y_max as f32],
-                [-1.0, -1.0],
-                [1.0, 1.0],
-                [config.width as f32, config.height as f32],
-            );
+            self.wgpu_renderer
+                .update_direct_uniforms(DirectUniforms::new(
+                    [x_min as f32, y_min as f32],
+                    [x_max as f32, y_max as f32],
+                    [-1.0, -1.0],
+                    [1.0, 1.0],
+                    [config.width as f32, config.height as f32],
+                    [0, 0],
+                ));
         }
         for (render_data, _vb, _ib) in &render_items {
             if render_data.pipeline_type == crate::core::PipelineType::Textured {
@@ -1839,7 +1893,7 @@ impl PlotRenderer {
     ) -> Result<RenderResult, Box<dyn std::error::Error>> {
         let start_time = Instant::now();
         let (rows, cols) = self.figure_axes_grid();
-        let axes_count = rows.saturating_mul(cols);
+        let axes_count = self.figure_axes_count();
         log::debug!(
             "runmat-plot: renderer.scene_to_target.start rows={} cols={} axes_count={} width={} height={}",
             rows,
@@ -1848,7 +1902,7 @@ impl PlotRenderer {
             config.width,
             config.height
         );
-        if axes_count <= 1 {
+        if axes_count <= 1 && !self.axes_position_explicit_for_axes(0) {
             log::debug!("runmat-plot: renderer.scene_to_target.branch_single_axes");
             return self.render(
                 encoder,
@@ -1860,8 +1914,7 @@ impl PlotRenderer {
             );
         }
 
-        let viewports =
-            Self::compute_tiled_viewports(config.width.max(1), config.height.max(1), rows, cols);
+        let viewports = self.compute_axes_viewports_px(config.width.max(1), config.height.max(1));
         log::debug!(
             "runmat-plot: renderer.scene_to_target.branch_subplot_axes viewports={}",
             viewports.len()
@@ -1914,6 +1967,72 @@ impl PlotRenderer {
             }
         }
         out
+    }
+
+    pub fn compute_axes_viewports_px(
+        &self,
+        total_width: u32,
+        total_height: u32,
+    ) -> Vec<(u32, u32, u32, u32)> {
+        let total_width = total_width.max(1);
+        let total_height = total_height.max(1);
+        let (rows, cols) = self.figure_axes_grid();
+        let axes_count = self.figure_axes_count().max(1);
+        let full = (0, 0, total_width, total_height);
+        let mut viewports = if rows.saturating_mul(cols) > 1 {
+            Self::compute_tiled_viewports(total_width, total_height, rows, cols)
+        } else {
+            vec![full; axes_count]
+        };
+        if viewports.len() < axes_count {
+            let grid_len = viewports.len().max(1);
+            for axes_index in viewports.len()..axes_count {
+                let parent = self
+                    .overlay_parent_for_axes(axes_index)
+                    .unwrap_or(axes_index)
+                    .min(grid_len - 1);
+                viewports.push(viewports.get(parent).copied().unwrap_or(full));
+            }
+        }
+        viewports.truncate(axes_count);
+        for (axes_index, viewport) in viewports.iter_mut().enumerate() {
+            if let Some((position, units)) = self.overlay_position_for_axes(axes_index) {
+                *viewport =
+                    Self::axes_position_to_viewport_px(total_width, total_height, position, &units);
+            }
+        }
+        viewports
+    }
+
+    fn axes_position_to_viewport_px(
+        total_width: u32,
+        total_height: u32,
+        position: [f64; 4],
+        units: &str,
+    ) -> (u32, u32, u32, u32) {
+        let tw = f64::from(total_width.max(1));
+        let th = f64::from(total_height.max(1));
+        let (left, bottom, width, height) = if units.eq_ignore_ascii_case("normalized") {
+            (
+                position[0] * tw,
+                position[1] * th,
+                position[2] * tw,
+                position[3] * th,
+            )
+        } else {
+            (position[0], position[1], position[2], position[3])
+        };
+        let x = left.clamp(0.0, tw - 1.0);
+        let h = height.max(1.0).min(th);
+        let y = (th - bottom - h).clamp(0.0, th - 1.0);
+        let w = width.max(1.0).min(tw - x);
+        let h = h.min(th - y);
+        (
+            x.round() as u32,
+            y.round() as u32,
+            w.round().max(1.0) as u32,
+            h.round().max(1.0) as u32,
+        )
     }
 
     /// Render using the camera-based pipeline into a viewport region with a scissor rectangle.
@@ -2497,7 +2616,8 @@ impl PlotRenderer {
         let mut grid_vb_opt: Option<wgpu::Buffer> = None;
         let show_major_grid = self.overlay_show_grid_for_axes(axes_index);
         let show_minor_grid = self.overlay_show_minor_grid_for_axes(axes_index);
-        if is_2d && (show_major_grid || show_minor_grid) {
+        let log_flags = self.direct_log_flags_for_axes(axes_index);
+        if is_2d && log_flags == [0, 0] && (show_major_grid || show_minor_grid) {
             if let Some((mut l, mut r, mut b, mut t)) = self.view_bounds_for_axes(axes_index) {
                 if self.overlay_axes_kind_for_axes(axes_index) == AxesKind::Polar {
                     let radius = l.abs().max(r.abs()).max(b.abs()).max(t.abs()).max(1e-6);
@@ -2509,11 +2629,14 @@ impl PlotRenderer {
                 // Update direct uniforms mapping for viewport
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
                     axes_index,
-                    [l as f32, b as f32],
-                    [r as f32, t as f32],
-                    [-1.0, -1.0],
-                    [1.0, 1.0],
-                    [sw.max(1) as f32, sh.max(1) as f32],
+                    DirectUniforms::new(
+                        [l as f32, b as f32],
+                        [r as f32, t as f32],
+                        [-1.0, -1.0],
+                        [1.0, 1.0],
+                        [sw.max(1) as f32, sh.max(1) as f32],
+                        log_flags,
+                    ),
                 );
                 self.wgpu_renderer.ensure_direct_line_pipeline();
 
@@ -2606,11 +2729,14 @@ impl PlotRenderer {
             if let Some((l, r, b, t)) = bounds_opt {
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
                     axes_index,
-                    [l as f32, b as f32],
-                    [r as f32, t as f32],
-                    [-1.0, -1.0],
-                    [1.0, 1.0],
-                    [sw.max(1) as f32, sh.max(1) as f32],
+                    DirectUniforms::new(
+                        [l as f32, b as f32],
+                        [r as f32, t as f32],
+                        [-1.0, -1.0],
+                        [1.0, 1.0],
+                        [sw.max(1) as f32, sh.max(1) as f32],
+                        log_flags,
+                    ),
                 );
             }
             self.wgpu_renderer.ensure_direct_triangle_pipeline();
@@ -2622,6 +2748,8 @@ impl PlotRenderer {
                 .ensure_pipeline(crate::core::PipelineType::Triangles);
             self.wgpu_renderer
                 .ensure_pipeline(crate::core::PipelineType::Lines);
+            self.wgpu_renderer
+                .ensure_pipeline(crate::core::PipelineType::LinesNoDepth);
             self.wgpu_renderer
                 .ensure_pipeline(crate::core::PipelineType::Points);
         }
@@ -2761,8 +2889,10 @@ impl PlotRenderer {
                     render_data.pipeline_type,
                     crate::core::PipelineType::Triangles
                 );
-                let is_lines =
-                    matches!(render_data.pipeline_type, crate::core::PipelineType::Lines);
+                let is_lines = matches!(
+                    render_data.pipeline_type,
+                    crate::core::PipelineType::Lines | crate::core::PipelineType::LinesNoDepth
+                );
                 let is_points = matches!(
                     render_data.pipeline_type,
                     crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
@@ -3407,11 +3537,25 @@ impl PlotRenderer {
     pub fn geometry_scene_presentation(&self) -> &GeometryScenePresentation {
         &self.geometry_presentation
     }
-    pub fn set_geometry_scene_presentation(&mut self, presentation: GeometryScenePresentation) {
+    pub fn set_geometry_scene_presentation(&mut self, mut presentation: GeometryScenePresentation) {
+        let requested_view_preset = presentation.view_preset.take();
+        self.preserve_geometry_scene_state_when_unspecified(&mut presentation);
+        if let Some(view_preset) = requested_view_preset {
+            self.set_camera_view_preset(geometry_scene_view_preset_to_camera(view_preset));
+        }
+        log::info!(
+            target: "runmat_plot",
+            "geometry_scene.presentation_renderer selected_region_id={} selected_region_count={} has_scene={} unchanged={}",
+            presentation.selected_region_id.as_deref().unwrap_or("none"),
+            presentation.selected_region_ids.len(),
+            self.last_geometry_scene.is_some(),
+            self.geometry_presentation == presentation,
+        );
         if self.geometry_presentation == presentation {
             return;
         }
         self.geometry_presentation = presentation;
+        self.apply_geometry_presentation_visibility();
         if let Some(scene) = self.last_geometry_scene.clone() {
             self.refresh_geometry_scene_render_data(&scene);
         }
@@ -3431,23 +3575,76 @@ impl PlotRenderer {
         } else if !self.geometry_hidden_owner_node_ids.insert(owner_id) {
             return;
         }
+        self.geometry_presentation.hidden_owner_node_ids = Some(
+            self.geometry_hidden_owner_node_ids
+                .iter()
+                .cloned()
+                .collect(),
+        );
+        self.geometry_presentation.isolated_owner_node_ids = None;
         self.apply_geometry_visibility_filter();
         self.needs_update = true;
     }
     fn refresh_geometry_scene_render_data(&mut self, geometry_scene: &GeometryScene) {
+        log::info!(
+            target: "runmat_plot",
+            "geometry_scene.refresh_render_data chunks={} selected_region_id={} selected_region_count={}",
+            geometry_scene.chunks.len(),
+            self.geometry_presentation
+                .selected_region_id
+                .as_deref()
+                .unwrap_or("none"),
+            self.geometry_presentation.selected_region_ids.len(),
+        );
+        self.rebuild_geometry_scene_nodes(geometry_scene);
+    }
+
+    fn rebuild_geometry_scene_nodes(&mut self, geometry_scene: &GeometryScene) {
+        self.scene.clear();
+        self.scene_buffer_cache.borrow_mut().clear();
+        self.geometry_node_owner_ids.clear();
         for (index, chunk) in geometry_scene.chunks.iter().enumerate() {
             let node_id = geometry_scene.chunk_node_id(index, &chunk.chunk_id);
-            if let Some(node) = self.scene.get_node_mut(node_id) {
-                node.render_data =
-                    Some(chunk.render_data_with_presentation(&self.geometry_presentation));
-                node.bounds = chunk.bounds;
-                node.visible = chunk.visible;
+            if !chunk.owner_node_ids.is_empty() {
+                self.geometry_node_owner_ids
+                    .insert(node_id, chunk.owner_node_ids.clone());
             }
+        }
+        self.apply_geometry_presentation_visibility();
+        for node in geometry_scene.nodes_with_presentation(&self.geometry_presentation) {
+            self.scene.add_node_preserving_id(node);
         }
         self.apply_geometry_xray_to_nodes();
         self.apply_geometry_visibility_filter();
-        self.scene_buffer_cache.borrow_mut().clear();
         self.needs_update = true;
+    }
+    fn preserve_geometry_scene_state_when_unspecified(
+        &self,
+        presentation: &mut GeometryScenePresentation,
+    ) {
+        if !presentation.resolves_owner_visibility() {
+            presentation.hidden_owner_node_ids =
+                self.geometry_presentation.hidden_owner_node_ids.clone();
+            presentation.isolated_owner_node_ids =
+                self.geometry_presentation.isolated_owner_node_ids.clone();
+        }
+        if !presentation.resolves_section() {
+            presentation.section = self.geometry_presentation.section.clone();
+        }
+    }
+    fn apply_geometry_presentation_visibility(&mut self) {
+        if !self.geometry_presentation.resolves_owner_visibility() {
+            return;
+        }
+        let all_owner_node_ids = self
+            .geometry_node_owner_ids
+            .values()
+            .flat_map(|owner_ids| owner_ids.iter().map(String::as_str));
+        self.geometry_hidden_owner_node_ids =
+            self.geometry_presentation.resolved_hidden_owner_node_ids(
+                all_owner_node_ids,
+                &self.geometry_hidden_owner_node_ids,
+            );
     }
     fn apply_geometry_visibility_filter(&mut self) {
         if self.geometry_node_owner_ids.is_empty() {
@@ -3521,6 +3718,24 @@ impl PlotRenderer {
             .as_ref()
             .and_then(|f| f.axes_metadata(axes_index))
             .and_then(|m| m.title.as_ref())
+    }
+    pub fn overlay_title_style_for_axes(&self, axes_index: usize) -> Option<&TextStyle> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| &m.title_style)
+    }
+    pub fn overlay_subtitle_for_axes(&self, axes_index: usize) -> Option<&String> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .and_then(|m| m.subtitle.as_ref())
+    }
+    pub fn overlay_subtitle_style_for_axes(&self, axes_index: usize) -> Option<&TextStyle> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| &m.subtitle_style)
     }
     pub fn overlay_x_label(&self) -> Option<&String> {
         self.figure_x_label.as_ref()
@@ -3696,7 +3911,7 @@ impl PlotRenderer {
             .unwrap_or(self.figure_y_log)
     }
     pub fn overlay_colormap(&self) -> ColorMap {
-        self.figure_colormap
+        self.figure_colormap.clone()
     }
     pub fn overlay_colorbar_enabled(&self) -> bool {
         self.figure_colorbar_enabled
@@ -3707,6 +3922,38 @@ impl PlotRenderer {
             .as_ref()
             .map(|f| f.axes_grid())
             .unwrap_or((1, 1))
+    }
+    pub fn figure_axes_count(&self) -> usize {
+        self.last_figure
+            .as_ref()
+            .map(|f| f.axes_count())
+            .unwrap_or(1)
+    }
+    pub fn overlay_parent_for_axes(&self, axes_index: usize) -> Option<usize> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_overlay_parent(axes_index))
+    }
+    pub fn axes_position_explicit_for_axes(&self, axes_index: usize) -> bool {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| m.position_explicit)
+            .unwrap_or(false)
+    }
+    pub fn overlay_position_for_axes(&self, axes_index: usize) -> Option<([f64; 4], String)> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .filter(|m| m.position_explicit)
+            .map(|m| (m.position, m.units.clone()))
+    }
+    pub fn overlay_y_axis_location_for_axes(&self, axes_index: usize) -> &str {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| m.y_axis_location.as_str())
+            .unwrap_or("left")
     }
     /// Return categorical labels if any (is_x_axis, &labels)
     pub fn overlay_categorical_labels(&self) -> Option<(bool, &Vec<String>)> {
@@ -3739,6 +3986,44 @@ impl PlotRenderer {
         self.last_figure
             .as_ref()
             .and_then(|f| f.y_axis_tick_labels_for_axes(axes_index))
+    }
+
+    pub fn overlay_x_tick_format_for_axes(&self, axes_index: usize) -> Option<String> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.x_axis_tick_format_for_axes(axes_index))
+    }
+
+    pub fn overlay_y_tick_format_for_axes(&self, axes_index: usize) -> Option<String> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.y_axis_tick_format_for_axes(axes_index))
+    }
+
+    pub fn overlay_x_tick_label_rotation_for_axes(&self, axes_index: usize) -> f64 {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.x_axis_tick_label_rotation_for_axes(axes_index))
+            .unwrap_or(0.0)
+    }
+
+    pub fn overlay_y_tick_label_rotation_for_axes(&self, axes_index: usize) -> f64 {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.y_axis_tick_label_rotation_for_axes(axes_index))
+            .unwrap_or(0.0)
+    }
+
+    pub fn overlay_x_ticks_for_axes(&self, axes_index: usize) -> Option<Vec<f64>> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.x_axis_ticks_for_axes(axes_index))
+    }
+
+    pub fn overlay_y_ticks_for_axes(&self, axes_index: usize) -> Option<Vec<f64>> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.y_axis_ticks_for_axes(axes_index))
     }
 
     pub fn overlay_histogram_edges_for_axes(&self, axes_index: usize) -> Option<(bool, Vec<f64>)> {
@@ -3848,12 +4133,66 @@ impl PlotRenderer {
         fig.x_log = self.figure_x_log;
         fig.y_log = self.figure_y_log;
         fig.axis_equal = self.figure_axis_equal;
-        fig.colormap = self.figure_colormap;
+        fig.colormap = self.figure_colormap.clone();
         fig.colorbar_enabled = self.figure_colorbar_enabled;
         let (rows, cols) = self.figure_axes_grid();
         fig.set_subplot_grid(rows, cols);
         fig
     }
+}
+
+fn geometry_scene_view_preset_to_camera(preset: GeometrySceneViewPreset) -> CameraViewPreset {
+    match preset {
+        GeometrySceneViewPreset::Perspective | GeometrySceneViewPreset::Isometric => {
+            CameraViewPreset::Perspective
+        }
+        GeometrySceneViewPreset::Front => CameraViewPreset::Front,
+        GeometrySceneViewPreset::Back => CameraViewPreset::Back,
+        GeometrySceneViewPreset::Left => CameraViewPreset::Left,
+        GeometrySceneViewPreset::Right => CameraViewPreset::Right,
+        GeometrySceneViewPreset::Top => CameraViewPreset::Top,
+        GeometrySceneViewPreset::Bottom => CameraViewPreset::Bottom,
+    }
+}
+
+fn data_aspect_adjusted_bounds(
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    ratio: [f64; 3],
+) -> (f64, f64, f64, f64) {
+    let x_ratio = ratio[0].abs().max(1.0e-12);
+    let y_ratio = ratio[1].abs().max(1.0e-12);
+    let cx = (x_min + x_max) * 0.5;
+    let cy = (y_min + y_max) * 0.5;
+    let x_span = (x_max - x_min).abs().max(0.1);
+    let y_span = (y_max - y_min).abs().max(0.1);
+    let units = (x_span / x_ratio).max(y_span / y_ratio).max(0.1);
+    let next_x = units * x_ratio;
+    let next_y = units * y_ratio;
+    (
+        cx - next_x * 0.5,
+        cx + next_x * 0.5,
+        cy - next_y * 0.5,
+        cy + next_y * 0.5,
+    )
+}
+
+fn data_aspect_adjusted_bounds_3d(min: Vec3, max: Vec3, ratio: [f64; 3]) -> (Vec3, Vec3) {
+    let aspect = Vec3::new(
+        ratio[0].abs().max(1.0e-12) as f32,
+        ratio[1].abs().max(1.0e-12) as f32,
+        ratio[2].abs().max(1.0e-12) as f32,
+    );
+    let center = (min + max) * 0.5;
+    let span = (max - min).abs().max(Vec3::splat(0.1));
+    let units = (span.x / aspect.x)
+        .max(span.y / aspect.y)
+        .max(span.z / aspect.z)
+        .max(0.1);
+    let next = aspect * units;
+    (center - next * 0.5, center + next * 0.5)
 }
 
 #[cfg(test)]
@@ -3902,6 +4241,18 @@ mod tests {
     }
 
     #[test]
+    fn applies_data_aspect_ratio_to_3d_display_bounds() {
+        let mut figure = Figure::new();
+        figure.set_axes_data_aspect_ratio(0, [1.0, 2.0, 4.0], "manual");
+        let bounds = BoundingBox::new(Vec3::ZERO, Vec3::new(1.0, 2.0, 1.0));
+
+        let display = PlotRenderer::apply_3d_display_limits_to_bounds(bounds, Some(&figure), 0);
+
+        assert_eq!(display.min, Vec3::new(0.0, 0.0, -1.5));
+        assert_eq!(display.max, Vec3::new(1.0, 2.0, 2.5));
+    }
+
+    #[test]
     fn degenerate_z_bounds_remain_finite_for_3d_display_bounds() {
         let figure = Figure::new();
         let bounds = BoundingBox::new(Vec3::new(-2.0, -2.0, 0.0), Vec3::new(2.0, 2.0, 0.0));
@@ -3911,6 +4262,36 @@ mod tests {
         assert!(PlotRenderer::bounds_are_finite(display));
         assert_eq!(display.min.z, 0.0);
         assert_eq!(display.max.z, 0.0);
+    }
+
+    #[test]
+    fn geometry_scene_view_presets_map_to_camera_presets() {
+        assert_eq!(
+            geometry_scene_view_preset_to_camera(GeometrySceneViewPreset::Isometric),
+            CameraViewPreset::Perspective
+        );
+        assert_eq!(
+            geometry_scene_view_preset_to_camera(GeometrySceneViewPreset::Front),
+            CameraViewPreset::Front
+        );
+        assert_eq!(
+            geometry_scene_view_preset_to_camera(GeometrySceneViewPreset::Top),
+            CameraViewPreset::Top
+        );
+    }
+
+    #[test]
+    fn positive_log_bounds_preserve_valid_positive_range() {
+        assert_eq!(PlotRenderer::positive_log_bounds(1.0, 100.0), (1.0, 100.0));
+    }
+
+    #[test]
+    fn positive_log_bounds_recover_from_nonpositive_lower_bound() {
+        let (lo, hi) = PlotRenderer::positive_log_bounds(-10.0, 100.0);
+
+        assert!(lo > 0.0);
+        assert_eq!(hi, 100.0);
+        assert!(lo < hi);
     }
 
     #[test]
@@ -4044,6 +4425,302 @@ pub mod plot_utils {
             trim_fixed(format!("{value:.2}"))
         } else {
             trim_fixed(format!("{value:.1}"))
+        }
+    }
+
+    pub fn canonical_tick_label_format(format: &str) -> String {
+        match format.trim().to_ascii_lowercase().as_str() {
+            "auto" => "%g".to_string(),
+            "usd" => "$%,.2f".to_string(),
+            "eur" => "\u{20AC}%,.2f".to_string(),
+            "gbp" => "\u{00A3}%,.2f".to_string(),
+            "jpy" => "\u{00A5}%,d".to_string(),
+            "degrees" => "%g\u{00B0}".to_string(),
+            "percentage" => "%g%%".to_string(),
+            _ => format.to_string(),
+        }
+    }
+
+    pub fn format_tick_label_with_format(value: f64, format: Option<&str>) -> String {
+        TickLabelFormatter::new(format).format(value)
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct TickLabelFormatter {
+        spec: Option<NumericTickFormat>,
+    }
+
+    impl TickLabelFormatter {
+        pub fn new(format: Option<&str>) -> Self {
+            let spec = format
+                .map(canonical_tick_label_format)
+                .and_then(|format| NumericTickFormat::parse(&format));
+            Self { spec }
+        }
+
+        pub fn format(&self, value: f64) -> String {
+            let Some(spec) = &self.spec else {
+                return format_tick_label(value);
+            };
+            spec.format(value)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct NumericTickFormat {
+        prefix: String,
+        suffix: String,
+        flags: TickFormatFlags,
+        width: Option<usize>,
+        precision: Option<usize>,
+        conversion: char,
+    }
+
+    #[derive(Debug, Clone, Copy, Default)]
+    struct TickFormatFlags {
+        thousands: bool,
+        plus: bool,
+        zero_pad: bool,
+        left: bool,
+        alternate: bool,
+    }
+
+    impl NumericTickFormat {
+        fn parse(format: &str) -> Option<Self> {
+            let chars: Vec<char> = format.chars().collect();
+            let mut index = 0usize;
+            while index < chars.len() {
+                if chars[index] == '%' {
+                    if chars.get(index + 1) == Some(&'%') {
+                        index += 2;
+                        continue;
+                    }
+                    break;
+                }
+                index += 1;
+            }
+            if index >= chars.len() {
+                return None;
+            }
+
+            let prefix = decode_percent_literals(&chars[..index]);
+            index += 1;
+            let mut flags = TickFormatFlags::default();
+            while index < chars.len() {
+                match chars[index] {
+                    ',' => flags.thousands = true,
+                    '+' => flags.plus = true,
+                    '0' => flags.zero_pad = true,
+                    '-' => flags.left = true,
+                    '#' => flags.alternate = true,
+                    _ => break,
+                }
+                index += 1;
+            }
+
+            let width_start = index;
+            while index < chars.len() && chars[index].is_ascii_digit() {
+                index += 1;
+            }
+            let width = parse_usize(&chars[width_start..index]);
+
+            let precision = if chars.get(index) == Some(&'.') {
+                index += 1;
+                let precision_start = index;
+                while index < chars.len() && chars[index].is_ascii_digit() {
+                    index += 1;
+                }
+                parse_usize(&chars[precision_start..index]).or(Some(0))
+            } else {
+                None
+            };
+
+            let conversion = *chars.get(index)?;
+            if !matches!(conversion, 'd' | 'i' | 'f' | 'e' | 'E' | 'g' | 'G') {
+                return None;
+            }
+            index += 1;
+            let suffix = decode_percent_literals(&chars[index..]);
+            Some(Self {
+                prefix,
+                suffix,
+                flags,
+                width,
+                precision,
+                conversion,
+            })
+        }
+
+        fn format(&self, value: f64) -> String {
+            let mut body = match self.conversion {
+                'd' | 'i' => format_integer(value, self.precision, self.flags),
+                'f' => format_fixed(value, self.precision.unwrap_or(6), self.flags),
+                'e' => format_exponential(value, self.precision.unwrap_or(6), false),
+                'E' => format_exponential(value, self.precision.unwrap_or(6), true),
+                'g' => format_general(value, self.precision.unwrap_or(6), false, self.flags),
+                'G' => format_general(value, self.precision.unwrap_or(6), true, self.flags),
+                _ => format_tick_label(value),
+            };
+            if self.flags.plus && value.is_sign_positive() && !body.starts_with('+') {
+                body.insert(0, '+');
+            }
+            if self.flags.thousands {
+                body = add_thousands_separators(&body);
+            }
+            body = apply_width(body, self.width, self.flags);
+            format!("{}{}{}", self.prefix, body, self.suffix)
+        }
+    }
+
+    fn parse_usize(chars: &[char]) -> Option<usize> {
+        if chars.is_empty() {
+            return None;
+        }
+        chars.iter().collect::<String>().parse().ok()
+    }
+
+    fn decode_percent_literals(chars: &[char]) -> String {
+        let mut out = String::new();
+        let mut index = 0usize;
+        while index < chars.len() {
+            if chars[index] == '%' && chars.get(index + 1) == Some(&'%') {
+                out.push('%');
+                index += 2;
+            } else {
+                out.push(chars[index]);
+                index += 1;
+            }
+        }
+        out
+    }
+
+    fn format_integer(value: f64, precision: Option<usize>, flags: TickFormatFlags) -> String {
+        let rounded = if value.is_finite() {
+            value.round()
+        } else {
+            value
+        };
+        let mut text = format!("{rounded:.0}");
+        if let Some(precision) = precision {
+            let negative = text.starts_with('-');
+            let digits = if negative { &text[1..] } else { &text };
+            if digits.len() < precision {
+                let mut padded = "0".repeat(precision - digits.len());
+                padded.push_str(digits);
+                text = if negative {
+                    format!("-{padded}")
+                } else {
+                    padded
+                };
+            }
+        }
+        if flags.alternate && !text.contains('.') {
+            text.push('.');
+        }
+        text
+    }
+
+    fn format_fixed(value: f64, precision: usize, flags: TickFormatFlags) -> String {
+        let mut text = format!("{value:.precision$}");
+        if precision == 0 && flags.alternate && !text.contains('.') {
+            text.push('.');
+        }
+        text
+    }
+
+    fn format_exponential(value: f64, precision: usize, upper: bool) -> String {
+        let text = format!("{value:.precision$e}");
+        if upper {
+            text.to_ascii_uppercase()
+        } else {
+            text
+        }
+    }
+
+    fn format_general(value: f64, precision: usize, upper: bool, flags: TickFormatFlags) -> String {
+        if value == 0.0 {
+            return "0".to_string();
+        }
+        let abs = value.abs();
+        let use_exp = abs < 1e-4 || abs >= 10f64.powi(precision as i32);
+        let text = if use_exp {
+            let decimals = precision.saturating_sub(1);
+            format_exponential(value, decimals, upper)
+        } else {
+            let integer_digits = abs.log10().floor().max(0.0) as usize + 1;
+            let decimals = precision.saturating_sub(integer_digits);
+            format_fixed(value, decimals, flags)
+        };
+        if flags.alternate {
+            text
+        } else {
+            trim_general_zeros(text)
+        }
+    }
+
+    fn trim_general_zeros(mut text: String) -> String {
+        let exp_index = text.find(['e', 'E']);
+        let suffix = exp_index.map(|idx| text.split_off(idx));
+        if text.contains('.') {
+            while text.ends_with('0') {
+                text.pop();
+            }
+            if text.ends_with('.') {
+                text.pop();
+            }
+        }
+        if let Some(suffix) = suffix {
+            text.push_str(&suffix);
+        }
+        text
+    }
+
+    fn add_thousands_separators(text: &str) -> String {
+        let (sign, rest) = match text.strip_prefix('-') {
+            Some(rest) => ("-", rest),
+            None => match text.strip_prefix('+') {
+                Some(rest) => ("+", rest),
+                None => ("", text),
+            },
+        };
+        let (integer, suffix) = rest
+            .find(['.', 'e', 'E'])
+            .map(|idx| rest.split_at(idx))
+            .unwrap_or((rest, ""));
+        let chars: Vec<char> = integer.chars().collect();
+        let mut out = String::new();
+        for (idx, ch) in chars.iter().enumerate() {
+            if idx > 0 && (chars.len() - idx).is_multiple_of(3) {
+                out.push(',');
+            }
+            out.push(*ch);
+        }
+        format!("{sign}{out}{suffix}")
+    }
+
+    fn apply_width(mut text: String, width: Option<usize>, flags: TickFormatFlags) -> String {
+        let Some(width) = width else {
+            return text;
+        };
+        let len = text.chars().count();
+        if len >= width {
+            return text;
+        }
+        let pad = width - len;
+        if flags.left {
+            text.push_str(&" ".repeat(pad));
+            text
+        } else if flags.zero_pad {
+            let mut chars = text.chars();
+            match chars.next() {
+                Some(sign @ ('-' | '+')) => {
+                    let rest = chars.collect::<String>();
+                    format!("{sign}{}{rest}", "0".repeat(pad))
+                }
+                _ => format!("{}{text}", "0".repeat(pad)),
+            }
+        } else {
+            format!("{}{text}", " ".repeat(pad))
         }
     }
 

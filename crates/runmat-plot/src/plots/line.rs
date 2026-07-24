@@ -30,6 +30,7 @@ pub struct LinePlot {
 
     /// Metadata
     pub label: Option<String>,
+    pub handle_visibility: String,
     pub visible: bool,
 
     /// Generated rendering data (cached)
@@ -62,11 +63,13 @@ pub struct LineGpuStyle {
     pub line_width: f32,
     pub line_style: LineStyle,
     pub marker: Option<LineMarkerAppearance>,
+    pub handle_visibility: String,
 }
 
 /// Line rendering styles
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineStyle {
+    None,
     Solid,
     Dashed,
     Dotted,
@@ -109,6 +112,10 @@ impl Default for LineStyle {
 
 impl LinePlot {
     pub(crate) fn has_gpu_line_inputs(&self) -> bool {
+        self.gpu_line_inputs.is_some()
+    }
+
+    pub fn has_gpu_source_data(&self) -> bool {
         self.gpu_line_inputs.is_some()
     }
 
@@ -181,6 +188,7 @@ impl LinePlot {
             line_cap: LineCap::default(),
             marker: None,
             label: None,
+            handle_visibility: "on".to_string(),
             visible: true,
             vertices: None,
             bounds: None,
@@ -216,6 +224,7 @@ impl LinePlot {
             line_cap: LineCap::Butt,
             marker: style.marker,
             label: None,
+            handle_visibility: style.handle_visibility,
             visible: true,
             vertices: None,
             bounds: Some(bounds),
@@ -252,6 +261,7 @@ impl LinePlot {
             line_cap: LineCap::Butt,
             marker: style.marker,
             label: None,
+            handle_visibility: style.handle_visibility,
             visible: true,
             vertices: None,
             bounds: Some(bounds),
@@ -303,6 +313,11 @@ impl LinePlot {
     /// Set the plot label for legends
     pub fn with_label<S: Into<String>>(mut self, label: S) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    pub fn with_handle_visibility<S: Into<String>>(mut self, visibility: S) -> Self {
+        self.handle_visibility = visibility.into();
         self
     }
 
@@ -421,6 +436,7 @@ impl LinePlot {
                     ),
                 };
                 let tris = match self.line_style {
+                    LineStyle::None => Vec::new(),
                     LineStyle::Solid => base_tris,
                     LineStyle::Dashed | LineStyle::DashDot | LineStyle::Dotted => {
                         vertex_utils::create_thick_polyline_dashed(
@@ -435,6 +451,7 @@ impl LinePlot {
                 self.vertices = Some(tris);
             } else {
                 let verts = match self.line_style {
+                    LineStyle::None => Vec::new(),
                     LineStyle::Solid => {
                         vertex_utils::create_line_plot(&self.x_data, &self.y_data, self.color)
                     }
@@ -465,6 +482,7 @@ impl LinePlot {
 
     fn generate_thin_line_vertices(&self) -> Vec<Vertex> {
         match self.line_style {
+            LineStyle::None => Vec::new(),
             LineStyle::Solid => {
                 vertex_utils::create_line_plot(&self.x_data, &self.y_data, self.color)
             }
@@ -628,10 +646,11 @@ impl LinePlot {
 
         // Encode width/style/cap/join into material for exporters:
         // - roughness: line width
-        // - metallic: line style code (0 solid,1 dashed,2 dotted,3 dashdot)
+        // - metallic: line style code (-1 none,0 solid,1 dashed,2 dotted,3 dashdot)
         // - emissive.x: cap (0 butt,1 square,2 round)
         // - emissive.y: join (0 miter,1 bevel,2 round)
         let style_code = match self.line_style {
+            LineStyle::None => -1.0,
             LineStyle::Solid => 0.0,
             LineStyle::Dashed => 1.0,
             LineStyle::Dotted => 2.0,
@@ -715,6 +734,7 @@ impl LinePlot {
         let vertex_count = tris.len();
 
         let style_code = match self.line_style {
+            LineStyle::None => -1.0,
             LineStyle::Solid => 0.0,
             LineStyle::Dashed => 1.0,
             LineStyle::Dotted => 2.0,
@@ -838,6 +858,7 @@ impl LinePlot {
             ),
         };
         let mut tris = match self.line_style {
+            LineStyle::None => Vec::new(),
             LineStyle::Solid => base_tris,
             LineStyle::Dashed | LineStyle::DashDot | LineStyle::Dotted => {
                 vertex_utils::create_thick_polyline_dashed(

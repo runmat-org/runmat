@@ -1,0 +1,37 @@
+{
+  "title": "trainNetwork",
+  "category": "deep_learning",
+  "keywords": ["trainNetwork", "deep learning", "training", "SeriesNetwork"],
+  "summary": "Train a supported in-memory feed-forward network.",
+  "description": "`trainNetwork(X,Y,layers,options)` trains a supported sequential feed-forward Deep Learning network over in-memory numeric or logical predictor data.",
+  "behaviors": [
+    "Supports the four-argument form with 2-D predictor matrices where rows are observations and columns are features.",
+    "Layer collections may be layer objects, cell arrays of layer objects, object lists, or simple `layerGraph` metadata objects.",
+    "Supported trainable topology is the same sequential feed-forward subset used by `forward`: `featureInputLayer`, `fullyConnectedLayer`, `reluLayer`, `eluLayer`, `softmaxLayer`, `classificationLayer`, and `regressionLayer`.",
+    "For regression, `Y` must be a numeric or logical matrix with one row per observation and the same output width as the network.",
+    "For classification, `Y` may be numeric integer labels, string labels, categorical labels, or a one-hot/probability matrix. The returned trained network stores sorted class labels in `Classes` when labels are provided.",
+    "`trainingOptions` metadata controls `sgdm` and `adam` training, including `MaxEpochs`, `MiniBatchSize`, `InitialLearnRate`, `Momentum`, Adam decay factors, `Epsilon`, deterministic `Shuffle` handling, and CPU/auto `ExecutionEnvironment` values.",
+    "The returned object is a `SeriesNetwork` for layer arrays and a `DAGNetwork` for simple layerGraph inputs. It includes updated layer weights, `Learnables`, `TrainingInfo`, `TrainingLoss`, and `TrainedWith` metadata.",
+    "Datastores, image/sequence/recurrent/convolutional/normalization/custom layers, branching DAG execution, validation data, callbacks, checkpoints, plots, multi-GPU training, and automatic differentiation tracing remain outside this slice and raise explicit compatibility errors or are stored as inert options."
+  ],
+  "examples": [
+    {
+      "description": "Train a small regression network",
+      "input": "layers = {featureInputLayer(1,'Name','x'); fullyConnectedLayer(1,'Name','fc'); regressionLayer('Name','out')};\nopts = trainingOptions('adam','MaxEpochs',120,'MiniBatchSize',4,'InitialLearnRate',0.05,'Shuffle','never');\nnet = trainNetwork([0;1;2;3], [1;3;5;7], layers, opts)",
+      "output": "net is a trained SeriesNetwork compatibility object usable with predict."
+    },
+    {
+      "description": "Train a two-class network",
+      "input": "layers = {featureInputLayer(2,'Name','in'); fullyConnectedLayer(2,'Name','fc'); softmaxLayer('Name','prob'); classificationLayer('Name','class')};\nnet = trainNetwork(X, labels, layers, opts)",
+      "output": "net.Classes records the sorted class labels."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "net = trainNetwork(X, Y, layers, options)\n[net, info] = trainNetwork(X, Y, layers, options)",
+      "output": "Trained network object and optional training info structure."
+    }
+  },
+  "gpu_residency": "`trainNetwork` currently gathers `gpuArray` inputs to host before training when the execution environment is `auto` or `cpu`. Explicit `ExecutionEnvironment` values of `gpu`, `multi-gpu`, or `parallel` raise a compatibility error because native GPU training kernels and provider-resident Deep Learning layer execution remain future acceleration work."
+}

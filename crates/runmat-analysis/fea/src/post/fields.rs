@@ -5,19 +5,22 @@ use crate::contracts::{
     FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS, FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
     FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS,
     FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
-    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
-    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_ROTATION,
-    FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
-    FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
-    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_NODAL_VON_MISES, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN,
+    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use crate::{
     assembly::{
         dofs::StructuralDofKind,
         elements::beam::{local_stiffness_matrix, BEAM_ELEMENT_DOF_COUNT},
+        elements::solid::{strain_displacement_matrix, Tetrahedron4ElementGeometry},
         AssemblySummary, BeamRecoveryElementSummary, PrepCoordinateSummary,
-        PrepRecoveryEdgeSummary, ShellRecoveryElementSummary, StructuralMaterialSummary,
+        PrepRecoveryEdgeSummary, ShellRecoveryElementSummary, SolidRecoveryElementSummary,
+        StructuralMaterialSummary,
     },
     operator::{apply_k, apply_k_unconstrained},
     solve::linear::LinearSolveResult,
@@ -32,7 +35,9 @@ pub fn recover_result_fields(
     summary: &AssemblySummary,
     solve_result: &LinearSolveResult,
 ) -> Vec<AnalysisField> {
-    if !solve_result.converged {
+    if solve_result.solution.is_empty()
+        || solve_result.solution.iter().any(|value| !value.is_finite())
+    {
         return empty_structural_fields();
     }
 
@@ -53,6 +58,10 @@ pub fn recover_result_fields(
     let strain_values = strain_recovery.values;
     let stress_values = recover_stress(&strain_values, summary.structural_material);
     let von_mises_values = recover_von_mises(&stress_values);
+    let nodal_von_mises_values =
+        recover_nodal_averaged_scalar(summary, &von_mises_values, node_count);
+    let strain_energy_density_values =
+        recover_strain_energy_density(&strain_values, &stress_values);
     let internal_force = apply_k_unconstrained(&summary.operator, &solve_result.solution);
     let reaction_values = recover_reaction_force(summary, &internal_force);
     let rotation_values = recover_rotation(summary, &solve_result.solution);
@@ -85,6 +94,16 @@ pub fn recover_result_fields(
             FEA_FIELD_STRUCTURAL_STRESS,
             vec![element_count, TENSOR_COMPONENT_COUNT],
             stress_values,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+            vec![element_count],
+            strain_energy_density_values,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+            vec![node_count],
+            nodal_von_mises_values,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -142,6 +161,8 @@ pub struct StructuralFieldRecoveryMetrics {
     pub prep_recovery_edge_count: usize,
     pub constrained_edge_count: usize,
     pub recovery_element_count: usize,
+    pub solver_mesh_node_count: usize,
+    pub solver_mesh_element_count: usize,
     pub max_edge_displacement_jump: f64,
     pub max_edge_strain_norm: f64,
     pub mean_edge_stiffness_ratio: f64,
@@ -215,12 +236,27 @@ pub fn structural_field_recovery_metrics(
         .as_ref()
         .map(|coordinates| coordinates.element_geometry_coverage_ratio)
         .unwrap_or(0.0);
+    let solver_mesh_element_count = summary.structural_solid_recovery.len();
+    let solver_mesh_node_count = if solver_mesh_element_count == 0 {
+        0
+    } else {
+        let mut nodes = summary
+            .structural_solid_recovery
+            .iter()
+            .flat_map(|element| element.node_indices)
+            .collect::<Vec<_>>();
+        nodes.sort_unstable();
+        nodes.dedup();
+        nodes.len()
+    };
 
     StructuralFieldRecoveryMetrics {
         active_stiffness_edge_count,
         prep_recovery_edge_count,
         constrained_edge_count,
         recovery_element_count: strain_recovery.element_count,
+        solver_mesh_node_count,
+        solver_mesh_element_count,
         max_edge_displacement_jump,
         max_edge_strain_norm,
         mean_edge_stiffness_ratio,
@@ -246,6 +282,12 @@ fn empty_structural_fields() -> Vec<AnalysisField> {
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![0], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRAIN, vec![0, 6], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![0, 6], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_NODAL_VON_MISES, vec![0], Vec::new()),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+            vec![0],
+            Vec::new(),
+        ),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_REACTION_FORCE, vec![0, 3], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_REACTION_MOMENT, vec![0, 3], Vec::new()),
         AnalysisField::host_f64(
@@ -271,6 +313,7 @@ struct StructuralRecoveryEdge {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StructuralRecoveryBasis {
+    SolidTetrahedron4ConstantStrain,
     PrepConstantStrainBMatrix,
     PrepElementConnectivity,
     OperatorConnectivity,
@@ -279,6 +322,7 @@ enum StructuralRecoveryBasis {
 impl StructuralRecoveryBasis {
     const fn as_str(self) -> &'static str {
         match self {
+            Self::SolidTetrahedron4ConstantStrain => "solid_tetrahedron4_constant_strain",
             Self::PrepConstantStrainBMatrix => "prep_constant_strain_b_matrix",
             Self::PrepElementConnectivity => "prep_element_connectivity",
             Self::OperatorConnectivity => "operator_connectivity",
@@ -475,6 +519,17 @@ fn recover_structural_strain(
     summary: &AssemblySummary,
     displacement: &[f64],
 ) -> StructuralStrainRecovery {
+    if !summary.structural_solid_recovery.is_empty() {
+        return StructuralStrainRecovery {
+            values: recover_solid_tetrahedron4_strain(
+                displacement,
+                &summary.structural_solid_recovery,
+            ),
+            element_count: summary.structural_solid_recovery.len().max(1),
+            basis: StructuralRecoveryBasis::SolidTetrahedron4ConstantStrain.as_str(),
+        };
+    }
+
     let b_matrix_elements = prep_b_matrix_recovery_elements(summary, displacement);
     if !b_matrix_elements.is_empty() {
         return StructuralStrainRecovery {
@@ -493,6 +548,62 @@ fn recover_structural_strain(
             .map(|edge| edge.basis.as_str())
             .unwrap_or(StructuralRecoveryBasis::OperatorConnectivity.as_str()),
     }
+}
+
+fn recover_solid_tetrahedron4_strain(
+    displacement: &[f64],
+    elements: &[SolidRecoveryElementSummary],
+) -> Vec<f64> {
+    let mut strain = vec![0.0; elements.len().max(1) * TENSOR_COMPONENT_COUNT];
+    for (element_index, element) in elements.iter().enumerate() {
+        let Ok(b) = strain_displacement_matrix(Tetrahedron4ElementGeometry {
+            nodes_m: element.coordinates_m,
+        }) else {
+            continue;
+        };
+        let mut element_displacement = [0.0_f64; 12];
+        for (local_node, node_index) in element.node_indices.iter().copied().enumerate() {
+            let displacement_vector = nodal_displacement(displacement, node_index);
+            let base = local_node * VECTOR_COMPONENT_COUNT;
+            element_displacement[base..base + VECTOR_COMPONENT_COUNT]
+                .copy_from_slice(&displacement_vector);
+        }
+        let base = element_index * TENSOR_COMPONENT_COUNT;
+        for component in 0..TENSOR_COMPONENT_COUNT {
+            strain[base + component] = b[component]
+                .iter()
+                .zip(element_displacement.iter())
+                .map(|(shape, value)| shape * value)
+                .sum();
+        }
+    }
+    strain
+}
+
+fn recover_nodal_averaged_scalar(
+    summary: &AssemblySummary,
+    element_values: &[f64],
+    node_count: usize,
+) -> Vec<f64> {
+    let mut nodal = vec![0.0_f64; node_count];
+    let mut counts = vec![0_usize; node_count];
+    for (element_index, element) in summary.structural_solid_recovery.iter().enumerate() {
+        let Some(value) = element_values.get(element_index).copied() else {
+            continue;
+        };
+        for node_index in element.node_indices {
+            if let Some(accumulator) = nodal.get_mut(node_index) {
+                *accumulator += value;
+                counts[node_index] += 1;
+            }
+        }
+    }
+    for (value, count) in nodal.iter_mut().zip(counts) {
+        if count > 0 {
+            *value /= count as f64;
+        }
+    }
+    nodal
 }
 
 fn prep_b_matrix_recovery_elements(
@@ -913,6 +1024,20 @@ fn recover_von_mises(stress: &[f64]) -> Vec<f64> {
             (0.5 * ((sxx - syy).powi(2) + (syy - szz).powi(2) + (szz - sxx).powi(2))
                 + 3.0 * (txy.powi(2) + tyz.powi(2) + txz.powi(2)))
             .sqrt()
+        })
+        .collect()
+}
+
+fn recover_strain_energy_density(strain: &[f64], stress: &[f64]) -> Vec<f64> {
+    strain
+        .chunks_exact(TENSOR_COMPONENT_COUNT)
+        .zip(stress.chunks_exact(TENSOR_COMPONENT_COUNT))
+        .map(|(strain_tensor, stress_tensor)| {
+            0.5 * strain_tensor
+                .iter()
+                .zip(stress_tensor.iter())
+                .map(|(strain, stress)| strain * stress)
+                .sum::<f64>()
         })
         .collect()
 }
@@ -1382,5 +1507,155 @@ fn recover_residual_metrics(
     StructuralResidualMetrics {
         normalized_residual_norm: residual_norm / equation_scale,
         equation_scale,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        assembly::assemble_linear_system,
+        fixtures::{fixture_model, FixtureId},
+    };
+    use runmat_meshing_core::{
+        contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisMeshArtifact, AnalysisMeshNode,
+        AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement, MeshSizingField,
+        VolumeElementKind,
+    };
+
+    #[test]
+    fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let summary = assemble_linear_system(&model, None, Some(tetrahedron4_mesh()), None, None);
+        let solve = LinearSolveResult {
+            iterations: 1,
+            residual_norm: 0.0,
+            converged: true,
+            host_sync_count: 0,
+            solver_backend: "test".to_string(),
+            device_apply_k_count: 0,
+            device_apply_k_attempt_count: 0,
+            solution: vec![
+                0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03,
+            ],
+            solver_method: "test".to_string(),
+            preconditioner: "none".to_string(),
+            diagnostics: Vec::new(),
+        };
+
+        let fields = recover_result_fields(&summary, &solve);
+        assert_eq!(
+            field_shape(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
+            &[4, 3]
+        );
+        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);
+        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRESS), &[1, 6]);
+        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_VON_MISES), &[1]);
+        assert_eq!(
+            field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY),
+            &[1]
+        );
+        assert_eq!(
+            field_shape(&fields, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES),
+            &[4]
+        );
+        assert!(host_field(&fields, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY)[0] >= 0.0);
+        let element_von_mises = host_field(&fields, FEA_FIELD_STRUCTURAL_VON_MISES)[0];
+        assert!(host_field(&fields, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES)
+            .iter()
+            .all(|value| (*value - element_von_mises).abs() <= 1.0e-12));
+        let metrics = structural_field_recovery_metrics(&summary, &solve.solution);
+        assert_eq!(metrics.basis, "solid_tetrahedron4_constant_strain");
+        assert_eq!(metrics.solver_mesh_node_count, 4);
+        assert_eq!(metrics.solver_mesh_element_count, 1);
+    }
+
+    #[test]
+    fn finite_nonconverged_solve_still_recovers_solver_mesh_fields() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let summary = assemble_linear_system(&model, None, Some(tetrahedron4_mesh()), None, None);
+        let solve = LinearSolveResult {
+            iterations: 10,
+            residual_norm: 1.0e-4,
+            converged: false,
+            host_sync_count: 0,
+            solver_backend: "test".to_string(),
+            device_apply_k_count: 0,
+            device_apply_k_attempt_count: 0,
+            solution: vec![
+                0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03,
+            ],
+            solver_method: "test".to_string(),
+            preconditioner: "none".to_string(),
+            diagnostics: Vec::new(),
+        };
+
+        let fields = recover_result_fields(&summary, &solve);
+
+        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_VON_MISES), &[1]);
+        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);
+        assert_eq!(
+            field_shape(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
+            &[4, 3]
+        );
+    }
+
+    fn field_shape<'a>(fields: &'a [AnalysisField], field_id: &str) -> &'a [usize] {
+        fields
+            .iter()
+            .find(|field| field.field_id == field_id)
+            .map(|field| field.shape.as_slice())
+            .expect("field should be present")
+    }
+
+    fn host_field<'a>(fields: &'a [AnalysisField], field_id: &str) -> &'a [f64] {
+        fields
+            .iter()
+            .find(|field| field.field_id == field_id)
+            .and_then(AnalysisField::as_host_f64)
+            .expect("field should be present")
+    }
+
+    fn tetrahedron4_mesh() -> AnalysisMeshArtifact {
+        let mut mesh = AnalysisMeshArtifact {
+            schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
+            mesh_id: "unit_tetrahedron".to_string(),
+            nodes: vec![
+                node(1, [0.0, 0.0, 0.0]),
+                node(2, [1.0, 0.0, 0.0]),
+                node(3, [0.0, 1.0, 0.0]),
+                node(4, [0.0, 0.0, 1.0]),
+            ],
+            volume_elements: vec![AnalysisVolumeElement {
+                element_id: "tetrahedron_1".to_string(),
+                kind: VolumeElementKind::Tetrahedron4,
+                node_ids: vec![1, 2, 3, 4],
+                material_region_id: "solid".to_string(),
+                provenance: Vec::new(),
+            }],
+            boundary_faces: Vec::new(),
+            boundary_edges: Vec::new(),
+            quality: AnalysisMeshQualityReport::default(),
+            sizing: MeshSizingField::default(),
+            field_topology: Vec::new(),
+            backend: Default::default(),
+            adaptive_iterations: Vec::new(),
+            provenance: AnalysisMeshProvenance {
+                algorithm: "test".to_string(),
+                source_geometry_id: "geo:test".to_string(),
+                source_geometry_revision: 1,
+                source_geometry_sha256: None,
+            },
+        };
+        mesh.refresh_field_topology();
+        mesh
+    }
+
+    fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
+        AnalysisMeshNode {
+            node_id,
+            coordinates_m,
+            provenance: Vec::new(),
+        }
     }
 }

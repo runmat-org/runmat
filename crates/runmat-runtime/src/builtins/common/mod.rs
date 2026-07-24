@@ -12,6 +12,7 @@ pub mod env;
 pub mod format;
 pub mod fs;
 pub mod gpu_helpers;
+pub mod identifiers;
 pub mod indexing;
 pub mod linalg;
 pub mod matrix;
@@ -23,6 +24,7 @@ pub mod residency;
 pub mod shape;
 pub mod spec;
 pub mod tensor;
+pub mod validation;
 
 #[cfg(test)]
 pub mod test_support;

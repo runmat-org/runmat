@@ -1,0 +1,15 @@
+{
+  "title": "istable",
+  "category": "table",
+  "keywords": ["istable", "table", "predicate"],
+  "summary": "Return true for table objects.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Predicate inspects host metadata."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
+  "description": "`istable(A)` returns true when `A` is a RunMat table object.",
+  "behaviors": ["Timetables are distinct and return false from `istable`.", "Non-table values return false."],
+  "examples": [{"description": "Test a table", "input": "tf = istable(table([1;2]))", "output": "tf = true"}],
+  "links": [{"label": "istimetable", "url": "./istimetable"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

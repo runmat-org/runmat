@@ -1,0 +1,51 @@
+{
+  "title": "xticks",
+  "category": "plotting",
+  "keywords": [
+    "xticks",
+    "x-axis ticks",
+    "axes",
+    "plot styling"
+  ],
+  "summary": "Query or set X-axis tick values.",
+  "description": "`xticks` returns or updates the tick mark locations for the X axis of the current or specified axes.",
+  "behaviors": [
+    "`xticks()` returns the current X-axis tick values as a row vector.",
+    "`xticks(ticks)` sets manual X-axis tick values. `ticks` must be an increasing numeric vector; `[]` removes X-axis tick marks.",
+    "`xticks('auto')` returns the X tick mode to automatic tick generation. `xticks('manual')` freezes the current tick values.",
+    "`xticks('mode')` returns `'auto'` or `'manual'`.",
+    "`xticks(ax, ...)` applies the same forms to the specified axes handle.",
+    "`get(ax, 'XTick')`, `set(ax, 'XTick', ticks)`, `get(ax, 'XTickMode')`, and `set(ax, 'XTickMode', mode)` share the same axes metadata."
+  ],
+  "examples": [
+    {
+      "description": "Set nonuniform X-axis ticks",
+      "input": "plot(-5:5, (-5:5).^2);\nxticks([-5 -2.5 0 1 2.5 5]);",
+      "output": "% Shows tick marks at the requested X coordinates"
+    },
+    {
+      "description": "Reset X-axis ticks to automatic mode",
+      "input": "xticks([0 5 10]);\nxticks('auto');",
+      "output": "% Restores automatic X tick generation"
+    }
+  ],
+  "gpu_residency": "`xticks` only reads and writes axes metadata. It does not gather GPU-resident plot data; automatic ticks are generated from the axes display bounds, including explicit limits and cached plotted-data bounds.",
+  "links": [
+    {
+      "label": "yticks",
+      "url": "./yticks"
+    },
+    {
+      "label": "xlim",
+      "url": "./xlim"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ]
+}

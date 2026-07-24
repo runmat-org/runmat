@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::elementwise::integer_cast::{integer_values, IntegerTarget};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
@@ -656,6 +657,11 @@ fn finalize_numeric_output(tensor: Tensor, like: &LikeSpec) -> BuiltinResult<Val
     match like.device {
         LikeDevice::Host => Ok(tensor::tensor_into_value(tensor)),
         LikeDevice::Gpu => {
+            if tensor.integer_storage().is_some() {
+                return Err(cat_err(
+                    "cat: GPU integer-array output is not supported until the acceleration provider supports typed integer buffers",
+                ));
+            }
             let provider = runmat_accelerate_api::provider().ok_or_else(|| {
                 cat_err(
                     "cat: GPU output requested via 'like' but no acceleration provider is active",
@@ -678,6 +684,10 @@ fn cat_numeric_tensors(
     values: Vec<Value>,
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
+    if let Some(target) = leftmost_integer_target(&values) {
+        return cat_integer_tensors(target, dim_zero, values, like);
+    }
+
     let mut tensors = Vec::with_capacity(values.len());
     for value in values {
         let tensor = tensor::value_into_tensor_for("cat", value).map_err(cat_err)?;
@@ -689,6 +699,90 @@ fn cat_numeric_tensors(
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
     let tensor = Tensor::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))?;
     finalize_numeric_output(tensor, like)
+}
+
+/// MATLAB concatenation adopts the class of the leftmost integer operand,
+/// converting every other numeric or logical input to that class.
+fn leftmost_integer_target(values: &[Value]) -> Option<IntegerTarget> {
+    let mut empty_integer_target = None;
+    for value in values {
+        match value {
+            Value::Int(value) => return Some(IntegerTarget::from_int_value(value)),
+            Value::Tensor(tensor) => {
+                if let Some(storage) = tensor.integer_storage() {
+                    let target = IntegerTarget::from_storage(storage);
+                    if !is_true_empty_neutral_shape(&tensor.shape) {
+                        return Some(target);
+                    }
+                    empty_integer_target.get_or_insert(target);
+                }
+            }
+            _ => {}
+        }
+    }
+    empty_integer_target
+}
+
+fn cat_integer_tensors(
+    target: IntegerTarget,
+    dim_zero: usize,
+    values: Vec<Value>,
+    like: &LikeSpec,
+) -> BuiltinResult<Value> {
+    let mut shapes = Vec::with_capacity(values.len());
+    let mut value_buffers = Vec::with_capacity(values.len());
+
+    for value in values {
+        let (shape, values) = integer_concat_input(target, value)?;
+        shapes.push(shape);
+        value_buffers.push(values);
+    }
+
+    let data_refs: Vec<&[runmat_builtins::IntValue]> =
+        value_buffers.iter().map(Vec::as_slice).collect();
+    let (values, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
+    let tensor = Tensor::new_integer(target.storage(values), shape)
+        .map_err(|error| cat_err(format!("cat: {error}")))?;
+    finalize_numeric_output(tensor, like)
+}
+
+fn integer_concat_input(
+    target: IntegerTarget,
+    value: Value,
+) -> BuiltinResult<(Vec<usize>, Vec<runmat_builtins::IntValue>)> {
+    match value {
+        Value::Tensor(tensor) => {
+            let values = match tensor.integer_data {
+                Some(storage) => integer_values(storage)
+                    .iter()
+                    .map(|value| target.cast_int(value))
+                    .collect(),
+                None => tensor
+                    .data
+                    .iter()
+                    .map(|&value| target.cast_scalar(value))
+                    .collect(),
+            };
+            Ok((tensor.shape, values))
+        }
+        Value::Int(value) => Ok((vec![1, 1], vec![target.cast_int(&value)])),
+        Value::Num(value) => Ok((vec![1, 1], vec![target.cast_scalar(value)])),
+        Value::Bool(value) => Ok((
+            vec![1, 1],
+            vec![target.cast_scalar(if value { 1.0 } else { 0.0 })],
+        )),
+        Value::LogicalArray(array) => Ok((
+            array.shape,
+            array
+                .data
+                .iter()
+                .map(|&value| target.cast_scalar(if value == 0 { 0.0 } else { 1.0 }))
+                .collect(),
+        )),
+        other => Err(cat_err(format!(
+            "cat: cannot concatenate integer arrays with {other:?}"
+        ))),
+    }
 }
 
 fn cat_logical_arrays(
@@ -1176,7 +1270,7 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     #[test]
     fn cat_type_prefers_cell() {
@@ -1223,6 +1317,69 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cat_preserves_exact_uint64_storage() {
+        let left =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 4]), vec![1, 2]).expect("left");
+        let right = Tensor::new_integer(IntegerStorage::U64(vec![5]), vec![1, 1]).expect("right");
+        let result = cat_builtin(
+            Value::Int(IntValue::I32(2)),
+            vec![Value::Tensor(left), Value::Tensor(right)],
+        )
+        .expect("cat");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 4, 5]))
+        );
+    }
+
+    #[test]
+    fn cat_uses_leftmost_integer_class_and_conversion_rules() {
+        let left = Tensor::new_integer(IntegerStorage::I8(vec![12]), vec![1, 1]).expect("left");
+        let result = cat_builtin(
+            Value::Int(IntValue::I32(2)),
+            vec![
+                Value::Tensor(left),
+                Value::Int(IntValue::U64(u64::MAX)),
+                Value::Num(3.5),
+                Value::Bool(true),
+            ],
+        )
+        .expect("cat");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I8(vec![12, i8::MAX, 4, 1]))
+        );
+    }
+
+    #[test]
+    fn cat_selects_a_later_integer_class_after_double_input() {
+        let right = Tensor::new_integer(IntegerStorage::I16(vec![8]), vec![1, 1]).expect("right");
+        let result = cat_builtin(
+            Value::Int(IntValue::I32(1)),
+            vec![Value::Num(3.5), Value::Tensor(right)],
+        )
+        .expect("cat");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I16(vec![4, 8]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

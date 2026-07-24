@@ -1,0 +1,76 @@
+{
+  "title": "deblank",
+  "category": "strings/transform",
+  "keywords": [
+    "deblank",
+    "strings",
+    "transform",
+    "matlab",
+    "compatibility"
+  ],
+  "summary": "Remove trailing whitespace from text.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "not applicable",
+    "notes": "Not eligible for fusion; this builtin materializes host text or logical results."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::compat::tests",
+    "integration": null
+  },
+  "description": "s = deblank(text) - Remove trailing whitespace from text.",
+  "signatures": [
+    {
+      "label": "s = deblank(text)",
+      "inputs": [
+        {
+          "name": "text",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Input text."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Output value."
+        }
+      ]
+    }
+  ],
+  "behaviors": [
+    "Remove trailing whitespace from text."
+  ],
+  "examples": [
+    "deblank(\"abc   \") returns \"abc\"."
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/compat.rs"
+  }
+}

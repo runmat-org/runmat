@@ -308,14 +308,13 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
         },
         "save" | "fopen" | "fclose" | "fread" | "fwrite" | "fileread" | "filewrite"
         | "copyfile" | "movefile" | "delete" | "mkdir" | "rmdir" | "dir" | "readmatrix"
-        | "csvwrite" | "csvread" | "dlmread" | "dlmwrite" | "writematrix" | "ls" | "genpath" => {
-            BuiltinSemantics {
-                effects: BuiltinEffects::none().with_filesystem(),
-                purity: BuiltinPurity::Impure,
-                semantic_kind: BuiltinSemanticKind::Filesystem,
-                ..BuiltinSemantics::unknown()
-            }
-        }
+        | "csvwrite" | "csvread" | "dlmread" | "dlmwrite" | "writematrix" | "writecell"
+        | "xlsread" | "xlswrite" | "ls" | "genpath" => BuiltinSemantics {
+            effects: BuiltinEffects::none().with_filesystem(),
+            purity: BuiltinPurity::Impure,
+            semantic_kind: BuiltinSemanticKind::Filesystem,
+            ..BuiltinSemantics::unknown()
+        },
         "fprintf" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_filesystem().with_ui(),
             purity: BuiltinPurity::Impure,

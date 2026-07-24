@@ -1,0 +1,81 @@
+{
+  "title": "sinpi",
+  "category": "math/trigonometry",
+  "keywords": [
+    "sinpi",
+    "sine",
+    "pi",
+    "trigonometry",
+    "elementwise",
+    "gpu"
+  ],
+  "summary": "Compute sin(X*pi) accurately with exact integer and half-integer results.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "gpuArray inputs are gathered to the host so RunMat can preserve exact results at integer and half-integer multiples of pi."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline",
+    "notes": "Fusion is intentionally disabled because lowering to `sin(X*pi)` would lose the exactness guarantees that distinguish `sinpi` from `sin`."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::trigonometry::sinpi::tests",
+    "integration": null
+  },
+  "description": "`sinpi(X)` computes `sin(X*pi)` without first materializing the approximate floating-point value `X*pi`. Integers return exactly zero and odd half-integers return exactly `+1` or `-1`.",
+  "behaviors": [
+    "Operates element-wise on scalars, vectors, matrices, and N-D tensors.",
+    "Integer and logical inputs are promoted to double precision before evaluation.",
+    "Returns exactly 0 for integer inputs and exactly ±1 for odd half-integer inputs.",
+    "Complex inputs use the analytic extension of `sin(pi*z)` while preserving exact real-axis sine/cosine factors when possible.",
+    "Output shape matches the input shape; non-finite real inputs produce `NaN`.",
+    "String inputs are unsupported and raise a builtin-scoped error."
+  ],
+  "examples": [
+    {
+      "description": "Sine of multiples of pi",
+      "input": "Y = sinpi([0 1/2 1 3/2 2])",
+      "output": "Y = [0 1 0 -1 0]"
+    },
+    {
+      "description": "Avoid floating-point drift at integer multiples",
+      "input": "y = sinpi(1)",
+      "output": "y = 0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why use `sinpi(X)` instead of `sin(X*pi)`?",
+      "answer": "`pi` is not exactly representable in binary floating point. `sinpi` short-circuits integer and half-integer multiples so common exact results do not contain small rounding noise."
+    },
+    {
+      "question": "Does `sinpi` support gpuArray inputs?",
+      "answer": "Yes. RunMat currently gathers gpuArray inputs and evaluates the exact host implementation; no GPU kernel is launched yet."
+    }
+  ],
+  "links": [
+    {
+      "label": "cospi",
+      "url": "./cospi"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "sind",
+      "url": "./sind"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/sinpi.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/sinpi.rs"
+  }
+}

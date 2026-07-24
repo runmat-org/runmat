@@ -11,6 +11,16 @@ pub struct Region {
     pub cad_ownership: Option<CadRegionOwnership>,
 }
 
+impl Region {
+    pub fn has_material_role(&self) -> bool {
+        self.tag.as_deref().is_some_and(is_material_role_text)
+            || self
+                .cad_ownership
+                .as_ref()
+                .is_some_and(CadRegionOwnership::has_material_role)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CadSemanticKind {
@@ -65,6 +75,8 @@ pub struct CadRegionOwnership {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub face_id: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curve_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<CadLabelRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owner_path: Vec<CadLabelRef>,
@@ -74,6 +86,26 @@ pub struct CadRegionOwnership {
     pub color: Option<CadColorEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<CadPhysicalMaterialEvidence>,
+}
+
+impl CadRegionOwnership {
+    pub fn has_material_role(&self) -> bool {
+        self.material.is_some()
+            || self
+                .label
+                .as_ref()
+                .is_some_and(|label| label.kind == CadSemanticKind::Material)
+            || self
+                .owner_path
+                .iter()
+                .any(|label| label.kind == CadSemanticKind::Material)
+    }
+}
+
+fn is_material_role_text(value: &str) -> bool {
+    value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|token| token.eq_ignore_ascii_case("material"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

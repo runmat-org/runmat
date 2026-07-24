@@ -1,0 +1,88 @@
+{
+  "title": "linkaxes",
+  "category": "plotting",
+  "keywords": [
+    "linkaxes",
+    "linked axes",
+    "xlim",
+    "ylim",
+    "plotting"
+  ],
+  "summary": "Link axes limits across multiple axes.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`linkaxes` updates host-side graphics state only and does not execute numeric GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::linkaxes::tests",
+    "vm": "runmat-vm plotting::linkaxes_propagates_limits_and_supports_off_mode"
+  },
+  "description": "`linkaxes(ax)` links the x- and y-axis limits for a vector of axes handles. `linkaxes(ax, option)` links only the requested axis limits or removes existing links.",
+  "behaviors": [
+    "`linkaxes(ax)` is equivalent to `linkaxes(ax, 'xy')`.",
+    "`linkaxes(ax, 'x')` links X limits while leaving Y limits independent.",
+    "`linkaxes(ax, 'y')` links Y limits while leaving X limits independent.",
+    "`linkaxes(ax, 'xy')` links both X and Y limits.",
+    "`linkaxes(ax, 'off')` removes the supplied axes from any existing linked-axes groups.",
+    "When a new link is created, linked axes are synchronized to limits that encompass the current limits of every supplied axes handle for the linked axes.",
+    "Axis-specific links can overlap. For example, one axes can stay linked to another axes on X limits while also being linked to a different axes on Y limits."
+  ],
+  "examples": [
+    {
+      "description": "Link x limits for two subplots",
+      "input": "ax1 = subplot(2,1,1);\nax2 = subplot(2,1,2);\nlinkaxes([ax1 ax2], 'x');\nset(ax1, 'XLim', [0 10]);\nget(ax2, 'XLim')",
+      "output": "ans = [0 10]"
+    },
+    {
+      "description": "Remove a link",
+      "input": "linkaxes([ax1 ax2], 'off');",
+      "output": ""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `linkaxes` create axes?",
+      "answer": "No. It requires existing axes handles such as values returned from `subplot`, `axes`, or `gca`."
+    },
+    {
+      "question": "Does linking affect future `set(ax, 'XLim', ...)` calls?",
+      "answer": "Yes. Linked limits propagate through RunMat's central axes-limit state path, including `xlim`, `ylim`, `set`, and zoom-related limit updates. Unlinked axes continue to use the direct limit-update path."
+    }
+  ],
+  "links": [
+    {
+      "label": "axes",
+      "url": "./axes"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "xlim",
+      "url": "./xlim"
+    },
+    {
+      "label": "ylim",
+      "url": "./ylim"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/linkaxes.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/linkaxes.rs"
+  },
+  "gpu_residency": "`linkaxes` works with host-side graphics handles and does not move arrays between host and GPU memory.",
+  "gpu_behavior": [
+    "`linkaxes` performs no provider dispatch and has no GPU kernel implementation."
+  ]
+}

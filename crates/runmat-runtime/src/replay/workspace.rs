@@ -220,6 +220,7 @@ fn validate_workspace_mode(mode: &str) -> Result<(), RuntimeError> {
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
+    use runmat_builtins::{IntegerStorage, Tensor};
 
     use super::*;
 
@@ -280,5 +281,22 @@ mod tests {
             err.identifier(),
             Some(ReplayErrorKind::ImportRejected.identifier())
         );
+    }
+
+    #[test]
+    fn workspace_replay_preserves_exact_integer_storage() {
+        let input =
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
+                .expect("integer tensor");
+        let entries = vec![("samples".to_string(), Value::Tensor(input))];
+
+        let payload =
+            block_on(encode_workspace_payload(&entries, "auto")).expect("encode workspace payload");
+        let decoded = decode_workspace_payload(&payload).expect("decode workspace payload");
+
+        assert!(matches!(decoded.as_slice(), [(name, Value::Tensor(tensor))]
+            if name == "samples"
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]))));
     }
 }

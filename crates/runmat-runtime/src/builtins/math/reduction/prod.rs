@@ -361,6 +361,11 @@ async fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         return Err(prod_descriptor_error(&PROD_ERROR_COMPLEX_UNSUPPORTED));
     }
     let parsed = parse_arguments(&rest).await?;
+    if matches!(parsed.output, OutputTemplate::Native) {
+        if let Some(result) = prod_native_integer(&value, &parsed)? {
+            return Ok(result);
+        }
+    }
     let raw_result = match value {
         Value::GpuTensor(handle) => prod_gpu(handle, &parsed).await?,
         Value::Tensor(_)
@@ -379,6 +384,30 @@ async fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         }
     };
     apply_output_template(raw_result, &parsed.output, &input_meta).await
+}
+
+fn prod_native_integer(value: &Value, parsed: &ParsedArguments) -> BuiltinResult<Option<Value>> {
+    let (storage, shape) = match value {
+        Value::Int(value) => (
+            crate::builtins::math::reduction::integer_native::storage_from_scalar(value),
+            vec![1, 1],
+        ),
+        Value::Tensor(tensor) => {
+            let Some(storage) = tensor.integer_storage() else {
+                return Ok(None);
+            };
+            (storage.clone(), tensor.shape.clone())
+        }
+        _ => return Ok(None),
+    };
+    let resolved = resolve_dims(&shape, &parsed.selection)?;
+    crate::builtins::math::reduction::integer_native::product(
+        &storage,
+        &shape,
+        &resolved.dims_in_bounds,
+    )
+    .map(Some)
+    .map_err(prod_internal_error)
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -749,14 +778,6 @@ fn prod_host(value: Value, parsed: &ParsedArguments) -> BuiltinResult<Value> {
 }
 
 async fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<Value> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     if matches!(parsed.nan_mode, ReductionNaN::Omit) {
         return prod_gpu_fallback(&handle, parsed).await;
     }
@@ -1005,7 +1026,8 @@ async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<
 async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
     match dtype {
         NumericDType::F64 => Ok(value),
-        NumericDType::F32 | NumericDType::U8 | NumericDType::U16 => match value {
+        NumericDType::F32 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => match value
+        {
             Value::Tensor(tensor) => {
                 let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))

@@ -3,8 +3,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use super::{
-    topology_from_raw, OcctCadFormat, OcctCadTopology, OcctRawAssemblyNode, OcctRawFaceSemantic,
-    OcctRawTopology,
+    topology_from_raw, OcctCadFormat, OcctCadTopology, OcctRawAssemblyNode,
+    OcctRawFaceEvaluationSample, OcctRawFaceSemantic, OcctRawTopology,
 };
 use crate::import::{
     GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportError, GeometryImportOptions,
@@ -44,6 +44,8 @@ struct WasmOcctPayload {
     face_names: Vec<String>,
     #[serde(default)]
     face_semantics: Vec<WasmOcctFaceSemanticPayload>,
+    #[serde(default)]
+    face_evaluation_samples: Vec<WasmOcctFaceEvaluationSamplePayload>,
     #[serde(default)]
     assembly_nodes: Vec<WasmOcctAssemblyNodePayload>,
     #[serde(default)]
@@ -94,6 +96,22 @@ struct WasmOcctAssemblyNodePayload {
     parent_node_id: String,
     #[serde(default)]
     label: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WasmOcctFaceEvaluationSamplePayload {
+    face_id: u64,
+    u: f64,
+    v: f64,
+    point_x: f64,
+    point_y: f64,
+    point_z: f64,
+    normal_x: f64,
+    normal_y: f64,
+    normal_z: f64,
+    #[serde(default)]
+    projection_error: f64,
 }
 
 pub(crate) fn import_cad_topology(
@@ -208,6 +226,18 @@ pub(crate) fn import_cad_topology(
                     material_density: item.material_density,
                     material_density_name: item.material_density_name,
                     material_density_value_type: item.material_density_value_type,
+                })
+                .collect(),
+            face_evaluation_samples: payload
+                .face_evaluation_samples
+                .into_iter()
+                .map(|item| OcctRawFaceEvaluationSample {
+                    face_id: item.face_id,
+                    u: item.u,
+                    v: item.v,
+                    point_m: [item.point_x, item.point_y, item.point_z],
+                    unit_normal: [item.normal_x, item.normal_y, item.normal_z],
+                    projection_error_m: item.projection_error,
                 })
                 .collect(),
             assembly_nodes: payload

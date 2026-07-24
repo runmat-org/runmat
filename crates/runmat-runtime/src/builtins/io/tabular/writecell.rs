@@ -24,7 +24,7 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 const BUILTIN_NAME: &str = "writecell";
 const MAX_EXCEL_ROW_INDEX: usize = 1_048_575;
 const MAX_EXCEL_COLUMN_INDEX: usize = 16_383;
-type WriteLock = Arc<AsyncMutex<()>>;
+pub(super) type WriteLock = Arc<AsyncMutex<()>>;
 type WeakWriteLock = Weak<AsyncMutex<()>>;
 static WRITE_LOCKS: OnceLock<StdMutex<HashMap<String, WeakWriteLock>>> = OnceLock::new();
 
@@ -343,9 +343,9 @@ enum SheetSelector {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-struct RangeStart {
-    row: usize,
-    col: usize,
+pub(super) struct RangeStart {
+    pub(super) row: usize,
+    pub(super) col: usize,
 }
 
 impl WriteCellOptions {
@@ -614,20 +614,40 @@ fn parse_a1_cell(value: &str) -> Option<RangeStart> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum CellValue {
+pub(super) enum CellValue {
     Empty,
     Number(f64),
     Boolean(bool),
     Text(String),
 }
 
-struct CellTable {
-    rows: usize,
-    cols: usize,
+pub(super) struct CellTable {
+    pub(super) rows: usize,
+    pub(super) cols: usize,
     data: Vec<CellValue>,
 }
 
 impl CellTable {
+    pub(super) fn from_cells(
+        rows: usize,
+        cols: usize,
+        data: Vec<CellValue>,
+    ) -> BuiltinResult<Self> {
+        let expected = rows.checked_mul(cols).ok_or_else(|| {
+            writecell_error_with(&WRITECELL_ERROR_DATA, "writecell: cell table size overflow")
+        })?;
+        if data.len() != expected {
+            return Err(writecell_error_with(
+                &WRITECELL_ERROR_DATA,
+                format!(
+                    "writecell: cell table has {} values for {rows}-by-{cols} shape",
+                    data.len()
+                ),
+            ));
+        }
+        Ok(Self { rows, cols, data })
+    }
+
     async fn from_value(value: Value) -> BuiltinResult<Self> {
         let cell = match value {
             Value::Cell(cell) => cell,
@@ -659,7 +679,7 @@ impl CellTable {
         })
     }
 
-    fn get(&self, row: usize, col: usize) -> &CellValue {
+    pub(super) fn get(&self, row: usize, col: usize) -> &CellValue {
         &self.data[row * self.cols + col]
     }
 }
@@ -763,7 +783,7 @@ async fn write_delimited_cells(
     Ok(bytes_written)
 }
 
-async fn write_lock_for_path(path: &Path) -> WriteLock {
+pub(super) async fn write_lock_for_path(path: &Path) -> WriteLock {
     let key = write_lock_key(path).await;
     let locks = WRITE_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
     let mut locks = locks
@@ -940,7 +960,7 @@ async fn write_spreadsheet_cells(
     Ok(bytes.len())
 }
 
-async fn safe_replace_file(path: &Path, bytes: &[u8], label: &str) -> BuiltinResult<()> {
+pub(super) async fn safe_replace_file(path: &Path, bytes: &[u8], label: &str) -> BuiltinResult<()> {
     let temp_path = temporary_sibling_path(path);
     let mut open_options = OpenOptions::new();
     open_options.write(true).create_new(true);
@@ -1003,7 +1023,7 @@ fn temporary_sibling_path(path: &Path) -> PathBuf {
     parent.join(format!(".{name}.runmat-tmp-{}-{nanos}", std::process::id()))
 }
 
-fn build_xlsx_workbook(
+pub(super) fn build_xlsx_workbook(
     table: &CellTable,
     sheet_name: &str,
     start: RangeStart,
@@ -1079,7 +1099,7 @@ fn build_xlsx_workbook(
     Ok(cursor.into_inner())
 }
 
-fn write_xlsx_part(
+pub(super) fn write_xlsx_part(
     zip: &mut zip::ZipWriter<Cursor<Vec<u8>>>,
     name: &str,
     contents: &str,
@@ -1103,7 +1123,7 @@ fn write_xlsx_part(
     Ok(())
 }
 
-fn build_sheet_xml(table: &CellTable, start: RangeStart) -> String {
+pub(super) fn build_sheet_xml(table: &CellTable, start: RangeStart) -> String {
     let mut xml = String::from(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -1336,7 +1356,7 @@ fn xml_text_escape(value: &str) -> String {
         .collect()
 }
 
-fn xml_attr_escape(value: &str) -> String {
+pub(super) fn xml_attr_escape(value: &str) -> String {
     value
         .chars()
         .map(|ch| match ch {

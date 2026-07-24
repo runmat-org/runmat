@@ -267,15 +267,17 @@ mod tests {
     use crate::builtins::common::random;
     use futures::executor::block_on;
 
-    fn reset() {
+    fn reset() -> impl Drop {
+        let guard = random::test_guard();
         runmat_accelerate_api::clear_provider();
         random::reset_rng();
+        guard
     }
 
     #[test]
     fn normrnd_scalar_deterministic() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset();
+        let _guard = random::test_guard();
+        let _guard = reset();
         let result =
             block_on(normrnd_builtin(vec![Value::Num(0.0), Value::Num(1.0)])).expect("normrnd");
         let expected = random::expected_normal_scaled_sequence(0.0, 1.0, 1)[0];
@@ -287,8 +289,8 @@ mod tests {
 
     #[test]
     fn normrnd_matrix_dims() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset();
+        let _guard = random::test_guard();
+        let _guard = reset();
         let args = vec![
             Value::Num(5.0),
             Value::Num(2.0),
@@ -304,8 +306,8 @@ mod tests {
 
     #[test]
     fn normrnd_size_vec() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset();
+        let _guard = random::test_guard();
+        let _guard = reset();
         let size = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
         let args = vec![Value::Num(0.0), Value::Num(1.0), Value::Tensor(size)];
         let result = block_on(normrnd_builtin(args)).expect("normrnd");
@@ -327,8 +329,8 @@ mod tests {
 
     #[test]
     fn normrnd_distribution_mean_and_std() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset();
+        let _guard = random::test_guard();
+        let _guard = reset();
         let mu = 5.0_f64;
         let sigma = 2.0_f64;
         let n = 50_000_usize;

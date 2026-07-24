@@ -9,19 +9,22 @@ use runmat_accelerate_api::{
     ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, CovNormalization, CovRows,
     CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage,
     HostTensorOwned, HostTensorView, ImfilterOptions, IsMemberOptions, IsMemberResult,
-    MeshgridAxisView, PagefunOp, PagefunRequest, ProviderBandwidth, ProviderCholResult,
-    ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
+    MeshgridAxisView, PagefunOp, PagefunRequest, ProviderAdamUpdateRequest,
+    ProviderAdamUpdateResult, ProviderBandwidth, ProviderBlackScholesPriceRequest,
+    ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
+    ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
+    ProviderCrossentropyMode, ProviderCrossentropyRequest, ProviderCrossentropyResult,
     ProviderCummaxResult, ProviderCumminResult, ProviderEigResult, ProviderFindResult,
     ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
     ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderMeshgridResult,
-    ProviderNanMode, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
-    ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision, ProviderQrOptions,
-    ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult, ProviderScanDirection,
-    ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
-    ProviderSpectralResult, ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult,
-    ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison,
-    SortOrder, SortResult, SortRowsColumnSpec, SpawnHandleConcurrency, UnionOptions, UnionResult,
-    UniqueOptions, UniqueResult, WgpuBufferRef,
+    ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder,
+    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions,
+    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult,
+    ProviderQrResult, ProviderScanDirection, ProviderSpectralFrameMode, ProviderSpectralRange,
+    ProviderSpectralRequest, ProviderSpectralResult, ProviderStdNormalization,
+    ProviderSymmetryKind, ReduceDimResult, ReductionFlavor, ReductionTwoPassMode, SetdiffOptions,
+    SetdiffResult, SortComparison, SortOrder, SortResult, SortRowsColumnSpec,
+    SpawnHandleConcurrency, UnionOptions, UnionResult, UniqueOptions, UniqueResult, WgpuBufferRef,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
@@ -64,10 +67,14 @@ mod constructors;
 mod context;
 #[path = "core.rs"]
 mod core;
+#[path = "ops/deep_learning.rs"]
+mod deep_learning;
 #[path = "ops/elementwise.rs"]
 mod elementwise;
 #[path = "ops/fft/mod.rs"]
 mod fft;
+#[path = "ops/finance.rs"]
+mod finance;
 #[path = "helpers.rs"]
 mod helpers;
 #[path = "ops/image.rs"]
@@ -76,6 +83,8 @@ mod image;
 mod indexing;
 #[path = "init.rs"]
 mod init;
+#[path = "ops/interpolation.rs"]
+mod interpolation;
 #[path = "ops/io.rs"]
 mod io;
 #[path = "ops/linalg/mod.rs"]
@@ -103,8 +112,9 @@ use crate::backend::wgpu::autotune::AutotuneController;
 use crate::backend::wgpu::cache::bind_group::BindGroupCache;
 use crate::backend::wgpu::params::{
     BandwidthParams, Conv1dParams, CummaxParams, CumminParams, CumprodParams, CumsumParams,
-    DiffParams, FilterParams, GradientParamsF32, GradientParamsF64, LinearGatherParams,
-    LinearScatterParams, QrPowerIterParams, SymmetryParamsF32, SymmetryParamsF64, SyrkParams,
+    DiffParams, FilterParams, GradientParamsF32, GradientParamsF64, Interp1ParamsF32,
+    Interp1ParamsF64, LinearGatherParams, LinearScatterParams, QrPowerIterParams,
+    SymmetryParamsF32, SymmetryParamsF64, SyrkParams, TrapezoidParamsF32, TrapezoidParamsF64,
     SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
 };
 use crate::backend::wgpu::pipelines::WgpuPipelines;

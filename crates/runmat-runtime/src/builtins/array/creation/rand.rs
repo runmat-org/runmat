@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Value,
+    ComplexTensor, IntValue, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::sync::OnceLock;
@@ -63,6 +63,16 @@ const RAND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Uniform random array in (0,1).",
 }];
+
+const RAND_SEED_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "seed",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Legacy restorable RNG state token.",
+}];
+
+const RAND_NO_OUTPUTS: [BuiltinParamDescriptor; 0] = [];
 
 const RAND_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
 
@@ -139,7 +149,32 @@ const RAND_SIG_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDesc
     description: "Prototype value when no numeric dimension arguments are provided.",
 }];
 
-const RAND_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+const RAND_SIG_SEED_QUERY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "seed_option",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: Some("\"seed\""),
+    description: "Legacy seed query option.",
+}];
+
+const RAND_SIG_SEED_SET_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "seed_option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"seed\""),
+        description: "Legacy seed control option.",
+    },
+    BuiltinParamDescriptor {
+        name: "seed",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Non-negative integer seed.",
+    },
+];
+
+const RAND_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
     BuiltinSignatureDescriptor {
         label: "A = rand()",
         inputs: &RAND_SIG_EMPTY_INPUTS,
@@ -174,6 +209,16 @@ const RAND_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
         label: "A = rand(..., \"like\", prototype)",
         inputs: &RAND_SIG_LIKE_INPUTS,
         outputs: &RAND_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "seed = rand(\"seed\")",
+        inputs: &RAND_SIG_SEED_QUERY_INPUTS,
+        outputs: &RAND_SEED_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "rand(\"seed\", seed)",
+        inputs: &RAND_SIG_SEED_SET_INPUTS,
+        outputs: &RAND_NO_OUTPUTS,
     },
 ];
 
@@ -233,8 +278,108 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::creation::rand"
 )]
 async fn rand_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if let Some(command) = LegacyRandCommand::parse(&rest)? {
+        return command.apply();
+    }
     let parsed = ParsedRand::parse(rest).await?;
     build_output(parsed).await
+}
+
+enum LegacyRandCommand {
+    QuerySeed,
+    SetSeed(u64),
+}
+
+impl LegacyRandCommand {
+    fn parse(args: &[Value]) -> crate::BuiltinResult<Option<Self>> {
+        let Some(first) = args.first() else {
+            return Ok(None);
+        };
+        if keyword_of(first).as_deref() != Some("seed") {
+            return Ok(None);
+        }
+        match args.len() {
+            1 => Ok(Some(Self::QuerySeed)),
+            2 => Ok(Some(Self::SetSeed(parse_legacy_seed(&args[1])?))),
+            _ => Err(builtin_error(
+                "rand: legacy seed option expects zero or one seed argument",
+            )),
+        }
+    }
+
+    fn apply(self) -> crate::BuiltinResult<Value> {
+        match self {
+            Self::QuerySeed => {
+                let seed = random::legacy_seed_value()?;
+                Ok(Value::Num(seed as f64))
+            }
+            Self::SetSeed(seed) => {
+                random::set_legacy_seed(seed)?;
+                let snapshot = random::snapshot()?;
+                sync_provider_rng_state(snapshot.state);
+                Tensor::new(Vec::new(), vec![0, 0])
+                    .map(Value::Tensor)
+                    .map_err(|e| builtin_error(format!("rand: {e}")))
+            }
+        }
+    }
+}
+
+fn parse_legacy_seed(value: &Value) -> crate::BuiltinResult<u64> {
+    match value {
+        Value::Int(value) => match legacy_seed_from_int(value)? {
+            Some(value) => Ok(value),
+            None => Err(builtin_error("rand: seed must be non-negative")),
+        },
+        Value::Num(value) => {
+            if !value.is_finite() {
+                return Err(builtin_error("rand: seed must be finite"));
+            }
+            if *value < 0.0 {
+                return Err(builtin_error("rand: seed must be non-negative"));
+            }
+            let rounded = value.round();
+            if (rounded - value).abs() > f64::EPSILON {
+                return Err(builtin_error("rand: seed must be an integer"));
+            }
+            if rounded > (1_u64 << 53) as f64 {
+                return Err(builtin_error("rand: seed exceeds 53-bit integer precision"));
+            }
+            Ok(rounded as u64)
+        }
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            parse_legacy_seed(&Value::Num(tensor.data[0]))
+        }
+        _ => Err(builtin_error("rand: seed must be a scalar numeric value")),
+    }
+}
+
+fn legacy_seed_from_int(value: &IntValue) -> crate::BuiltinResult<Option<u64>> {
+    let parsed = match value {
+        IntValue::I8(value) => (*value >= 0).then_some(*value as u64),
+        IntValue::I16(value) => (*value >= 0).then_some(*value as u64),
+        IntValue::I32(value) => (*value >= 0).then_some(*value as u64),
+        IntValue::I64(value) => (*value >= 0).then_some(*value as u64),
+        IntValue::U8(value) => Some(*value as u64),
+        IntValue::U16(value) => Some(*value as u64),
+        IntValue::U32(value) => Some(*value as u64),
+        IntValue::U64(value) => Some(*value),
+    };
+    let Some(parsed) = parsed else {
+        return Ok(None);
+    };
+    if parsed > (1_u64 << 53) {
+        return Err(builtin_error("rand: seed exceeds 53-bit integer precision"));
+    }
+    Ok(Some(parsed))
+}
+
+fn sync_provider_rng_state(state: u64) {
+    if let Some(provider) = runmat_accelerate_api::provider() {
+        if let Err(err) = provider.set_rng_state(state) {
+            log::debug!("rand: provider seed sync failed: {err}");
+        }
+    }
 }
 
 struct ParsedRand {
@@ -365,7 +510,7 @@ async fn rand_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value
         Value::Tensor(t) => match t.dtype {
             NumericDType::F32 => rand_single(shape),
             NumericDType::F64 => rand_double(shape),
-            NumericDType::U8 | NumericDType::U16 => rand_double(shape),
+            NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => rand_double(shape),
         },
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => {
             rand_double(shape)
@@ -450,7 +595,7 @@ fn try_gpu_uniform(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult
     let precision = match dtype {
         NumericDType::F32 => ProviderPrecision::F32,
         NumericDType::F64 => ProviderPrecision::F64,
-        NumericDType::U8 | NumericDType::U16 => {
+        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
             log_rand_fallback(shape, dtype, "integer-dtype");
             return Ok(None);
         }
@@ -513,18 +658,21 @@ fn dtype_from_precision(precision: ProviderPrecision) -> NumericDType {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
+    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
 
-    fn reset_rng_clean() {
+    fn reset_rng_clean() -> impl Drop {
+        let guard = random::test_guard();
         runmat_accelerate_api::clear_provider();
         random::reset_rng();
+        guard
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_default_scalar() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let result = block_on(rand_builtin(Vec::new())).expect("rand");
         let expected = random::expected_uniform_sequence(1)[0];
         match result {
@@ -554,8 +702,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_square_from_single_dimension() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let args = vec![Value::Num(3.0)];
         let result = block_on(rand_builtin(args)).expect("rand");
         match result {
@@ -573,9 +721,117 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn rand_legacy_seed_string_resets_sequence_and_queries_seed() {
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
+        let seed_result = block_on(rand_builtin(vec![Value::from("seed"), Value::Num(2026.0)]))
+            .expect("rand seed");
+        assert!(matches!(seed_result, Value::Tensor(t) if t.shape == vec![0, 0]));
+        let query = block_on(rand_builtin(vec![Value::from("seed")])).expect("rand seed query");
+        assert!(matches!(query, Value::Num(seed) if (seed - 2026.0).abs() < f64::EPSILON));
+
+        let prefix = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(4.0)])).expect("rand");
+        let saved = block_on(rand_builtin(vec![Value::from("seed")])).expect("rand seed query");
+        assert!(matches!(&saved, Value::Num(seed) if (*seed - 2026.0).abs() > f64::EPSILON));
+        let first = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(3.0)])).expect("rand");
+        block_on(rand_builtin(vec![Value::from("seed"), saved])).expect("rand restore state token");
+        let second = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(3.0)])).expect("rand");
+        match (prefix, first, second) {
+            (Value::Tensor(prefix), Value::Tensor(a), Value::Tensor(b)) => {
+                assert_eq!(prefix.shape, vec![1, 4]);
+                assert_eq!(a.shape, vec![1, 3]);
+                assert_eq!(b.shape, vec![1, 3]);
+                assert_eq!(a.data, b.data);
+            }
+            other => panic!("expected tensor outputs, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rand_legacy_seed_syncs_provider_state() {
+        let _guard = random::test_guard();
+        random::reset_rng();
+        test_support::with_test_provider(|provider| {
+            block_on(rand_builtin(vec![Value::from("seed"), Value::Num(9.0)])).expect("rand seed");
+            let handle = provider.random_uniform(&[4, 1]).expect("gpu uniform");
+            let host_after_gpu =
+                random::generate_uniform(4, "rand provider sync").expect("uniform");
+            let gpu = block_on(download_handle_async(provider, &handle)).expect("download");
+            assert_eq!(gpu.data, host_after_gpu);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rand_legacy_seed_literal_restarts_sequence() {
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
+        block_on(rand_builtin(vec![Value::from("seed"), Value::Num(2026.0)])).expect("rand seed");
+        let first = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(4.0)])).expect("rand");
+        block_on(rand_builtin(vec![Value::from("seed"), Value::Num(2026.0)]))
+            .expect("rand seed again");
+        let second = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(4.0)])).expect("rand");
+        match (first, second) {
+            (Value::Tensor(a), Value::Tensor(b)) => {
+                assert_eq!(a.shape, vec![1, 4]);
+                assert_eq!(b.shape, vec![1, 4]);
+                assert_eq!(a.data, b.data);
+            }
+            other => panic!("expected tensor outputs, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rand_legacy_seed_char_array_resets_sequence() {
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
+        let seed_keyword = Value::CharArray(runmat_builtins::CharArray::new_row("seed"));
+        block_on(rand_builtin(vec![seed_keyword.clone(), Value::Num(17.0)]))
+            .expect("rand char seed");
+        let first = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(3.0)])).expect("rand");
+        block_on(rand_builtin(vec![seed_keyword, Value::Num(17.0)])).expect("rand char seed again");
+        let second = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(3.0)])).expect("rand");
+        match (first, second) {
+            (Value::Tensor(a), Value::Tensor(b)) => {
+                assert_eq!(a.shape, vec![1, 3]);
+                assert_eq!(a.data, b.data);
+            }
+            other => panic!("expected tensor outputs, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rand_legacy_seed_rejects_invalid_seed_values() {
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
+        let err = block_on(rand_builtin(vec![Value::from("seed"), Value::Num(-1.0)]))
+            .expect_err("negative seed");
+        assert!(err.message().contains("non-negative"));
+
+        let err = block_on(rand_builtin(vec![
+            Value::from("seed"),
+            Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+        ]))
+        .expect_err("imprecise integer seed");
+        assert!(err.message().contains("53-bit"));
+
+        let err = block_on(rand_builtin(vec![
+            Value::from("seed"),
+            Value::Num(1.0),
+            Value::Num(2.0),
+        ]))
+        .expect_err("extra seed argument");
+        assert!(err.message().contains("expects zero or one seed"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn rand_like_tensor_infers_shape() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         let result = block_on(rand_builtin(args)).expect("rand");
@@ -594,8 +850,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_single_matrix_has_f32_dtype() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("single")];
         let result = block_on(rand_builtin(args)).expect("rand single");
         match result {
@@ -620,8 +876,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_like_complex_produces_complex_tensor() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let args = vec![
             Value::Num(2.0),
             Value::Num(2.0),
@@ -645,8 +901,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_gpuarray_keyword_produces_valid_output() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let args = vec![Value::Num(3.0), Value::Num(4.0), Value::from("gpuArray")];
         let result = block_on(rand_builtin(args)).expect("rand gpuArray");
         match result {
@@ -667,7 +923,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_gpu_like_uniform() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         random::reset_rng();
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();

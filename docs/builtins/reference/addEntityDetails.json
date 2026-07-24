@@ -1,0 +1,104 @@
+{
+  "title": "addEntityDetails",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "addEntityDetails",
+    "tokenizedDocument",
+    "text analytics",
+    "entity",
+    "named entity"
+  ],
+  "summary": "Add named-entity tags to tokenized documents.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`addEntityDetails` retokenizes host token strings and updates tokenizedDocument metadata; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 5,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::entities::tests",
+    "integration": null
+  },
+  "description": "`addEntityDetails(documents)` adds named-entity metadata to a RunMat `tokenizedDocument` compatibility object. Use `tokenDetails` to view the resulting `Entity` column.",
+  "behaviors": [
+    "`documents` must be a RunMat `tokenizedDocument` object.",
+    "`addEntityDetails(documents, Name, Value)` supports `RetokenizeMethod`, `DiscardKnownValues`, and `Model` name-value pairs.",
+    "`RetokenizeMethod` defaults to `\"entity\"`, which merges simple adjacent entity tokens such as multiword locations. Use `\"none\"` to keep existing tokens.",
+    "`DiscardKnownValues` defaults to `false`, so existing known entity details are preserved while missing or empty entries are filled.",
+    "`DiscardKnownValues`, `true` recomputes every stored tag and ignores malformed stored entity details.",
+    "`Model`, `\"auto\"` selects RunMat's built-in deterministic compatibility tagger. Custom `hmmEntityModel` inputs remain tracked as broader Text Analytics model infrastructure.",
+    "`addEntityDetails` ensures sentence and part-of-speech details exist first, then updates part-of-speech details for recognized entities to `\"proper-noun\"`.",
+    "RunMat tags English and German tokens with deterministic compatibility rules for `person`, `location`, `organization`, `other`, and `non-entity`.",
+    "If an existing tokenizedDocument object already carries Japanese or Korean language metadata, RunMat accepts the language and uses conservative token-class-aware fallback tags. Public Japanese/Korean tokenizedDocument construction and MeCab-backed entity models remain tracked.",
+    "Exact MathWorks statistical entity-model parity remains tracked as broader Text Analytics work."
+  ],
+  "examples": [
+    {
+      "description": "Add Entity Details",
+      "input": "documents = tokenizedDocument(\"Mary uses MATLAB at MathWorks.\");\ndocuments = addEntityDetails(documents);\ntdetails = tokenDetails(documents)",
+      "output": "`tdetails.Entity` contains tags such as `\"person\"`, `\"organization\"`, `\"other\"`, and `\"non-entity\"`."
+    },
+    {
+      "description": "Keep Existing Tokens",
+      "input": "documents = addEntityDetails(documents, \"RetokenizeMethod\", \"none\")",
+      "output": "`documents` receives entity details without the entity retokenization pass."
+    },
+    {
+      "description": "Recompute Entity Details",
+      "input": "documents = addEntityDetails(documents, \"DiscardKnownValues\", true)",
+      "output": "`documents` has refreshed entity details."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `addEntityDetails` use a full entity model?",
+      "answer": "No. This compatibility slice uses deterministic English and German rules and records exact MathWorks model parity as remaining Text Analytics work."
+    },
+    {
+      "question": "Does `addEntityDetails` execute on the GPU?",
+      "answer": "No. It updates host tokenizedDocument metadata."
+    }
+  ],
+  "links": [
+    {
+      "label": "tokenDetails",
+      "url": "./tokenDetails"
+    },
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "addPartOfSpeechDetails",
+      "url": "./addPartOfSpeechDetails"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "updatedDocuments = addEntityDetails(documents)\nupdatedDocuments = addEntityDetails(documents, Name, Value)",
+      "output": "`updatedDocuments` is a `tokenizedDocument` compatibility object."
+    },
+    "points": [
+      "`documents` must be a RunMat `tokenizedDocument` object.",
+      "`Name, Value` pairs may include `RetokenizeMethod`, `DiscardKnownValues`, and `Model`.",
+      "`RetokenizeMethod` may be `\"entity\"` or `\"none\"`.",
+      "`DiscardKnownValues` must be a logical scalar or numeric 0/1 scalar.",
+      "`Model` currently accepts `\"auto\"`; custom entity model objects remain tracked.",
+      "Use `tokenDetails(updatedDocuments)` to view the resulting `Entity` table column."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/entities.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/entities.rs"
+  },
+  "gpu_residency": "`addEntityDetails` updates host tokenizedDocument metadata and has no provider kernel."
+}

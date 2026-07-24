@@ -1,0 +1,60 @@
+{
+  "title": "corr",
+  "category": "stats/summary",
+  "keywords": ["corr", "correlation", "pearson", "spearman", "kendall", "statistics", "tail"],
+  "summary": "Compute pairwise correlation coefficients and p-values.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host for compatibility until a provider hook exists."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::corr::tests",
+    "integration": null
+  },
+  "description": "`corr(X)` returns pairwise correlations between columns of `X`. `corr(X,Y)` returns correlations between columns of `X` and columns of `Y`. `[R,P] = corr(...)` also returns approximate p-values for testing no correlation.",
+  "behaviors": [
+    "Rows are observations and columns are variables.",
+    "`Type` supports `\"Pearson\"`, `\"Spearman\"`, and `\"Kendall\"`.",
+    "`Rows` supports `\"all\"`, `\"complete\"`, and `\"pairwise\"`.",
+    "`Tail` supports `\"both\"`, `\"right\"`, and `\"left\"` for p-value direction.",
+    "Constant or insufficient data pairs produce `NaN`."
+  ],
+  "examples": [
+    {
+      "description": "Column correlations",
+      "input": "R = corr([1 3; 2 2; 3 1])"
+    },
+    {
+      "description": "Pairwise NaN omission",
+      "input": "R = corr([1; 2; NaN; 4], [1; 2; 3; 4], \"Rows\", \"pairwise\")"
+    },
+    {
+      "description": "Rank correlation and p-values",
+      "input": "[R,P] = corr(x, y, \"Type\", \"Kendall\", \"Tail\", \"right\")"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does corr support rank correlations?",
+      "answer": "Spearman and Kendall rank correlations are supported through the `Type` option. P-values use standard large-sample approximations."
+    }
+  ],
+  "links": [
+    { "label": "corrcoef", "url": "./corrcoef" },
+    { "label": "cov", "url": "./cov" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/corr.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/corr.rs"
+  }
+}

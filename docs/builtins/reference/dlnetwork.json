@@ -1,0 +1,35 @@
+{
+  "title": "dlnetwork",
+  "category": "deep_learning",
+  "keywords": ["dlnetwork", "deep learning", "network", "learnables"],
+  "summary": "Create a dlnetwork compatibility object for supported feed-forward layers.",
+  "description": "`dlnetwork(layers)` converts a supported layer collection or `layerGraph` object into a RunMat `dlnetwork` compatibility object with layer metadata, learnables, state, and input/output names.",
+  "behaviors": [
+    "Accepts a layer object, a cell array of layer objects, an object list, or a `layerGraph` object.",
+    "Materializes `Layers`, `LayerNames`, `InputNames`, `OutputNames`, `Connections`, `Learnables`, `State`, and `Initialized` metadata.",
+    "Supports forward execution for sequential feed-forward networks made from `featureInputLayer`, `fullyConnectedLayer`, `reluLayer`, `eluLayer`, `softmaxLayer`, `classificationLayer`, and `regressionLayer`.",
+    "`fullyConnectedLayer` weights and bias are preserved when supplied. Missing weights are initialized deterministically from the preceding feature width, and missing bias values default to zeros.",
+    "`dlnetwork(layers,'Initialize',false)` preserves the uninitialized metadata state and does not synthesize missing learnables; `forward` then raises a clear error until required weights and bias are present.",
+    "When passed through `dlfeval`, supported fully-connected learnables are traced so `dlgradient` can return matching learnables-gradient trees for custom training loops.",
+    "Recurrent, convolutional, normalization, sequence, image input, branching DAG execution, custom layers, and provider-resident training remain separate Deep Learning infrastructure work and raise explicit compatibility errors in this slice."
+  ],
+  "examples": [
+    {
+      "description": "Create a feed-forward network object",
+      "input": "layers = {featureInputLayer(2,'Name','in'); fullyConnectedLayer(3,'Name','fc'); reluLayer('Name','relu')};\nnet = dlnetwork(layers)",
+      "output": "net is a dlnetwork compatibility object with initialized learnables."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "net = dlnetwork(layers)\nnet = dlnetwork(graph)\nnet = dlnetwork(layers, 'Initialize', false)",
+      "output": "dlnetwork compatibility object."
+    }
+  },
+  "gpu_residency": "`dlnetwork` construction is host metadata work. Forward execution currently gathers plain `gpuArray` inputs to host outside autodiff. GPU-backed `dlarray` autodiff is rejected with an explicit provider-gap error until Deep Learning tape kernels are implemented in the acceleration provider.",
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/deep_learning/model.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/model.rs"
+  }
+}

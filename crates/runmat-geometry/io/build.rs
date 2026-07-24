@@ -132,13 +132,7 @@ fn require_cmake_for_bundled_occt() {
 
     let (source, cmake) = configured_cmake(&cmake_env_keys);
     match std::process::Command::new(&cmake).arg("--version").output() {
-        Ok(output) if output.status.success() => {
-            println!(
-                "cargo:warning=RunMat OCCT: building bundled OCCT with CMake from {source}: {}",
-                cmake.display()
-            );
-            return;
-        }
+        Ok(output) if output.status.success() => return,
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);

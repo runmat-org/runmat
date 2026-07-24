@@ -1,0 +1,100 @@
+{
+  "title": "onCleanup",
+  "category": "introspection",
+  "keywords": [
+    "onCleanup",
+    "cleanup",
+    "delete",
+    "cancel",
+    "scope",
+    "resource"
+  ],
+  "summary": "Run a function automatically when a cleanup object is deleted or cleared.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side lifecycle helper. Callback bodies may call GPU-aware functions, but the cleanup object itself does not launch kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::on_cleanup",
+    "integration": "builtins::introspection::clear / clearvars cleanup tests"
+  },
+  "description": "`onCleanup(f)` creates a handle object that invokes the zero-input function handle `f` when the object is deleted or cleared from the workspace. It is useful for restoring state, closing files, removing temporary folders, and other cleanup tasks.",
+  "behaviors": [
+    "`cleanupObj = onCleanup(cleanupFun)` requires `cleanupFun` to be a function handle or anonymous-function closure.",
+    "The cleanup function is invoked with zero input arguments and zero requested outputs.",
+    "The callback runs at most once for each cleanup object.",
+    "`delete(cleanupObj)` invokes the callback immediately through the onCleanup handle method.",
+    "`cancel(cleanupObj)` deactivates the cleanup object without invoking the callback.",
+    "`clear cleanupObj`, `clear`, and `clearvars` run active cleanup callbacks before removing the corresponding workspace values."
+  ],
+  "examples": [
+    {
+      "description": "Restore state when a workspace variable is cleared",
+      "input": "old = pwd;\ncleanupObj = onCleanup(@() cd(old));\ncd(tempdir);\nclear cleanupObj",
+      "output": "% The current folder is restored before cleanupObj is removed."
+    },
+    {
+      "description": "Close a file even when later code fails",
+      "input": "fid = fopen('data.txt', 'w');\ncleanupObj = onCleanup(@() fclose(fid));\nfprintf(fid, 'sample\\n');\n% cleanupObj closes fid when it is deleted or cleared.",
+      "output": ""
+    },
+    {
+      "description": "Cancel cleanup when ownership has been transferred",
+      "input": "cleanupObj = onCleanup(@() disp('cleanup'));\ncancel(cleanupObj);\ndelete(cleanupObj)",
+      "output": "% No cleanup message is printed because cancel disabled the callback."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can I pass arguments directly to the cleanup function?",
+      "answer": "No. Use an anonymous function that captures the values you need, for example `onCleanup(@() fclose(fid))`."
+    },
+    {
+      "question": "Does the callback run more than once if I call delete multiple times?",
+      "answer": "No. The object is deactivated before the callback is invoked, so later delete, clear, or clearvars paths are no-ops."
+    },
+    {
+      "question": "Does `cancel` delete the object?",
+      "answer": "`cancel` only deactivates the callback. The handle value can still exist, but it will no longer run the cleanup function."
+    },
+    {
+      "question": "Does GPU residency matter?",
+      "answer": "No. The cleanup handle is a host object. Any GPU work is determined by the callback body itself."
+    }
+  ],
+  "links": [
+    {
+      "label": "clear",
+      "url": "./clear"
+    },
+    {
+      "label": "clearvars",
+      "url": "./clearvars"
+    },
+    {
+      "label": "delete",
+      "url": "./delete"
+    },
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/on_cleanup.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/on_cleanup.rs"
+  },
+  "gpu_behavior": [
+    "`onCleanup` creates and manages a host lifecycle object. It does not participate in fusion and does not create GPU-resident outputs."
+  ]
+}

@@ -130,7 +130,6 @@ All runtime settings are under `[runtime]`. Runtime settings control the behavio
 | `callstack_limit` | integer | `200`   | Max retained call stack frames for diagnostics.                                          |
 | `error_namespace` | string  | `""`    | Error ID namespace. Empty value is normalized at startup by [language compatibility mode](/docs/runtime/getting-started/compatability) (set to `RunMat` in `compat = "runmat"` mode). |
 | `verbose`         | boolean | `false` | Enables verbose execution output.                                                        |
-| `snapshot_path`   | string  | unset   | Optional snapshot file to preload.                                                       |
 
 
 ### `[runtime.language]`

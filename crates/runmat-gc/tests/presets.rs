@@ -206,6 +206,12 @@ fn test_preset_performance_characteristics() {
             let value = Value::Num(42.0);
             let ptr = gc_allocate(value);
             assert!(ptr.is_ok(), "Failed to allocate with preset {name}");
+
+            // Each iteration changes the heap topology. Release the unrooted
+            // probe allocation before applying the next preset so the test
+            // exercises a valid empty-heap reconfiguration rather than asking
+            // the collector to discard a live allocation.
+            gc_collect_major().expect("collect preset probe allocation");
         }
     });
 }

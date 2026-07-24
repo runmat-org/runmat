@@ -1,0 +1,18 @@
+[package]
+name = "runmat-meshing-tetrahedron"
+version = "0.5.0"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../../LICENSE.md"
+description = "Tetrahedron meshing stage for RunMat meshing"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+runmat-geometry-core = { workspace = true }
+runmat-meshing-core = { workspace = true }
+runmat-meshing-opt = { workspace = true }
+runmat-meshing-plc = { workspace = true }
+runmat-meshing-size = { workspace = true }

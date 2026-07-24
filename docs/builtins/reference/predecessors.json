@@ -1,0 +1,11 @@
+{
+  "title": "predecessors",
+  "category": "graph",
+  "keywords": ["predecessors", "digraph", "graph", "nodes"],
+  "summary": "Return predecessor nodes.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`predecessors(G,node)` returns incoming neighbors for digraphs and adjacent neighbors for undirected graphs.",
+  "signatures": [{"label": "P = predecessors(G, node)", "description": "Return predecessor nodes."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

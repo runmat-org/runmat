@@ -219,6 +219,8 @@ fn wasm_registry_build_configuration() -> String {
                 .map(|feature| feature.to_ascii_lowercase().replace('_', "-"))
         })
         .collect::<Vec<_>>();
+    // The OCCT host sidecar changes geometry import wiring, not builtin helper registration.
+    features.retain(|feature| feature != "occt-wasm-host");
     features.sort();
     format!("target={target};features={}", features.join(","))
 }

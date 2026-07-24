@@ -106,6 +106,7 @@ pub fn run_thermal_with_options(
     let summary = assemble_linear_system(
         model,
         options.prep_context.clone(),
+        None,
         Some(thermo_context.clone()),
         None,
     );

@@ -1,0 +1,32 @@
+{
+  "title": "combvec",
+  "category": "deep_learning",
+  "keywords": ["combvec", "deep learning", "neural network", "cartesian product"],
+  "summary": "Generate all column combinations from numeric matrices.",
+  "description": "`combvec(A,B,...)` returns a numeric matrix whose columns are all combinations of the input matrix columns, with the first input varying fastest.",
+  "behaviors": [
+    "Inputs must be finite numeric scalars or 2-D matrices.",
+    "The output row count is the sum of the input row counts, and the output column count is the product of the input column counts.",
+    "Very large outputs are rejected before allocation."
+  ],
+  "examples": [
+    {
+      "description": "Combine Vectors",
+      "input": "M = combvec([1 2], [10 20 30])",
+      "output": "`M` is 2-by-6."
+    },
+    {
+      "description": "Combine Matrix Columns",
+      "input": "M = combvec([1 3; 2 4], [10 20])",
+      "output": "`M` is 3-by-4, stacking one column from each input per output column."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "M = combvec(A, B, ...)",
+      "output": "Numeric combination matrix."
+    }
+  },
+  "gpu_residency": "`combvec` materializes a host numeric matrix in this slice; provider-resident Cartesian generation remains future GPU work."
+}

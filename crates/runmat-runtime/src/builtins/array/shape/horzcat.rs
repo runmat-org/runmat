@@ -302,7 +302,9 @@ pub(crate) mod tests {
         block_on(super::horzcat_builtin(args))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor};
+    use runmat_builtins::{
+        CellArray, CharArray, ComplexTensor, IntegerStorage, LogicalArray, StringArray, Tensor,
+    };
 
     #[test]
     fn horzcat_type_combines_shapes() {
@@ -367,6 +369,21 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn horzcat_preserves_exact_integer_class() {
+        let left =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("left");
+        let result = horzcat_builtin(vec![Value::Tensor(left), Value::Num(3.5)]).expect("horzcat");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 4]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

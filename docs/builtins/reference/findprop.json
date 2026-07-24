@@ -1,0 +1,83 @@
+{
+  "title": "findprop",
+  "category": "introspection",
+  "keywords": [
+    "findprop",
+    "dynamicprops",
+    "property metadata",
+    "matlab.metadata.Property",
+    "matlab.metadata.DynamicProperty"
+  ],
+  "summary": "Find property metadata on an object or handle object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side metadata lookup. GPU provider kernels do not participate."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::dynamicprops::tests",
+    "integration": "crates/runmat-vm/tests/functions.rs::dynamicprops_class_supports_addprop_dot_access_and_delete"
+  },
+  "description": "`prop = findprop(obj, name)` returns property metadata for class-defined or dynamic properties. Dynamic properties on handle objects return a `matlab.metadata.DynamicProperty` handle; class-defined properties return a `matlab.metadata.Property` object. Missing properties return an empty double.",
+  "behaviors": [
+    "The target must be an object or valid handle object.",
+    "Dynamic property lookup on handle objects returns a metadata handle that can later be passed to `delete`.",
+    "Class-defined property lookup returns metadata fields including `Name`, `DefiningClass`, `GetAccess`, `SetAccess`, and `Dependent`.",
+    "Missing properties return `[]`.",
+    "Invalid handle targets raise `RunMat:dynamicprops:InvalidTarget`."
+  ],
+  "examples": [
+    {
+      "description": "Find a dynamic property",
+      "input": "p = addprop(s, 'gain');\nq = findprop(s, 'gain');\nname = q.Name",
+      "output": "name = 'gain'"
+    },
+    {
+      "description": "Missing property",
+      "input": "q = findprop(s, 'missing')",
+      "output": "q = []"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can metadata returned by `findprop` for class-defined properties be deleted?",
+      "answer": "No. Only dynamic property metadata handles returned for per-instance properties can be deleted."
+    },
+    {
+      "question": "Does `findprop` invoke user methods?",
+      "answer": "No. It inspects runtime class and object metadata only."
+    }
+  ],
+  "links": [
+    {
+      "label": "addprop",
+      "url": "./addprop"
+    },
+    {
+      "label": "getfield",
+      "url": "./getfield"
+    },
+    {
+      "label": "setfield",
+      "url": "./setfield"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/dynamicprops.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/dynamicprops.rs"
+  },
+  "gpu_residency": "`findprop` inspects host-side metadata and returns host metadata values.",
+  "limitations": [
+    "Object arrays are not supported.",
+    "External MATLAB MAT-file class metadata is not decoded into dynamic property metadata."
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "title": "isequaln",
+  "category": "logical/rel",
+  "keywords": ["isequaln", "equality", "comparison", "nan", "logical"],
+  "summary": "Test array equality while treating NaN values as equal.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "GPU tensors are gathered to host before recursive comparison."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::rel::isequal::tests",
+    "integration": null
+  },
+  "description": "`isequaln(A, B, ...)` returns true when every input has matching shape, compatible class, and equal contents, with `NaN` values considered equal.",
+  "behaviors": [
+    "Accepts two or more inputs and compares every input against the first.",
+    "Treats `NaN` values as equal, including inside numeric arrays, complex values, cells, and structs.",
+    "Requires arrays to have identical shape.",
+    "Compares cell arrays and structs recursively.",
+    "Returns a scalar logical value."
+  ],
+  "examples": [
+    {
+      "description": "Comparing NaN values",
+      "input": "isequaln(NaN, NaN)",
+      "output": "ans = logical\n     1"
+    },
+    {
+      "description": "Comparing arrays recursively",
+      "input": "isequaln({[1 NaN]}, {[1 NaN]})",
+      "output": "ans = logical\n     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `isequaln` different from `isequal`?",
+      "answer": "`isequaln` treats `NaN` values as equal. `isequal` returns false when corresponding values are both `NaN`."
+    }
+  ],
+  "links": [
+    {
+      "label": "isequal",
+      "url": "./isequal"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/rel/isequal.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/rel/isequal.rs"
+  },
+  "gpu_residency": "GPU inputs are gathered to host and the result is a host logical scalar.",
+  "gpu_behavior": [
+    "`isequaln` does not currently execute comparison on device; it gathers GPU tensors before comparing values recursively."
+  ]
+}

@@ -4,7 +4,7 @@ use runmat_accelerate_api::{HostTensorView, ProviderFindResult};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -363,14 +363,6 @@ fn try_provider_find(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     options: &FindOptions,
 ) -> Option<ProviderFindResult> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     let provider = runmat_accelerate_api::provider()?;
     let direction = match options.direction {
         FindDirection::First => runmat_accelerate_api::FindDirection::First,
@@ -435,6 +427,7 @@ struct FindResult {
 #[derive(Clone)]
 enum FindValues {
     Real(Vec<f64>),
+    Integer(IntegerStorage),
     Complex(Vec<(f64, f64)>),
 }
 
@@ -560,7 +553,7 @@ async fn materialize_input(value: Value) -> crate::BuiltinResult<(DataStorage, b
             Ok((DataStorage::Real(tensor), false))
         }
         Value::Int(i) => {
-            let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
+            let tensor = Tensor::new_integer(integer_storage_from_scalar(&i), vec![1, 1])
                 .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL))?;
             Ok((DataStorage::Real(tensor), false))
         }
@@ -604,10 +597,9 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
     match storage {
         DataStorage::Real(tensor) => {
             let mut indices = Vec::new();
-            let mut values = Vec::new();
 
             if matches!(limit, Some(0)) {
-                return FindResult::new(shape, indices, FindValues::Real(values));
+                return FindResult::new(shape, indices, find_values_for_tensor(tensor, &[]));
             }
 
             let len = tensor.data.len();
@@ -617,7 +609,6 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                         let value = tensor.data[idx];
                         if value != 0.0 {
                             indices.push(idx + 1);
-                            values.push(value);
                             if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
                             }
@@ -629,7 +620,6 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                         let value = tensor.data[idx];
                         if value != 0.0 {
                             indices.push(idx + 1);
-                            values.push(value);
                             if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
                             }
@@ -638,7 +628,8 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                 }
             }
 
-            FindResult::new(shape, indices, FindValues::Real(values))
+            let values = find_values_for_tensor(tensor, &indices);
+            FindResult::new(shape, indices, values)
         }
         DataStorage::Complex(tensor) => {
             let mut indices = Vec::new();
@@ -785,6 +776,7 @@ impl FindResult {
                 })?;
                 Ok(tensor_to_value(tensor, prefer_gpu))
             }
+            FindValues::Integer(values) => integer_values_to_value(values.clone()),
             FindValues::Complex(values) => {
                 let tensor =
                     ComplexTensor::new(values.clone(), vec![values.len(), 1]).map_err(|e| {
@@ -793,6 +785,68 @@ impl FindResult {
                 Ok(complex_tensor_into_value(tensor))
             }
         }
+    }
+}
+
+fn find_values_for_tensor(tensor: &Tensor, indices: &[usize]) -> FindValues {
+    let Some(storage) = tensor.integer_storage() else {
+        return FindValues::Real(indices.iter().map(|index| tensor.data[index - 1]).collect());
+    };
+    let selected: Vec<usize> = indices.iter().map(|index| index - 1).collect();
+    FindValues::Integer(select_integer_values(storage, &selected))
+}
+
+fn select_integer_values(storage: &IntegerStorage, indices: &[usize]) -> IntegerStorage {
+    macro_rules! select {
+        ($values:expr, $variant:ident) => {
+            IntegerStorage::$variant(indices.iter().map(|&index| $values[index]).collect())
+        };
+    }
+    match storage {
+        IntegerStorage::I8(values) => select!(values, I8),
+        IntegerStorage::I16(values) => select!(values, I16),
+        IntegerStorage::I32(values) => select!(values, I32),
+        IntegerStorage::I64(values) => select!(values, I64),
+        IntegerStorage::U8(values) => select!(values, U8),
+        IntegerStorage::U16(values) => select!(values, U16),
+        IntegerStorage::U32(values) => select!(values, U32),
+        IntegerStorage::U64(values) => select!(values, U64),
+    }
+}
+
+fn integer_values_to_value(storage: IntegerStorage) -> crate::BuiltinResult<Value> {
+    if storage.len() == 1 {
+        return Ok(Value::Int(integer_storage_value(&storage, 0)));
+    }
+    let shape = vec![storage.len(), 1];
+    let tensor = Tensor::new_integer(storage, shape)
+        .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL))?;
+    Ok(Value::Tensor(tensor))
+}
+
+fn integer_storage_value(storage: &IntegerStorage, index: usize) -> IntValue {
+    match storage {
+        IntegerStorage::I8(values) => IntValue::I8(values[index]),
+        IntegerStorage::I16(values) => IntValue::I16(values[index]),
+        IntegerStorage::I32(values) => IntValue::I32(values[index]),
+        IntegerStorage::I64(values) => IntValue::I64(values[index]),
+        IntegerStorage::U8(values) => IntValue::U8(values[index]),
+        IntegerStorage::U16(values) => IntValue::U16(values[index]),
+        IntegerStorage::U32(values) => IntValue::U32(values[index]),
+        IntegerStorage::U64(values) => IntValue::U64(values[index]),
+    }
+}
+
+fn integer_storage_from_scalar(value: &IntValue) -> IntegerStorage {
+    match value {
+        IntValue::I8(value) => IntegerStorage::I8(vec![*value]),
+        IntValue::I16(value) => IntegerStorage::I16(vec![*value]),
+        IntValue::I32(value) => IntegerStorage::I32(vec![*value]),
+        IntValue::I64(value) => IntegerStorage::I64(vec![*value]),
+        IntValue::U8(value) => IntegerStorage::U8(vec![*value]),
+        IntValue::U16(value) => IntegerStorage::U16(vec![*value]),
+        IntValue::U32(value) => IntegerStorage::U32(vec![*value]),
+        IntValue::U64(value) => IntegerStorage::U64(vec![*value]),
     }
 }
 
@@ -948,6 +1002,48 @@ pub(crate) mod tests {
         let vals = test_support::gather(eval.values_value().expect("vals")).expect("gather vals");
         assert_eq!(vals.shape, vec![3, 1]);
         assert_eq!(vals.data, vec![2.0, 3.0, 6.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn find_values_preserve_exact_uint64_storage() {
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, u64::MAX, 1_u64 << 63, 0]),
+            vec![2, 2],
+        )
+        .expect("integer tensor");
+        let eval = evaluate(Value::Tensor(input), &[]).expect("evaluate");
+        let values = eval.values_value().expect("values");
+        let Value::Tensor(values) = values else {
+            panic!("expected typed tensor values");
+        };
+        assert_eq!(values.shape, vec![2, 1]);
+        assert_eq!(
+            values.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn find_single_integer_value_preserves_scalar_class() {
+        let input = Tensor::new_integer(IntegerStorage::I64(vec![0, i64::MIN]), vec![2, 1])
+            .expect("integer tensor");
+        let eval = evaluate(Value::Tensor(input), &[]).expect("evaluate");
+        assert_eq!(
+            eval.values_value().expect("values"),
+            Value::Int(IntValue::I64(i64::MIN))
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn find_integer_scalar_preserves_exact_value_output() {
+        let eval = evaluate(Value::Int(IntValue::U64(u64::MAX)), &[]).expect("evaluate");
+        assert_eq!(
+            eval.values_value().expect("values"),
+            Value::Int(IntValue::U64(u64::MAX))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

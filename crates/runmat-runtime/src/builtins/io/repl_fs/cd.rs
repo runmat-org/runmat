@@ -334,7 +334,7 @@ pub(crate) mod tests {
         let _lock = REPL_FS_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        let _guard = DirGuard::new();
+        let guard = DirGuard::new();
 
         let original = env::current_dir().expect("current dir");
         let temp = tempdir().expect("tempdir");
@@ -347,6 +347,7 @@ pub(crate) mod tests {
 
         let new_dir = env::current_dir().expect("current dir");
         assert_eq!(canonical_path(&new_dir), canonical_path(temp.path()));
+        drop(guard);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -355,7 +356,7 @@ pub(crate) mod tests {
         let _lock = REPL_FS_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        let _guard = DirGuard::new();
+        let guard = DirGuard::new();
 
         let root = tempdir().expect("root tempdir");
         let child = root.path().join("child");
@@ -371,6 +372,7 @@ pub(crate) mod tests {
         assert_eq!(canonical_path(&previous_path), canonical_path(root.path()));
         let current = env::current_dir().expect("current dir");
         assert_eq!(canonical_path(&current), canonical_path(&child));
+        drop(guard);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

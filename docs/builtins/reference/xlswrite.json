@@ -1,0 +1,108 @@
+{
+  "title": "xlswrite",
+  "category": "io/tabular",
+  "keywords": [
+    "xlswrite",
+    "xls",
+    "xlsx",
+    "spreadsheet",
+    "excel",
+    "legacy export"
+  ],
+  "summary": "Write numeric, logical, string, character, or cell data to Excel-compatible spreadsheet files.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Spreadsheet files are written on the host. gpuArray inputs are gathered before serialization."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::tabular::xlswrite::tests",
+    "integration": [
+      "builtins::io::tabular::xlswrite::tests::xlswrite_writes_numeric_matrix_with_sheet_and_range",
+      "builtins::io::tabular::xlswrite::tests::xlswrite_preserves_existing_cells_outside_overlay",
+      "builtins::io::tabular::xlswrite::tests::xlswrite_preserves_other_sheets_and_uses_numeric_sheet_ordinal",
+      "runmat-vm/tests/xlswrite.rs"
+    ]
+  },
+  "description": "`xlswrite` provides MATLAB's legacy spreadsheet export forms for older scripts. It writes an OOXML workbook payload for `.xlsx` and legacy `.xls` filenames, accepts worksheet and range selectors, preserves supported cells in workbooks previously created by RunMat `xlswrite`, and returns status/message outputs when requested.",
+  "behaviors": [
+    "`xlswrite(filename, A)` writes `A` to the first worksheet starting at `A1`. If the filename has no extension, `.xlsx` is appended.",
+    "`xlswrite(filename, A, sheet)` selects a worksheet by name or one-based numeric index.",
+    "`xlswrite(filename, A, range)` writes to an A1-style range start such as `\"B2\"` on the default worksheet.",
+    "`xlswrite(filename, A, sheet, range)` combines worksheet and range selection.",
+    "When the destination workbook already exists and was created by RunMat `xlswrite`, `xlswrite` preserves supported existing worksheets and cells outside the overwritten range.",
+    "Existing unmarked Excel workbooks are rejected instead of being flattened into RunMat's minimal workbook representation; this avoids silently discarding formulas, macros, styles, charts, images, or workbook metadata.",
+    "Numeric sheet selectors are one-based worksheet ordinals. Missing ordinal sheets are created as `SheetN` placeholders so later `xlsread(filename, N, ...)` calls address the same worksheet.",
+    "Numeric, sparse, logical, string, character, and heterogeneous cell inputs are supported. Cell contents must be scalar spreadsheet values.",
+    "A1 ranges may use absolute markers such as `$B$2:$C$3`; malformed range endpoints are rejected.",
+    "The legacy `'-basic'` mode flag is accepted as a no-op because RunMat writes spreadsheets directly rather than using Excel COM automation.",
+    "`status = xlswrite(...)` returns true on success. `[status,message] = xlswrite(...)` captures write failures as false plus a diagnostic struct with `message` and `identifier` fields."
+  ],
+  "examples": [
+    {
+      "description": "Write a numeric matrix",
+      "input": "status = xlswrite('measurements.xlsx', [1 2 3; 4 5 6]);"
+    },
+    {
+      "description": "Write to a named worksheet and range",
+      "input": "status = xlswrite('measurements.xlsx', {'Voltage', 1.5, true}, 'Data', 'B2');"
+    },
+    {
+      "description": "Capture a failure message",
+      "input": "[status, message] = xlswrite('out.xlsx', 1+2i);\nif ~status\n    disp(message.message)\nend"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `xlswrite` use Microsoft Excel?",
+      "answer": "No. RunMat writes workbook files directly on the host. The `'-basic'` flag is accepted for compatibility, but COM automation is not used."
+    },
+    {
+      "question": "What happens with `.xls` filenames?",
+      "answer": "RunMat accepts legacy `.xls` filenames and writes the same OOXML workbook payload used for `.xlsx`. This keeps old scripts running in RunMat and remains readable by RunMat's content-based spreadsheet reader."
+    },
+    {
+      "question": "Can `xlswrite` update an existing Excel workbook created elsewhere?",
+      "answer": "No. RunMat rejects unmarked existing workbooks rather than rewriting them as a minimal value-only workbook and losing formulas, macros, formatting, charts, images, comments, or metadata."
+    },
+    {
+      "question": "What should I use for new code?",
+      "answer": "`xlswrite` exists for legacy MATLAB compatibility. For new code, prefer `writematrix`, `writecell`, or table-oriented export APIs where available."
+    }
+  ],
+  "links": [
+    {
+      "label": "xlsread",
+      "url": "./xlsread"
+    },
+    {
+      "label": "writematrix",
+      "url": "./writematrix"
+    },
+    {
+      "label": "writecell",
+      "url": "./writecell"
+    },
+    {
+      "label": "readtable",
+      "url": "./readtable"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/tabular/xlswrite.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/xlswrite.rs"
+  },
+  "gpu_residency": "`xlswrite` consumes host-side file data. gpuArray inputs are gathered before writing; outputs are CPU-resident status/message values.",
+  "gpu_behavior": [
+    "`xlswrite` performs file I/O and spreadsheet serialization on the CPU. It is not fusible and does not call acceleration provider hooks."
+  ]
+}

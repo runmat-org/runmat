@@ -136,6 +136,13 @@ pub fn set_geometry_scene_presentation(
 ) -> Result<(), JsValue> {
     let presentation: runmat_plot::GeometryScenePresentation =
         serde_wasm_bindgen::from_value(presentation).map_err(|err| js_error(&err.to_string()))?;
+    log::info!(
+        "geometry_scene.presentation_api surface_id={} selected_region_id={} selected_region_count={} display_mode={:?}",
+        surface_id,
+        presentation.selected_region_id.as_deref().unwrap_or("none"),
+        presentation.selected_region_ids.len(),
+        presentation.display_mode,
+    );
     runtime_set_geometry_scene_presentation(surface_id, presentation)
         .map_err(|err| runtime_error_to_js(&err))
 }

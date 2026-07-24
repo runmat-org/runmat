@@ -3,7 +3,6 @@
 const INCLUDE_BUNDLER_ARTIFACTS = false;
 
 const fs = require("node:fs/promises");
-const fsSync = require("node:fs");
 const path = require("node:path");
 
 async function copyTree(src, dest) {
@@ -37,11 +36,6 @@ async function copyTree(src, dest) {
 
 async function main() {
   const repoRoot = path.join(__dirname, "..");
-  const snapshotSrcCandidates = [
-    path.join(repoRoot, "artifacts", "stdlib.snapshot"),
-    path.join(repoRoot, "stdlib.snapshot")
-  ];
-  const snapshotSrc = snapshotSrcCandidates.find((candidate) => fsSync.existsSync(candidate));
   const copies = [
     ...(INCLUDE_BUNDLER_ARTIFACTS ? [{
       src: path.join(repoRoot, "pkg"),
@@ -55,24 +49,15 @@ async function main() {
       src: path.join(repoRoot, "lsp-web"),
       dest: path.join(repoRoot, "dist", "lsp"),
     },
-    {
-      src: snapshotSrc ?? snapshotSrcCandidates[0],
-      dest: path.join(repoRoot, "dist", "runtime", "stdlib.snapshot"),
-      required: true,
-    },
   ];
 
   let copiedAny = false;
-  let missingRequired = false;
-  for (const { src, dest, required } of copies) {
+  for (const { src, dest } of copies) {
     const ok = await copyTree(src, dest);
     copiedAny = copiedAny || ok;
-    if (ok === false && required) {
-      missingRequired = true;
-    }
   }
 
-  if (!copiedAny || missingRequired) {
+  if (!copiedAny) {
     process.exitCode = 1;
   }
 }

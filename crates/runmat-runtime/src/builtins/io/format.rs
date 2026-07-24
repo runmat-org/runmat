@@ -86,7 +86,10 @@ async fn format_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             return Ok(empty_value());
         }
         [Value::String(s)] => s.to_lowercase(),
-        [Value::CharArray(ca)] => ca.to_string().to_lowercase(),
+        [Value::CharArray(chars)] if chars.rows == 1 => chars
+            .row_string()
+            .expect("row-validated character array")
+            .to_lowercase(),
         _ => {
             return Err(format_error_with(
                 &FORMAT_ERROR_ARG_CONFIG,

@@ -332,9 +332,53 @@ pub(crate) fn permute_tensor(
     tensor: Tensor,
     order: &[usize],
 ) -> crate::BuiltinResult<Tensor> {
-    let Tensor { data, shape, .. } = tensor;
-    let (out, new_shape) = permute_generic(builtin, &data, &shape, order)?;
-    Tensor::new(out, new_shape).map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
+    let Tensor {
+        data,
+        shape,
+        integer_data,
+        ..
+    } = tensor;
+    match integer_data {
+        Some(storage) => {
+            // Exact integer storage is the authoritative buffer. Do not first
+            // permute the lossy f64 compatibility view on this fast path.
+            let (storage, new_shape) = permute_integer_storage(builtin, storage, &shape, order)?;
+            Tensor::new_integer(storage, new_shape)
+                .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
+        }
+        None => {
+            let (out, new_shape) = permute_generic(builtin, &data, &shape, order)?;
+            Tensor::new(out, new_shape)
+                .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
+        }
+    }
+}
+
+fn permute_integer_storage(
+    builtin: &'static str,
+    storage: runmat_builtins::IntegerStorage,
+    shape: &[usize],
+    order: &[usize],
+) -> crate::BuiltinResult<(runmat_builtins::IntegerStorage, Vec<usize>)> {
+    use runmat_builtins::IntegerStorage;
+
+    macro_rules! permute_storage {
+        ($values:expr, $variant:ident) => {{
+            let (values, new_shape) = permute_generic(builtin, &$values, shape, order)?;
+            Ok((IntegerStorage::$variant(values), new_shape))
+        }};
+    }
+
+    match storage {
+        IntegerStorage::I8(values) => permute_storage!(values, I8),
+        IntegerStorage::I16(values) => permute_storage!(values, I16),
+        IntegerStorage::I32(values) => permute_storage!(values, I32),
+        IntegerStorage::I64(values) => permute_storage!(values, I64),
+        IntegerStorage::U8(values) => permute_storage!(values, U8),
+        IntegerStorage::U16(values) => permute_storage!(values, U16),
+        IntegerStorage::U32(values) => permute_storage!(values, U32),
+        IntegerStorage::U64(values) => permute_storage!(values, U64),
+    }
 }
 
 pub(crate) fn permute_complex_tensor(
@@ -430,14 +474,6 @@ pub(crate) async fn permute_gpu(
     handle: GpuTensorHandle,
     order: &[usize],
 ) -> crate::BuiltinResult<Value> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     if let Some(provider) = runmat_accelerate_api::provider() {
         let zero_based: Vec<usize> = order.iter().map(|&idx| idx - 1).collect();
         if let Ok(out) = provider.permute(&handle, &zero_based) {
@@ -550,6 +586,7 @@ fn is_vector(tensor: &Tensor) -> bool {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
         block_on(super::permute_builtin(value, order))
@@ -740,6 +777,19 @@ pub(crate) mod tests {
         assert!(err
             .to_string()
             .contains("order length (1) must be at least ndims(A) (2)"));
+    }
+
+    #[test]
+    fn permute_preserves_exact_integer_storage() {
+        let input = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX, 3, 4]), vec![2, 2])
+            .expect("integer tensor");
+        let output = permute_tensor("permute", input, &[2, 1]).expect("permute");
+
+        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1, 3, u64::MAX, 4]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

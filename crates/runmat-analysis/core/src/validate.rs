@@ -23,6 +23,14 @@ pub enum AnalysisValidationError {
     #[error("ANALYSIS_VALIDATION_ZERO_MOMENT: moment load {load_id} must have nonzero magnitude")]
     ZeroMomentVector { load_id: String },
     #[error(
+        "ANALYSIS_VALIDATION_INVALID_WRENCH: wrench load {load_id} must have finite force, moment, and point components"
+    )]
+    InvalidWrench { load_id: String },
+    #[error(
+        "ANALYSIS_VALIDATION_ZERO_WRENCH: wrench load {load_id} must have nonzero force or moment"
+    )]
+    ZeroWrench { load_id: String },
+    #[error(
         "ANALYSIS_VALIDATION_UNIT_MISMATCH: model units {model:?} do not match geometry units {geometry:?}"
     )]
     UnitMismatch {
@@ -57,6 +65,38 @@ pub fn validate_model(model: &AnalysisModel) -> Result<(), AnalysisValidationErr
             }
             if mx == 0.0 && my == 0.0 && mz == 0.0 {
                 return Err(AnalysisValidationError::ZeroMomentVector {
+                    load_id: load.load_id.clone(),
+                });
+            }
+        }
+        if let LoadKind::Wrench {
+            fx,
+            fy,
+            fz,
+            mx,
+            my,
+            mz,
+            px,
+            py,
+            pz,
+        } = load.kind
+        {
+            if !fx.is_finite()
+                || !fy.is_finite()
+                || !fz.is_finite()
+                || !mx.is_finite()
+                || !my.is_finite()
+                || !mz.is_finite()
+                || !px.is_finite()
+                || !py.is_finite()
+                || !pz.is_finite()
+            {
+                return Err(AnalysisValidationError::InvalidWrench {
+                    load_id: load.load_id.clone(),
+                });
+            }
+            if fx == 0.0 && fy == 0.0 && fz == 0.0 && mx == 0.0 && my == 0.0 && mz == 0.0 {
+                return Err(AnalysisValidationError::ZeroWrench {
                     load_id: load.load_id.clone(),
                 });
             }

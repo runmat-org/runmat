@@ -1,0 +1,87 @@
+{
+  "title": "yticklabels",
+  "category": "plotting",
+  "keywords": [
+    "yticklabels",
+    "y tick labels",
+    "axes",
+    "plot labels"
+  ],
+  "summary": "Query or set Y-axis tick labels for the current axes or a specified axes handle.",
+  "status": "done",
+  "version_added": "0.5.3",
+  "tests": {
+    "unit": "builtins::plotting::yticklabels::tests"
+  },
+  "description": "`yticklabels` controls the display text associated with Y-axis tick marks. It supports query, explicit label assignment, automatic mode, manual mode, mode query, and explicit axes-target forms.",
+  "syntax": [
+    "labels = yticklabels()",
+    "labels = yticklabels(labels)",
+    "mode = yticklabels(mode)",
+    "labels = yticklabels(ax, labels)",
+    "mode = yticklabels(ax, 'mode')"
+  ],
+  "arguments": [
+    {
+      "name": "labels",
+      "type": "cell array of character vectors | string array | char array | []",
+      "description": "Labels to associate with the current Y-axis ticks. Fewer labels than ticks are padded with empty character vectors; an empty cell or empty numeric array removes labels."
+    },
+    {
+      "name": "mode",
+      "type": "'auto' | 'manual' | 'mode'",
+      "description": "'auto' returns tick labels to automatic generation, 'manual' freezes current labels, and 'mode' queries the current label mode."
+    },
+    {
+      "name": "ax",
+      "type": "axes handle",
+      "description": "Target axes handle. If omitted, the current axes are used."
+    }
+  ],
+  "examples": [
+    {
+      "description": "Set Y-axis tick values and labels",
+      "input": "plot(0:10, (0:10).^2);\nyticks([0 50 100]);\nyticklabels({'low', 'mid', 'high'});",
+      "output": "% The Y-axis shows the three supplied labels"
+    },
+    {
+      "description": "Query and reset label mode",
+      "input": "yticklabels({'A', 'B'});\nyticklabels('mode')\nyticklabels('auto');",
+      "output": "ans = 'manual'\n% Labels return to automatic numeric formatting"
+    },
+    {
+      "description": "Set labels on a specific axes",
+      "input": "ax = subplot(1, 2, 2);\nplot(ax, 1:3);\nyticks(ax, [1 2 3]);\nyticklabels(ax, {'one', 'two', 'three'});",
+      "output": "% Only the target axes receives the labels"
+    }
+  ],
+  "notes": [
+    "Setting explicit labels also freezes the Y tick values at their current positions, matching MATLAB's YTickMode side effect.",
+    "Automatic labels are formatted from the current Y tick values and cached display bounds, so this builtin does not gather plot data from accelerated backends."
+  ],
+  "gpu_residency": "`yticklabels` only reads and writes axes metadata. It does not gather GPU-resident plot data; automatic labels are generated from current tick metadata and cached display bounds.",
+  "related": [
+    {
+      "label": "yticks",
+      "url": "./yticks"
+    },
+    {
+      "label": "xticklabels",
+      "url": "./xticklabels"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "implemented_in": [
+    {
+      "label": "crates/runmat-runtime/src/builtins/plotting/ops/yticklabels.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/yticklabels.rs"
+    }
+  ]
+}

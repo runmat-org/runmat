@@ -891,6 +891,7 @@ pub(crate) mod tests {
             col_ptrs: vec![0, 0, 0],
             row_indices: Vec::new(),
             values: Vec::new(),
+            integer_data: None,
         };
 
         let err = match mask_from_sparse(&sparse) {

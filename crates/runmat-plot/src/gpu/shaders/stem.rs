@@ -54,6 +54,7 @@ fn include_segment(i: u32, style: u32) -> bool {
             let m = i % 6u;
             return (m < 2u) || (m == 3u);
         }
+        case 4u: { return false; }
         default: { return true; }
     }
 }
@@ -136,6 +137,7 @@ fn include_segment(i: u32, style: u32) -> bool {
             let m = i % 6u;
             return (m < 2u) || (m == 3u);
         }
+        case 4u: { return false; }
         default: { return true; }
     }
 }

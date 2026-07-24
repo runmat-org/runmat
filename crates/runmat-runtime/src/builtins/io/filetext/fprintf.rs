@@ -302,7 +302,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
     })
 }
 
-// kind_of was used for debugging logs; removed to avoid dead code in production builds.
+// kind_of was used for debugging logs; removed to avoid dead code in release builds.
 
 fn try_tensor_char_row_as_string(value: &Value) -> Option<Result<String, String>> {
     match value {

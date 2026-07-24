@@ -1,15 +1,5 @@
 use clap::ValueEnum;
 
-#[derive(Clone, Debug, ValueEnum)]
-pub enum CompressionAlg {
-    /// No compression
-    None,
-    /// LZ4 compression (fast)
-    Lz4,
-    /// Zstd compression (balanced)
-    Zstd,
-}
-
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum LogLevel {
     Error,
@@ -54,16 +44,4 @@ pub enum CaptureFiguresMode {
 pub struct FigureSize {
     pub width: u32,
     pub height: u32,
-}
-
-impl From<CompressionAlg> for runmat_snapshot::CompressionAlgorithm {
-    fn from(alg: CompressionAlg) -> Self {
-        use runmat_snapshot::CompressionAlgorithm;
-
-        match alg {
-            CompressionAlg::None => CompressionAlgorithm::None,
-            CompressionAlg::Lz4 => CompressionAlgorithm::Lz4,
-            CompressionAlg::Zstd => CompressionAlgorithm::Zstd,
-        }
-    }
 }

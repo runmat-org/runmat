@@ -9,6 +9,7 @@ use crate::builtins::math::optim::common::optim_error;
 use crate::BuiltinResult;
 
 pub(crate) type ResidualFuture<'a> = Pin<Box<dyn Future<Output = BuiltinResult<Vec<f64>>> + 'a>>;
+const MAX_LEAST_SQUARES_WORK_ELEMENTS: usize = 50_000_000;
 
 pub(crate) trait LeastSquaresEvaluator {
     fn residual<'a>(&'a mut self, x: &'a [f64]) -> ResidualFuture<'a>;
@@ -87,7 +88,42 @@ pub(crate) struct LeastSquaresResult {
     pub iterations: usize,
     pub func_count: usize,
     pub first_order_optimality: f64,
+    pub step_size: f64,
     pub message: String,
+}
+
+fn checked_least_squares_work(name: &str, m: usize, n: usize) -> BuiltinResult<usize> {
+    let jacobian = m.checked_mul(n).ok_or_else(|| {
+        optim_error(
+            name,
+            format!("{name}: least-squares work array size overflow"),
+        )
+    })?;
+    let normal = n.checked_mul(n).ok_or_else(|| {
+        optim_error(
+            name,
+            format!("{name}: least-squares normal-equation size overflow"),
+        )
+    })?;
+    let total = jacobian
+        .checked_add(normal)
+        .and_then(|value| value.checked_add(m))
+        .and_then(|value| value.checked_add(n))
+        .ok_or_else(|| {
+            optim_error(
+                name,
+                format!("{name}: least-squares workspace size overflow"),
+            )
+        })?;
+    if total > MAX_LEAST_SQUARES_WORK_ELEMENTS {
+        return Err(optim_error(
+            name,
+            format!(
+                "{name}: least-squares workspace requires {total} elements, exceeding the supported limit of {MAX_LEAST_SQUARES_WORK_ELEMENTS}"
+            ),
+        ));
+    }
+    Ok(jacobian)
 }
 
 pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
@@ -115,11 +151,13 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
         ));
     }
     let m = residual.len();
+    let jacobian_len = checked_least_squares_work(name, m, n)?;
     let mut func_count = 1usize;
     let mut iterations = 0usize;
     let mut lambda = 1.0e-3;
-    let mut last_jacobian = vec![0.0; m * n];
+    let mut last_jacobian = vec![0.0; jacobian_len];
     let mut last_optimality = f64::INFINITY;
+    let mut last_step_size = 0.0;
 
     if residual_norm_inf(&residual) <= options.tol_fun {
         let jacobian = finite_difference_jacobian(
@@ -133,7 +171,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
         )
         .await
         .map(|jacobian| jacobian.values)
-        .unwrap_or_else(|_| vec![0.0; m * n]);
+        .unwrap_or_else(|_| vec![0.0; jacobian_len]);
         let optimality = first_order_optimality(&jacobian, &residual, n);
         return final_result(
             name,
@@ -147,6 +185,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
             iterations,
             func_count,
             optimality,
+            0.0,
             "Local minimum found. Residual is within function tolerance.",
         )
         .await;
@@ -163,6 +202,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                 iterations.saturating_sub(1),
                 func_count,
                 last_optimality,
+                last_step_size,
                 "Exceeded maximum function evaluations.",
             ));
         }
@@ -190,6 +230,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                 iterations,
                 func_count,
                 optimality,
+                last_step_size,
                 "Exceeded maximum function evaluations.",
             ));
         }
@@ -202,6 +243,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                 iterations,
                 func_count,
                 optimality,
+                last_step_size,
                 "Local minimum found. First-order optimality is within tolerance.",
             ));
         }
@@ -222,6 +264,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                     iterations,
                     func_count,
                     optimality,
+                    last_step_size,
                     "Exceeded maximum function evaluations.",
                 ));
             }
@@ -257,6 +300,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                 let improvement = current_norm - trial_norm;
                 x = trial;
                 residual = trial_residual;
+                last_step_size = step_norm;
                 lambda = (lambda * 0.3).max(1.0e-12);
                 accepted = true;
                 if residual_norm_inf(&residual) <= options.tol_fun {
@@ -272,6 +316,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                         iterations,
                         func_count,
                         optimality,
+                        step_norm,
                         "Local minimum found. Residual is within function tolerance.",
                     )
                     .await;
@@ -289,6 +334,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                         iterations,
                         func_count,
                         optimality,
+                        step_norm,
                         "Local minimum possible. Step size is within tolerance.",
                     )
                     .await;
@@ -306,6 +352,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                         iterations,
                         func_count,
                         optimality,
+                        step_norm,
                         "Local minimum possible. Change in residual norm is within tolerance.",
                     )
                     .await;
@@ -323,6 +370,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                     iterations,
                     func_count,
                     optimality,
+                    last_step_size,
                     "Exceeded maximum function evaluations.",
                 ));
             }
@@ -337,6 +385,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                 iterations,
                 func_count,
                 last_optimality,
+                last_step_size,
                 "Iteration stalled before convergence.",
             ));
         }
@@ -350,6 +399,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
         iterations,
         func_count,
         last_optimality,
+        last_step_size,
         "Exceeded maximum iterations.",
     ))
 }
@@ -370,7 +420,7 @@ async fn finite_difference_jacobian<E: LeastSquaresEvaluator>(
 ) -> BuiltinResult<FiniteDifferenceJacobian> {
     let m = residual.len();
     let n = x.len();
-    let mut jacobian = vec![0.0; m * n];
+    let mut jacobian = vec![0.0; checked_least_squares_work(name, m, n)?];
     for col in 0..n {
         if *func_count >= max_fun_evals {
             return Ok(FiniteDifferenceJacobian {
@@ -420,6 +470,7 @@ async fn final_result<E: LeastSquaresEvaluator>(
     iterations: usize,
     func_count: usize,
     fallback_optimality: f64,
+    step_size: f64,
     message: &str,
 ) -> BuiltinResult<LeastSquaresResult> {
     if !options.final_jacobian || func_count.saturating_add(x.len()) > options.max_fun_evals {
@@ -431,6 +482,7 @@ async fn final_result<E: LeastSquaresEvaluator>(
             iterations,
             func_count,
             fallback_optimality,
+            step_size,
             message,
         ));
     }
@@ -456,6 +508,7 @@ async fn final_result<E: LeastSquaresEvaluator>(
         iterations,
         final_func_count,
         optimality,
+        step_size,
         message,
     ))
 }
@@ -468,6 +521,7 @@ fn result(
     iterations: usize,
     func_count: usize,
     first_order_optimality: f64,
+    step_size: f64,
     message: &str,
 ) -> LeastSquaresResult {
     let resnorm = norm2_squared(&residual);
@@ -482,6 +536,7 @@ fn result(
         iterations,
         func_count,
         first_order_optimality,
+        step_size,
         message: message.to_string(),
     }
 }
@@ -552,6 +607,13 @@ mod tests {
             .validate("lsqcurvefit", 1)
             .expect_err("invalid bounds");
         assert!(err.message().contains("finite feasible iterate"));
+    }
+
+    #[test]
+    fn least_squares_workspace_guard_rejects_oversized_problem() {
+        let err = checked_least_squares_work("lsqnonlin", MAX_LEAST_SQUARES_WORK_ELEMENTS, 2)
+            .expect_err("oversized workspace");
+        assert!(err.message().contains("workspace"));
     }
 
     #[test]

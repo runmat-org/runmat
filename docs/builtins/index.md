@@ -154,7 +154,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `io/interactive` | `input` | host | - | - | Prompted input, including text mode. |
 | done | `io/import` | `importdata`, `textscan` | host | - | - | Legacy text import with delimiter detection, formatted parsing, header text, column headers, and row labels. |
 | done | `io/audio` | `audioinfo` | host | - | - | Audio metadata inspection for WAV/RF64, FLAC, AIFF/AIFC, Ogg/Vorbis, and MP3 frame headers. |
-| done | `io/tabular` | `readtable`, `detectImportOptions`, `spreadsheetImportOptions`, `readmatrix`, `writematrix`, `writecell`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Tabular I/O; `readtable` imports delimited text and spreadsheet files as table variables with sheet/range/name/type options, and `writecell` exports heterogeneous cells to text or spreadsheets. |
+| done | `io/tabular` | `readtable`, `detectImportOptions`, `spreadsheetImportOptions`, `readmatrix`, `writematrix`, `writecell`, `xlsread`, `xlswrite`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Tabular I/O; `readtable` imports delimited text and spreadsheet files as table variables with sheet/range/name/type options, and `xlswrite`/`writecell` export spreadsheet-compatible data. |
 | done | `io/mat` | `save`, `load` | host | - | - | MAT-like persistence. |
 
 ## I/O - JSON, Networking, and Images
@@ -172,7 +172,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 
 | Status | Path | Names | GPU | Fusion | Backend | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| done | `plot/core` | `plot`, `scatter`, `scatterplot`, `semilogx`, `semilogy`, `loglog`, `bar`, `area`, `histogram`, `hist`, `stairs`, `stem`, `errorbar`, `quiver`, `patch`, `pie`, `subplot`, `figure`, `gcf`, `gca`, `hold`, `clf`, `cla`, `drawnow`, `print`, `get`, `set`, `isgraphics`, `ishandle`, `title`, `sgtitle`, `suptitle`, `xlabel`, `ylabel`, `zlabel`, `legend`, `xlim`, `ylim`, `zlim`, `axis`, `caxis`, `clim`, `xline`, `yline`, `text`, `grid`, `box`, `colormap`, `shading`, `colorbar` | host | - | - | Feature-gated through `plot-core` and backed by `runmat-plot`. |
+| done | `plot/core` | `plot`, `plotyy`, `scatter`, `scatterplot`, `semilogx`, `semilogy`, `loglog`, `bar`, `barh`, `area`, `histogram`, `hist`, `stairs`, `stem`, `errorbar`, `quiver`, `patch`, `pie`, `subplot`, `figure`, `groot`, `gcf`, `gca`, `axes`, `ancestor`, `hold`, `clf`, `cla`, `drawnow`, `print`, `saveas`, `savefig`, `openfig`, `hgsave`, `hgload`, `get`, `set`, `isgraphics`, `ishandle`, `title`, `subtitle`, `sgtitle`, `suptitle`, `xlabel`, `ylabel`, `zlabel`, `legend`, `xlim`, `ylim`, `zlim`, `xticks`, `yticks`, `xticklabels`, `yticklabels`, `xtickangle`, `ytickangle`, `xtickformat`, `ytickformat`, `xscale`, `yscale`, `linkaxes`, `zoom`, `pan`, `datacursormode`, `waitbar`, `opengl`, `axis`, `caxis`, `clim`, `xline`, `yline`, `text`, `grid`, `box`, `colormap`, `parula`, `colorcube`, `colororder`, `shading`, `colorbar` | host | - | - | Feature-gated through `plot-core` and backed by `runmat-plot`. |
 | done | `plot/3d` | `plot3`, `scatter3`, `surf`, `surfc`, `mesh`, `meshc`, `contour`, `contour3`, `contourf`, `fill3`, `heatmap`, `view` | host | - | - | Surface, contour, 3D, and heatmap plotting through `plot-core`. |
 
 ## Constants

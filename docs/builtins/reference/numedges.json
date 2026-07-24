@@ -1,0 +1,11 @@
+{
+  "title": "numedges",
+  "category": "graph",
+  "keywords": ["numedges", "graph", "edges"],
+  "summary": "Return the number of edges in a graph or digraph.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`numedges(G)` returns the height of the graph edge list.",
+  "signatures": [{"label": "m = numedges(G)", "description": "Return the edge count as a scalar double."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

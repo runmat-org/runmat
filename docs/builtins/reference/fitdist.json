@@ -1,0 +1,53 @@
+{
+  "title": "fitdist",
+  "category": "stats/summary",
+  "keywords": ["fitdist", "probability distribution", "normal", "exponential", "lognormal", "gamma", "weibull", "poisson", "statistics"],
+  "summary": "Fit a probability distribution object to sample data.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Parameter estimation currently runs on CPU."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::fitdist::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`fitdist(x,distname)` estimates distribution parameters from vector data and returns a `ProbabilityDistribution` object accepted by `pdf`, `cdf`, `icdf`, and `random`.",
+  "behaviors": [
+    "Supported fitted distributions are `\"Normal\"`, `\"Exponential\"`, `\"Lognormal\"`, `\"Gamma\"`, `\"Weibull\"`, and `\"Poisson\"`; common short aliases such as `\"norm\"`, `\"exp\"`, `\"logn\"`, `\"gam\"`, `\"wbl\"`, and `\"poiss\"` are accepted.",
+    "Input data must be a numeric vector. `NaN` observations are ignored and `Inf` observations are rejected.",
+    "`fitdist(x,distname,\"Frequency\",w)` accepts nonnegative finite observation weights with one weight per observation. Zero-weight observations are ignored.",
+    "Range constraints follow the selected distribution: exponential data must be nonnegative, lognormal/gamma/weibull data must be positive, and Poisson data must be nonnegative integers.",
+    "The returned object exposes `DistributionName`, `DistName`, `ParameterNames`, `ParameterValues`, `NumParameters`, `NumObservations`, `NLogL`, `IsTruncated`, and scalar parameter properties such as `mu`, `sigma`, `lambda`, `a`, or `b`."
+  ],
+  "examples": [
+    {
+      "description": "Fit a normal distribution and evaluate it",
+      "input": "pd = fitdist([1;2;3], \"Normal\"); y = pdf(pd, 2); p = cdf(pd, 2); x = icdf(pd, 0.5)"
+    },
+    {
+      "description": "Fit with observation frequencies",
+      "input": "pd = fitdist([1;2], \"Exponential\", \"Frequency\", [1;3])"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does fitdist support censoring or custom optimization options?",
+      "answer": "Not yet. `Censoring`, `Options`, and grouped `By` fits are rejected explicitly rather than ignored."
+    }
+  ],
+  "links": [
+    { "label": "pdf", "url": "./pdf" },
+    { "label": "cdf", "url": "./cdf" },
+    { "label": "icdf", "url": "./icdf" },
+    { "label": "random", "url": "./random" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/fitdist.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/fitdist.rs"
+  }
+}

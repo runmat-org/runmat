@@ -1,0 +1,32 @@
+{
+  "title": "trainnet",
+  "category": "deep_learning",
+  "keywords": ["trainnet", "deep learning", "training", "dlnetwork"],
+  "summary": "Train a supported dlnetwork with a built-in loss.",
+  "description": "`trainnet(X,Y,net,lossFcn,options)` trains a supported `dlnetwork` compatibility object over in-memory numeric or logical predictor data.",
+  "behaviors": [
+    "Supports the five-argument form with 2-D predictor matrices where rows are observations and columns are features.",
+    "`net` may be a `dlnetwork`, trained network compatibility object, simple layerGraph, or supported layer collection.",
+    "`lossFcn` supports `\"mse\"`/`\"mean-squared-error\"` for regression and `\"crossentropy\"` for classification.",
+    "For regression, `Y` must be a numeric or logical matrix with one row per observation and the same output width as the network.",
+    "For classification, `Y` may be numeric integer labels, string labels, categorical labels, or a one-hot/probability matrix. The returned `dlnetwork` stores sorted class labels in `Classes` when labels are provided.",
+    "`trainingOptions` metadata controls `sgdm` and `adam` training, including `MaxEpochs`, `MiniBatchSize`, `InitialLearnRate`, `Momentum`, Adam decay factors, `Epsilon`, deterministic `Shuffle` handling, and CPU/auto `ExecutionEnvironment` values.",
+    "The returned object is a `dlnetwork` compatibility object with updated layer weights, `Learnables`, `TrainingInfo`, `TrainingLoss`, and `TrainedWith` metadata.",
+    "Custom loss function handles are not executed by `trainnet`; use explicit `dlfeval`/`dlgradient` loops for custom host `dlarray` autodiff. Datastores, image/sequence/recurrent/convolutional/normalization/custom layers, branching DAG execution, validation data, callbacks, plots, and GPU training remain outside this slice and raise explicit compatibility errors or are stored as inert options."
+  ],
+  "examples": [
+    {
+      "description": "Train a dlnetwork with crossentropy",
+      "input": "net = dlnetwork(layers);\nopts = trainingOptions('adam','MaxEpochs',120,'MiniBatchSize',4,'InitialLearnRate',0.05,'Shuffle','never');\nnet = trainnet(X, labels, net, 'crossentropy', opts)",
+      "output": "net is a trained dlnetwork compatibility object usable with forward or predict."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "net = trainnet(X, Y, net, lossFcn, options)\n[net, info] = trainnet(X, Y, net, lossFcn, options)",
+      "output": "Trained dlnetwork object and optional training info structure."
+    }
+  },
+  "gpu_residency": "`trainnet` currently gathers `gpuArray` inputs to host before training when the execution environment is `auto` or `cpu`. Explicit `ExecutionEnvironment` values of `gpu`, `multi-gpu`, or `parallel` raise a compatibility error because native GPU training kernels, provider-resident Deep Learning layers, and GPU-backed autodiff remain future acceleration work."
+}

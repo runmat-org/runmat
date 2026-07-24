@@ -300,16 +300,20 @@ mod tests {
 
     static CPU_ONLY_PROVIDER: CpuOnlyProvider = CpuOnlyProvider;
 
-    fn reset_cpu_path() -> runmat_accelerate_api::ThreadProviderGuard {
+    fn reset_cpu_path() -> (impl Drop, runmat_accelerate_api::ThreadProviderGuard) {
+        let state_guard = random::test_guard();
         runmat_accelerate_api::clear_provider();
         random::reset_rng();
-        runmat_accelerate_api::ThreadProviderGuard::set(Some(&CPU_ONLY_PROVIDER))
+        (
+            state_guard,
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&CPU_ONLY_PROVIDER)),
+        )
     }
 
     #[test]
     fn unifrnd_scalar_deterministic() {
-        let _guard = random::test_lock().lock().unwrap();
-        let _provider_guard = reset_cpu_path();
+        let _guard = random::test_guard();
+        let (_state_guard, _provider_guard) = reset_cpu_path();
         let result =
             block_on(unifrnd_builtin(vec![Value::Num(2.0), Value::Num(5.0)])).expect("unifrnd");
         let expected = random::expected_uniform_scaled_sequence(2.0, 5.0, 1)[0];
@@ -324,8 +328,8 @@ mod tests {
 
     #[test]
     fn unifrnd_matrix_dims() {
-        let _guard = random::test_lock().lock().unwrap();
-        let _provider_guard = reset_cpu_path();
+        let _guard = random::test_guard();
+        let (_state_guard, _provider_guard) = reset_cpu_path();
         let args = vec![
             Value::Num(0.0),
             Value::Num(10.0),
@@ -344,8 +348,8 @@ mod tests {
 
     #[test]
     fn unifrnd_size_vec() {
-        let _guard = random::test_lock().lock().unwrap();
-        let _provider_guard = reset_cpu_path();
+        let _guard = random::test_guard();
+        let (_state_guard, _provider_guard) = reset_cpu_path();
         let size = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
         let args = vec![Value::Num(0.0), Value::Num(1.0), Value::Tensor(size)];
         let result = block_on(unifrnd_builtin(args)).expect("unifrnd");
@@ -377,8 +381,8 @@ mod tests {
 
     #[test]
     fn unifrnd_distribution_bounds() {
-        let _guard = random::test_lock().lock().unwrap();
-        let _provider_guard = reset_cpu_path();
+        let _guard = random::test_guard();
+        let (_state_guard, _provider_guard) = reset_cpu_path();
         let a = 2.0_f64;
         let b = 7.0_f64;
         let n = 50_000_usize;

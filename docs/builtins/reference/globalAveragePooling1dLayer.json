@@ -1,0 +1,23 @@
+{
+  "title": "globalAveragePooling1dLayer",
+  "category": "deep_learning",
+  "keywords": ["globalAveragePooling1dLayer", "deep learning", "pooling"],
+  "summary": "Create a global average pooling 1-D layer compatibility object.",
+  "description": "`globalAveragePooling1dLayer` creates metadata for global average pooling in 1-D architectures.",
+  "behaviors": ["Common layer name-value options are stored as properties."],
+  "examples": [
+    {
+      "description": "Create Pooling Layer",
+      "input": "layer = globalAveragePooling1dLayer('Name', 'gap')",
+      "output": "Global average pooling compatibility object."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "layer = globalAveragePooling1dLayer\nlayer = globalAveragePooling1dLayer(Name, Value)",
+      "output": "Layer compatibility object."
+    }
+  },
+  "gpu_residency": "Layer construction is host metadata work and has no provider kernel."
+}

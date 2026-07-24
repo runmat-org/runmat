@@ -1,0 +1,40 @@
+{
+  "title": "datasample",
+  "category": "stats/random",
+  "keywords": ["datasample", "random", "sample", "replacement", "weights", "statistics"],
+  "summary": "Randomly sample from data with or without replacement.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host for compatibility until provider sampling hooks exist."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::random::sampling::tests", "integration": null },
+  "description": "`datasample(data,k)` samples `k` observations from `data`. `datasample(data,k,dim)` samples along a selected dimension. `[y,idx] = datasample(...)` also returns one-based sampled indices.",
+  "behaviors": [
+    "Samples with replacement by default.",
+    "`\"Replace\",false` samples without replacement and requires `k` to be no larger than the sampled dimension.",
+    "`\"Weights\",w` samples proportionally to nonnegative weights with at least one positive value.",
+    "Numeric, logical, string, and char arrays are supported.",
+    "The default sampled dimension is the first nonsingleton dimension."
+  ],
+  "examples": [
+    { "description": "Sample rows", "input": "Y = datasample(X, 5)" },
+    { "description": "Sample columns without replacement", "input": "Y = datasample(X, 3, 2, \"Replace\", false)" },
+    { "description": "Return sampled indices", "input": "[Y,idx] = datasample(X, 10)" }
+  ],
+  "faqs": [
+    {
+      "question": "Does datasample change RNG state?",
+      "answer": "Yes. It uses RunMat's global random stream, like other random builtins."
+    }
+  ],
+  "links": [{ "label": "randsample", "url": "./randsample" }, { "label": "randperm", "url": "./randperm" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/random/sampling.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/sampling.rs"
+  }
+}

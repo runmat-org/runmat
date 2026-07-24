@@ -1,0 +1,107 @@
+{
+  "title": "bagOfNgrams",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "bagOfNgrams",
+    "text analytics",
+    "n-grams",
+    "word counts",
+    "tokenizedDocument"
+  ],
+  "summary": "Create bag-of-n-grams model objects.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`bagOfNgrams` builds host text-model metadata and currently stores dense host counts."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::ngrams::tests",
+    "integration": null
+  },
+  "description": "`bagOfNgrams(documents)` creates a lightweight RunMat `bagOfNgrams` object from a `tokenizedDocument` compatibility object. `bagOfNgrams(uniqueNgrams, counts)` creates a model from explicit n-grams and count matrix data.",
+  "behaviors": [
+    "`bagOfNgrams` with no input creates an empty model using default bigram length metadata.",
+    "`bagOfNgrams(documents)` accepts RunMat `tokenizedDocument` objects created by `tokenizedDocument`.",
+    "`bagOfNgrams(words)` accepts a word vector as one pre-tokenized document.",
+    "`bagOfNgrams(___, 'NgramLengths', lengths)` accepts a positive integer scalar or vector of n-gram lengths. Duplicate length values are collapsed in first-seen order. For explicit `uniqueNgrams, counts` input, this option keeps only rows whose nonempty word count matches the requested lengths.",
+    "`bagOfNgrams(uniqueNgrams, counts)` accepts a string matrix or text cell matrix whose rows are unique n-grams and a numeric count matrix whose columns match the n-gram rows.",
+    "When `NgramLengths` is not supplied for explicit `uniqueNgrams, counts` input, RunMat infers the property from the nonmissing n-gram rows in first-seen order.",
+    "Duplicate nonmissing n-grams raise `RunMat:bagOfNgrams:InvalidInput`. Rows containing missing strings are ignored along with their corresponding count columns.",
+    "The returned object stores `Ngrams`, `Counts`, `NgramLengths`, `Vocabulary`, `NumNgrams`, and `NumDocuments` properties.",
+    "N-gram rows are stored in `Ngrams`; shorter n-grams are padded with empty strings when mixed lengths are present.",
+    "Counts are stored as a dense host tensor with one row per document and one column per n-gram. Very large dense count matrices are rejected with a controlled error until native sparse bag storage is implemented.",
+    "Native sparse bag storage, object-array parity, and the full Text Analytics model method surface remain broader Text Analytics work."
+  ],
+  "examples": [
+    {
+      "description": "Create A Bigram Bag",
+      "input": "documents = tokenizedDocument([\"a b a\"; \"a b c\"]);\nbag = bagOfNgrams(documents)",
+      "output": "`bag.Ngrams` contains the bigrams `[\"a\" \"b\"]`, `[\"b\" \"a\"]`, and `[\"b\" \"c\"]`."
+    },
+    {
+      "description": "Use Multiple Ngram Lengths",
+      "input": "documents = tokenizedDocument(\"a b c\", \"TokenizeMethod\", \"unicode\");\nbag = bagOfNgrams(documents, \"NgramLengths\", [1 3])",
+      "output": "`bag.NgramLengths` is `[1 3]`, and the model contains unigrams plus the three-word n-gram."
+    },
+    {
+      "description": "Create A Bag From Counts",
+      "input": "uniqueNgrams = [\"a\" \"b\"; \"b\" \"c\"];\nbag = bagOfNgrams(uniqueNgrams, [2 1; 0 3])",
+      "output": "`bag.Counts` is the supplied `2 x 2` count matrix."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `bagOfNgrams` use sparse matrices?",
+      "answer": "Not in this slice. The compatibility object stores dense host counts and rejects very large dense count matrices. Sparse storage and provider-resident sparse paths remain broader runtime/model work."
+    },
+    {
+      "question": "Can `bagOfNgrams` consume raw document strings directly?",
+      "answer": "No. Raw document arrays should first be converted with `tokenizedDocument`. A raw word vector is accepted as a single pre-tokenized document."
+    },
+    {
+      "question": "Does `bagOfNgrams` execute on the GPU?",
+      "answer": "No. It builds host text-model metadata and has no `runmat-accelerate` provider path."
+    }
+  ],
+  "links": [
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "bagOfWords",
+      "url": "./bagOfWords"
+    },
+    {
+      "label": "removeShortWords",
+      "url": "./removeShortWords"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "bag = bagOfNgrams\nbag = bagOfNgrams(documents)\nbag = bagOfNgrams(words)\nbag = bagOfNgrams(___, 'NgramLengths', lengths)\nbag = bagOfNgrams(uniqueNgrams, counts)",
+      "output": "`bag` is a `bagOfNgrams` compatibility object."
+    },
+    "points": [
+      "`documents` must be a RunMat `tokenizedDocument` object.",
+      "`lengths` must contain positive integer values.",
+      "`counts` must be a nonnegative integer-valued numeric matrix.",
+      "The number of columns in `counts` must match the number of rows in `uniqueNgrams`."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/ngrams.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/ngrams.rs"
+  },
+  "gpu_residency": "`bagOfNgrams` stores host text-model metadata and dense host counts in this slice."
+}

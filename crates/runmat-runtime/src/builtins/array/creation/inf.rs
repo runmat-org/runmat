@@ -472,7 +472,9 @@ async fn inf_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value>
         Value::GpuTensor(handle) => inf_like_gpu(handle, shape).await,
         Value::Tensor(t) => match t.dtype {
             NumericDType::F32 => inf_single(shape),
-            NumericDType::F64 | NumericDType::U8 | NumericDType::U16 => inf_double(shape),
+            NumericDType::F64 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
+                inf_double(shape)
+            }
         },
         Value::SparseTensor(_) => inf_double(shape),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => inf_double(shape),
@@ -544,7 +546,7 @@ fn inf_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult<O
     let precision = match dtype {
         NumericDType::F32 => ProviderPrecision::F32,
         NumericDType::F64 => ProviderPrecision::F64,
-        NumericDType::U8 | NumericDType::U16 => return Ok(None),
+        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => return Ok(None),
     };
     if provider.precision() != precision {
         return Ok(None);

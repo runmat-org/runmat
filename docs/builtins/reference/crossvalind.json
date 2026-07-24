@@ -1,0 +1,86 @@
+{
+  "title": "crossvalind",
+  "category": "stats/ml",
+  "keywords": [
+    "crossvalind",
+    "cross validation",
+    "kfold",
+    "holdout",
+    "leavemout",
+    "resubstitution",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Generate cross-validation indices and logical train/test partitions.",
+  "status": "implemented",
+  "coverage": {
+    "unit": "builtins::stats::ml::crossvalind::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`crossvalind` provides MATLAB-compatible cross-validation split helpers for older Statistics and Machine Learning workflows. K-fold calls return numeric fold ids, while holdout, leave-M-out, and resubstitution calls return logical training/test masks.",
+  "signatures": [
+    {
+      "label": "indices = crossvalind('KFold', n, k)",
+      "description": "Return a column vector of one-based fold ids for `n` observations distributed across `k` randomized folds."
+    },
+    {
+      "label": "indices = crossvalind('KFold', n, k, 'Classes', group)",
+      "description": "Assign fold ids while balancing observations within each class label."
+    },
+    {
+      "label": "train = crossvalind('HoldOut', n, p)",
+      "description": "Return a logical training mask after randomly holding out fraction `p` or count `p` for testing."
+    },
+    {
+      "label": "[train, test] = crossvalind('HoldOut', n, p)",
+      "description": "Return complementary logical training and test masks."
+    },
+    {
+      "label": "[train, test] = crossvalind('LeaveMOut', n, m)",
+      "description": "Randomly mark `m` observations as test observations and return train/test masks."
+    },
+    {
+      "label": "[train, test] = crossvalind('Resubstitution', n)",
+      "description": "Return all-true training and test masks for resubstitution workflows."
+    }
+  ],
+  "examples": [
+    {
+      "input": "rng(2026);\nidx = crossvalind('HoldOut', 10, 0.3);\nnumel(idx)",
+      "description": "Create a reproducible holdout training mask."
+    },
+    {
+      "input": "rng(1);\nfold = crossvalind('KFold', 12, 3);\ntabulate(fold)",
+      "description": "Assign observations to randomized folds."
+    },
+    {
+      "input": "group = [1;1;1;1;2;2;2;2];\n[train,test] = crossvalind('HoldOut', 8, 0.5, 'Classes', group);",
+      "description": "Preserve class balance when producing a holdout split."
+    }
+  ],
+  "returns": [
+    "`KFold` returns a numeric column vector with one-based fold ids in the range `1:k`.",
+    "`HoldOut`, `LeaveMOut`, and `Resubstitution` return a logical training mask by default.",
+    "Two-output partition calls return `[train, test]` logical column vectors."
+  ],
+  "notes": [
+    "`crossvalind` consumes RunMat's shared RNG stream, so `rng(seed)` controls reproducibility.",
+    "`Classes` accepts numeric, logical, string, string-array, or character-row labels with one label per observation.",
+    "`Min` validates that each class has enough observations for class-balanced splits."
+  ],
+  "errors": [
+    {
+      "identifier": "RunMat:crossvalind:InvalidArgument",
+      "when": "The method, observation count, partition value, options, classes, or output count is invalid."
+    },
+    {
+      "identifier": "RunMat:crossvalind:Internal",
+      "when": "The requested output is too large or cannot be allocated."
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/crossvalind.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/crossvalind.rs"
+  },
+  "gpu_residency": "No. `crossvalind` is a small control-flow/index generation helper. GPU-resident inputs are gathered before partition generation, and outputs are host logical or numeric index arrays."
+}

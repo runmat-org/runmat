@@ -863,14 +863,38 @@ fn compile_semantic_functions(
                                     .validators
                                     .iter()
                                     .map(|validator| match validator {
+                                        runmat_hir::FunctionArgValidator::A(class_names) => {
+                                            crate::bytecode::program::FunctionArgValidator::A(class_names.clone())
+                                        }
+                                        runmat_hir::FunctionArgValidator::Column => {
+                                            crate::bytecode::program::FunctionArgValidator::Column
+                                        }
                                         runmat_hir::FunctionArgValidator::Finite => {
                                             crate::bytecode::program::FunctionArgValidator::Finite
+                                        }
+                                        runmat_hir::FunctionArgValidator::Float => {
+                                            crate::bytecode::program::FunctionArgValidator::Float
+                                        }
+                                        runmat_hir::FunctionArgValidator::Folder => {
+                                            crate::bytecode::program::FunctionArgValidator::Folder
+                                        }
+                                        runmat_hir::FunctionArgValidator::File => {
+                                            crate::bytecode::program::FunctionArgValidator::File
                                         }
                                         runmat_hir::FunctionArgValidator::NumericOrLogical => {
                                             crate::bytecode::program::FunctionArgValidator::NumericOrLogical
                                         }
+                                        runmat_hir::FunctionArgValidator::Numeric => {
+                                            crate::bytecode::program::FunctionArgValidator::Numeric
+                                        }
                                         runmat_hir::FunctionArgValidator::Text => {
                                             crate::bytecode::program::FunctionArgValidator::Text
+                                        }
+                                        runmat_hir::FunctionArgValidator::TextScalar => {
+                                            crate::bytecode::program::FunctionArgValidator::TextScalar
+                                        }
+                                        runmat_hir::FunctionArgValidator::NonzeroLengthText => {
+                                            crate::bytecode::program::FunctionArgValidator::NonzeroLengthText
                                         }
                                         runmat_hir::FunctionArgValidator::Nonempty => {
                                             crate::bytecode::program::FunctionArgValidator::Nonempty
@@ -884,6 +908,9 @@ fn compile_semantic_functions(
                                         runmat_hir::FunctionArgValidator::Integer => {
                                             crate::bytecode::program::FunctionArgValidator::Integer
                                         }
+                                        runmat_hir::FunctionArgValidator::Vector => {
+                                            crate::bytecode::program::FunctionArgValidator::Vector
+                                        }
                                         runmat_hir::FunctionArgValidator::Positive => {
                                             crate::bytecode::program::FunctionArgValidator::Positive
                                         }
@@ -893,11 +920,57 @@ fn compile_semantic_functions(
                                         runmat_hir::FunctionArgValidator::Nonnegative => {
                                             crate::bytecode::program::FunctionArgValidator::Nonnegative
                                         }
+                                        runmat_hir::FunctionArgValidator::Nonmissing => {
+                                            crate::bytecode::program::FunctionArgValidator::Nonmissing
+                                        }
+                                        runmat_hir::FunctionArgValidator::NonNan => {
+                                            crate::bytecode::program::FunctionArgValidator::NonNan
+                                        }
                                         runmat_hir::FunctionArgValidator::Nonzero => {
                                             crate::bytecode::program::FunctionArgValidator::Nonzero
                                         }
                                         runmat_hir::FunctionArgValidator::Nonpositive => {
                                             crate::bytecode::program::FunctionArgValidator::Nonpositive
+                                        }
+                                        runmat_hir::FunctionArgValidator::Nonsparse => {
+                                            crate::bytecode::program::FunctionArgValidator::Nonsparse
+                                        }
+                                        runmat_hir::FunctionArgValidator::Sparse => {
+                                            crate::bytecode::program::FunctionArgValidator::Sparse
+                                        }
+                                        runmat_hir::FunctionArgValidator::ValidVariableName => {
+                                            crate::bytecode::program::FunctionArgValidator::ValidVariableName
+                                        }
+                                        runmat_hir::FunctionArgValidator::UnderlyingType(class_names) => {
+                                            crate::bytecode::program::FunctionArgValidator::UnderlyingType(class_names.clone())
+                                        }
+                                        runmat_hir::FunctionArgValidator::Member(literals) => {
+                                            crate::bytecode::program::FunctionArgValidator::Member(
+                                                literals
+                                                    .iter()
+                                                    .map(|literal| match literal {
+                                                        runmat_hir::FunctionArgValidationLiteral::Number(value) => {
+                                                            crate::bytecode::program::FunctionArgValidationLiteral::Number(*value)
+                                                        }
+                                                        runmat_hir::FunctionArgValidationLiteral::Text(value) => {
+                                                            crate::bytecode::program::FunctionArgValidationLiteral::Text(value.clone())
+                                                        }
+                                                        runmat_hir::FunctionArgValidationLiteral::Bool(value) => {
+                                                            crate::bytecode::program::FunctionArgValidationLiteral::Bool(*value)
+                                                        }
+                                                    })
+                                                    .collect(),
+                                            )
+                                        }
+                                        runmat_hir::FunctionArgValidator::InRange(lower, upper, inclusivity) => {
+                                            crate::bytecode::program::FunctionArgValidator::InRange(
+                                                *lower,
+                                                *upper,
+                                                crate::bytecode::program::FunctionArgRangeInclusivity {
+                                                    lower: inclusivity.lower,
+                                                    upper: inclusivity.upper,
+                                                },
+                                            )
                                         }
                                         runmat_hir::FunctionArgValidator::GreaterThanOrEqual(
                                             threshold,

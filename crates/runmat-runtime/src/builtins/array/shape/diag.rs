@@ -3,12 +3,12 @@
 use crate::builtins::common::{
     spec::{
         BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-        ReductionNaN, ResidencyPolicy, ShapeRequirements,
+        ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
     },
     tensor,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -167,16 +167,20 @@ fn literal_offset_at(context: &ResolveContext, idx: usize) -> Option<isize> {
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "diag",
     op_kind: GpuOpKind::Custom("diag"),
-    supported_precisions: &[],
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
+    provider_hooks: &[
+        ProviderHook::Custom("diag_from_vector"),
+        ProviderHook::Custom("diag_from_vector_sized"),
+        ProviderHook::Custom("diag_extract"),
+    ],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "diag executes on the host and gathers GPU inputs first.",
+    notes: "Real and logical gpuArray inputs use provider diag hooks for native vector placement, rectangular placement, vector mode, and matrix diagonal extraction. Complex, character, and conversion-heavy template forms use the host fallback.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::diag")]
@@ -187,7 +191,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "diag is a host-only shape helper.",
+    notes: "diag uses provider hooks for supported real/logical gpuArray shape operations and otherwise falls back to the runtime host path.",
 };
 
 const DIAG_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -619,6 +623,15 @@ async fn try_parse_size_override(value: &Value) -> BuiltinResult<Option<(usize, 
 )]
 async fn diag_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let parsed = ParsedDiagArgs::parse(rest).await?;
+    let value = match value {
+        Value::GpuTensor(handle) => {
+            if let Some(output) = try_diag_gpu(handle.clone(), &parsed)? {
+                return Ok(output);
+            }
+            Value::GpuTensor(handle)
+        }
+        other => other,
+    };
     let gathered = gather_if_needed_async(&value).await?;
     let input = coerce_diag_input(gathered)?;
 
@@ -630,6 +643,124 @@ async fn diag_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     };
 
     apply_output_template(raw, &parsed.template).await
+}
+
+#[derive(Clone, Copy)]
+struct GpuDiagTemplate {
+    logical: bool,
+    precision: ProviderPrecision,
+}
+
+fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResult<Option<Value>> {
+    if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
+        return Ok(None);
+    }
+
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
+        .or_else(runmat_accelerate_api::provider)
+    else {
+        return Ok(None);
+    };
+
+    let input_logical = runmat_accelerate_api::handle_is_logical(&handle);
+    let input_precision =
+        runmat_accelerate_api::handle_precision(&handle).unwrap_or(provider.precision());
+    let Some(template) =
+        gpu_diag_template(parsed, input_logical, input_precision, provider.precision())
+    else {
+        return Ok(None);
+    };
+
+    let (rows, cols) = matrix_dims(&handle.shape)?;
+    let is_vector = rows == 1 || cols == 1;
+    validate_vector_mode(is_vector, parsed)?;
+
+    let result = if parsed.vector_mode {
+        let len = rows.max(cols);
+        provider.reshape(&handle, &[len, 1])
+    } else if is_vector {
+        let len = rows.max(cols);
+        let (out_rows, out_cols) = vector_output_dims(len, parsed)?;
+        if parsed.size_override.is_some() {
+            provider.diag_from_vector_sized(&handle, parsed.offset, out_rows, out_cols)
+        } else {
+            provider.diag_from_vector(&handle, parsed.offset)
+        }
+    } else {
+        if parsed.size_override.is_some() {
+            return Ok(None);
+        }
+        provider.diag_extract(&handle, parsed.offset)
+    };
+
+    match result {
+        Ok(out) => {
+            runmat_accelerate_api::set_handle_precision(&out, template.precision);
+            runmat_accelerate_api::set_handle_logical(&out, template.logical);
+            Ok(Some(Value::GpuTensor(out)))
+        }
+        Err(err) if is_unsupported_diag_provider(&err) => Ok(None),
+        Err(err) => Err(diag_error(
+            MESSAGE_ID_INVALID_INPUT,
+            format!("diag: provider diagonal operation failed: {err}"),
+        )),
+    }
+}
+
+fn gpu_diag_template(
+    parsed: &ParsedDiagArgs,
+    input_logical: bool,
+    input_precision: ProviderPrecision,
+    provider_precision: ProviderPrecision,
+) -> Option<GpuDiagTemplate> {
+    match &parsed.template {
+        OutputTemplate::Native => Some(GpuDiagTemplate {
+            logical: input_logical,
+            precision: input_precision,
+        }),
+        OutputTemplate::Double => {
+            if provider_precision != ProviderPrecision::F64 {
+                return None;
+            }
+            Some(GpuDiagTemplate {
+                logical: false,
+                precision: ProviderPrecision::F64,
+            })
+        }
+        OutputTemplate::Logical => {
+            if !input_logical {
+                return None;
+            }
+            Some(GpuDiagTemplate {
+                logical: true,
+                precision: input_precision,
+            })
+        }
+        OutputTemplate::Like(Value::GpuTensor(prototype)) => {
+            if runmat_accelerate_api::handle_storage(prototype)
+                == GpuTensorStorage::ComplexInterleaved
+            {
+                return None;
+            }
+            let logical = runmat_accelerate_api::handle_is_logical(prototype);
+            if logical && !input_logical {
+                return None;
+            }
+            Some(GpuDiagTemplate {
+                logical,
+                precision: runmat_accelerate_api::handle_precision(prototype)
+                    .unwrap_or(provider_precision),
+            })
+        }
+        OutputTemplate::Like(_) => None,
+    }
+}
+
+fn is_unsupported_diag_provider(err: &anyhow::Error) -> bool {
+    let text = err.to_string();
+    text.contains("diag_from_vector not supported")
+        || text.contains("diag_from_vector_sized not supported")
+        || text.contains("diag_extract not supported")
 }
 
 enum DiagInput {
@@ -1088,6 +1219,11 @@ fn cast_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> BuiltinResult<Tenso
             .iter()
             .map(|value| tensor::clamp_u16(*value))
             .collect(),
+        NumericDType::U32 => tensor
+            .data
+            .iter()
+            .map(|value| tensor::clamp_u32(*value))
+            .collect(),
     };
 
     Tensor::new_with_dtype(data, tensor.shape.clone(), dtype)
@@ -1443,6 +1579,161 @@ mod tests {
             assert_eq!(gathered.shape, vec![2, 2]);
             assert_eq!(gathered.data, vec![1.0, 0.0, 0.0, 0.0]);
         });
+    }
+
+    #[test]
+    fn diag_gpu_native_vector_paths_stay_resident() {
+        test_support::with_test_provider(|provider| {
+            let vector = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &vector.data,
+                    shape: &vector.shape,
+                })
+                .expect("upload");
+
+            let square = run_diag(Value::GpuTensor(handle.clone()), Vec::new()).expect("diag");
+            assert!(
+                matches!(square, Value::GpuTensor(_)),
+                "native diag(gpuArray(vector)) should remain resident"
+            );
+            let gathered = test_support::gather(square).expect("gather square");
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.data, vec![1.0, 0.0, 0.0, 2.0]);
+
+            let rectangular = run_diag(
+                Value::GpuTensor(handle),
+                vec![Value::Num(1.0), size_vector(3, 4)],
+            )
+            .expect("diag rectangular");
+            assert!(
+                matches!(rectangular, Value::GpuTensor(_)),
+                "rectangular diag(gpuArray(vector), k, sz) should remain resident"
+            );
+            let gathered = test_support::gather(rectangular).expect("gather rectangular");
+            assert_eq!(gathered.shape, vec![3, 4]);
+            assert_eq!(
+                gathered.data,
+                vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0]
+            );
+        });
+    }
+
+    #[test]
+    fn diag_gpu_matrix_extract_and_logical_metadata_stay_resident() {
+        test_support::with_test_provider(|provider| {
+            let matrix = Tensor::new(
+                vec![1.0, 4.0, 7.0, 2.0, 5.0, 8.0, 3.0, 6.0, 9.0],
+                vec![3, 3],
+            )
+            .unwrap();
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &matrix.data,
+                    shape: &matrix.shape,
+                })
+                .expect("upload matrix");
+            let extracted =
+                run_diag(Value::GpuTensor(handle), vec![Value::Num(-1.0)]).expect("diag extract");
+            assert!(
+                matches!(extracted, Value::GpuTensor(_)),
+                "diag(gpuArray(matrix), k) should remain resident"
+            );
+            let gathered = test_support::gather(extracted).expect("gather extracted");
+            assert_eq!(gathered.shape, vec![2, 1]);
+            assert_eq!(gathered.data, vec![4.0, 8.0]);
+
+            let logical = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
+            let logical_handle = provider
+                .upload(&HostTensorView {
+                    data: &logical.data,
+                    shape: &logical.shape,
+                })
+                .expect("upload logical");
+            runmat_accelerate_api::set_handle_logical(&logical_handle, true);
+            let logical_out = run_diag(
+                Value::GpuTensor(logical_handle),
+                vec![Value::from("logical")],
+            )
+            .expect("logical diag");
+            let Value::GpuTensor(logical_result) = logical_out else {
+                panic!("expected logical gpu tensor output");
+            };
+            assert!(runmat_accelerate_api::handle_is_logical(&logical_result));
+            let gathered =
+                test_support::gather(Value::GpuTensor(logical_result)).expect("gather logical");
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.data, vec![1.0, 0.0, 0.0, 0.0]);
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn diag_wgpu_rectangular_and_extract_paths_stay_resident() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let vector = Tensor::new(vec![3.0, 5.0, 7.0], vec![3, 1]).unwrap();
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &vector.data,
+                shape: &vector.shape,
+            })
+            .expect("upload vector");
+        let placed = run_diag(
+            Value::GpuTensor(handle),
+            vec![Value::Num(-1.0), size_vector(5, 3)],
+        )
+        .expect("diag placed");
+        assert!(matches!(placed, Value::GpuTensor(_)));
+        let gathered = test_support::gather(placed).expect("gather placed");
+        assert_eq!(gathered.shape, vec![5, 3]);
+        assert_eq!(
+            gathered.data,
+            vec![0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0]
+        );
+
+        let matrix = Tensor::new(
+            vec![1.0, 4.0, 7.0, 2.0, 5.0, 8.0, 3.0, 6.0, 9.0],
+            vec![3, 3],
+        )
+        .unwrap();
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &matrix.data,
+                shape: &matrix.shape,
+            })
+            .expect("upload matrix");
+        let extracted =
+            run_diag(Value::GpuTensor(handle), vec![Value::Num(1.0)]).expect("diag extract");
+        assert!(matches!(extracted, Value::GpuTensor(_)));
+        let gathered = test_support::gather(extracted).expect("gather extracted");
+        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.data, vec![2.0, 6.0]);
+
+        let matrix = Tensor::new(
+            vec![1.0, 4.0, 7.0, 2.0, 5.0, 8.0, 3.0, 6.0, 9.0],
+            vec![3, 3],
+        )
+        .unwrap();
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &matrix.data,
+                shape: &matrix.shape,
+            })
+            .expect("upload matrix");
+        let empty = run_diag(Value::GpuTensor(handle), vec![Value::Num(10.0)]).expect("diag empty");
+        assert!(matches!(empty, Value::GpuTensor(_)));
+        let gathered = test_support::gather(empty).expect("gather empty");
+        assert_eq!(gathered.shape, vec![0, 1]);
+        assert!(gathered.data.is_empty());
     }
 
     #[test]

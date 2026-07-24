@@ -24,7 +24,7 @@ pub mod surface;
 pub mod volume;
 
 pub use area::{AreaGpuSource, AreaPlot};
-pub use bar::BarChart;
+pub use bar::{BarChart, PolarHistogramDisplayStyle};
 pub use contour::ContourPlot;
 pub use contour_fill::ContourFillPlot;
 pub use errorbar::ErrorBar;

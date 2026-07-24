@@ -24,7 +24,8 @@ use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::Wind
 impl<'window> PlotWindow<'window> {
     fn update_subplot_camera_aspects_for_rect(&mut self, plot_rect: egui::Rect) {
         let (rows, cols) = self.plot_renderer.figure_axes_grid();
-        if rows * cols <= 1 {
+        let expected_axes = self.plot_renderer.figure_axes_count().max(1);
+        if rows * cols <= 1 && expected_axes <= 1 {
             let plot_width = plot_rect.width();
             let plot_height = plot_rect.height();
             if plot_width > 0.0 && plot_height > 0.0 {
@@ -34,7 +35,7 @@ impl<'window> PlotWindow<'window> {
             }
             return;
         }
-        let rects: Vec<egui::Rect> = if self.plot_overlay.axes_plot_rects().len() == rows * cols {
+        let rects: Vec<egui::Rect> = if self.plot_overlay.axes_plot_rects().len() == expected_axes {
             self.plot_overlay.axes_plot_rects().to_vec()
         } else {
             self.plot_overlay
@@ -776,8 +777,9 @@ impl<'window> PlotWindow<'window> {
             // Use egui's pixels-per-point for exact device pixel mapping
             let ppp = self.pixels_per_point.max(0.5);
             let (rows, cols) = self.plot_renderer.figure_axes_grid();
-            let axes_plot_rects = if rows * cols > 1 {
-                if self.plot_overlay.axes_plot_rects().len() == rows * cols {
+            let expected_axes = self.plot_renderer.figure_axes_count().max(1);
+            let axes_plot_rects = if rows * cols > 1 || expected_axes > 1 {
+                if self.plot_overlay.axes_plot_rects().len() == expected_axes {
                     self.plot_overlay.axes_plot_rects().to_vec()
                 } else {
                     self.plot_overlay.compute_subplot_plot_rects_snapped(
@@ -852,8 +854,8 @@ impl<'window> PlotWindow<'window> {
                 drop(clear_pass);
             }
 
-            // If this figure has a subplot grid > 1, split into axes rectangles and render each
-            if rows * cols > 1 {
+            // If this figure has multiple displayed axes, render each through its viewport.
+            if axes_plot_rects.len() > 1 {
                 let mut viewports: Vec<(u32, u32, u32, u32)> = Vec::new();
                 let mut hovered_axes: Option<usize> = None;
                 // Detect hovered subplot for camera interaction

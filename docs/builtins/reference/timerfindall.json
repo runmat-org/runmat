@@ -1,0 +1,62 @@
+{
+  "title": "timerfindall",
+  "category": "timing",
+  "keywords": [
+    "timerfindall",
+    "timer",
+    "callback",
+    "handle"
+  ],
+  "summary": "Find all timer objects by exact property value.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`timerfindall` queries host-side timer handles and does not use acceleration providers."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::timing::timer::tests::timerfind_filters_visible_timers",
+    "integration": [
+      "timer_constructs_finds_starts_and_deletes_through_vm"
+    ]
+  },
+  "description": "`timerfindall` returns valid timer handles regardless of `ObjectVisibility`, optionally filtered by exact property values.",
+  "behaviors": [
+    "`timerfindall` returns visible and invisible valid timers in the current runtime thread.",
+    "`timerfindall(Name, Value, ...)` applies exact property matches.",
+    "A single match returns a scalar timer handle. Zero or multiple matches return a 1-by-N cell row because RunMat does not yet have first-class MATLAB object arrays.",
+    "Deleted timers are removed from discovery."
+  ],
+  "examples": [
+    {
+      "description": "Find invisible timers",
+      "input": "t = timer('ObjectVisibility', 'off', 'TimerFcn', @tick);\nallTimers = timerfindall"
+    }
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "timer",
+      "url": "./timer"
+    },
+    {
+      "label": "timerfind",
+      "url": "./timerfind"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/timing/timer.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/timer.rs"
+  },
+  "gpu_behavior": [
+    "`timerfindall` is host-side handle registry lookup and has no GPU behavior."
+  ]
+}

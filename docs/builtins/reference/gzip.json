@@ -1,0 +1,35 @@
+{
+  "title": "gzip",
+  "category": "io/archive",
+  "keywords": [
+    "gzip"
+  ],
+  "summary": "Compress files using gzip.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::archive::gzip::tests",
+    "integration": null
+  },
+  "description": "Compress files using gzip.",
+  "behaviors": [
+    "Compresses scalar file paths, string arrays, cell arrays of paths, wildcard expansions, and files inside a folder.",
+    "Writes .gz files beside each input by default or under the supplied output folder.",
+    "Returns a cell array of generated gzip file paths."
+  ],
+  "examples": [],
+  "faqs": [],
+  "links": []
+}

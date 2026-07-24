@@ -1,4 +1,5 @@
 pub(crate) mod end_expr;
+pub(crate) mod integer_assignment;
 pub(crate) mod plan;
 pub(crate) mod read_linear;
 pub(crate) mod read_slice;

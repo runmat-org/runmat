@@ -1,0 +1,87 @@
+{
+  "title": "isVocabularyWord",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "isVocabularyWord",
+    "wordEmbedding",
+    "wordEncoding",
+    "text analytics",
+    "vocabulary"
+  ],
+  "summary": "Test whether words are in a wordEmbedding or wordEncoding vocabulary.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`isVocabularyWord` is a host vocabulary lookup and has no provider kernel."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::encoding::tests",
+    "integration": null
+  },
+  "description": "`isVocabularyWord(emb, words)` and `isVocabularyWord(enc, words)` return logical masks for vocabulary membership.",
+  "behaviors": [
+    "The first input must be a RunMat `wordEmbedding` or `wordEncoding` compatibility object.",
+    "`words` may be a string scalar, string array, character vector, character matrix, or cell array of scalar text.",
+    "The output logical array preserves the input word container shape for string arrays and cell arrays. A character vector returns a scalar 1-by-1 logical array; a character matrix returns one row per input row.",
+    "`isVocabularyWord(___, 'IgnoreCase', true)` performs case-insensitive vocabulary lookup."
+  ],
+  "examples": [
+    {
+      "description": "Test Membership",
+      "input": "enc = wordEncoding([\"I\" \"love\" \"RunMat\"]);\ntf = isVocabularyWord(enc, [\"RunMat\" \"MATLAB\"])",
+      "output": "`tf` is `[true false]`."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does this work for both embeddings and encodings?",
+      "answer": "Yes. RunMat supports `wordEmbedding` objects from `fastTextWordEmbedding`, `readWordEmbedding`, or `trainWordEmbedding`, and `wordEncoding` objects from `wordEncoding`."
+    },
+    {
+      "question": "Does `isVocabularyWord` execute on the GPU?",
+      "answer": "No. It is a host vocabulary lookup."
+    }
+  ],
+  "links": [
+    {
+      "label": "wordEncoding",
+      "url": "./wordEncoding"
+    },
+    {
+      "label": "word2ind",
+      "url": "./word2ind"
+    },
+    {
+      "label": "ind2word",
+      "url": "./ind2word"
+    },
+    {
+      "label": "fastTextWordEmbedding",
+      "url": "./fastTextWordEmbedding"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "tf = isVocabularyWord(emb, words)\ntf = isVocabularyWord(enc, words)\ntf = isVocabularyWord(___, 'IgnoreCase', true)",
+      "output": "`tf` is a logical array."
+    },
+    "points": [
+      "`IgnoreCase` must be a logical scalar."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/encoding.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/encoding.rs"
+  },
+  "gpu_residency": "`isVocabularyWord` reads host text/model metadata and returns a CPU logical array."
+}

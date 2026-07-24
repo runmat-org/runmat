@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, LogicalArray, NumericDType, Tensor, Value,
+    IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -440,9 +440,24 @@ impl GrayscaleInput {
                 "expected an MxN grayscale image; truecolor RGB images are not accepted",
             ));
         }
+        if let Some(storage) = tensor.integer_storage() {
+            let class_max = match storage {
+                IntegerStorage::U8(_) => 255.0,
+                IntegerStorage::U16(_) => 65535.0,
+                IntegerStorage::U32(_) => u32::MAX as f64,
+                other => {
+                    return Err(unsupported(format!(
+                        "grayscale images with class {} are not supported",
+                        other.class_name()
+                    )))
+                }
+            };
+            return Self::from_integer_values(tensor.data, 0.0, class_max);
+        }
         match tensor.dtype {
             NumericDType::U8 => Self::from_integer_values(tensor.data, 0.0, 255.0),
             NumericDType::U16 => Self::from_integer_values(tensor.data, 0.0, 65535.0),
+            NumericDType::U32 => Self::from_integer_values(tensor.data, 0.0, u32::MAX as f64),
             NumericDType::F32 | NumericDType::F64 => {
                 Self::from_float_values(tensor.data, tensor.dtype, &tensor.shape)
             }
@@ -831,6 +846,19 @@ mod tests {
         assert_eq!(counts.data[0], 1.0);
         assert_eq!(counts.data[1], 2.0);
         assert_eq!(counts.data[255], 1.0);
+    }
+
+    #[test]
+    fn exact_uint8_storage_uses_integer_image_range() {
+        let image = Tensor::new_integer(IntegerStorage::U8(vec![0, 1, 1, 2, 2, 2]), vec![2, 3])
+            .expect("uint8 image");
+        let Value::Tensor(counts) = call(Value::Tensor(image), vec![], None) else {
+            panic!("expected counts tensor");
+        };
+        assert_eq!(counts.shape, vec![256, 1]);
+        assert_eq!(counts.data[0], 1.0);
+        assert_eq!(counts.data[1], 2.0);
+        assert_eq!(counts.data[2], 3.0);
     }
 
     #[test]

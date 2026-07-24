@@ -1,0 +1,84 @@
+{
+  "title": "extractAfter",
+  "category": "strings/transform",
+  "keywords": [
+    "extractAfter",
+    "strings",
+    "transform",
+    "matlab",
+    "compatibility"
+  ],
+  "summary": "Extract text after a position or boundary.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "not applicable",
+    "notes": "Not eligible for fusion; this builtin materializes host text or logical results."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::compat::tests",
+    "integration": null
+  },
+  "description": "s = extractAfter(text, boundary) - Extract text after a position or boundary.",
+  "signatures": [
+    {
+      "label": "s = extractAfter(text, boundary)",
+      "inputs": [
+        {
+          "name": "text",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Input text."
+        },
+        {
+          "name": "arg",
+          "ty": "Any",
+          "arity": "Variadic",
+          "default": null,
+          "description": "Additional arguments."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Output value."
+        }
+      ]
+    }
+  ],
+  "behaviors": [
+    "Extract text after a position or boundary.",
+    "Missing text or pattern boundaries are reported as errors."
+  ],
+  "examples": [
+    "extractAfter(\"alpha.beta\", \".\") returns \"beta\"."
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/compat.rs"
+  }
+}

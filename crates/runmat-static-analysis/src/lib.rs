@@ -1,7 +1,9 @@
+pub mod frontend;
 pub mod lints;
 
-pub use lints::shape::infer_binding_shapes;
-pub use lints::shape::lint_shapes;
+pub use lints::shape::{
+    infer_binding_shapes, infer_binding_shapes_from_mir, lint_shapes, lint_shapes_from_mir,
+};
 
 pub fn lint_mir_analysis(result: &runmat_hir::LoweringResult) -> Vec<runmat_hir::HirDiagnostic> {
     let mir = match runmat_mir::lowering::lower_assembly(&result.assembly) {

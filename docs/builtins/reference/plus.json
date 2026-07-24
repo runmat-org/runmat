@@ -42,6 +42,7 @@
     "Complex operands follow MATLAB's analytic rule `(a + ib) + (c + id) = (a + c) + i(b + d)`.",
     "Empty dimensions propagate naturally—if either operand has a zero-sized dimension after broadcasting, the result is empty with the broadcasted shape.",
     "Integer inputs promote to double precision before addition, mirroring MATLAB behaviour and keeping numeric tower rules consistent with other RunMat arithmetic builtins.",
+    "Sparse real matrices interoperate with sparse, dense, logical, character, scalar, and complex operands. Sparse-sparse addition preserves sparse storage; dense, nonzero scalar, and complex interop returns full real or complex storage when implicit zeros become nonzero.",
     "The optional `'like'` prototype makes the output adopt the residency (host or GPU) and complexity characteristics of the prototype, which is particularly useful for keeping implicit-expansion expressions on the device."
   ],
   "examples": [
@@ -108,6 +109,10 @@
     {
       "question": "Can I mix complex and real operands?",
       "answer": "Absolutely. The result is complex, with broadcasting rules identical to MATLAB."
+    },
+    {
+      "question": "Does `plus` preserve sparse matrices?",
+      "answer": "Sparse-sparse addition returns sparse storage, including scalar sparse expansion when the result fits the sparse materialization limit. Adding dense, complex, or nonzero full scalar operands returns full storage because implicit sparse zeros become stored nonzero values."
     },
     {
       "question": "What about string arrays?",

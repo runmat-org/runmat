@@ -1,0 +1,51 @@
+{
+  "title": "cdf",
+  "category": "stats/summary",
+  "keywords": ["cdf", "fitdist", "probability distribution", "cumulative", "statistics"],
+  "summary": "Evaluate a fitted or named probability distribution cumulative distribution function.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "evaluation input shape",
+    "notes": "GPU inputs are gathered to host. Fitted-distribution evaluation currently runs on CPU."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::fitdist::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`cdf(pd,x)` evaluates the cumulative distribution function for a `ProbabilityDistribution` object returned by `fitdist`. `cdf(distname,x,params...)` evaluates supported named distributions directly.",
+  "behaviors": [
+    "`pd` must be a fitted distribution object returned by `fitdist`, or `distname` must name a supported distribution.",
+    "Supported named distributions are `\"Normal\"`, `\"Exponential\"`, `\"Lognormal\"`, `\"Gamma\"`, `\"Weibull\"`, and `\"Poisson\"` with their standard scalar parameters.",
+    "`x` may be a scalar or numeric array; the output has the same shape as `x`.",
+    "Supported fitted distributions are normal, exponential, lognormal, gamma, Weibull, and Poisson."
+  ],
+  "examples": [
+    {
+      "description": "Evaluate a fitted normal CDF",
+      "input": "pd = fitdist([1;2;3], \"Normal\"); p = cdf(pd, 2)"
+    },
+    {
+      "description": "Evaluate a named Poisson CDF",
+      "input": "p = cdf(\"Poisson\", 2, 3)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I compute inverse probabilities?",
+      "answer": "Use `icdf(pd,p)` with the fitted distribution object."
+    }
+  ],
+  "links": [
+    { "label": "fitdist", "url": "./fitdist" },
+    { "label": "icdf", "url": "./icdf" },
+    { "label": "normcdf", "url": "./normcdf" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/fitdist.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/fitdist.rs"
+  }
+}

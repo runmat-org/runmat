@@ -1,0 +1,76 @@
+{
+  "title": "append",
+  "category": "strings/transform",
+  "keywords": [
+    "append",
+    "strings",
+    "transform",
+    "matlab",
+    "compatibility"
+  ],
+  "summary": "Append text inputs elementwise.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "not applicable",
+    "notes": "Not eligible for fusion; this builtin materializes host text or logical results."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::compat::tests",
+    "integration": null
+  },
+  "description": "s = append(arg1, ...) - Append text inputs elementwise.",
+  "signatures": [
+    {
+      "label": "s = append(arg1, ...)",
+      "inputs": [
+        {
+          "name": "arg",
+          "ty": "Any",
+          "arity": "Variadic",
+          "default": null,
+          "description": "Values to append."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Output value."
+        }
+      ]
+    }
+  ],
+  "behaviors": [
+    "Append text inputs elementwise."
+  ],
+  "examples": [
+    "append(\"run\", \"mat\") returns \"runmat\"."
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/compat.rs"
+  }
+}

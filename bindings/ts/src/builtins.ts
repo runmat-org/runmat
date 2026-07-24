@@ -1,6 +1,7 @@
 export type BuiltinDocExample = {
-  description: string;
-  input: string;
+  description?: string;
+  label?: string;
+  input?: string;
   output?: string;
   image?: string;
   image_webp?: string;
@@ -20,8 +21,8 @@ export type BuiltinDocLink = {
 
 export type BuiltinDocSyntax = {
   example: BuiltinDocExample;
-  points: string[];
-};
+  points?: string[];
+} | string[];
 
 
 export type BuiltinDocJsonEncodeOption = {
@@ -39,6 +40,11 @@ export type BuiltinDocValidation = {
 };
 
 export type BuiltinDoc = {
+  // Reference documents carry domain-specific metadata (for example plotting
+  // signatures, graph status, or implementation notes) in addition to this
+  // normalized index surface. Preserve those fields for consumers without
+  // weakening the types of the normalized fields below.
+  [metadata: string]: unknown;
   key: string;
   title: string;
   slug: string;
@@ -47,14 +53,14 @@ export type BuiltinDoc = {
   categoryPath: string[];
   keywords: string[];
   summary: string;
-  hero_image?: string;
+  hero_image?: string | null;
   description?: string;
   behaviors?: string[];
   extended_capabilities?: string[];
-  examples?: BuiltinDocExample[];
+  examples?: Array<BuiltinDocExample | string>;
   faqs?: BuiltinDocFAQ[];
   links?: BuiltinDocLink[];
-  source?: BuiltinDocLink;
+  source?: BuiltinDocLink | BuiltinDocLink[];
   gpu_residency?: string;
   gpu_behavior?: string[];
   options?: string[];

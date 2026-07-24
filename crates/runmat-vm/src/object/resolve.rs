@@ -6,6 +6,7 @@ use crate::call::shared::{
 };
 use crate::interpreter::errors::mex;
 use runmat_builtins::{self, Closure, StructValue, Tensor, Value};
+use runmat_runtime::builtins::introspection::dynamicprops;
 use runmat_runtime::RuntimeError;
 
 const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
@@ -170,7 +171,9 @@ pub async fn load_member(
                     }
                 }
             }
-            if let Some(v) = obj.properties.get(&field) {
+            if let Some(v) = dynamicprops::dynamic_property_read(&obj, &field)? {
+                Ok(v)
+            } else if let Some(v) = obj.properties.get(&field) {
                 Ok(v.clone())
             } else if let Some((p2, owner)) =
                 runmat_builtins::lookup_property(&obj.class_name, &field)
@@ -419,6 +422,12 @@ where
                 }
                 obj.properties.insert(field, rhs);
                 Ok(Value::Object(obj))
+            } else if dynamicprops::dynamic_property_exists(&obj, &field) {
+                if let Some(oldv) = obj.properties.get(&field) {
+                    on_write(oldv, &rhs);
+                }
+                dynamicprops::dynamic_property_assign(&mut obj, &field, rhs)?;
+                Ok(Value::Object(obj))
             } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
                 if class_defines_member_subsasgn(&cls) {
                     call_object_member_subsasgn(Value::Object(obj), field, rhs).await
@@ -556,8 +565,8 @@ fn is_invalid_graphics_handle_error(err: &RuntimeError) -> bool {
 
 fn is_possible_graphics_handle_value(value: &Value) -> bool {
     match value {
-        Value::Num(v) => v.is_finite() && *v > 0.0,
-        Value::Int(i) => i.to_f64() > 0.0,
+        Value::Num(v) => v.is_finite() && *v >= 0.0,
+        Value::Int(i) => i.to_f64() >= 0.0,
         _ => false,
     }
 }

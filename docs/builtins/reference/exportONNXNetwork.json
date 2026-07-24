@@ -1,0 +1,29 @@
+{
+  "title": "exportONNXNetwork",
+  "category": "deep_learning",
+  "keywords": ["exportONNXNetwork", "deep learning", "ONNX", "export"],
+  "summary": "Export supported feed-forward deep-learning networks to ONNX.",
+  "description": "`exportONNXNetwork(net, filename)` writes deterministic ONNX graph files for RunMat `dlnetwork`, `SeriesNetwork`, and `DAGNetwork` compatibility objects that use the supported sequential feed-forward execution subset.",
+  "behaviors": [
+    "Supported layers are `featureInputLayer`, `fullyConnectedLayer`, `reluLayer`, `eluLayer`, `softmaxLayer`, and terminal `classificationLayer` or `regressionLayer` objects.",
+    "`fullyConnectedLayer` exports as ONNX `Gemm`; ReLU, ELU, and Softmax export as their corresponding ONNX operators.",
+    "Learned parameters are serialized as ONNX DOUBLE tensor initializers using deterministic names derived from layer names.",
+    "`OpsetVersion` supports versions 13 through 20; `BatchSize`, `InputNames`, `OutputNames`, and `Verbose` are accepted for single-input/single-output exports.",
+    "Unsupported layers, options, or malformed network metadata raise deterministic errors without writing partial graphs."
+  ],
+  "examples": [
+    {
+      "description": "Export ONNX",
+      "input": "exportONNXNetwork(net, 'model.onnx', 'OpsetVersion', 14)",
+      "output": "model.onnx is written."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "exportONNXNetwork(net, filename, Name, Value)",
+      "output": "Writes an ONNX file and returns no output arguments."
+    }
+  },
+  "gpu_residency": "ONNX export is host graph serialization and file I/O. GPU-resident top-level values are gathered before export; no provider kernels are applicable."
+}

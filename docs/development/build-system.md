@@ -9,7 +9,7 @@ last_updated: "May 28, 2026"
 
 RunMat builds from a single Cargo workspace. The workspace keeps the language pipeline, execution engines, runtime builtins, acceleration layer, plotting, CLI, LSP, snapshotting, filesystem, and WASM bindings in one versioned graph.
 
-The TypeScript package in `bindings/ts` contains bindings for the WASM runtime to run in the browser, along with the LSP bundle, generated builtin metadata, and startup snapshot used by JavaScript consumers.
+The TypeScript package in `bindings/ts` contains bindings for the WASM runtime to run in the browser, along with the LSP bundle and generated builtin metadata used by JavaScript consumers.
 
 ## Workspace Layout
 
@@ -20,7 +20,7 @@ The root workspace uses Cargo resolver v2. Workspace dependency versions live in
 | Language pipeline | `runmat-lexer`, `runmat-parser`, `runmat-hir`, `runmat-mir`, `runmat-static-analysis` |
 | Execution | `runmat-vm`, `runmat-turbine`, `runmat-core` |
 | Runtime | `runmat-runtime`, `runmat-builtins`, `runmat-filesystem`, `runmat-time`, `runmat-config` |
-| Performance systems | `runmat-accelerate`, `runmat-accelerate-api`, `runmat-gc`, `runmat-gc-api`, `runmat-plot`, `runmat-snapshot` |
+| Performance systems | `runmat-accelerate`, `runmat-accelerate-api`, `runmat-gc`, `runmat-gc-api`, `runmat-plot` |
 | Host surfaces | `runmat` CLI, `runmat-lsp`, `runmat-wasm`, `runmat-server-client`, `runmat-telemetry`, `runmat-logging` |
 
 The `runmat` binary lives in `crates/runmat-cli`. It depends on the compiler, VM, runtime, plotting, acceleration, filesystem, config, telemetry, and session crates, so a default CLI build is the broadest native build target.
@@ -58,14 +58,23 @@ The native build touches numerical, graphics, and networking libraries.
 | OpenSSL | Linux release builds use system OpenSSL. Non-Linux release targets enable `vendored-openssl`. |
 | WGPU/GUI stack | Native plotting and GPU builds pull WGPU, windowing, EGL/GL, Wayland/X11, udev, and related platform packages. |
 | ZeroMQ | CI and runner provisioning install ZeroMQ packages for environments that need the server/client stack. |
+| HDF5 | Native runtime builds require HDF5 headers and libraries for `h5read`, `h5write`, and related builtins. Linux uses the distro package, macOS uses Homebrew, and Windows uses vcpkg. |
 
 `crates/runmat-runtime/build.rs` participates in BLAS/LAPACK discovery when `blas-lapack` is enabled. It honors the standard library hints used by local packages and vcpkg: `VCPKG_ROOT`, `VCPKGRS_TRIPLET`, `VCPKG_DEFAULT_TRIPLET`, `OPENBLAS_DIR`, `BLAS_LIB_DIR`, `BLAS_LIBS`, `LAPACK_LIB_DIR`, and `LAPACK_LIBS`.
 
 On Ubuntu-like systems, the important local packages are:
 
 ```bash
-sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
+sudo apt-get install -y libhdf5-dev libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
 ```
+
+On macOS, install the corresponding native dependencies with:
+
+```bash
+brew install hdf5 zeromq
+```
+
+On Windows, install `hdf5`, `openblas`, `lapack-reference` (or the CI-specific LAPACK package), `zeromq`, and `opencascade` through the same vcpkg triplet. Set `HDF5_DIR` to the absolute vcpkg installed-prefix directory so `hdf5-metno-sys` finds the matching headers, import library, and runtime DLL.
 
 The full Linux runner also installs GUI/GPU headers and libraries such as X11, Wayland, EGL, GL, udev, and dbus because CI builds all targets and features.
 

@@ -1,0 +1,60 @@
+{
+  "title": "bitand",
+  "category": "logical/bit",
+  "keywords": ["bitand", "bitwise", "and", "integer"],
+  "summary": "Compute bitwise AND for integer-valued scalars and arrays.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "matlab",
+    "notes": "GPU inputs gather to host for integer bit operations."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::bit::integer::tests",
+    "integration": null
+  },
+  "description": "`bitand(A, B)` applies bitwise AND to finite nonnegative integer-valued inputs using MATLAB-style implicit expansion.",
+  "behaviors": [
+    "Accepts double integer-valued inputs, logical inputs, integer scalar values, integer-class tensors, and gatherable gpuArray tensors.",
+    "Supports implicit expansion across compatible shapes.",
+    "For mixed unsigned integer inputs, returns the widest unsigned integer class involved; double and logical inputs return double-compatible numeric results.",
+    "Rejects fractional, negative double, infinite, NaN, complex, string, cell, and struct inputs."
+  ],
+  "examples": [
+    {
+      "description": "Scalar bitwise AND",
+      "input": "bitand(6, 3)",
+      "output": "ans = 2"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can `bitand` broadcast scalar masks?",
+      "answer": "Yes. Scalar masks expand across array inputs using MATLAB-compatible implicit expansion."
+    }
+  ],
+  "links": [
+    {
+      "label": "bitor",
+      "url": "./bitor"
+    },
+    {
+      "label": "bitshift",
+      "url": "./bitshift"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/bit/integer.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/integer.rs"
+  },
+  "gpu_residency": "GPU inputs are gathered for host execution.",
+  "gpu_behavior": ["RunMat currently executes integer bitwise functions on the host."]
+}

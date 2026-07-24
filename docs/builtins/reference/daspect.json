@@ -1,0 +1,65 @@
+{
+  "title": "daspect",
+  "keywords": [
+    "daspect",
+    "data aspect ratio",
+    "plotting",
+    "axes"
+  ],
+  "category": "plotting",
+  "summary": "Query or set axes data aspect ratio.",
+  "status": "implemented",
+  "backend": {
+    "runtime": "runmat-runtime",
+    "acceleration": "metadata-only",
+    "notes": "`daspect` reads and writes axes metadata. Manual data aspect ratios are applied by the plotting display-bounds and camera-fit paths; numeric plot buffers are not gathered or transformed."
+  },
+  "tests": {
+    "unit": "builtins::plotting::daspect::tests"
+  },
+  "description": "`daspect` controls the data aspect ratio for the current or specified axes. RunMat supports ratio query, positive three-element ratio assignment, mode query, `auto`/`manual` mode assignment, and the corresponding `DataAspectRatio` and `DataAspectRatioMode` axes properties.",
+  "signatures": [
+    "ratio = daspect()",
+    "daspect([dx dy dz])",
+    "mode = daspect('mode')",
+    "daspect('auto')",
+    "daspect('manual')",
+    "ratio = daspect(ax)",
+    "daspect(ax, ratioOrMode)"
+  ],
+  "examples": [
+    {
+      "input": "plot(0:10, sin(0:10));\ndaspect([1 2 1]);\nget(gca, 'DataAspectRatio')",
+      "output": "ans =\n     1     2     1"
+    },
+    {
+      "input": "ax = subplot(1,2,1);\nplot(ax, 1:4, [1 4 9 16]);\ndaspect(ax, [1 1 1]);\ndaspect(ax, 'mode')",
+      "output": "ans =\n    'manual'"
+    }
+  ],
+  "notes": [
+    "`daspect([dx dy dz])` sets `DataAspectRatioMode` to `manual`.",
+    "`daspect('auto')` and `set(gca,'DataAspectRatioMode','auto')` preserve the stored ratio but return display bounds to automatic aspect fitting.",
+    "RunMat applies manual X/Y data aspect ratios to 2-D display bounds and X/Y/Z data aspect ratios to 3-D camera-fit bounds."
+  ],
+  "related": [
+    {
+      "label": "axis",
+      "url": "./axis"
+    },
+    {
+      "label": "xscale",
+      "url": "./xscale"
+    },
+    {
+      "label": "yscale",
+      "url": "./yscale"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/daspect.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/daspect.rs"
+  },
+  "gpu_residency": "`daspect` is axes metadata only. It does not gather, upload, or mutate numeric GPU buffers; rendering applies the stored aspect metadata through the normal plot camera/bounds path.",
+  "limitations": []
+}

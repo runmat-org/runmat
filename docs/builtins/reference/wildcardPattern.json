@@ -1,0 +1,84 @@
+{
+  "title": "wildcardPattern",
+  "category": "strings/pattern",
+  "keywords": [
+    "wildcardPattern",
+    "strings",
+    "pattern",
+    "matlab",
+    "compatibility"
+  ],
+  "summary": "Create a pattern matching arbitrary text.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "not applicable",
+    "notes": "Not eligible for fusion; this builtin materializes host text or logical results."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::compat::tests",
+    "integration": null
+  },
+  "description": "pat = wildcardPattern - Create a pattern matching arbitrary text.",
+  "signatures": [
+    {
+      "label": "pat = wildcardPattern",
+      "inputs": [
+        {
+          "name": "text",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Input text."
+        },
+        {
+          "name": "arg",
+          "ty": "Any",
+          "arity": "Variadic",
+          "default": null,
+          "description": "Additional arguments."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Output value."
+        }
+      ]
+    }
+  ],
+  "behaviors": [
+    "Create a pattern matching arbitrary text.",
+    "Creates a regular-expression-backed wildcard pattern, with optional exact count."
+  ],
+  "examples": [
+    "contains(\"abc\", wildcardPattern) matches arbitrary text."
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/compat.rs"
+  }
+}

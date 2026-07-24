@@ -1,0 +1,15 @@
+{
+  "title": "head",
+  "category": "table",
+  "keywords": ["head", "table", "timetable", "preview", "rows"],
+  "summary": "Return the first rows of a table, timetable, or array.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Inputs are gathered before row selection."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
+  "description": "`head(A, n)` selects the first `n` rows. The default row count is 8.",
+  "behaviors": ["Table/timetable variable metadata is preserved.", "Array inputs use the same row-selection helper as table variables."],
+  "examples": [{"description": "First row", "input": "H = head(T, 1)", "output": "H = first row of T"}],
+  "links": [{"label": "table", "url": "./table"}, {"label": "timetable", "url": "./timetable"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

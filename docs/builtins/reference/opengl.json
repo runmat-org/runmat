@@ -1,0 +1,61 @@
+{
+  "title": "opengl",
+  "category": "plotting",
+  "keywords": [
+    "opengl",
+    "renderer",
+    "graphics",
+    "plotting"
+  ],
+  "summary": "Report deterministic RunMat renderer compatibility information.",
+  "status": "done",
+  "version_added": "0.5.3",
+  "tests": {
+    "unit": "builtins::plotting::opengl::tests"
+  },
+  "description": "`opengl` provides MATLAB-compatible renderer status and information commands for scripts that probe or select graphics rendering modes. RunMat maps these calls onto the `runmat-plot` renderer instead of exposing a process-global native OpenGL switch.",
+  "syntax": [
+    "status = opengl",
+    "info = opengl('info')",
+    "data = opengl('data')",
+    "status = opengl('hardware')",
+    "status = opengl('hardwarebasic')",
+    "status = opengl('software')",
+    "status = opengl('save', mode)"
+  ],
+  "arguments": [
+    {
+      "name": "command",
+      "type": "text scalar",
+      "description": "Renderer command: `info`, `data`, `hardware`, `hardwarebasic`, `software`, `save`, `autoselect`, or `neverselect`. `opengl('save', mode)` accepts `hardware`, `hardwarebasic`, `software`, `autoselect`, or `none`."
+    }
+  ],
+  "examples": [
+    {
+      "description": "Query renderer information",
+      "input": "info = opengl('info');\ninfo.Renderer",
+      "output": "ans = 'runmat-plot'"
+    }
+  ],
+  "notes": [
+    "`opengl('info')` and `opengl('data')` return a struct with MATLAB-style fields such as `Version`, `Vendor`, `Renderer`, `HardwareSupportLevel`, `Software`, and `MaxTextureSize`.",
+    "Mode-selection commands are deterministic compatibility operations; they do not replace the `runmat-plot` backend or install a native OpenGL context."
+  ],
+  "gpu_residency": "`opengl` reports renderer metadata only. It does not affect gpuArray residency or provider dispatch.",
+  "related": [
+    {
+      "label": "figure",
+      "url": "./figure"
+    },
+    {
+      "label": "drawnow",
+      "url": "./drawnow"
+    }
+  ],
+  "implemented_in": [
+    {
+      "label": "crates/runmat-runtime/src/builtins/plotting/ops/opengl.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/opengl.rs"
+    }
+  ]
+}

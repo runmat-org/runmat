@@ -1,0 +1,60 @@
+{
+  "title": "bitor",
+  "category": "logical/bit",
+  "keywords": ["bitor", "bitwise", "or", "integer"],
+  "summary": "Compute bitwise OR for integer-valued scalars and arrays.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "matlab",
+    "notes": "GPU inputs gather to host for integer bit operations."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::bit::integer::tests",
+    "integration": null
+  },
+  "description": "`bitor(A, B)` applies bitwise OR to finite nonnegative integer-valued inputs using MATLAB-style implicit expansion.",
+  "behaviors": [
+    "Accepts double integer-valued inputs, logical inputs, integer scalar values, integer-class tensors, and gatherable gpuArray tensors.",
+    "Supports implicit expansion across compatible shapes.",
+    "For mixed unsigned integer inputs, returns the widest unsigned integer class involved; double and logical inputs return double-compatible numeric results.",
+    "Rejects fractional, negative double, infinite, NaN, complex, string, cell, and struct inputs."
+  ],
+  "examples": [
+    {
+      "description": "Scalar bitwise OR",
+      "input": "bitor(5, 3)",
+      "output": "ans = 7"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `bitor` preserve integer class?",
+      "answer": "For unsigned integer operands, the result keeps the widest unsigned integer class involved, so mixed uint8/uint32 inputs return uint32 regardless of argument order."
+    }
+  ],
+  "links": [
+    {
+      "label": "bitand",
+      "url": "./bitand"
+    },
+    {
+      "label": "bitshift",
+      "url": "./bitshift"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/bit/integer.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/integer.rs"
+  },
+  "gpu_residency": "GPU inputs are gathered for host execution.",
+  "gpu_behavior": ["RunMat currently executes integer bitwise functions on the host."]
+}

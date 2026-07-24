@@ -1,0 +1,31 @@
+{
+  "title": "tabulate",
+  "category": "stats/summary",
+  "keywords": ["tabulate", "frequency", "count", "percent", "statistics"],
+  "summary": "Create a frequency table.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host for compatibility until provider frequency-table hooks exist."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::descriptive::tests", "integration": null },
+  "description": "`tabulate(X)` returns value, count, and percent columns. Numeric inputs return a numeric matrix; string-like inputs return a cell array.",
+  "behaviors": [
+    "Positive integer numeric vectors include zero-count rows for missing integer levels between 1 and `max(X)`.",
+    "Non-integer numeric values are grouped by exact numeric value and sorted ascending.",
+    "Numeric NaNs are omitted from the table and from percentage denominators.",
+    "Logical, string arrays, and cell arrays of scalar strings return a cell frequency table.",
+    "Percentages are relative to the number of non-missing input elements."
+  ],
+  "examples": [{ "description": "Frequency table", "input": "tbl = tabulate([1 3 3])" }],
+  "faqs": [{ "question": "Why does tabulate([1 3 3]) include 2?", "answer": "For positive integer numeric vectors, MATLAB includes missing integer levels with zero counts." }],
+  "links": [{ "label": "histcounts", "url": "./histcounts" }, { "label": "mode", "url": "./mode" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs"
+  }
+}

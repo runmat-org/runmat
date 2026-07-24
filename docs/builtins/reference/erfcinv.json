@@ -1,0 +1,92 @@
+{
+  "title": "erfcinv",
+  "category": "math/elementwise",
+  "keywords": [
+    "erfcinv",
+    "inverse complementary error function",
+    "special",
+    "elementwise",
+    "gpu"
+  ],
+  "summary": "Compute inverse complementary error-function values.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "GPU-resident real inputs use the provider unary_erfcinv hook when available; unsupported providers fall back to host evaluation and re-upload."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::erfcinv::tests",
+    "gpu": "builtins::math::elementwise::erfcinv::tests::gpu_roundtrip_matches_cpu"
+  },
+  "description": "`erfcinv(X)` returns the value `Y` such that `erfc(Y) = X`, evaluated element by element for real single or double inputs.",
+  "behaviors": [
+    "Inputs in the interval `[0, 2]` return real outputs.",
+    "`erfcinv(0)` returns `Inf`, `erfcinv(1)` returns `0`, and `erfcinv(2)` returns `-Inf`.",
+    "Inputs outside `[0, 2]` return `NaN`.",
+    "NaN values propagate to NaN outputs.",
+    "Logical, integer-class, char, complex, string, and sparse inputs are rejected."
+  ],
+  "examples": [
+    {
+      "description": "Invert complementary error-function values",
+      "input": "x = [0.25 0.5 1 1.5 1.75];\ny = erfcinv(x)",
+      "output": "y contains real values satisfying erfc(y) == x"
+    },
+    {
+      "description": "Check endpoint behavior",
+      "input": "erfcinv([0 1 2])",
+      "output": "[Inf 0 -Inf]"
+    },
+    {
+      "description": "Preserve array shape",
+      "input": "X = reshape([0.5 1 1.5 2], [2 2]);\nY = erfcinv(X)",
+      "output": "Y is a 2-by-2 numeric array"
+    },
+    {
+      "description": "Use GPU inputs",
+      "input": "G = gpuArray([0.5 1.5]);\nY = erfcinv(G)",
+      "output": "Y is computed with the same numeric semantics as host inputs"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `erfcinv` related to `erf`?",
+      "answer": "`erfcinv(x)` is the inverse of `erfc(y) = 1 - erf(y)`, so `erfc(erfcinv(x))` returns `x` for values in the supported real domain."
+    },
+    {
+      "question": "What happens outside the real domain?",
+      "answer": "RunMat returns `NaN` for real values less than 0 or greater than 2, matching MATLAB's real-valued inverse complementary error-function behavior."
+    },
+    {
+      "question": "Does `erfcinv` run on the GPU?",
+      "answer": "Yes. Providers can evaluate real gpuArray inputs with a unary erfcinv kernel and keep the result resident; unsupported providers fall back to CPU evaluation and re-upload when possible."
+    }
+  ],
+  "links": [
+    {
+      "label": "erf",
+      "url": "./erf"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/erfcinv.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/erfcinv.rs"
+  },
+  "gpu_residency": "```matlab:runnable\nG = gpuArray([0.5 1.5]);\nY = erfcinv(G)\n```\nExpected behavior: `Y` contains the inverse complementary error-function values and remains GPU-resident through the active provider.",
+  "gpu_behavior": [
+    "WGPU and the simple provider implement unary_erfcinv for real dense buffers.",
+    "The provider path preserves shape, NaN, endpoint, and single/double dtype behavior."
+  ]
+}

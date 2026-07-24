@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
-    AssemblyNode, CadColorEvidence, CadLabelRef, CadPhysicalMaterialEvidence, CadRegionOwnership,
-    CadSemanticKind, EntityIdRange, EntityKind, Region, RegionEntityMapping, SourceGeometryKind,
-    SurfaceMesh,
+    AssemblyNode, CadColorEvidence, CadEvaluatorSet, CadFaceEvaluationSample,
+    CadFaceEvaluationSampleSource, CadFaceEvaluator, CadLabelRef, CadPhysicalMaterialEvidence,
+    CadRegionOwnership, CadSemanticKind, EntityIdRange, EntityKind, Region, RegionEntityMapping,
+    SourceGeometryKind, SurfaceMesh,
 };
 
 use crate::{
@@ -187,6 +188,7 @@ pub(crate) fn build_topology_result(
     let vertex_count = topology.vertices.len() as u64;
     let triangle_count = topology.triangles.len() as u64;
     let (regions, mappings) = topology_regions(&topology);
+    let cad_evaluators = cad_evaluator_sets(&topology);
     let importer_version = format!("cad/occt/{}/v1", format.as_str());
     let mut asset = build_asset(BuildAssetInput {
         path,
@@ -208,6 +210,7 @@ pub(crate) fn build_topology_result(
     });
 
     asset.source_geometry.kind = SourceGeometryKind::Cad;
+    asset.source_geometry.cad_evaluators = cad_evaluators;
     asset.source_geometry.assembly = topology
         .assembly
         .clone()
@@ -225,6 +228,176 @@ pub(crate) fn build_topology_result(
     asset.region_entity_mappings = mappings;
 
     Ok(build_result(asset, diagnostics))
+}
+
+fn cad_evaluator_sets(topology: &OcctCadTopology) -> Vec<CadEvaluatorSet> {
+    if topology.faces.is_empty() {
+        return Vec::new();
+    }
+    let samples = face_evaluator_samples(topology);
+    let backend_samples = backend_query_samples_by_face(topology);
+    vec![CadEvaluatorSet {
+        evaluator_id: format!("cad_evaluator_{}", topology.backend),
+        backend: topology.backend.clone(),
+        format_name: topology.format_name.clone(),
+        requires_source_geometry: true,
+        faces: topology
+            .faces
+            .iter()
+            .map(|face| CadFaceEvaluator {
+                reference_point_m: samples
+                    .get(&face.face_id)
+                    .map(|sample| sample.reference_point_m),
+                reference_unit_normal: samples
+                    .get(&face.face_id)
+                    .and_then(|sample| sample.reference_unit_normal),
+                evaluator_id: format!("cad_face_{}", face.face_id),
+                imported_face_id: face.face_id,
+                name: face.name.clone(),
+                supports_point_evaluation: true,
+                supports_projection: true,
+                supports_normal: true,
+                supports_derivatives: true,
+                supports_curvature: true,
+                evaluation_samples: backend_samples
+                    .get(&face.face_id)
+                    .cloned()
+                    .unwrap_or_default(),
+            })
+            .collect(),
+        curves: Vec::new(),
+    }]
+}
+
+fn backend_query_samples_by_face(
+    topology: &OcctCadTopology,
+) -> BTreeMap<u64, Vec<CadFaceEvaluationSample>> {
+    let mut by_face = BTreeMap::<u64, Vec<CadFaceEvaluationSample>>::new();
+    for sample in &topology.face_evaluation_samples {
+        if !sample.projection_error_m.is_finite() || sample.projection_error_m < 0.0 {
+            continue;
+        }
+        if sample
+            .point_m
+            .iter()
+            .chain(sample.unit_normal.iter())
+            .any(|value| !value.is_finite())
+        {
+            continue;
+        }
+        by_face
+            .entry(sample.face_id)
+            .or_default()
+            .push(CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: sample.point_m,
+                uv: Some([sample.u, sample.v]),
+                projected_point_m: Some(sample.point_m),
+                unit_normal: Some(sample.unit_normal),
+                projection_error_m: Some(sample.projection_error_m),
+            });
+    }
+    by_face
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FaceEvaluatorSample {
+    reference_point_m: [f64; 3],
+    reference_unit_normal: Option<[f64; 3]>,
+}
+
+fn face_evaluator_samples(topology: &OcctCadTopology) -> BTreeMap<u64, FaceEvaluatorSample> {
+    let mut accumulators = BTreeMap::<u64, FaceSampleAccumulator>::new();
+    for (triangle_index, triangle) in topology.triangles.iter().enumerate() {
+        let Some(face_id) = topology.triangle_face_ids.get(triangle_index).copied() else {
+            continue;
+        };
+        let Some(points) = triangle_points(&topology.vertices, *triangle) else {
+            continue;
+        };
+        accumulators
+            .entry(face_id)
+            .or_default()
+            .add_triangle(points);
+    }
+    accumulators
+        .into_iter()
+        .filter_map(|(face_id, accumulator)| accumulator.finish().map(|sample| (face_id, sample)))
+        .collect()
+}
+
+#[derive(Debug, Default, Clone)]
+struct FaceSampleAccumulator {
+    weighted_centroid: [f64; 3],
+    normal_sum: [f64; 3],
+    area_sum: f64,
+}
+
+impl FaceSampleAccumulator {
+    fn add_triangle(&mut self, points: [[f64; 3]; 3]) {
+        let cross = cross(sub(points[1], points[0]), sub(points[2], points[0]));
+        let double_area = norm(cross);
+        if !double_area.is_finite() || double_area <= f64::EPSILON {
+            return;
+        }
+        let centroid = [
+            (points[0][0] + points[1][0] + points[2][0]) / 3.0,
+            (points[0][1] + points[1][1] + points[2][1]) / 3.0,
+            (points[0][2] + points[1][2] + points[2][2]) / 3.0,
+        ];
+        self.area_sum += double_area;
+        for axis in 0..3 {
+            self.weighted_centroid[axis] += centroid[axis] * double_area;
+            self.normal_sum[axis] += cross[axis];
+        }
+    }
+
+    fn finish(self) -> Option<FaceEvaluatorSample> {
+        if !self.area_sum.is_finite() || self.area_sum <= f64::EPSILON {
+            return None;
+        }
+        let reference_point_m = [
+            self.weighted_centroid[0] / self.area_sum,
+            self.weighted_centroid[1] / self.area_sum,
+            self.weighted_centroid[2] / self.area_sum,
+        ];
+        Some(FaceEvaluatorSample {
+            reference_point_m,
+            reference_unit_normal: unit(self.normal_sum),
+        })
+    }
+}
+
+fn triangle_points(vertices: &[[f64; 3]], triangle: [u32; 3]) -> Option<[[f64; 3]; 3]> {
+    Some([
+        *vertices.get(triangle[0] as usize)?,
+        *vertices.get(triangle[1] as usize)?,
+        *vertices.get(triangle[2] as usize)?,
+    ])
+}
+
+fn sub(lhs: [f64; 3], rhs: [f64; 3]) -> [f64; 3] {
+    [lhs[0] - rhs[0], lhs[1] - rhs[1], lhs[2] - rhs[2]]
+}
+
+fn cross(lhs: [f64; 3], rhs: [f64; 3]) -> [f64; 3] {
+    [
+        lhs[1] * rhs[2] - lhs[2] * rhs[1],
+        lhs[2] * rhs[0] - lhs[0] * rhs[2],
+        lhs[0] * rhs[1] - lhs[1] * rhs[0],
+    ]
+}
+
+fn norm(vector: [f64; 3]) -> f64 {
+    (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).sqrt()
+}
+
+fn unit(vector: [f64; 3]) -> Option<[f64; 3]> {
+    let length = norm(vector);
+    if !length.is_finite() || length <= f64::EPSILON {
+        return None;
+    }
+    Some([vector[0] / length, vector[1] / length, vector[2] / length])
 }
 
 fn topology_regions(topology: &OcctCadTopology) -> (Vec<Region>, Vec<RegionEntityMapping>) {
@@ -299,6 +472,7 @@ fn accumulate_semantic_regions(
                 tag: Some(format!("cad_{}", cad_kind_tag(owner.kind))),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: None,
+                    curve_id: None,
                     label: Some(owner.clone()),
                     owner_path: vec![owner.clone()],
                     layers: Vec::new(),
@@ -322,6 +496,7 @@ fn accumulate_semantic_regions(
             tag: Some("cad_layer".to_string()),
             cad_ownership: Some(CadRegionOwnership {
                 face_id: None,
+                curve_id: None,
                 label: Some(CadLabelRef {
                     label_entry: format!("layer:{layer}"),
                     name: layer.to_string(),
@@ -346,6 +521,7 @@ fn accumulate_semantic_regions(
                 tag: Some("cad_color".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: None,
+                    curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: format!("color:{hex}"),
                         name: hex.to_string(),
@@ -375,6 +551,7 @@ fn accumulate_semantic_regions(
                 tag: Some("cad_material".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: None,
+                    curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: if material.label_entry.is_empty() {
                             format!("material:{name}")
@@ -521,6 +698,7 @@ mod tests {
                 name: "Mount Face".to_string(),
                 ownership: Some(CadRegionOwnership {
                     face_id: Some(0),
+                    curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:1:7".to_string(),
                         name: "Mount Face".to_string(),
@@ -554,6 +732,7 @@ mod tests {
                     }),
                 }),
             }],
+            face_evaluation_samples: Vec::new(),
             assembly: Some(AssemblyNode {
                 node_id: "0:1".to_string(),
                 label: "Assembly A".to_string(),
@@ -604,6 +783,32 @@ mod tests {
                 name: "Face 1".to_string(),
                 ownership: None,
             }],
+            face_evaluation_samples: vec![
+                crate::occt::OcctRawFaceEvaluationSample {
+                    face_id: 0,
+                    u: 0.25,
+                    v: 0.5,
+                    point_m: [0.25, 0.5, 0.0],
+                    unit_normal: [0.0, 0.0, 1.0],
+                    projection_error_m: 0.0,
+                },
+                crate::occt::OcctRawFaceEvaluationSample {
+                    face_id: 0,
+                    u: 0.5,
+                    v: 0.25,
+                    point_m: [0.5, 0.25, 0.0],
+                    unit_normal: [0.0, 0.0, 1.0],
+                    projection_error_m: 0.0,
+                },
+                crate::occt::OcctRawFaceEvaluationSample {
+                    face_id: 0,
+                    u: 0.5,
+                    v: 0.75,
+                    point_m: [0.5, 0.75, 0.0],
+                    unit_normal: [0.0, 0.0, 1.0],
+                    projection_error_m: 0.0,
+                },
+            ],
             assembly: None,
             warnings: Vec::new(),
         };
@@ -620,6 +825,30 @@ mod tests {
                 .expect("truncated preview topology should import");
 
         assert_eq!(result.asset.surface_meshes[0].triangles.len(), 1);
+        assert_eq!(result.asset.source_geometry.cad_evaluators.len(), 1);
+        assert_eq!(
+            result.asset.source_geometry.cad_evaluators[0].faces[0].imported_face_id,
+            0
+        );
+        assert!(result.asset.source_geometry.cad_evaluators[0].faces[0].supports_projection);
+        assert_eq!(
+            result.asset.source_geometry.cad_evaluators[0].faces[0].reference_point_m,
+            Some([1.0 / 3.0, 1.0 / 3.0, 0.0])
+        );
+        assert_eq!(
+            result.asset.source_geometry.cad_evaluators[0].faces[0].reference_unit_normal,
+            Some([0.0, 0.0, 1.0])
+        );
+        assert_eq!(
+            result.asset.source_geometry.cad_evaluators[0].faces[0]
+                .evaluation_samples
+                .len(),
+            3
+        );
+        assert_eq!(
+            result.asset.source_geometry.cad_evaluators[0].faces[0].evaluation_samples[0].source,
+            CadFaceEvaluationSampleSource::BackendQuery
+        );
         assert!(result
             .asset
             .diagnostics

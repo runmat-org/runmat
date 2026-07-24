@@ -60,6 +60,12 @@ pub struct OverlayConfig {
     /// Whether to show the top toolbar (legend/grid/reset/save).
     pub show_toolbar: bool,
 
+    /// Whether to render the CAD/geometry overlay UI inside the plot surface.
+    ///
+    /// Hosted web/Tauri surfaces reserve React UI outside the native surface
+    /// instead, because native-layer surfaces cannot be occluded by DOM.
+    pub show_cad_overlay: bool,
+
     /// Scale factor applied to overlay font sizes (1.0 = default).
     pub font_scale: f32,
 
@@ -108,6 +114,7 @@ impl Default for OverlayConfig {
         Self {
             show_sidebar: true,
             show_toolbar: true,
+            show_cad_overlay: true,
             font_scale: 1.0,
             show_grid: true,
             show_axes: true,
@@ -273,7 +280,7 @@ impl PlotOverlay {
                     Pos2::new(x_screen, border_bottom),
                     Pos2::new(x_screen, border_bottom + tick_length),
                 ],
-                Stroke::new(1.0, axis_color),
+                Stroke::new(1.0_f32, axis_color),
             );
             ui.painter().text(
                 Pos2::new(x_screen, border_bottom + label_offset),
@@ -315,6 +322,84 @@ impl PlotOverlay {
 
     fn approx_text_width_points(text: &str, font_size: f32) -> f32 {
         (text.chars().count() as f32) * font_size * 0.56
+    }
+
+    fn rotated_text_extent(width: f32, height: f32, angle_degrees: f64) -> (f32, f32) {
+        if angle_degrees.abs() <= f64::EPSILON {
+            return (width, height);
+        }
+        let radians = (angle_degrees as f32).to_radians();
+        let sin = radians.sin().abs();
+        let cos = radians.cos().abs();
+        (width * cos + height * sin, width * sin + height * cos)
+    }
+
+    fn estimate_x_axis_max_tick_label_width(
+        &self,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        scale: f32,
+    ) -> f32 {
+        let tick_font_size = Self::axes_tick_font_size(plot_renderer, Some(axes_index), scale);
+        let labels = self.estimate_x_axis_tick_labels(plot_renderer, axes_index);
+        if labels.is_empty() {
+            Self::approx_text_width_points("-1.00", tick_font_size)
+        } else {
+            labels
+                .iter()
+                .map(|label| Self::approx_text_width_points(label, tick_font_size))
+                .fold(0.0_f32, f32::max)
+        }
+    }
+
+    fn estimate_x_axis_tick_labels(
+        &self,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+    ) -> Vec<String> {
+        let x_log = plot_renderer.overlay_x_log_for_axes(axes_index);
+        let explicit_tick_labels = plot_renderer
+            .overlay_x_tick_labels_for_axes(axes_index)
+            .filter(|labels| !labels.is_empty());
+        let x_tick_format = plot_renderer.overlay_x_tick_format_for_axes(axes_index);
+        let categorical_tick_labels = plot_renderer
+            .overlay_categorical_labels_for_axes(axes_index)
+            .and_then(|(is_x, labels)| if is_x { Some(labels) } else { None })
+            .or_else(|| {
+                plot_renderer
+                    .overlay_categorical_labels()
+                    .and_then(|(is_x, labels)| if is_x { Some(labels.clone()) } else { None })
+            });
+
+        if let Some(labels) = explicit_tick_labels {
+            labels
+                .iter()
+                .map(|label| truncate_label(label, 14))
+                .collect()
+        } else if let Some(labels) = categorical_tick_labels {
+            labels
+                .iter()
+                .map(|label| truncate_label(label, 14))
+                .collect()
+        } else if let Some((x_min, x_max, _y_min, _y_max)) =
+            plot_renderer.overlay_display_bounds_for_axes(axes_index)
+        {
+            if x_log && x_min > 0.0 && x_max > 0.0 {
+                let start_decade = x_min.log10().floor() as i32;
+                let end_decade = x_max.log10().ceil() as i32;
+                (start_decade..=end_decade)
+                    .map(|d| format!("10^{d}"))
+                    .collect()
+            } else {
+                let formatter = plot_utils::TickLabelFormatter::new(x_tick_format.as_deref());
+                plot_utils::generate_major_ticks(x_min, x_max)
+                    .into_iter()
+                    .map(|value| formatter.format(value))
+                    .collect()
+            }
+        } else {
+            vec!["-1.00".to_string(), "1.00".to_string()]
+        }
     }
 
     fn estimate_y_axis_band_width(
@@ -365,7 +450,9 @@ impl PlotOverlay {
             Self::approx_text_width_points("-1.00", tick_font_size)
         };
 
-        let y_tick_zone = label_offset + max_label_width * 0.5 + 4.0 * scale;
+        let y_angle = plot_renderer.overlay_y_tick_label_rotation_for_axes(axes_index);
+        let (label_width, _) = Self::rotated_text_extent(max_label_width, tick_font_size, y_angle);
+        let y_tick_zone = label_offset + label_width * 0.5 + 4.0 * scale;
         let y_label_zone = if has_y_label {
             11.0 * scale
         } else {
@@ -381,48 +468,7 @@ impl PlotOverlay {
         scale: f32,
     ) -> f32 {
         let tick_font_size = Self::axes_tick_font_size(plot_renderer, Some(axes_index), scale);
-        let x_log = plot_renderer.overlay_x_log_for_axes(axes_index);
-
-        let explicit_tick_labels = plot_renderer
-            .overlay_x_tick_labels_for_axes(axes_index)
-            .filter(|labels| !labels.is_empty());
-        let categorical_tick_labels = plot_renderer
-            .overlay_categorical_labels_for_axes(axes_index)
-            .and_then(|(is_x, labels)| if is_x { Some(labels) } else { None })
-            .or_else(|| {
-                plot_renderer
-                    .overlay_categorical_labels()
-                    .and_then(|(is_x, labels)| if is_x { Some(labels.clone()) } else { None })
-            });
-
-        let labels: Vec<String> = if let Some(labels) = explicit_tick_labels {
-            labels
-                .iter()
-                .map(|label| truncate_label(label, 14))
-                .collect()
-        } else if let Some(labels) = categorical_tick_labels {
-            labels
-                .iter()
-                .map(|label| truncate_label(label, 14))
-                .collect()
-        } else if let Some((x_min, x_max, _y_min, _y_max)) =
-            plot_renderer.overlay_display_bounds_for_axes(axes_index)
-        {
-            if x_log && x_min > 0.0 && x_max > 0.0 {
-                let start_decade = x_min.log10().floor() as i32;
-                let end_decade = x_max.log10().ceil() as i32;
-                (start_decade..=end_decade)
-                    .map(|d| format!("10^{d}"))
-                    .collect()
-            } else {
-                plot_utils::generate_major_ticks(x_min, x_max)
-                    .into_iter()
-                    .map(plot_utils::format_tick_label)
-                    .collect()
-            }
-        } else {
-            vec!["-1.00".to_string(), "1.00".to_string()]
-        };
+        let labels = self.estimate_x_axis_tick_labels(plot_renderer, axes_index);
 
         let max_edge_label_width = if labels.is_empty() {
             Self::approx_text_width_points("-1.00", tick_font_size)
@@ -434,7 +480,10 @@ impl PlotOverlay {
             left.max(right)
         };
 
-        (max_edge_label_width * 0.5 + 3.0 * scale).max(6.0 * scale)
+        let x_angle = plot_renderer.overlay_x_tick_label_rotation_for_axes(axes_index);
+        let (label_width, _) =
+            Self::rotated_text_extent(max_edge_label_width, tick_font_size, x_angle);
+        (label_width * 0.5 + 3.0 * scale).max(6.0 * scale)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -444,27 +493,46 @@ impl PlotOverlay {
         plot_renderer: &PlotRenderer,
         axes_index: usize,
         title: Option<&str>,
+        subtitle: Option<&str>,
         x_label: Option<&str>,
         y_label: Option<&str>,
         scale: f32,
     ) -> PanelLayout {
         let scale = scale.max(0.75);
         let has_title = Self::has_visible_text(title);
+        let has_subtitle = Self::has_visible_text(subtitle);
         let has_x_label = Self::has_visible_text(x_label);
         let has_y_label = Self::has_visible_text(y_label);
         let outer_w = outer.width().max(1.0);
         let outer_h = outer.height().max(1.0);
-        let title_gap = if has_title { 4.0 * scale } else { 1.5 * scale };
+        let has_title_band = has_title || has_subtitle;
+        let title_gap = if has_title_band {
+            4.0 * scale
+        } else {
+            1.5 * scale
+        };
         let x_gap = 4.0 * scale;
         let x_edge_pad = self.estimate_x_axis_edge_padding(plot_renderer, axes_index, scale);
         let mut right_pad = (3.0 * scale).max(x_edge_pad + 1.0 * scale);
 
-        let mut title_h = if has_title {
-            (28.0 * scale).min(outer_h * 0.16)
+        let mut title_h = if has_title_band {
+            let base = if has_title && has_subtitle {
+                44.0
+            } else {
+                28.0
+            };
+            (base * scale).min(outer_h * 0.22)
         } else {
             0.0
         };
-        let mut x_h = ((24.0 + if has_x_label { 14.0 } else { 0.0 }) * scale).min(outer_h * 0.28);
+        let x_angle = plot_renderer.overlay_x_tick_label_rotation_for_axes(axes_index);
+        let x_tick_label_width =
+            self.estimate_x_axis_max_tick_label_width(plot_renderer, axes_index, scale);
+        let (_, x_tick_label_height) =
+            Self::rotated_text_extent(x_tick_label_width, 13.0 * scale, x_angle);
+        let x_tick_band = (15.0 * scale + x_tick_label_height + 4.0 * scale).max(24.0 * scale);
+        let mut x_h =
+            (x_tick_band + if has_x_label { 14.0 * scale } else { 0.0 }).min(outer_h * 0.28);
         let y_band_estimate =
             self.estimate_y_axis_band_width(plot_renderer, axes_index, has_y_label, scale);
         let mut y_w = y_band_estimate.min(outer_w * 0.30);
@@ -519,10 +587,23 @@ impl PlotOverlay {
         }
     }
 
-    fn layout_3d_panel(&self, outer: Rect, title: Option<&str>, scale: f32) -> PanelLayout {
+    fn layout_3d_panel(
+        &self,
+        outer: Rect,
+        title: Option<&str>,
+        subtitle: Option<&str>,
+        scale: f32,
+    ) -> PanelLayout {
         let scale = scale.max(0.75);
-        let title_h = if Self::has_visible_text(title) {
-            (28.0 * scale).min(outer.height().max(1.0) * 0.16)
+        let has_title = Self::has_visible_text(title);
+        let has_subtitle = Self::has_visible_text(subtitle);
+        let title_h = if has_title || has_subtitle {
+            let base = if has_title && has_subtitle {
+                44.0
+            } else {
+                28.0
+            };
+            (base * scale).min(outer.height().max(1.0) * 0.22)
         } else {
             0.0
         };
@@ -548,6 +629,39 @@ impl PlotOverlay {
         )
     }
 
+    fn positioned_axes_outer_rect(
+        outer: Rect,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+    ) -> Rect {
+        let Some((position, units)) = plot_renderer.overlay_position_for_axes(axes_index) else {
+            return outer;
+        };
+        let (left, bottom, width, height) = if units.eq_ignore_ascii_case("normalized") {
+            (
+                position[0] as f32 * outer.width(),
+                position[1] as f32 * outer.height(),
+                position[2] as f32 * outer.width(),
+                position[3] as f32 * outer.height(),
+            )
+        } else {
+            (
+                position[0] as f32,
+                position[1] as f32,
+                position[2] as f32,
+                position[3] as f32,
+            )
+        };
+        let width = width.max(1.0).min(outer.width().max(1.0));
+        let height = height.max(1.0).min(outer.height().max(1.0));
+        let x = (outer.min.x + left).clamp(outer.min.x, outer.max.x - 1.0);
+        let y = (outer.max.y - bottom - height).clamp(outer.min.y, outer.max.y - 1.0);
+        Rect::from_min_size(
+            egui::pos2(x, y),
+            egui::vec2(width.min(outer.max.x - x), height.min(outer.max.y - y)),
+        )
+    }
+
     fn panel_layout_for_axes(
         &self,
         outer: Rect,
@@ -561,6 +675,9 @@ impl PlotOverlay {
                 plot_renderer
                     .overlay_title_for_axes(axes_index)
                     .map(|s| s.as_str()),
+                plot_renderer
+                    .overlay_subtitle_for_axes(axes_index)
+                    .map(|s| s.as_str()),
                 scale,
             )
         } else {
@@ -570,6 +687,9 @@ impl PlotOverlay {
                 axes_index,
                 plot_renderer
                     .overlay_title_for_axes(axes_index)
+                    .map(|s| s.as_str()),
+                plot_renderer
+                    .overlay_subtitle_for_axes(axes_index)
                     .map(|s| s.as_str()),
                 plot_renderer
                     .overlay_x_label_for_axes(axes_index)
@@ -624,10 +744,14 @@ impl PlotOverlay {
         };
         let (rows, cols) = plot_renderer.figure_axes_grid();
         if rows * cols <= 1 {
-            vec![
-                self.panel_layout_for_axes(plot_area, plot_renderer, 0, font_scale)
-                    .plot_rect,
-            ]
+            (0..plot_renderer.figure_axes_count().max(1))
+                .map(|axes_index| {
+                    let axes_outer =
+                        Self::positioned_axes_outer_rect(plot_area, plot_renderer, axes_index);
+                    self.panel_layout_for_axes(axes_outer, plot_renderer, axes_index, font_scale)
+                        .plot_rect
+                })
+                .collect()
         } else {
             let rects = self.compute_subplot_rects(
                 plot_area,
@@ -640,7 +764,9 @@ impl PlotOverlay {
                 .into_iter()
                 .enumerate()
                 .map(|(axes_index, rect)| {
-                    self.panel_layout_for_axes(rect, plot_renderer, axes_index, font_scale)
+                    let axes_outer =
+                        Self::positioned_axes_outer_rect(rect, plot_renderer, axes_index);
+                    self.panel_layout_for_axes(axes_outer, plot_renderer, axes_index, font_scale)
                         .plot_rect
                 })
                 .collect()
@@ -697,7 +823,7 @@ impl PlotOverlay {
     }
 
     fn draw_2d_border(&self, ui: &mut egui::Ui, plot_rect: Rect) {
-        let stroke = Stroke::new(1.5, self.theme_axis_color());
+        let stroke = Stroke::new(1.5_f32, self.theme_axis_color());
         let ppp = ui.ctx().pixels_per_point();
         let (left, right, top, bottom) =
             Self::border_centerline_edges(plot_rect, ppp, stroke.width);
@@ -1105,20 +1231,26 @@ impl PlotOverlay {
             }
         }
 
-        if rows * cols > 1 {
-            let rects = self.compute_subplot_rects(
-                plot_area_rect,
-                rows,
-                cols,
-                Self::SUBPLOT_GAP_POINTS,
-                Self::SUBPLOT_GAP_POINTS,
-            );
+        let axes_count = plot_renderer.figure_axes_count().max(1);
+        if rows * cols > 1 || axes_count > 1 {
+            let rects = if rows * cols > 1 {
+                self.compute_subplot_rects(
+                    plot_area_rect,
+                    rows,
+                    cols,
+                    Self::SUBPLOT_GAP_POINTS,
+                    Self::SUBPLOT_GAP_POINTS,
+                )
+            } else {
+                vec![plot_area_rect; axes_count]
+            };
             for (i, cell_rect) in rects.iter().enumerate() {
+                let cell_rect = Self::positioned_axes_outer_rect(*cell_rect, plot_renderer, i);
                 let cam = plot_renderer
                     .axes_camera(i)
                     .unwrap_or_else(|| plot_renderer.camera());
                 let panel_layout =
-                    self.panel_layout_for_axes(*cell_rect, plot_renderer, i, config.font_scale);
+                    self.panel_layout_for_axes(cell_rect, plot_renderer, i, config.font_scale);
                 let r =
                     Self::snap_rect_to_pixels(panel_layout.plot_rect, ui.ctx().pixels_per_point());
                 let frame_rect =
@@ -1149,15 +1281,17 @@ impl PlotOverlay {
                     crate::core::camera::ProjectionType::Perspective { .. }
                 ) {
                     if config.show_title {
-                        if let Some(title) = plot_renderer.overlay_title_for_axes(i) {
-                            self.draw_title_in_rect(
-                                ui,
-                                panel_layout.title_rect,
-                                title,
-                                None,
-                                config.font_scale,
-                            );
-                        }
+                        self.draw_title_block_in_rect(
+                            ui,
+                            panel_layout.title_rect,
+                            plot_renderer.overlay_title_for_axes(i).map(String::as_str),
+                            plot_renderer.overlay_title_style_for_axes(i),
+                            plot_renderer
+                                .overlay_subtitle_for_axes(i)
+                                .map(String::as_str),
+                            plot_renderer.overlay_subtitle_style_for_axes(i),
+                            config.font_scale,
+                        );
                     }
                     self.draw_3d_orientation_gizmo(ui, r, plot_renderer, i, config.font_scale);
                     let show_world_grid_overlay = plot_renderer.geometry_overlay().is_none()
@@ -1193,18 +1327,32 @@ impl PlotOverlay {
                 if config.show_axes {
                     let b = plot_renderer.view_bounds_for_axes(i);
                     self.draw_axes(ui, r, plot_renderer, config, b, Some(i));
+                    for overlay_axes in 0..plot_renderer.figure_axes_count() {
+                        if plot_renderer.overlay_parent_for_axes(overlay_axes) == Some(i) {
+                            self.draw_axes(
+                                ui,
+                                r,
+                                plot_renderer,
+                                config,
+                                plot_renderer.view_bounds_for_axes(overlay_axes),
+                                Some(overlay_axes),
+                            );
+                        }
+                    }
                 }
 
                 if config.show_title {
-                    if let Some(title) = plot_renderer.overlay_title_for_axes(i) {
-                        self.draw_title_in_rect(
-                            ui,
-                            panel_layout.title_rect,
-                            title,
-                            None,
-                            config.font_scale,
-                        );
-                    }
+                    self.draw_title_block_in_rect(
+                        ui,
+                        panel_layout.title_rect,
+                        plot_renderer.overlay_title_for_axes(i).map(String::as_str),
+                        plot_renderer.overlay_title_style_for_axes(i),
+                        plot_renderer
+                            .overlay_subtitle_for_axes(i)
+                            .map(String::as_str),
+                        plot_renderer.overlay_subtitle_style_for_axes(i),
+                        config.font_scale,
+                    );
                 }
                 if !matches!(
                     cam.projection,
@@ -1270,18 +1418,20 @@ impl PlotOverlay {
                 centered_plot_rect.max.y
             );
             if config.show_title {
-                if let Some(title) = plot_renderer
-                    .overlay_title_for_axes(0)
-                    .or(config.title.as_ref())
-                {
-                    self.draw_title_in_rect(
-                        ui,
-                        panel_layout.title_rect,
-                        title,
-                        None,
-                        config.font_scale,
-                    );
-                }
+                self.draw_title_block_in_rect(
+                    ui,
+                    panel_layout.title_rect,
+                    plot_renderer
+                        .overlay_title_for_axes(0)
+                        .map(String::as_str)
+                        .or(config.title.as_deref()),
+                    plot_renderer.overlay_title_style_for_axes(0),
+                    plot_renderer
+                        .overlay_subtitle_for_axes(0)
+                        .map(String::as_str),
+                    plot_renderer.overlay_subtitle_style_for_axes(0),
+                    config.font_scale,
+                );
             }
             if matches!(
                 cam.projection,
@@ -1328,14 +1478,26 @@ impl PlotOverlay {
 
                 // Draw axes if enabled
                 if config.show_axes {
-                    self.draw_axes(ui, centered_plot_rect, plot_renderer, config, None, None);
+                    self.draw_axes(ui, centered_plot_rect, plot_renderer, config, None, Some(0));
+                    for overlay_axes in 1..plot_renderer.figure_axes_count() {
+                        if plot_renderer.overlay_parent_for_axes(overlay_axes) == Some(0) {
+                            self.draw_axes(
+                                ui,
+                                centered_plot_rect,
+                                plot_renderer,
+                                config,
+                                plot_renderer.view_bounds_for_axes(overlay_axes),
+                                Some(overlay_axes),
+                            );
+                        }
+                    }
                     // Emphasize zero baseline if within data range
                     if let Some((x_min, x_max, y_min, y_max)) = plot_renderer
                         .view_bounds()
                         .or_else(|| plot_renderer.data_bounds())
                     {
                         let axis_color = self.theme_axis_color();
-                        let zero_stroke = Stroke::new(1.5, axis_color);
+                        let zero_stroke = Stroke::new(1.5_f32, axis_color);
                         if y_min < 0.0 && y_max > 0.0 {
                             let y_screen = centered_plot_rect.max.y
                                 - ((0.0 - y_min) / (y_max - y_min)) as f32
@@ -1393,13 +1555,13 @@ impl PlotOverlay {
                 );
             }
         }
-        let centered_plot_rect = if rows * cols <= 1 {
+        let centered_plot_rect = if rows * cols <= 1 && axes_count <= 1 {
             self.panel_layout_for_axes(plot_area_rect, plot_renderer, 0, config.font_scale)
                 .plot_rect
         } else {
             plot_area_rect
         };
-        for (label, pos) in if rows * cols <= 1 {
+        for (label, pos) in if rows * cols <= 1 && axes_count <= 1 {
             plot_renderer.active_axes_pie_labels()
         } else {
             Vec::new()
@@ -1408,7 +1570,7 @@ impl PlotOverlay {
         }
 
         // Draw legend if enabled and entries available
-        if rows * cols <= 1 && plot_renderer.overlay_show_legend() {
+        if rows * cols <= 1 && axes_count <= 1 && plot_renderer.overlay_show_legend() {
             self.draw_legend(
                 ui,
                 centered_plot_rect,
@@ -1466,25 +1628,27 @@ impl PlotOverlay {
             ui.painter().rect_stroke(
                 bar_rect,
                 0.0,
-                Stroke::new(1.0, border),
+                Stroke::new(1.0_f32, border),
                 egui::StrokeKind::Inside,
             );
             #[cfg(not(target_arch = "wasm32"))]
             ui.painter()
-                .rect_stroke(bar_rect, 0.0, Stroke::new(1.0, border));
+                .rect_stroke(bar_rect, 0.0, Stroke::new(1.0_f32, border));
         }
 
-        if let Some(overlay) = plot_renderer.geometry_overlay() {
-            let actions = self.cad_overlay.render(CadOverlayRenderInput {
-                ctx: ui.ctx(),
-                plot_rect: centered_plot_rect,
-                overlay,
-                grid_enabled: plot_renderer.overlay_show_grid(),
-                xray_enabled: plot_renderer.geometry_xray_enabled(),
-                owner_visible: &|owner_id| plot_renderer.geometry_owner_visible(owner_id),
-                font_scale: config.font_scale,
-            });
-            self.cad_actions.merge(actions);
+        if config.show_cad_overlay {
+            if let Some(overlay) = plot_renderer.geometry_overlay() {
+                let actions = self.cad_overlay.render(CadOverlayRenderInput {
+                    ctx: ui.ctx(),
+                    plot_rect: centered_plot_rect,
+                    overlay,
+                    grid_enabled: plot_renderer.overlay_show_grid(),
+                    xray_enabled: plot_renderer.geometry_xray_enabled(),
+                    owner_visible: &|owner_id| plot_renderer.geometry_owner_visible(owner_id),
+                    font_scale: config.font_scale,
+                });
+                self.cad_actions.merge(actions);
+            }
         }
 
         self.axes_plot_rects = rendered_axes_rects;
@@ -1554,20 +1718,28 @@ impl PlotOverlay {
             let show_minor_grid = axes_index
                 .map(|idx| plot_renderer.overlay_show_minor_grid_for_axes(idx))
                 .unwrap_or_else(|| plot_renderer.overlay_show_minor_grid());
+            let explicit_x_ticks =
+                axes_index.and_then(|idx| plot_renderer.overlay_x_ticks_for_axes(idx));
+            let explicit_y_ticks =
+                axes_index.and_then(|idx| plot_renderer.overlay_y_ticks_for_axes(idx));
 
-            let x_ticks = if x_log {
+            let x_ticks = if let Some(ticks) = explicit_x_ticks.as_ref() {
+                ticks.clone()
+            } else if x_log {
                 Vec::new()
             } else {
                 plot_utils::generate_major_ticks(x_min, x_max)
             };
-            let y_ticks = if y_log {
+            let y_ticks = if let Some(ticks) = explicit_y_ticks.as_ref() {
+                ticks.clone()
+            } else if y_log {
                 Vec::new()
             } else {
                 plot_utils::generate_major_ticks(y_min, y_max)
             };
 
             // Draw vertical grid lines (linear vs log)
-            if x_log {
+            if x_log && explicit_x_ticks.is_none() {
                 // Decades within [x_min, x_max]
                 let start_decade = x_min.log10().floor() as i32;
                 let end_decade = x_max.log10().ceil() as i32;
@@ -1598,7 +1770,7 @@ impl PlotOverlay {
                                 Pos2::new(x_screen, plot_rect.max.y),
                             ],
                             Stroke::new(
-                                if is_major { 0.8 } else { 0.6 },
+                                if is_major { 0.8_f32 } else { 0.6_f32 },
                                 if is_major {
                                     grid_color_major
                                 } else {
@@ -1609,7 +1781,7 @@ impl PlotOverlay {
                     }
                 }
             } else {
-                if show_minor_grid {
+                if show_minor_grid && !x_log {
                     for pair in x_ticks.windows(2) {
                         let step = (pair[1] - pair[0]) / 5.0;
                         if !step.is_finite() || step <= 0.0 {
@@ -1633,15 +1805,28 @@ impl PlotOverlay {
                                     Pos2::new(x_screen, plot_rect.min.y),
                                     Pos2::new(x_screen, plot_rect.max.y),
                                 ],
-                                Stroke::new(0.6, grid_color_minor),
+                                Stroke::new(0.6_f32, grid_color_minor),
                             );
                         }
                     }
                 }
                 if show_major_grid {
                     for x_val in x_ticks {
-                        let x_screen = plot_rect.min.x
-                            + ((x_val - x_min) / x_range) as f32 * plot_rect.width();
+                        if x_val < x_min || x_val > x_max {
+                            continue;
+                        }
+                        let x_screen = if x_log {
+                            if x_val <= 0.0 || x_min <= 0.0 || x_max <= 0.0 {
+                                continue;
+                            }
+                            plot_rect.min.x
+                                + ((x_val.log10() - x_min.log10())
+                                    / (x_max.log10() - x_min.log10()))
+                                    as f32
+                                    * plot_rect.width()
+                        } else {
+                            plot_rect.min.x + ((x_val - x_min) / x_range) as f32 * plot_rect.width()
+                        };
                         let x_screen = Self::snap_coord(x_screen, ppp);
                         if (x_screen - plot_rect.min.x).abs() <= edge_eps
                             || (x_screen - plot_rect.max.x).abs() <= edge_eps
@@ -1653,14 +1838,14 @@ impl PlotOverlay {
                                 Pos2::new(x_screen, plot_rect.min.y),
                                 Pos2::new(x_screen, plot_rect.max.y),
                             ],
-                            Stroke::new(0.8, grid_color_major),
+                            Stroke::new(0.8_f32, grid_color_major),
                         );
                     }
                 }
             }
 
             // Draw horizontal grid lines (linear vs log)
-            if y_log {
+            if y_log && explicit_y_ticks.is_none() {
                 let start_decade = y_min.log10().floor() as i32;
                 let end_decade = y_max.log10().ceil() as i32;
                 for d in start_decade..=end_decade {
@@ -1690,7 +1875,7 @@ impl PlotOverlay {
                                 Pos2::new(plot_rect.max.x, y_screen),
                             ],
                             Stroke::new(
-                                if is_major { 0.8 } else { 0.6 },
+                                if is_major { 0.8_f32 } else { 0.6_f32 },
                                 if is_major {
                                     grid_color_major
                                 } else {
@@ -1701,7 +1886,7 @@ impl PlotOverlay {
                     }
                 }
             } else {
-                if show_minor_grid {
+                if show_minor_grid && !y_log {
                     for pair in y_ticks.windows(2) {
                         let step = (pair[1] - pair[0]) / 5.0;
                         if !step.is_finite() || step <= 0.0 {
@@ -1725,15 +1910,29 @@ impl PlotOverlay {
                                     Pos2::new(plot_rect.min.x, y_screen),
                                     Pos2::new(plot_rect.max.x, y_screen),
                                 ],
-                                Stroke::new(0.6, grid_color_minor),
+                                Stroke::new(0.6_f32, grid_color_minor),
                             );
                         }
                     }
                 }
                 if show_major_grid {
                     for y_val in y_ticks {
-                        let y_screen = plot_rect.max.y
-                            - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                        if y_val < y_min || y_val > y_max {
+                            continue;
+                        }
+                        let y_screen = if y_log {
+                            if y_val <= 0.0 || y_min <= 0.0 || y_max <= 0.0 {
+                                continue;
+                            }
+                            plot_rect.max.y
+                                - ((y_val.log10() - y_min.log10())
+                                    / (y_max.log10() - y_min.log10()))
+                                    as f32
+                                    * plot_rect.height()
+                        } else {
+                            plot_rect.max.y
+                                - ((y_val - y_min) / y_range) as f32 * plot_rect.height()
+                        };
                         let y_screen = Self::snap_coord(y_screen, ppp);
                         if (y_screen - plot_rect.min.y).abs() <= edge_eps
                             || (y_screen - plot_rect.max.y).abs() <= edge_eps
@@ -1745,7 +1944,7 @@ impl PlotOverlay {
                                 Pos2::new(plot_rect.min.x, y_screen),
                                 Pos2::new(plot_rect.max.x, y_screen),
                             ],
-                            Stroke::new(0.8, grid_color_major),
+                            Stroke::new(0.8_f32, grid_color_major),
                         );
                     }
                 }
@@ -1780,6 +1979,25 @@ impl PlotOverlay {
             let label_color = self.theme_text_color();
             let border_left = plot_rect.min.x;
             let border_bottom = plot_rect.max.y;
+            let y_axis_on_right = axes_index
+                .map(|idx| plot_renderer.overlay_y_axis_location_for_axes(idx) == "right")
+                .unwrap_or(false);
+            let draw_x_axis = !y_axis_on_right;
+            let y_axis_x = if y_axis_on_right {
+                plot_rect.max.x
+            } else {
+                border_left
+            };
+            let y_tick_outer_x = if y_axis_on_right {
+                y_axis_x + tick_length
+            } else {
+                y_axis_x - tick_length
+            };
+            let y_label_x = if y_axis_on_right {
+                y_axis_x + label_offset
+            } else {
+                y_axis_x - label_offset
+            };
 
             let x_log = axes_index
                 .map(|idx| plot_renderer.overlay_x_log_for_axes(idx))
@@ -1787,97 +2005,217 @@ impl PlotOverlay {
             let y_log = axes_index
                 .map(|idx| plot_renderer.overlay_y_log_for_axes(idx))
                 .unwrap_or_else(|| plot_renderer.overlay_y_log());
+            let explicit_x_ticks =
+                axes_index.and_then(|idx| plot_renderer.overlay_x_ticks_for_axes(idx));
+            let explicit_y_ticks =
+                axes_index.and_then(|idx| plot_renderer.overlay_y_ticks_for_axes(idx));
+            let explicit_x_labels =
+                axes_index.and_then(|idx| plot_renderer.overlay_x_tick_labels_for_axes(idx));
+            let explicit_y_labels =
+                axes_index.and_then(|idx| plot_renderer.overlay_y_tick_labels_for_axes(idx));
+            let explicit_x_format =
+                axes_index.and_then(|idx| plot_renderer.overlay_x_tick_format_for_axes(idx));
+            let explicit_y_format =
+                axes_index.and_then(|idx| plot_renderer.overlay_y_tick_format_for_axes(idx));
+            let x_tick_formatter =
+                plot_utils::TickLabelFormatter::new(explicit_x_format.as_deref());
+            let y_tick_formatter =
+                plot_utils::TickLabelFormatter::new(explicit_y_format.as_deref());
+            let x_tick_angle = axes_index
+                .map(|idx| plot_renderer.overlay_x_tick_label_rotation_for_axes(idx))
+                .unwrap_or(0.0);
+            let y_tick_angle = axes_index
+                .map(|idx| plot_renderer.overlay_y_tick_label_rotation_for_axes(idx))
+                .unwrap_or(0.0);
 
             // Histogram numeric tick support and categorical axis support
             let (mut cat_x, mut cat_y) = (false, false);
             let mut custom_hist_x = false;
-            if let Some((true, edges)) =
-                axes_index.and_then(|idx| plot_renderer.overlay_histogram_edges_for_axes(idx))
-            {
-                custom_hist_x = true;
-                self.draw_histogram_axis_ticks(
-                    ui,
-                    plot_rect,
-                    ppp,
-                    axis_color,
-                    label_color,
-                    tick_length,
-                    label_offset,
-                    tick_font.clone(),
-                    border_bottom,
-                    x_min,
-                    x_max,
-                    &edges,
-                );
-            }
-            if let Some(labels) = axes_index.and_then(|idx| {
-                plot_renderer
-                    .overlay_x_tick_labels_for_axes(idx)
-                    .filter(|labels| !labels.is_empty())
-            }) {
-                cat_x = true;
-                let stride = Self::label_stride(&labels, plot_rect.width(), tick_font.size);
-                for (label_idx, label) in labels.iter().enumerate() {
-                    if label_idx != 0 && label_idx != labels.len() - 1 && label_idx % stride != 0 {
-                        continue;
-                    }
-                    let x_val = (label_idx + 1) as f64;
-                    if x_val < x_min || x_val > x_max {
-                        continue;
-                    }
-                    let x_screen =
-                        plot_rect.min.x + ((x_val - x_min) / x_range) as f32 * plot_rect.width();
-                    let x_screen = Self::snap_coord(x_screen, ppp);
-                    ui.painter().line_segment(
-                        [
-                            Pos2::new(x_screen, border_bottom),
-                            Pos2::new(x_screen, border_bottom + tick_length),
-                        ],
-                        Stroke::new(1.0, axis_color),
-                    );
-                    let text = truncate_label(label, 14);
-                    ui.painter().text(
-                        Pos2::new(x_screen, border_bottom + label_offset),
-                        Align2::CENTER_CENTER,
-                        text,
-                        tick_font.clone(),
+            if draw_x_axis && explicit_x_ticks.is_none() {
+                if let Some((true, edges)) =
+                    axes_index.and_then(|idx| plot_renderer.overlay_histogram_edges_for_axes(idx))
+                {
+                    custom_hist_x = true;
+                    self.draw_histogram_axis_ticks(
+                        ui,
+                        plot_rect,
+                        ppp,
+                        axis_color,
                         label_color,
+                        tick_length,
+                        label_offset,
+                        tick_font.clone(),
+                        border_bottom,
+                        x_min,
+                        x_max,
+                        &edges,
                     );
                 }
             }
-            if let Some(labels) = axes_index.and_then(|idx| {
-                plot_renderer
-                    .overlay_y_tick_labels_for_axes(idx)
+            if draw_x_axis {
+                if let Some(ticks) = explicit_x_ticks.as_ref() {
+                    cat_x = true;
+                    for (tick_idx, x_val) in ticks.iter().enumerate() {
+                        if *x_val < x_min || *x_val > x_max {
+                            continue;
+                        }
+                        let x_screen = if x_log {
+                            if *x_val <= 0.0 || x_min <= 0.0 || x_max <= 0.0 {
+                                continue;
+                            }
+                            plot_rect.min.x
+                                + (((*x_val).log10() - x_min.log10())
+                                    / (x_max.log10() - x_min.log10()))
+                                    as f32
+                                    * plot_rect.width()
+                        } else {
+                            plot_rect.min.x
+                                + ((*x_val - x_min) / x_range) as f32 * plot_rect.width()
+                        };
+                        let x_screen = Self::snap_coord(x_screen, ppp);
+                        ui.painter().line_segment(
+                            [
+                                Pos2::new(x_screen, border_bottom),
+                                Pos2::new(x_screen, border_bottom + tick_length),
+                            ],
+                            Stroke::new(1.0_f32, axis_color),
+                        );
+                        let label = explicit_x_labels
+                            .as_ref()
+                            .and_then(|labels| labels.get(tick_idx).cloned())
+                            .unwrap_or_else(|| x_tick_formatter.format(*x_val));
+                        Self::draw_tick_label(
+                            ui,
+                            Pos2::new(x_screen, border_bottom + label_offset),
+                            Align2::CENTER_CENTER,
+                            truncate_label(&label, 14),
+                            tick_font.clone(),
+                            label_color,
+                            x_tick_angle,
+                        );
+                    }
+                }
+            }
+            if draw_x_axis && explicit_x_ticks.is_none() {
+                if let Some(labels) = explicit_x_labels
+                    .as_ref()
                     .filter(|labels| !labels.is_empty())
-            }) {
+                {
+                    cat_x = true;
+                    let stride = Self::label_stride(labels, plot_rect.width(), tick_font.size);
+                    for (label_idx, label) in labels.iter().enumerate() {
+                        if label_idx != 0
+                            && label_idx != labels.len() - 1
+                            && label_idx % stride != 0
+                        {
+                            continue;
+                        }
+                        let x_val = (label_idx + 1) as f64;
+                        if x_val < x_min || x_val > x_max {
+                            continue;
+                        }
+                        let x_screen = plot_rect.min.x
+                            + ((x_val - x_min) / x_range) as f32 * plot_rect.width();
+                        let x_screen = Self::snap_coord(x_screen, ppp);
+                        ui.painter().line_segment(
+                            [
+                                Pos2::new(x_screen, border_bottom),
+                                Pos2::new(x_screen, border_bottom + tick_length),
+                            ],
+                            Stroke::new(1.0_f32, axis_color),
+                        );
+                        let text = truncate_label(label, 14);
+                        Self::draw_tick_label(
+                            ui,
+                            Pos2::new(x_screen, border_bottom + label_offset),
+                            Align2::CENTER_CENTER,
+                            text,
+                            tick_font.clone(),
+                            label_color,
+                            x_tick_angle,
+                        );
+                    }
+                }
+            }
+            if let Some(ticks) = explicit_y_ticks.as_ref() {
                 cat_y = true;
-                let stride = Self::label_stride(&labels, plot_rect.height(), tick_font.size);
-                for (label_idx, label) in labels.iter().enumerate() {
-                    if label_idx != 0 && label_idx != labels.len() - 1 && label_idx % stride != 0 {
+                for (tick_idx, y_val) in ticks.iter().enumerate() {
+                    if *y_val < y_min || *y_val > y_max {
                         continue;
                     }
-                    let y_val = (label_idx + 1) as f64;
-                    if y_val < y_min || y_val > y_max {
-                        continue;
-                    }
-                    let y_screen =
-                        plot_rect.max.y - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                    let y_screen = if y_log {
+                        if *y_val <= 0.0 || y_min <= 0.0 || y_max <= 0.0 {
+                            continue;
+                        }
+                        plot_rect.max.y
+                            - (((*y_val).log10() - y_min.log10()) / (y_max.log10() - y_min.log10()))
+                                as f32
+                                * plot_rect.height()
+                    } else {
+                        plot_rect.max.y - ((*y_val - y_min) / y_range) as f32 * plot_rect.height()
+                    };
                     let y_screen = Self::snap_coord(y_screen, ppp);
                     ui.painter().line_segment(
                         [
-                            Pos2::new(border_left - tick_length, y_screen),
-                            Pos2::new(border_left, y_screen),
+                            Pos2::new(y_tick_outer_x, y_screen),
+                            Pos2::new(y_axis_x, y_screen),
                         ],
-                        Stroke::new(1.0, axis_color),
+                        Stroke::new(1.0_f32, axis_color),
                     );
-                    let text = truncate_label(label, 14);
-                    ui.painter().text(
-                        Pos2::new(border_left - label_offset, y_screen),
+                    let label = explicit_y_labels
+                        .as_ref()
+                        .and_then(|labels| labels.get(tick_idx).cloned())
+                        .unwrap_or_else(|| y_tick_formatter.format(*y_val));
+                    Self::draw_tick_label(
+                        ui,
+                        Pos2::new(y_label_x, y_screen),
                         Align2::CENTER_CENTER,
-                        text,
+                        truncate_label(&label, 14),
                         tick_font.clone(),
                         label_color,
+                        y_tick_angle,
                     );
+                }
+            }
+            if explicit_y_ticks.is_none() {
+                if let Some(labels) = explicit_y_labels
+                    .as_ref()
+                    .filter(|labels| !labels.is_empty())
+                {
+                    cat_y = true;
+                    let stride = Self::label_stride(labels, plot_rect.height(), tick_font.size);
+                    for (label_idx, label) in labels.iter().enumerate() {
+                        if label_idx != 0
+                            && label_idx != labels.len() - 1
+                            && label_idx % stride != 0
+                        {
+                            continue;
+                        }
+                        let y_val = (label_idx + 1) as f64;
+                        if y_val < y_min || y_val > y_max {
+                            continue;
+                        }
+                        let y_screen = plot_rect.max.y
+                            - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                        let y_screen = Self::snap_coord(y_screen, ppp);
+                        ui.painter().line_segment(
+                            [
+                                Pos2::new(y_tick_outer_x, y_screen),
+                                Pos2::new(y_axis_x, y_screen),
+                            ],
+                            Stroke::new(1.0_f32, axis_color),
+                        );
+                        let text = truncate_label(label, 14);
+                        Self::draw_tick_label(
+                            ui,
+                            Pos2::new(y_label_x, y_screen),
+                            Align2::CENTER_CENTER,
+                            text,
+                            tick_font.clone(),
+                            label_color,
+                            y_tick_angle,
+                        );
+                    }
                 }
             }
             if let Some((is_x, labels)) = axes_index
@@ -1890,7 +2228,7 @@ impl PlotOverlay {
             {
                 if (is_x && cat_x) || (!is_x && cat_y) {
                     // Explicit axes tick labels take precedence over inferred bar labels.
-                } else if is_x {
+                } else if is_x && draw_x_axis {
                     cat_x = true;
                     let stride = Self::label_stride(&labels, plot_rect.width(), tick_font.size);
                     // Draw X categorical labels at integer positions (1..n)
@@ -1914,16 +2252,18 @@ impl PlotOverlay {
                                 Pos2::new(x_screen, border_bottom),
                                 Pos2::new(x_screen, border_bottom + tick_length),
                             ],
-                            Stroke::new(1.0, axis_color),
+                            Stroke::new(1.0_f32, axis_color),
                         );
                         // Label
                         let text = truncate_label(label, 14);
-                        ui.painter().text(
+                        Self::draw_tick_label(
+                            ui,
                             Pos2::new(x_screen, border_bottom + label_offset),
                             Align2::CENTER_CENTER,
                             text,
                             tick_font.clone(),
                             label_color,
+                            x_tick_angle,
                         );
                     }
                 } else {
@@ -1947,26 +2287,28 @@ impl PlotOverlay {
                         // Tick
                         ui.painter().line_segment(
                             [
-                                Pos2::new(border_left - tick_length, y_screen),
-                                Pos2::new(border_left, y_screen),
+                                Pos2::new(y_tick_outer_x, y_screen),
+                                Pos2::new(y_axis_x, y_screen),
                             ],
-                            Stroke::new(1.0, axis_color),
+                            Stroke::new(1.0_f32, axis_color),
                         );
                         // Label
                         let text = truncate_label(label, 14);
-                        ui.painter().text(
-                            Pos2::new(border_left - label_offset, y_screen),
+                        Self::draw_tick_label(
+                            ui,
+                            Pos2::new(y_label_x, y_screen),
                             Align2::CENTER_CENTER,
                             text,
                             tick_font.clone(),
                             label_color,
+                            y_tick_angle,
                         );
                     }
                 }
             }
 
             // Draw X-axis ticks and labels (categorical handled above)
-            if x_log {
+            if draw_x_axis && x_log && !cat_x {
                 let start_decade = x_min.log10().floor() as i32;
                 let end_decade = x_max.log10().ceil() as i32;
                 for d in start_decade..=end_decade {
@@ -1982,18 +2324,20 @@ impl PlotOverlay {
                             Pos2::new(x_screen, border_bottom),
                             Pos2::new(x_screen, border_bottom + tick_length),
                         ],
-                        Stroke::new(1.0, axis_color),
+                        Stroke::new(1.0_f32, axis_color),
                     );
                     // Label like 10^d
-                    ui.painter().text(
+                    Self::draw_tick_label(
+                        ui,
                         Pos2::new(x_screen, border_bottom + label_offset),
                         Align2::CENTER_CENTER,
                         format!("10^{}", d),
                         tick_font.clone(),
                         label_color,
+                        x_tick_angle,
                     );
                 }
-            } else if !cat_x && !custom_hist_x {
+            } else if draw_x_axis && !cat_x && !custom_hist_x {
                 for x_val in plot_utils::generate_major_ticks(x_min, x_max) {
                     let x_screen =
                         plot_rect.min.x + ((x_val - x_min) / x_range) as f32 * plot_rect.width();
@@ -2003,20 +2347,22 @@ impl PlotOverlay {
                             Pos2::new(x_screen, border_bottom),
                             Pos2::new(x_screen, border_bottom + tick_length),
                         ],
-                        Stroke::new(1.0, axis_color),
+                        Stroke::new(1.0_f32, axis_color),
                     );
-                    ui.painter().text(
+                    Self::draw_tick_label(
+                        ui,
                         Pos2::new(x_screen, border_bottom + label_offset),
                         Align2::CENTER_CENTER,
-                        plot_utils::format_tick_label(x_val),
+                        x_tick_formatter.format(x_val),
                         tick_font.clone(),
                         label_color,
+                        x_tick_angle,
                     );
                 }
             }
 
             // Draw Y-axis ticks and labels (categorical handled above)
-            if y_log {
+            if y_log && !cat_y {
                 let start_decade = y_min.log10().floor() as i32;
                 let end_decade = y_max.log10().ceil() as i32;
                 for d in start_decade..=end_decade {
@@ -2028,17 +2374,19 @@ impl PlotOverlay {
                     let y_screen = Self::snap_coord(y_screen, ppp);
                     ui.painter().line_segment(
                         [
-                            Pos2::new(border_left - tick_length, y_screen),
-                            Pos2::new(border_left, y_screen),
+                            Pos2::new(y_tick_outer_x, y_screen),
+                            Pos2::new(y_axis_x, y_screen),
                         ],
-                        Stroke::new(1.0, axis_color),
+                        Stroke::new(1.0_f32, axis_color),
                     );
-                    ui.painter().text(
-                        Pos2::new(border_left - label_offset, y_screen),
+                    Self::draw_tick_label(
+                        ui,
+                        Pos2::new(y_label_x, y_screen),
                         Align2::CENTER_CENTER,
                         format!("10^{}", d),
                         tick_font.clone(),
                         label_color,
+                        y_tick_angle,
                     );
                 }
             } else if !cat_y {
@@ -2048,21 +2396,56 @@ impl PlotOverlay {
                     let y_screen = Self::snap_coord(y_screen, ppp);
                     ui.painter().line_segment(
                         [
-                            Pos2::new(border_left - tick_length, y_screen),
-                            Pos2::new(border_left, y_screen),
+                            Pos2::new(y_tick_outer_x, y_screen),
+                            Pos2::new(y_axis_x, y_screen),
                         ],
-                        Stroke::new(1.0, axis_color),
+                        Stroke::new(1.0_f32, axis_color),
                     );
-                    ui.painter().text(
-                        Pos2::new(border_left - label_offset, y_screen),
+                    Self::draw_tick_label(
+                        ui,
+                        Pos2::new(y_label_x, y_screen),
                         Align2::CENTER_CENTER,
-                        plot_utils::format_tick_label(y_val),
+                        y_tick_formatter.format(y_val),
                         tick_font.clone(),
                         label_color,
+                        y_tick_angle,
                     );
                 }
             }
         }
+    }
+
+    fn draw_tick_label(
+        ui: &egui::Ui,
+        pos: Pos2,
+        anchor: Align2,
+        text: impl ToString,
+        font_id: FontId,
+        text_color: Color32,
+        angle_degrees: f64,
+    ) {
+        if angle_degrees.abs() <= f64::EPSILON {
+            ui.painter().text(pos, anchor, text, font_id, text_color);
+            return;
+        }
+
+        let galley = ui
+            .painter()
+            .layout_no_wrap(text.to_string(), font_id, text_color);
+        let size = galley.size();
+        let rect = anchor.anchor_size(pos, size);
+        let local_anchor = pos - rect.min;
+        let radians = (angle_degrees as f32).to_radians();
+        let sin = radians.sin();
+        let cos = radians.cos();
+        let rotated_anchor = egui::vec2(
+            local_anchor.x * cos - local_anchor.y * sin,
+            local_anchor.x * sin + local_anchor.y * cos,
+        );
+        let mut shape = egui::epaint::TextShape::new(pos - rotated_anchor, galley, text_color);
+        shape.angle = radians;
+        shape.override_text_color = Some(text_color);
+        ui.painter().add(shape);
     }
 
     /// Draw a CAD-style XYZ orientation gizmo in the bottom-left corner of the plot rect.
@@ -2378,6 +2761,56 @@ impl PlotOverlay {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn draw_title_block_in_rect(
+        &self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        title: Option<&str>,
+        title_style: Option<&TextStyle>,
+        subtitle: Option<&str>,
+        subtitle_style: Option<&TextStyle>,
+        scale: f32,
+    ) {
+        let title = title.filter(|text| Self::has_visible_text(Some(text)));
+        let subtitle = subtitle.filter(|text| Self::has_visible_text(Some(text)));
+        let Some((first_text, first_style, second)) = title
+            .map(|title| (title, title_style, subtitle.map(|s| (s, subtitle_style))))
+            .or_else(|| subtitle.map(|subtitle| (subtitle, subtitle_style, None)))
+        else {
+            return;
+        };
+
+        let scale = scale.max(0.75);
+        let center = rect.center();
+        if let Some((second_text, second_style)) = second {
+            let first_style = first_style.cloned().unwrap_or_default();
+            let second_style = second_style.cloned().unwrap_or_default();
+            Self::paint_styled_text(
+                ui.painter(),
+                egui::pos2(center.x, center.y - 8.0 * scale),
+                Align2::CENTER_CENTER,
+                first_text,
+                Self::style_font_size(&first_style, 16.0, scale),
+                Self::style_color(&first_style, self.theme_text_color()),
+                Self::style_is_bold(&first_style),
+                110,
+            );
+            Self::paint_styled_text(
+                ui.painter(),
+                egui::pos2(center.x, center.y + 9.0 * scale),
+                Align2::CENTER_CENTER,
+                second_text,
+                Self::style_font_size(&second_style, 13.0, scale),
+                Self::style_color(&second_style, self.theme_text_color()),
+                Self::style_is_bold(&second_style),
+                110,
+            );
+        } else {
+            self.draw_title_in_rect(ui, rect, first_text, first_style, scale);
+        }
+    }
+
     fn draw_legend(
         &self,
         ui: &mut egui::Ui,
@@ -2442,7 +2875,7 @@ impl PlotOverlay {
                             Pos2::new(swatch_rect.min.x, ymid),
                             Pos2::new(swatch_rect.max.x, ymid),
                         ],
-                        Stroke::new(2.0, c),
+                        Stroke::new(2.0_f32, c),
                     );
                 }
                 crate::plots::figure::PlotType::Scatter
@@ -2450,7 +2883,7 @@ impl PlotOverlay {
                     let center = swatch_rect.center();
                     ui.painter().circle_filled(center, 3.5, c);
                     ui.painter()
-                        .circle_stroke(center, 3.5, Stroke::new(1.0, legend_stroke));
+                        .circle_stroke(center, 3.5, Stroke::new(1.0_f32, legend_stroke));
                 }
                 crate::plots::figure::PlotType::Bar
                 | crate::plots::figure::PlotType::Area
@@ -2464,12 +2897,12 @@ impl PlotOverlay {
                     ui.painter().rect_stroke(
                         swatch_rect,
                         2.0,
-                        Stroke::new(1.0, legend_stroke),
+                        Stroke::new(1.0_f32, legend_stroke),
                         egui::StrokeKind::Inside,
                     );
                     #[cfg(not(target_arch = "wasm32"))]
                     ui.painter()
-                        .rect_stroke(swatch_rect, 2.0, Stroke::new(1.0, legend_stroke));
+                        .rect_stroke(swatch_rect, 2.0, Stroke::new(1.0_f32, legend_stroke));
                 }
                 crate::plots::figure::PlotType::ErrorBar
                 | crate::plots::figure::PlotType::Stairs
@@ -2481,14 +2914,14 @@ impl PlotOverlay {
                             Pos2::new(swatch_rect.min.x, ymid),
                             Pos2::new(swatch_rect.max.x - 4.0, ymid),
                         ],
-                        Stroke::new(1.5, c),
+                        Stroke::new(1.5_f32, c),
                     );
                     ui.painter().line_segment(
                         [
                             Pos2::new(swatch_rect.max.x - 4.0, ymid - 3.0),
                             Pos2::new(swatch_rect.max.x, ymid),
                         ],
-                        Stroke::new(1.0, c),
+                        Stroke::new(1.0_f32, c),
                     );
                 }
             }

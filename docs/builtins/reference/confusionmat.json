@@ -1,0 +1,75 @@
+{
+  "title": "confusionmat",
+  "category": "stats/ml",
+  "keywords": [
+    "confusionmat",
+    "confusion matrix",
+    "classification",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Compute a confusion matrix from true and predicted class labels.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Label matching and count accumulation run on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::confusionmat::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`confusionmat(group,grouphat)` compares true class labels in `group` with predicted labels in `grouphat` and returns a matrix whose rows are true classes and columns are predicted classes.",
+  "behaviors": [
+    "`group` and `grouphat` must contain the same number of labels.",
+    "Numeric, logical, string, character-row, categorical, and cell-string labels are supported. Text label families can be mixed between string, char, cell-string, and categorical inputs.",
+    "Without an explicit order, numeric labels are sorted ascending, text labels follow first appearance across `group` then `grouphat`, categorical labels follow category order for observed categories, and logical labels are ordered false then true.",
+    "`confusionmat(group,grouphat,'Order',order)` uses the supplied class order, requires every nonmissing label in `group` and `grouphat` to appear in `order`, and includes zero rows or columns for extra order labels that do not appear in the data.",
+    "Rows with missing true or predicted labels are omitted. Numeric `NaN`, empty text, and `<missing>` text are treated as missing labels.",
+    "`[C,order] = confusionmat(...)` returns the class labels corresponding to the rows and columns of `C`, preserving the label family of the inferred or explicit order."
+  ],
+  "examples": [
+    {
+      "description": "Build a numeric confusion matrix",
+      "input": "truth = [1; 1; 2; 2];\npred = [1; 2; 2; 1];\n[C,order] = confusionmat(truth, pred)",
+      "output": "C is [1 1; 1 1] and order is [1; 2]."
+    },
+    {
+      "description": "Use an explicit class order",
+      "input": "C = confusionmat([\"cat\";\"dog\";\"dog\"], [\"dog\";\"dog\";\"cat\"], 'Order', [\"dog\";\"cat\"])",
+      "output": "Rows and columns are ordered as dog, then cat."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `confusionmat` normalize counts?",
+      "answer": "No. It returns raw counts. Normalize rows or columns explicitly after computing `C`."
+    },
+    {
+      "question": "How are labels not present in an explicit Order handled?",
+      "answer": "When `Order` is supplied, it must contain every nonmissing true and predicted label. Extra order labels are allowed and produce zero rows or columns."
+    }
+  ],
+  "links": [
+    {
+      "label": "classify",
+      "url": "./classify"
+    },
+    {
+      "label": "fitctree",
+      "url": "./fitctree"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/confusionmat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/confusionmat.rs"
+  }
+}

@@ -544,7 +544,7 @@ fn ensure_supported_model(model: &TfModel) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn ss_object_to_tf(object: &ObjectInstance) -> BuiltinResult<TfModel> {
+pub(crate) fn ss_object_to_tf(object: &ObjectInstance) -> BuiltinResult<TfModel> {
     let a = matrix_property(object, "A")?;
     let b = matrix_property(object, "B")?;
     let c = matrix_property(object, "C")?;

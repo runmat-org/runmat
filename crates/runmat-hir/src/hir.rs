@@ -149,22 +149,74 @@ pub struct FunctionArgumentValidation {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum FunctionArgValidator {
+    A(Vec<String>),
+    Column,
     Finite,
+    Float,
+    Folder,
+    File,
     NumericOrLogical,
+    Numeric,
     Text,
+    TextScalar,
+    NonzeroLengthText,
     Nonempty,
     ScalarOrEmpty,
     Real,
     Integer,
+    Vector,
     Positive,
     Negative,
     Nonnegative,
+    Nonmissing,
+    NonNan,
     Nonzero,
     Nonpositive,
+    Nonsparse,
+    Sparse,
+    ValidVariableName,
+    UnderlyingType(Vec<String>),
+    Member(Vec<FunctionArgValidationLiteral>),
+    InRange(f64, f64, FunctionArgRangeInclusivity),
     GreaterThanOrEqual(f64),
     LessThanOrEqual(f64),
     GreaterThan(f64),
     LessThan(f64),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+pub struct FunctionArgRangeInclusivity {
+    pub lower: bool,
+    pub upper: bool,
+}
+
+impl FunctionArgRangeInclusivity {
+    pub const CLOSED: Self = Self {
+        lower: true,
+        upper: true,
+    };
+
+    pub const OPEN: Self = Self {
+        lower: false,
+        upper: false,
+    };
+
+    pub const OPEN_LEFT: Self = Self {
+        lower: false,
+        upper: true,
+    };
+
+    pub const OPEN_RIGHT: Self = Self {
+        lower: true,
+        upper: false,
+    };
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum FunctionArgValidationLiteral {
+    Number(f64),
+    Text(String),
+    Bool(bool),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -592,9 +644,11 @@ impl CallableFallbackPolicy {
 
 pub const FEVAL_BUILTIN_NAME: &str = "feval";
 pub const EVAL_BUILTIN_NAME: &str = "eval";
+pub const EVALC_BUILTIN_NAME: &str = "evalc";
 pub const EVALIN_BUILTIN_NAME: &str = "evalin";
 pub const ASSIGNIN_BUILTIN_NAME: &str = "assignin";
 pub const RUN_BUILTIN_NAME: &str = "run";
+pub const RUNTESTS_BUILTIN_NAME: &str = "runtests";
 pub const NARGIN_BUILTIN_NAME: &str = "nargin";
 pub const NARGOUT_BUILTIN_NAME: &str = "nargout";
 pub const NARGINCHK_BUILTIN_NAME: &str = "narginchk";
@@ -641,6 +695,7 @@ pub struct HirClass {
     pub module: ModuleId,
     pub name: QualifiedName,
     pub super_class: Option<ClassId>,
+    pub builtin_super_class: Option<String>,
     pub kind: ClassKind,
     pub is_sealed: bool,
     pub is_abstract: bool,
@@ -976,6 +1031,7 @@ pub struct HirIndex {
     pub imports: Vec<ImportResolution>,
     pub references: Vec<ReferenceResolution>,
     pub calls: Vec<CallResolution>,
+    pub function_handles: Vec<FunctionHandleResolution>,
     pub mutations: Vec<PlaceMutation>,
 }
 
@@ -1019,7 +1075,15 @@ pub struct CallResolution {
     pub name: QualifiedName,
     pub callee: HirCallableRef,
     pub kind: CallKind,
+    pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
+    pub span: Span,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct FunctionHandleResolution {
+    pub name: QualifiedName,
+    pub target: FunctionHandleTarget,
     pub span: Span,
 }
 

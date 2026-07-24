@@ -1,0 +1,94 @@
+{
+  "title": "predict",
+  "category": "stats/ml",
+  "keywords": [
+    "predict",
+    "fitctree",
+    "classification tree",
+    "fitlm",
+    "linear model",
+    "dlnetwork",
+    "regression",
+    "prediction"
+  ],
+  "summary": "Predict responses from a fitted model.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU predictor inputs are gathered to host for model prediction."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::linear_model::tests; builtins::deep_learning::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`predict(mdl,Xnew)` evaluates supported fitted model objects, including `LinearModel` from `fitlm`, `ClassificationTree` from `fitctree`, and supported Deep Learning network objects, on new predictor data.",
+  "behaviors": [
+    "`Xnew` can be a numeric matrix with the same predictor column count used during fitting.",
+    "For table input, predictor variables are selected by the model's `PredictorNames` property.",
+    "For `LinearModel`, `[ypred,yci] = predict(...)` returns pointwise confidence intervals for curve predictions by default.",
+    "For `ClassificationTree`, `[label,score,node,cnum] = predict(...)` returns predicted class labels, posterior probabilities, one-based leaf node ids, and one-based class-number predictions.",
+    "For `dlnetwork`, `SeriesNetwork`, and `DAGNetwork` compatibility objects, `predict(net,Xnew)` returns the score/activation matrix for the supported sequential feed-forward layer subset also used by `forward`.",
+    "Deep Learning prediction accepts `ObservationsIn` with `rows` or `columns`; column-observation input is transposed before execution.",
+    "Linear-model name-value options `Alpha`, `Prediction`, and `Simultaneous` are accepted. `Prediction` can be `curve` or `observation`; `Simultaneous` must be false because simultaneous intervals are not supported yet.",
+    "Classification-tree prediction currently accepts matrix or table predictor data and raises explicit errors for unsupported pruning/subtree options."
+  ],
+  "examples": [
+    {
+      "description": "Predict from a linear model",
+      "input": "mdl = fitlm([0; 1; 2; 3], [1; 3; 5; 7]);\nyhat = predict(mdl, [4; 5])",
+      "output": "yhat is approximately [9; 11]."
+    },
+    {
+      "description": "Return confidence intervals",
+      "input": "[yhat, yci] = predict(mdl, [4; 5], 'Alpha', 0.01)",
+      "output": "yci is a two-column matrix with lower and upper bounds."
+    },
+    {
+      "description": "Predict classes from a classification tree",
+      "input": "tree = fitctree([0; 1; 2; 3], [0; 0; 1; 1], 'MaxNumSplits', 1, 'MinParentSize', 2);\n[label,score] = predict(tree, [0.5; 2.5])",
+      "output": "label is [0; 1], and score has one posterior-probability column per class."
+    },
+    {
+      "description": "Predict from a dlnetwork",
+      "input": "layers = {featureInputLayer(2,'Name','in'); fullyConnectedLayer(2,'Name','fc'); softmaxLayer('Name','prob')};\nnet = dlnetwork(layers);\nscores = predict(net, [1 2; 3 4])",
+      "output": "scores has one row per observation."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which model classes are supported?",
+      "answer": "Currently `predict` supports `LinearModel` objects returned by `fitlm`, `ClassificationTree` objects returned by `fitctree`, and supported Deep Learning network compatibility objects."
+    }
+  ],
+  "links": [
+    {
+      "label": "dlnetwork",
+      "url": "./dlnetwork"
+    },
+    {
+      "label": "forward",
+      "url": "./forward"
+    },
+    {
+      "label": "fitctree",
+      "url": "./fitctree"
+    },
+    {
+      "label": "fitlm",
+      "url": "./fitlm"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/linear_model.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/linear_model.rs"
+  }
+}

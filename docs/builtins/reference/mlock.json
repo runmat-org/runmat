@@ -1,0 +1,59 @@
+{
+  "title": "mlock",
+  "category": "introspection",
+  "keywords": ["mlock", "persistent", "lock", "function"],
+  "summary": "Mark the current function or script as locked in RunMat's compatibility registry.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side function-state compatibility only."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::debugging::tests::mlock_mislocked_munlock_current_function",
+    "integration": "debugger_compat_commands_execute_through_core"
+  },
+  "description": "`mlock` records the active function or script in RunMat's lock registry so `mislocked` and `munlock` behave predictably.",
+  "behaviors": [
+    "`mlock` accepts no inputs and locks the active function or script name.",
+    "The registry is thread-local execution state.",
+    "RunMat does not yet evict parsed/compiled MATLAB functions in the same way MATLAB clears functions from memory, so the lock currently affects compatibility queries rather than code-cache eviction."
+  ],
+  "examples": [
+    {
+      "description": "Lock the current function",
+      "input": "mlock"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `mlock` prevent RunMat from clearing compiled code?",
+      "answer": "RunMat does not currently expose MATLAB-style function-cache eviction. The lock state is implemented for `mislocked`/`munlock` compatibility."
+    }
+  ],
+  "links": [
+    {
+      "label": "mislocked",
+      "url": "./mislocked"
+    },
+    {
+      "label": "munlock",
+      "url": "./munlock"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/debugging.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/debugging.rs"
+  },
+  "gpu_behavior": [
+    "`mlock` is host-side execution-state bookkeeping and has no GPU/provider behavior."
+  ]
+}

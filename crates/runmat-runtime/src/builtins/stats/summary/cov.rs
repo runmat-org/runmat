@@ -1,6 +1,9 @@
 //! MATLAB-compatible `cov` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{CovNormalization, CovRows, CovarianceOptions};
+use runmat_accelerate_api::{
+    AccelProvider, CovNormalization, CovRows, CovarianceOptions, GpuTensorHandle, GpuTensorStorage,
+    HostTensorView,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -474,38 +477,178 @@ pub enum CovWeightSpec {
 }
 
 async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
-    if args.rows != CovRows::All || args.weight_vector.is_some() {
+    if args.rows != CovRows::All {
         return Ok(None);
     }
-
-    let provider = match runmat_accelerate_api::provider() {
-        Some(p) => p,
-        None => return Ok(None),
-    };
 
     let first_handle = match &args.first {
         Value::GpuTensor(handle) => handle,
         _ => return Ok(None),
     };
 
+    let provider = match runmat_accelerate_api::provider_for_handle(first_handle)
+        .or_else(runmat_accelerate_api::provider)
+    {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+
     let maybe_second_handle = match &args.second {
-        Some(Value::GpuTensor(handle)) => Some(handle),
+        Some(Value::GpuTensor(handle)) => {
+            let Some(second_provider) = runmat_accelerate_api::provider_for_handle(handle) else {
+                return Ok(None);
+            };
+            if !std::ptr::eq(provider, second_provider) {
+                return Ok(None);
+            }
+            Some(handle)
+        }
         Some(_) => return Ok(None),
         None => None,
     };
 
+    let rows = gpu_rows(first_handle)?;
+    let mut temporary_inputs = Vec::new();
+    let weight_handle = match materialize_gpu_weight_vector(
+        provider,
+        args.weight_vector.as_ref(),
+        rows,
+        &mut temporary_inputs,
+    )
+    .await
+    {
+        Ok(weight) => weight,
+        Err(err) => {
+            free_temporary_gpu_inputs(provider, temporary_inputs);
+            return Err(err);
+        }
+    };
+    if args.weight_vector.is_some() && weight_handle.is_none() {
+        free_temporary_gpu_inputs(provider, temporary_inputs);
+        return Ok(None);
+    }
+
     let options = CovarianceOptions {
         normalization: args.normalization,
         rows: args.rows,
-        has_weight_vector: false,
+        has_weight_vector: weight_handle.is_some(),
     };
 
     match provider
-        .covariance(first_handle, maybe_second_handle, None, &options)
+        .covariance(
+            first_handle,
+            maybe_second_handle,
+            weight_handle.as_ref(),
+            &options,
+        )
         .await
     {
-        Ok(result) => Ok(Some(Value::GpuTensor(result))),
-        Err(_) => Ok(None),
+        Ok(result) => {
+            free_temporary_gpu_inputs(provider, temporary_inputs);
+            Ok(Some(Value::GpuTensor(result)))
+        }
+        Err(_) => {
+            free_temporary_gpu_inputs(provider, temporary_inputs);
+            Ok(None)
+        }
+    }
+}
+
+fn gpu_rows(handle: &GpuTensorHandle) -> BuiltinResult<usize> {
+    if handle.shape.len() > 2 {
+        return Err(cov_error_with_detail(
+            &COV_ERROR_INVALID_ARGUMENT,
+            "inputs must be 2-D matrices or vectors",
+        ));
+    }
+    Ok(if handle.shape.is_empty() {
+        1
+    } else {
+        handle.shape[0]
+    })
+}
+
+async fn materialize_gpu_weight_vector(
+    provider: &dyn AccelProvider,
+    value: Option<&Value>,
+    expected_rows: usize,
+    temporary_inputs: &mut Vec<GpuTensorHandle>,
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if expected_rows == 0 {
+        return Err(cov_error_with_detail(
+            &COV_ERROR_INVALID_ARGUMENT,
+            "weight vector cannot be empty",
+        ));
+    }
+
+    match value {
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved
+            {
+                return Ok(None);
+            }
+            validate_gpu_weight_shape(handle, expected_rows)?;
+            let Some(weight_provider) = runmat_accelerate_api::provider_for_handle(handle) else {
+                return Ok(None);
+            };
+            if !std::ptr::eq(provider, weight_provider) {
+                return Ok(None);
+            }
+            Ok(Some(handle.clone()))
+        }
+        other => {
+            let weights = value_to_weight_vector(other.clone(), expected_rows).await?;
+            let shape = [expected_rows, 1];
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &weights,
+                    shape: &shape,
+                })
+                .map_err(|err| cov_internal_error(err.to_string()))?;
+            temporary_inputs.push(handle.clone());
+            Ok(Some(handle))
+        }
+    }
+}
+
+fn validate_gpu_weight_shape(handle: &GpuTensorHandle, expected_rows: usize) -> BuiltinResult<()> {
+    if handle.shape.len() > 2 {
+        return Err(cov_error_with_detail(
+            &COV_ERROR_INVALID_ARGUMENT,
+            "weight vector must be one-dimensional",
+        ));
+    }
+    let rows = if handle.shape.is_empty() {
+        1
+    } else {
+        handle.shape[0]
+    };
+    let cols = if handle.shape.len() >= 2 {
+        handle.shape[1]
+    } else {
+        1
+    };
+    if rows != 1 && cols != 1 {
+        return Err(cov_error_with_detail(
+            &COV_ERROR_INVALID_ARGUMENT,
+            "weight vector must be one-dimensional",
+        ));
+    }
+    if rows != expected_rows && cols != expected_rows {
+        return Err(cov_error_with_detail(
+            &COV_ERROR_WEIGHT_VECTOR_LENGTH_MISMATCH,
+            format!("expected {expected_rows} elements"),
+        ));
+    }
+    Ok(())
+}
+
+fn free_temporary_gpu_inputs(provider: &dyn AccelProvider, handles: Vec<GpuTensorHandle>) {
+    for handle in handles {
+        let _ = provider.free(&handle);
     }
 }
 
@@ -1424,11 +1567,120 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn cov_gpu_host_weights_return_resident_result() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(
+                vec![
+                    4.0, 4.2, 3.9, 4.3, 4.1, //
+                    2.0, 2.1, 2.0, 2.1, 2.2,
+                ],
+                vec![5, 2],
+            )
+            .unwrap();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let weights = Tensor::new(vec![1.0, 1.0, 1.0, 2.0, 2.0], vec![5, 1]).unwrap();
+
+            let result = block_on(cov_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::Tensor(weights)],
+            ))
+            .expect("weighted cov");
+            assert!(matches!(result, Value::GpuTensor(_)));
+            let gathered = test_support::gather(result).expect("gather");
+            let expected = [
+                0.022380952380952376,
+                0.004999999999999994, //
+                0.004999999999999994,
+                0.006666666666666678,
+            ];
+            assert_tensor_close(&gathered, &expected, 1.0e-6);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cov_gpu_resident_weights_return_resident_result() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(
+                vec![
+                    4.0, 4.2, 3.9, 4.3, 4.1, //
+                    2.0, 2.1, 2.0, 2.1, 2.2,
+                ],
+                vec![5, 2],
+            )
+            .unwrap();
+            let weights = Tensor::new(vec![1.0, 1.0, 1.0, 2.0, 2.0], vec![1, 5]).unwrap();
+            let data = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &tensor.data,
+                    shape: &tensor.shape,
+                })
+                .expect("upload data");
+            let weight_handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &weights.data,
+                    shape: &weights.shape,
+                })
+                .expect("upload weights");
+
+            let result = block_on(cov_builtin(
+                Value::GpuTensor(data),
+                vec![Value::GpuTensor(weight_handle)],
+            ))
+            .expect("weighted cov");
+            assert!(matches!(result, Value::GpuTensor(_)));
+            let gathered = test_support::gather(result).expect("gather");
+            let expected = [
+                0.022380952380952376,
+                0.004999999999999994, //
+                0.004999999999999994,
+                0.006666666666666678,
+            ];
+            assert_tensor_close(&gathered, &expected, 1.0e-6);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cov_gpu_rejects_negative_resident_weights() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+            let weights = Tensor::new(vec![1.0, -1.0], vec![2, 1]).unwrap();
+            let data = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &tensor.data,
+                    shape: &tensor.shape,
+                })
+                .expect("upload data");
+            let weight_handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &weights.data,
+                    shape: &weights.shape,
+                })
+                .expect("upload weights");
+
+            let err = block_on(cov_builtin(
+                Value::GpuTensor(data),
+                vec![Value::GpuTensor(weight_handle)],
+            ))
+            .expect_err("negative weights should fail");
+            assert_eq!(err.identifier(), COV_ERROR_INVALID_ARGUMENT.identifier);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     #[cfg(feature = "wgpu")]
     fn cov_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        ) else {
+            return;
+        };
 
         let tensor = Tensor::new(
             vec![
@@ -1446,7 +1698,6 @@ pub(crate) mod tests {
             other => panic!("expected tensor result, got {other:?}"),
         };
 
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.data,
             shape: &tensor.shape,
@@ -1457,5 +1708,59 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu_value).expect("gather");
 
         assert_tensor_close(&gathered, &cpu_tensor.data, 1.0e-6);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn cov_wgpu_weighted_matches_cpu_and_stays_resident() {
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+
+        let tensor = Tensor::new(
+            vec![
+                4.0, 4.2, 3.9, 4.3, 4.1, //
+                2.0, 2.1, 2.0, 2.1, 2.2,
+            ],
+            vec![5, 2],
+        )
+        .unwrap();
+        let weights = Tensor::new(vec![1.0, 1.0, 1.0, 2.0, 2.0], vec![1, 5]).unwrap();
+
+        let cpu_result = block_on(cov_builtin(
+            Value::Tensor(tensor.clone()),
+            vec![Value::Tensor(weights.clone())],
+        ))
+        .expect("cov");
+        let cpu_tensor = match cpu_result {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor result, got {other:?}"),
+        };
+
+        let data_handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            })
+            .expect("upload data");
+        let weight_handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &weights.data,
+                shape: &weights.shape,
+            })
+            .expect("upload weights");
+
+        let gpu_value = cov_builtin_sync(
+            Value::GpuTensor(data_handle),
+            vec![Value::GpuTensor(weight_handle)],
+        )
+        .expect("weighted cov");
+        assert!(matches!(gpu_value, Value::GpuTensor(_)));
+        let gathered = test_support::gather(gpu_value).expect("gather");
+
+        assert_tensor_close(&gathered, &cpu_tensor.data, 1.0e-5);
     }
 }

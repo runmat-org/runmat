@@ -1,4 +1,6 @@
-use anyhow::{Context, Result};
+#[cfg(feature = "wgpu")]
+use anyhow::Context;
+use anyhow::Result;
 
 #[cfg(feature = "wgpu")]
 fn print_threshold_delta(label: &str, entry: &runmat_accelerate::ThresholdDeltaEntry) {

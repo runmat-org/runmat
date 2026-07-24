@@ -1,0 +1,14 @@
+{
+  "title": "xmlwrite",
+  "category": "io/repl_fs",
+  "keywords": ["xmlwrite", "xml", "file", "dom"],
+  "summary": "Serialize lightweight XML DOM-compatible values.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Host file I/O; GPU-resident inputs are gathered before execution."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": null, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::io::repl_fs::compat::tests", "integration": null},
+  "description": "`xmlwrite(document)` serializes a lightweight XML document or element object to text; `xmlwrite(filename, document)` writes the serialized XML to a file.",
+  "behaviors": ["Serializes the lightweight `org.w3c.dom.Document` and `org.w3c.dom.Element` objects returned by `xmlread`, including tag names, text content, attributes, and child nodes.", "Accepts XML text values and scalar structs for compatibility with simple file-emission workflows.", "Escapes XML text and attribute values. This is not a full Java DOM implementation and does not perform schema validation or formatting preservation after object mutation."],
+  "examples": [{"description": "Write a DOM document", "input": "doc = xmlread('config.xml'); xmlwrite('copy.xml', doc)", "output": "copy.xml written"}],
+  "links": [{"label": "xmlread", "url": "./xmlread"}, {"label": "readstruct", "url": "./readstruct"}]
+}

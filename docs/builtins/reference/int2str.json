@@ -1,0 +1,113 @@
+{
+  "title": "int2str",
+  "category": "strings/core",
+  "keywords": [
+    "int2str",
+    "integer to string",
+    "number to string",
+    "round",
+    "gpu"
+  ],
+  "summary": "Convert rounded integer values to a character array in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Accepts GPU tensors but gathers them to host memory before rounding and formatting."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::int2str::tests",
+    "integration": "builtins::strings::core::int2str::tests::int2str_gpu_tensor_roundtrip"
+  },
+  "description": "`int2str(N)` treats `N` as a numeric or logical scalar, vector, or matrix, rounds floating-point values to integers, and returns a MATLAB `char` array.",
+  "behaviors": [
+    "Floating-point values are rounded before conversion.",
+    "Scalar and vector inputs return one text row; matrix inputs return one character row per numeric row.",
+    "Columns are padded with spaces so each textual column aligns across rows.",
+    "Logical and integer inputs are accepted and formatted as numeric 0/1 or integer values.",
+    "GPU tensors are gathered to host memory before formatting.",
+    "Empty inputs return a `0x0` character array.",
+    "Complex inputs, inputs with more than two dimensions, and non-numeric inputs raise descriptive errors."
+  ],
+  "examples": [
+    {
+      "description": "Convert An Integer",
+      "input": "chr = int2str(256)",
+      "output": "chr =\n    '256'"
+    },
+    {
+      "description": "Round A Floating-Point Value",
+      "input": "chr = int2str(3.14159)",
+      "output": "chr =\n    '3'"
+    },
+    {
+      "description": "Format A Numeric Matrix",
+      "input": "chr = int2str([5 10 20; 100 200 400])",
+      "output": "chr =\n    '  5   10   20'\n    '100  200  400'"
+    },
+    {
+      "description": "Convert GPU-Resident Data",
+      "input": "G = gpuArray([10.2 20.8]);\nchr = int2str(G)",
+      "output": "chr =\n    '10  21'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `int2str` different from `num2str`?",
+      "answer": "`int2str` rounds numeric values to integers first and has no precision or format-string arguments. Use `num2str` when you need decimal formatting or explicit `printf`-style control."
+    },
+    {
+      "question": "Does `int2str` return a modern string scalar?",
+      "answer": "No. MATLAB `int2str` returns a character array. Wrap the result with `string(...)` if you need a string scalar."
+    },
+    {
+      "question": "Does `int2str` run on the GPU?",
+      "answer": "No. GPU inputs are accepted, gathered to host memory, and formatted on the CPU, matching MATLAB's documented GPU-array limitation."
+    },
+    {
+      "question": "Does `int2str` support complex inputs?",
+      "answer": "No. RunMat rejects complex inputs for `int2str` because MATLAB documents the input as a numeric matrix of integer values and does not document complex formatting for this function."
+    }
+  ],
+  "links": [
+    {
+      "label": "num2str",
+      "url": "./num2str"
+    },
+    {
+      "label": "sprintf",
+      "url": "./sprintf"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/int2str.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/int2str.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "chr = int2str(N)"
+    },
+    "points": [
+      "`N` is a numeric or logical scalar, vector, or matrix.",
+      "Floating-point values are rounded before text conversion.",
+      "Returns `chr`, a MATLAB `char` array with matrix columns padded for alignment."
+    ]
+  }
+}

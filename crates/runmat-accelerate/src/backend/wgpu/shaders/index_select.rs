@@ -7,7 +7,7 @@ struct Indices {
 };
 struct Params {
   count: u32,
-  _pad0: u32,
+  lane_factor: u32,
   _pad1: u32,
   _pad2: u32,
 };
@@ -22,7 +22,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
   let lin = Ind.data[idx];
-  Out.data[idx] = Source.data[lin];
+  let src = lin * Pm.lane_factor;
+  let dst = idx * Pm.lane_factor;
+  var lane = 0u;
+  loop {
+    if (lane >= Pm.lane_factor) {
+      break;
+    }
+    Out.data[dst + lane] = Source.data[src + lane];
+    lane = lane + 1u;
+  }
 }
 "#;
 
@@ -35,7 +44,7 @@ struct Indices {
 };
 struct Params {
   count: u32,
-  _pad0: u32,
+  lane_factor: u32,
   _pad1: u32,
   _pad2: u32,
 };
@@ -50,7 +59,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
   let lin = Ind.data[idx];
-  Out.data[idx] = Source.data[lin];
+  let src = lin * Pm.lane_factor;
+  let dst = idx * Pm.lane_factor;
+  var lane = 0u;
+  loop {
+    if (lane >= Pm.lane_factor) {
+      break;
+    }
+    Out.data[dst + lane] = Source.data[src + lane];
+    lane = lane + 1u;
+  }
 }
 "#;
 
@@ -63,7 +81,7 @@ struct Indices {
 };
 struct Params {
   count: u32,
-  _pad0: u32,
+  lane_factor: u32,
   _pad1: u32,
   _pad2: u32,
 };
@@ -78,7 +96,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
   let lin = Ind.data[idx];
-  Target.data[lin] = Values.data[idx];
+  let dst = lin * Pm.lane_factor;
+  let src = idx * Pm.lane_factor;
+  var lane = 0u;
+  loop {
+    if (lane >= Pm.lane_factor) {
+      break;
+    }
+    Target.data[dst + lane] = Values.data[src + lane];
+    lane = lane + 1u;
+  }
 }
 "#;
 
@@ -91,7 +118,7 @@ struct Indices {
 };
 struct Params {
   count: u32,
-  _pad0: u32,
+  lane_factor: u32,
   _pad1: u32,
   _pad2: u32,
 };
@@ -106,6 +133,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
   let lin = Ind.data[idx];
-  Target.data[lin] = Values.data[idx];
+  let dst = lin * Pm.lane_factor;
+  let src = idx * Pm.lane_factor;
+  var lane = 0u;
+  loop {
+    if (lane >= Pm.lane_factor) {
+      break;
+    }
+    Target.data[dst + lane] = Values.data[src + lane];
+    lane = lane + 1u;
+  }
 }
 "#;

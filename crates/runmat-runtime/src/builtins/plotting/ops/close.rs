@@ -12,12 +12,18 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 pub(crate) fn close_plot_targets(rest: &[Value]) -> crate::BuiltinResult<f64> {
     match parse_close_action(rest)? {
         FigureAction::Current => {
+            if figure_handles().is_empty() {
+                return Ok(0.0);
+            }
             let closed = close_figure_with_builtin("close", None)?;
             Ok(closed.as_u32() as f64)
         }
         FigureAction::Handles(handles) => {
             let unique: BTreeSet<u32> = handles.into_iter().map(|h| h.as_u32()).collect();
             if unique.is_empty() {
+                if figure_handles().is_empty() {
+                    return Ok(0.0);
+                }
                 let closed = close_figure_with_builtin("close", None)?;
                 return Ok(closed.as_u32() as f64);
             }
@@ -50,17 +56,24 @@ pub(crate) fn close_plot_targets(rest: &[Value]) -> crate::BuiltinResult<f64> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::builtins::plotting::{
+        lock_plot_test_context, reset_hold_state_for_run, reset_plot_state,
+        tests::ensure_plot_test_env, PlotTestLockGuard,
+    };
     use runmat_builtins::{ResolveContext, Type};
 
-    fn setup_plot_tests() {
+    fn setup_plot_tests() -> PlotTestLockGuard {
+        let guard = lock_plot_test_context();
         ensure_plot_test_env();
+        reset_plot_state();
+        reset_hold_state_for_run();
+        guard
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_defaults_to_current() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         assert!(matches!(
             parse_close_action(&[]).unwrap(),
             FigureAction::Current
@@ -70,7 +83,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_numeric_handles() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let values = vec![Value::Num(3.0), Value::Num(1.0)];
         match parse_close_action(&values).unwrap() {
             FigureAction::Handles(handles) => {
@@ -85,12 +98,37 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_all_flag() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let values = vec![Value::String("all".to_string())];
         assert!(matches!(
             parse_close_action(&values).unwrap(),
             FigureAction::All
         ));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn close_current_is_noop_when_no_figures_exist() {
+        let _guard = setup_plot_tests();
+        assert!(figure_handles().is_empty());
+
+        let result = close_plot_targets(&[]).expect("bare close should be safe with no figures");
+        assert_eq!(result, 0.0);
+        assert!(figure_handles().is_empty());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn close_explicit_missing_handle_still_errors() {
+        let _guard = setup_plot_tests();
+        assert!(figure_handles().is_empty());
+
+        let err = close_plot_targets(&[Value::Num(99.0)]).expect_err("explicit missing handle");
+        assert!(
+            err.message().contains("figure handle 99 does not exist"),
+            "unexpected error: {}",
+            err.message()
+        );
     }
 
     #[test]

@@ -1,0 +1,66 @@
+{
+  "title": "onehotencode",
+  "category": "stats/summary",
+  "keywords": [
+    "onehotencode",
+    "one hot",
+    "classification",
+    "categorical",
+    "statistics"
+  ],
+  "summary": "Encode class labels as one-hot vectors.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Class discovery and label matching run on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::encoding::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`onehotencode(A,featureDim)` expands labels in `A` into one-hot vectors along `featureDim`.",
+  "behaviors": [
+    "`featureDim` must identify a singleton dimension in `A`; dimensions beyond `ndims(A)` are padded with singleton dimensions.",
+    "Categorical inputs infer classes from the full category order, including categories not observed in the input values.",
+    "Noncategorical inputs require `ClassNames`; class names must be unique and match the input label type.",
+    "`OutputType` supports `double`, `single`, and `logical`; `single` is represented with RunMat's numeric tensor storage.",
+    "Missing labels and labels not listed in `ClassNames` encode as all-`NaN` feature vectors for numeric output.",
+    "Logical output cannot represent missing labels or labels excluded by `ClassNames` and raises an error in those cases."
+  ],
+  "examples": [
+    {
+      "description": "Encode string labels along columns",
+      "input": "B = onehotencode([\"red\";\"blue\";\"red\"], 2, 'ClassNames', [\"blue\";\"red\"], 'OutputType', 'logical')",
+      "output": "B is a 3-by-2 logical array."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can I control the class order?",
+      "answer": "Yes. Supply the `ClassNames` name-value option for noncategorical inputs, or use the category order of a categorical input."
+    }
+  ],
+  "links": [
+    {
+      "label": "onehotdecode",
+      "url": "./onehotdecode"
+    },
+    {
+      "label": "dummyvar",
+      "url": "./dummyvar"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/encoding.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/encoding.rs"
+  }
+}

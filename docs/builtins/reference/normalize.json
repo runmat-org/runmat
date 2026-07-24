@@ -1,0 +1,32 @@
+{
+  "title": "normalize",
+  "category": "stats/summary",
+  "keywords": ["normalize", "zscore", "scale", "range", "norm", "center", "statistics"],
+  "summary": "Normalize data by centering and scaling along a dimension.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "matlab",
+    "notes": "GPU inputs currently use the same resident fallback as other statistics helpers: gather to host for parameter estimation and normalization."
+  },
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::stats::summary::normalize::tests", "integration": null},
+  "description": "`normalize(A)` returns z-scores of `A` along the first non-singleton dimension.",
+  "behaviors": [
+    "Supports numeric, logical, complex, and gpuArray inputs.",
+    "The optional `dim` argument chooses the operating dimension.",
+    "Default z-score normalization subtracts the mean and divides by sample standard deviation, omitting NaN values while preserving NaNs in the output.",
+    "Supports `\"zscore\"`, `\"zscore\",\"robust\"`, `\"norm\"`, `\"norm\",p`, `\"scale\"`, `\"range\"`, `\"center\"`, and `\"medianiqr\"` methods.",
+    "Supports combined `\"center\", centertype, \"scale\", scaletype` forms, including explicit numeric center and scale arrays compatible by implicit expansion.",
+    "`[N,C,S] = normalize(...)` returns normalized values plus the center and scale parameters so they can be reused on another array.",
+    "Table and timetable `DataVariables` and `ReplaceValues` forms are tracked with the broader tabular workflow work."
+  ],
+  "examples": [
+    {"description": "Default z-score normalization", "input": "N = normalize([1; 2; 3])", "output": "N = [-1; 0; 1]"},
+    {"description": "Normalize by Euclidean norm", "input": "N = normalize([3; 4], \"norm\")", "output": "N = [0.6; 0.8]"}
+  ],
+  "links": [{"label": "zscore", "url": "./zscore"}, {"label": "std", "url": "./std"}, {"label": "mean", "url": "./mean"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/stats/summary/normalize.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/normalize.rs"}
+}

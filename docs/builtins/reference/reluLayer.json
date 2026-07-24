@@ -1,0 +1,23 @@
+{
+  "title": "reluLayer",
+  "category": "deep_learning",
+  "keywords": ["reluLayer", "deep learning", "activation"],
+  "summary": "Create a ReLU layer compatibility object.",
+  "description": "`reluLayer` creates metadata for ReLU activation layers in layer arrays and graphs.",
+  "behaviors": ["`Name`, `Description`, and additional common options are stored as properties."],
+  "examples": [
+    {
+      "description": "Create ReLU",
+      "input": "layer = reluLayer('Name', 'relu1')",
+      "output": "`layer` is a ReLU layer compatibility object."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "layer = reluLayer\nlayer = reluLayer(Name, Value)",
+      "output": "Layer compatibility object."
+    }
+  },
+  "gpu_residency": "Layer construction is host metadata work and has no provider kernel."
+}

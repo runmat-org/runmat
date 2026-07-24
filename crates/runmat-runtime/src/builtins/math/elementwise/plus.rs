@@ -16,6 +16,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
+use crate::builtins::math::elementwise::sparse::{try_sparse_binary, SparseBinaryOp};
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -161,11 +163,43 @@ const PLUS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "plus: internal error",
 };
 
-const PLUS_ERRORS: [BuiltinErrorDescriptor; 4] = [
+const PLUS_ERROR_SPARSE_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PLUS.SPARSE_SIZE_MISMATCH",
+    identifier: Some("RunMat:plus:SparseSizeMismatch"),
+    when: "Sparse operands cannot be implicitly expanded to a compatible result shape.",
+    message: "plus: sparse operand sizes are not compatible",
+};
+
+const PLUS_ERROR_SPARSE_UNSUPPORTED_OPERAND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PLUS.SPARSE_UNSUPPORTED_OPERAND",
+    identifier: Some("RunMat:plus:SparseUnsupportedOperand"),
+    when: "Sparse arithmetic is requested with an unsupported operand class or residency.",
+    message: "plus: unsupported sparse arithmetic operand",
+};
+
+const PLUS_ERROR_SPARSE_DENSIFY_TOO_LARGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PLUS.SPARSE_DENSIFY_TOO_LARGE",
+    identifier: Some("RunMat:plus:SparseDensifyTooLarge"),
+    when: "A sparse operation would have to materialize a dense or fully populated sparse result beyond the runtime limit.",
+    message: "plus: sparse arithmetic result is too large to materialize",
+};
+
+const PLUS_ERROR_SPARSE_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PLUS.SPARSE_INTERNAL",
+    identifier: Some("RunMat:plus:SparseInternal"),
+    when: "Sparse arithmetic storage construction or conversion failed unexpectedly.",
+    message: "plus: sparse arithmetic internal error",
+};
+
+const PLUS_ERRORS: [BuiltinErrorDescriptor; 8] = [
     PLUS_ERROR_INVALID_ARGUMENT,
     PLUS_ERROR_INVALID_INPUT,
     PLUS_ERROR_SIZE_MISMATCH,
     PLUS_ERROR_INTERNAL,
+    PLUS_ERROR_SPARSE_SIZE_MISMATCH,
+    PLUS_ERROR_SPARSE_UNSUPPORTED_OPERAND,
+    PLUS_ERROR_SPARSE_DENSIFY_TOO_LARGE,
+    PLUS_ERROR_SPARSE_INTERNAL,
 ];
 
 pub const PLUS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -621,6 +655,14 @@ fn scalar_plus_value(lhs: &Value, rhs: &Value) -> Option<Value> {
 
 fn plus_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if let Some(result) = symbolic_binary(&lhs, &rhs, SymbolicBinaryOp::Add) {
+        return Ok(result);
+    }
+    if let Some(result) = try_sparse_binary(&lhs, &rhs, SparseBinaryOp::Add, BUILTIN_NAME) {
+        return result;
+    }
+    if let Some(result) =
+        try_integer_binary(&lhs, &rhs, IntegerBinaryOp::Add, BUILTIN_NAME).map_err(builtin_error)?
+    {
         return Ok(result);
     }
     if let Some(result) = scalar_plus_value(&lhs, &rhs) {
@@ -1344,13 +1386,10 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn plus_int_inputs_promote_to_double() {
+    fn plus_same_class_integer_inputs_preserve_class() {
         let lhs = Value::Int(IntValue::I32(3));
         let rhs = Value::Int(IntValue::I32(5));
         let result = plus_builtin(lhs, rhs, Vec::new()).expect("plus");
-        match result {
-            Value::Num(v) => assert_eq!(v, 8.0),
-            other => panic!("expected numeric scalar, got {other:?}"),
-        }
+        assert_eq!(result, Value::Int(IntValue::I32(8)));
     }
 }

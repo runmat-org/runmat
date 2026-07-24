@@ -1,0 +1,92 @@
+{
+  "title": "hex2dec",
+  "category": "comms/conversion",
+  "keywords": [
+    "hex2dec",
+    "hexadecimal",
+    "decimal",
+    "base conversion",
+    "twos complement"
+  ],
+  "summary": "Convert hexadecimal text to decimal numbers in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Text inputs are converted on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::comms::binary_conversion::tests",
+    "integration": null
+  },
+  "description": "`hex2dec(hexStr)` converts hexadecimal character vectors, character matrices, string arrays, or cell arrays of text to decimal double values. Character matrix rows and cell text entries produce a column vector; string arrays preserve their shape.",
+  "behaviors": [
+    "Character vectors and string scalars produce a scalar double result.",
+    "Each row of a character matrix is converted independently.",
+    "String arrays preserve their input shape in the numeric output.",
+    "Cell arrays of character vectors or strings are converted element-by-element and returned as a column vector.",
+    "Optional `0x` or `0X` prefixes are accepted.",
+    "Unsigned suffixes `u8`, `u16`, `u32`, and `u64` are accepted when the digits fit in the requested width.",
+    "Signed suffixes `s8`, `s16`, `s32`, and `s64` interpret the digits as two's-complement signed values.",
+    "Results that exceed RunMat's exact integer range are rejected instead of silently losing precision.",
+    "Hexadecimal letters may be uppercase or lowercase."
+  ],
+  "examples": [
+    {
+      "description": "Convert a hexadecimal character vector",
+      "input": "d = hex2dec('3FF')",
+      "output": "d = 1023"
+    },
+    {
+      "description": "Convert a string array and preserve its shape",
+      "input": "d = hex2dec([\"3FF\" \"7A\" \"E\"])",
+      "output": "d = [1023 122 14]"
+    },
+    {
+      "description": "Accept a hexadecimal prefix",
+      "input": "d = hex2dec('0xFF')",
+      "output": "d = 255"
+    },
+    {
+      "description": "Interpret a signed suffix",
+      "input": "d = hex2dec('0xFFs8')",
+      "output": "d = -1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can hex2dec parse prefixed hexadecimal literals?",
+      "answer": "Yes. RunMat accepts `0x` and `0X` prefixes."
+    },
+    {
+      "question": "What do signed suffixes mean?",
+      "answer": "A suffix such as `s8` treats the parsed digits as a signed two's-complement integer with that width."
+    },
+    {
+      "question": "How does RunMat handle very large hexadecimal values?",
+      "answer": "RunMat returns double values only when the result is exactly representable; larger results raise an error instead of returning rounded values."
+    }
+  ],
+  "links": [
+    {
+      "label": "dec2hex",
+      "url": "./dec2hex"
+    },
+    {
+      "label": "bin2dec",
+      "url": "./bin2dec"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/comms/binary_conversion.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/comms/binary_conversion.rs"
+  }
+}

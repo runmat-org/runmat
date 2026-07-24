@@ -498,6 +498,7 @@ fn infer_stairs_x_from_y(y: &Value) -> BuiltinResult<Value> {
         shape: vec![len],
         rows: len,
         cols: 1,
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     }))
 }
@@ -636,6 +637,7 @@ pub(crate) mod tests {
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,

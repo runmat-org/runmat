@@ -1,3 +1,4 @@
+use std::collections::{HashMap, VecDeque};
 use std::f64::consts::PI;
 use std::sync::{Mutex, OnceLock};
 
@@ -81,9 +82,47 @@ impl From<RngSnapshot> for GlobalRng {
 }
 
 static RNG_STATE: OnceLock<Mutex<GlobalRng>> = OnceLock::new();
+const LEGACY_TOKEN_BASE: u64 = (1_u64 << 52) + 0x5eed;
+const LEGACY_TOKEN_CAPACITY: usize = 1024;
+
+struct LegacyTokenState {
+    next: u64,
+    entries: HashMap<u64, RngSnapshot>,
+    order: VecDeque<u64>,
+}
+
+impl LegacyTokenState {
+    fn new() -> Self {
+        Self {
+            next: 0,
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+
+    fn insert(&mut self, snapshot: RngSnapshot) -> u64 {
+        let token = LEGACY_TOKEN_BASE + self.next;
+        self.next = self.next.wrapping_add(1);
+        if self.entries.insert(token, snapshot).is_none() {
+            self.order.push_back(token);
+        }
+        while self.order.len() > LEGACY_TOKEN_CAPACITY {
+            if let Some(oldest) = self.order.pop_front() {
+                self.entries.remove(&oldest);
+            }
+        }
+        token
+    }
+}
+
+static LEGACY_TOKENS: OnceLock<Mutex<LegacyTokenState>> = OnceLock::new();
 
 fn rng_state() -> &'static Mutex<GlobalRng> {
     RNG_STATE.get_or_init(|| Mutex::new(GlobalRng::new()))
+}
+
+fn legacy_tokens() -> &'static Mutex<LegacyTokenState> {
+    LEGACY_TOKENS.get_or_init(|| Mutex::new(LegacyTokenState::new()))
 }
 
 fn mix_seed(seed: u64) -> u64 {
@@ -122,6 +161,33 @@ pub(crate) fn apply_snapshot(snapshot: RngSnapshot) -> BuiltinResult<RngSnapshot
 pub(crate) fn set_seed(seed: u64) -> BuiltinResult<RngSnapshot> {
     let state = mix_seed(seed);
     apply_snapshot(RngSnapshot::new(state, Some(seed), RngAlgorithm::RunMatLcg))
+}
+
+pub(crate) fn legacy_seed_value() -> BuiltinResult<u64> {
+    let snapshot = snapshot()?;
+    if let Some(seed) = snapshot.seed {
+        if snapshot.state == mix_seed(seed) {
+            return Ok(seed);
+        }
+    }
+    let mut tokens = legacy_tokens()
+        .lock()
+        .map_err(|_| random_error("rand", "rand: failed to acquire legacy RNG token lock"))?;
+    Ok(tokens.insert(snapshot))
+}
+
+pub(crate) fn set_legacy_seed(seed_or_token: u64) -> BuiltinResult<RngSnapshot> {
+    if let Some(snapshot) = legacy_tokens()
+        .lock()
+        .map_err(|_| random_error("rand", "rand: failed to acquire legacy RNG token lock"))?
+        .entries
+        .get(&seed_or_token)
+        .copied()
+    {
+        apply_snapshot(snapshot)
+    } else {
+        set_seed(seed_or_token)
+    }
 }
 
 pub(crate) fn set_default() -> BuiltinResult<RngSnapshot> {
@@ -253,6 +319,198 @@ pub(crate) fn generate_normal_scaled(
     Ok(out)
 }
 
+pub(crate) fn generate_student_t(nu: &[f64], len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    let mut out = Vec::with_capacity(len);
+    let mut spare_normal = None;
+    for idx in 0..len {
+        let df = if nu.len() == 1 { nu[0] } else { nu[idx] };
+        let z = if let Some(value) = spare_normal.take() {
+            value
+        } else {
+            let (z0, z1) = next_normal_pair(&mut guard.state);
+            spare_normal = Some(z1);
+            z0
+        };
+        if df == f64::INFINITY {
+            out.push(z);
+        } else {
+            let chi_square = sample_gamma_shape_scale(&mut guard.state, df / 2.0, 2.0);
+            out.push(z / (chi_square / df).sqrt());
+        }
+    }
+    Ok(out)
+}
+
+pub(crate) fn generate_gamma_shape_scale(
+    shape: &[f64],
+    scale: &[f64],
+    len: usize,
+    label: &str,
+) -> BuiltinResult<Vec<f64>> {
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    let mut out = Vec::with_capacity(len);
+    for idx in 0..len {
+        let a = if shape.len() == 1 {
+            shape[0]
+        } else {
+            shape[idx]
+        };
+        let b = if scale.len() == 1 {
+            scale[0]
+        } else {
+            scale[idx]
+        };
+        out.push(if a == 0.0 {
+            0.0
+        } else {
+            sample_gamma_shape_scale(&mut guard.state, a, b)
+        });
+    }
+    Ok(out)
+}
+
+pub(crate) fn generate_binomial(
+    trials: &[f64],
+    probability: &[f64],
+    len: usize,
+    label: &str,
+) -> BuiltinResult<Vec<f64>> {
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    let mut out = Vec::with_capacity(len);
+    for idx in 0..len {
+        let n = if trials.len() == 1 {
+            trials[0]
+        } else {
+            trials[idx]
+        };
+        let p = if probability.len() == 1 {
+            probability[0]
+        } else {
+            probability[idx]
+        };
+        out.push(sample_binomial(&mut guard.state, n, p));
+    }
+    Ok(out)
+}
+
+pub(crate) fn generate_weibull(
+    scale: &[f64],
+    shape: &[f64],
+    len: usize,
+    label: &str,
+) -> BuiltinResult<Vec<f64>> {
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    let mut out = Vec::with_capacity(len);
+    for idx in 0..len {
+        let a = if scale.len() == 1 {
+            scale[0]
+        } else {
+            scale[idx]
+        };
+        let b = if shape.len() == 1 {
+            shape[0]
+        } else {
+            shape[idx]
+        };
+        let u = next_uniform_state(&mut guard.state).max(MIN_UNIFORM);
+        out.push(a * (-u.ln()).powf(1.0 / b));
+    }
+    Ok(out)
+}
+
+fn sample_gamma_shape_scale(state: &mut u64, shape: f64, scale: f64) -> f64 {
+    if shape < 1.0 {
+        let u = next_uniform_state(state).max(MIN_UNIFORM);
+        return sample_gamma_shape_scale(state, shape + 1.0, scale) * u.powf(1.0 / shape);
+    }
+
+    let d = shape - 1.0 / 3.0;
+    let c = (1.0 / (9.0 * d)).sqrt();
+    loop {
+        let (x, _) = next_normal_pair(state);
+        let v_base = 1.0 + c * x;
+        if v_base <= 0.0 {
+            continue;
+        }
+        let v = v_base * v_base * v_base;
+        let u = next_uniform_state(state);
+        let x2 = x * x;
+        if u < 1.0 - 0.0331 * x2 * x2 || u.ln() < 0.5 * x2 + d * (1.0 - v + v.ln()) {
+            return scale * d * v;
+        }
+    }
+}
+
+fn sample_binomial(state: &mut u64, trials: f64, probability: f64) -> f64 {
+    if trials == 0.0 || probability == 0.0 {
+        return 0.0;
+    }
+    if probability == 1.0 {
+        return trials;
+    }
+
+    let effective_p = probability.min(1.0 - probability);
+    let mean = trials * effective_p;
+    let sampled = if trials <= 10_000.0 {
+        sample_binomial_direct(state, trials as u64, effective_p)
+    } else if mean < 30.0 {
+        sample_poisson_knuth(state, mean).min(trials)
+    } else {
+        sample_binomial_normal_approx(state, trials, effective_p)
+    };
+
+    if probability <= 0.5 {
+        sampled
+    } else {
+        trials - sampled
+    }
+}
+
+fn sample_binomial_direct(state: &mut u64, trials: u64, probability: f64) -> f64 {
+    let mut successes = 0_u64;
+    for _ in 0..trials {
+        if next_uniform_state(state) < probability {
+            successes += 1;
+        }
+    }
+    successes as f64
+}
+
+fn sample_poisson_knuth(state: &mut u64, lambda: f64) -> f64 {
+    if lambda <= 0.0 {
+        return 0.0;
+    }
+    let threshold = (-lambda).exp();
+    let mut product = 1.0;
+    let mut count = 0_u64;
+    loop {
+        count += 1;
+        product *= next_uniform_state(state).max(MIN_UNIFORM);
+        if product <= threshold {
+            return (count - 1) as f64;
+        }
+    }
+}
+
+fn sample_binomial_normal_approx(state: &mut u64, trials: f64, probability: f64) -> f64 {
+    let mean = trials * probability;
+    let variance = mean * (1.0 - probability);
+    if variance <= 0.0 {
+        return mean.round().clamp(0.0, trials);
+    }
+    let (z, _) = next_normal_pair(state);
+    (mean + variance.sqrt() * z).round().clamp(0.0, trials)
+}
+
 pub(crate) fn generate_uniform_scaled(
     a: f64,
     b: f64,
@@ -304,6 +562,11 @@ pub(crate) fn reset_rng() {
         }
     } else {
         let _ = RNG_STATE.set(Mutex::new(GlobalRng::new()));
+    }
+    if let Some(mutex) = LEGACY_TOKENS.get() {
+        if let Ok(mut guard) = mutex.lock() {
+            *guard = LegacyTokenState::new();
+        }
     }
 }
 
@@ -389,9 +652,6 @@ pub(crate) fn expected_complex_normal_sequence(count: usize) -> Vec<(f64, f64)> 
 }
 
 #[cfg(test)]
-static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
-
-#[cfg(test)]
-pub(crate) fn test_lock() -> &'static Mutex<()> {
-    TEST_MUTEX.get_or_init(|| Mutex::new(()))
+pub(crate) fn test_guard() -> super::test_support::GlobalStateTestGuard {
+    super::test_support::global_state_test_guard()
 }

@@ -99,7 +99,7 @@ pub async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 &x_axis,
                 &y_axis,
                 &handle,
-                color_map,
+                color_map.clone(),
                 base_z,
                 &level_spec,
                 &line_color,
@@ -175,6 +175,7 @@ mod tests {
     fn tensor_from(data: &[f64], rows: usize, cols: usize) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![rows, cols],
             rows,
             cols,

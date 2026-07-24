@@ -1,0 +1,26 @@
+{
+  "title": "eluLayer",
+  "category": "deep_learning",
+  "keywords": ["eluLayer", "deep learning", "activation"],
+  "summary": "Create an ELU layer compatibility object.",
+  "description": "`eluLayer` creates metadata for ELU activation layers.",
+  "behaviors": [
+    "A leading numeric scalar sets `Alpha`; the default alpha is `1`.",
+    "`Name`, `Description`, and other common options are stored as properties."
+  ],
+  "examples": [
+    {
+      "description": "Create ELU",
+      "input": "layer = eluLayer(0.5, 'Name', 'elu1')",
+      "output": "`layer.Alpha` stores `0.5`."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "layer = eluLayer\nlayer = eluLayer(alpha)\nlayer = eluLayer(___, Name, Value)",
+      "output": "Layer compatibility object."
+    }
+  },
+  "gpu_residency": "Layer construction is host metadata work and has no provider kernel."
+}

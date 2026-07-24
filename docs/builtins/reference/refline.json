@@ -1,0 +1,80 @@
+{
+  "title": "refline",
+  "category": "stats/summary",
+  "keywords": [
+    "refline",
+    "reference line",
+    "statistics",
+    "plotting"
+  ],
+  "summary": "Add a reference line y = m*x + b to the current or specified axes.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`refline` creates a graphics object and does not perform numeric GPU computation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::refline::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`refline` appends straight reference lines to the current or specified axes and returns the created line handle or handles when requested. With no coefficients it adds least-squares lines for eligible scatter-style series in the axes. With coefficients it draws `y = m*x + b` over the current x-axis span.",
+  "behaviors": [
+    "`refline()` and `refline(ax)` add least-squares reference lines for scatter-style series in the current or specified axes, matching MATLAB's `lsline`-style behavior.",
+    "`refline([m b])` and `refline(m,b)` draw a line with slope `m` and intercept `b`; coefficients must be finite numeric scalars.",
+    "`refline(ax,...)` targets the supplied axes handle.",
+    "The line uses explicit `XLim` when present. If x-limits are automatic, RunMat derives a finite x span from the target axes' visible data bounds and falls back to `[0,1]` only when no finite span is available.",
+    "As a RunMat extension, optional LineSpec and line Name/Value pairs such as `Color`, `LineStyle`, `LineWidth`, and `DisplayName` are accepted using the same parser as line plotting builtins.",
+    "The return value is a line graphics handle compatible with `get` and `set` for line properties such as `XData`, `YData`, `Color`, `LineStyle`, `LineWidth`, and `DisplayName`."
+  ],
+  "examples": [
+    {
+      "description": "Add a least-squares reference line to a scatter plot",
+      "input": "scatter(x, y);\nh = refline;"
+    },
+    {
+      "description": "Add a line with slope and intercept",
+      "input": "h = refline(2, 1);"
+    },
+    {
+      "description": "Use coefficient vector form and style the line",
+      "input": "h = refline([0.5 3], '--r', 'DisplayName', 'reference');"
+    },
+    {
+      "description": "Target a specific axes",
+      "input": "ax = subplot(1,2,2);\nrefline(ax, [1 0]);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does refline compute a least-squares fit?",
+      "answer": "Yes, when called without explicit coefficients it adds least-squares lines for eligible scatter-style series in the axes. When coefficients are supplied, it draws exactly `y = m*x + b` and does not fit a model."
+    }
+  ],
+  "links": [
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "xline",
+      "url": "./xline"
+    },
+    {
+      "label": "yline",
+      "url": "./yline"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/refline.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/refline.rs"
+  }
+}

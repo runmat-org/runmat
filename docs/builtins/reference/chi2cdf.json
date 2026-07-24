@@ -1,0 +1,47 @@
+{
+  "title": "chi2cdf",
+  "category": "stats/summary",
+  "keywords": ["chi2cdf", "chi-square", "cdf", "upper tail", "statistics"],
+  "summary": "Evaluate the chi-square cumulative distribution function.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "matlab",
+    "notes": "gpuArray inputs are gathered to the host reference path."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 3, "constants": "inline" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::distributions::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`chi2cdf(x,nu)` evaluates the chi-square CDF at `x` for degrees of freedom `nu`. `chi2cdf(x,nu,\"upper\")` returns the complementary upper-tail probability.",
+  "behaviors": [
+    "`x` and `nu` support scalar expansion and matching array shapes.",
+    "`nu` must be positive; invalid parameters produce `NaN` outputs.",
+    "Negative `x` values return zero for the lower tail and one for the upper tail.",
+    "The computation uses regularized incomplete gamma functions."
+  ],
+  "examples": [
+    {
+      "description": "Evaluate chi-square CDF",
+      "input": "p = chi2cdf(3,5)",
+      "output": "p = 0.3000"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why use the upper-tail form?",
+      "answer": "The upper-tail form computes the complementary incomplete-gamma value directly, which is more stable for extreme upper tails than `1 - chi2cdf(...)`."
+    }
+  ],
+  "links": [
+    { "label": "tcdf", "url": "./tcdf" },
+    { "label": "binocdf", "url": "./binocdf" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/distributions.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/distributions.rs"
+  }
+}

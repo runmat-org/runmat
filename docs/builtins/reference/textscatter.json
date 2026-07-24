@@ -1,0 +1,98 @@
+{
+  "title": "textscatter",
+  "category": "plotting",
+  "keywords": [
+    "textscatter",
+    "text scatter",
+    "text analytics",
+    "word embedding plot",
+    "2-D text plot",
+    "matlab textscatter"
+  ],
+  "summary": "Create a 2-D text scatter chart from x/y coordinates and text labels.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`textscatter` is a chart/annotation rendering sink. Coordinates are materialized on the host so text annotations can be created; marker rendering reuses the existing scatter plot path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::textscatter::tests",
+    "vm": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`textscatter(x,y,str)` creates a text scatter chart with labels from `str` at matching x/y coordinates. `textscatter(xy,str)` accepts an N-by-2 coordinate matrix. The returned handle is a `textscatter` chart object with MATLAB-style data and display properties.",
+  "behaviors": [
+    "`x`, `y`, and `str` must have equal element counts.",
+    "`xy` must be an N-by-2 matrix whose first and second columns provide x and y coordinates.",
+    "`str` can be a string scalar, string array, character row, character matrix, or cell array of text scalars.",
+    "The axes-target form `textscatter(ax,...)` renders into the supplied axes handle.",
+    "`TextDensityPercentage` controls how many labels are visible; `0` hides all text labels and `100` shows all labels and suppresses marker creation.",
+    "`MaxTextLength` truncates long labels and adds `...` at the truncation point.",
+    "`MarkerColor` accepts `auto`, `none`, or an RGB color. `ColorData` accepts an RGB triplet or N-by-3 RGB matrix for text colors.",
+    "`get` supports `Type`, `Parent`, `Children`, `TextData`, `XData`, `YData`, `ZData`, `TextDensityPercentage`, `MaxTextLength`, `MarkerColor`, `MarkerSize`, `ColorData`, `Colors`, `Visible`, `DisplayName`, and `Tag`; 2-D charts report empty `ZData`.",
+    "`set` supports `TextData`, `XData`, `YData`, `TextDensityPercentage`, `MaxTextLength`, `MarkerColor`, `MarkerSize`, `ColorData`, `Colors`, `Visible`, `Color`, `FontSize`, `FontWeight`, `FontAngle`, and `Interpreter`. `ZData` mutation is reserved for `textscatter3` charts.",
+    "Categorical `ColorData`, datasource properties, callbacks, app data, and interactive data-tip template objects are not implemented yet and raise explicit unsupported-property errors."
+  ],
+  "examples": [
+    {
+      "description": "Create a 2-D text scatter chart",
+      "input": "x = [1 2 3];\ny = [4 5 6];\nwords = [\"one\" \"two\" \"three\"];\nts = textscatter(x, y, words);"
+    },
+    {
+      "description": "Use an N-by-2 coordinate matrix",
+      "input": "xy = [1 4; 2 5; 3 6];\ntextscatter(xy, [\"one\" \"two\" \"three\"]);"
+    },
+    {
+      "description": "Limit label length and color each label",
+      "input": "xy = [1 1; 2 2; 3 3];\ncolors = [1 0 0; 0 1 0; 0 0 1];\nts = textscatter(xy, [\"alphabet\" \"betatron\" \"gamma\"], 'MaxTextLength', 5, 'ColorData', colors);\nget(ts, 'TextData')"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does textscatter return individual text handles?",
+      "answer": "No. RunMat returns a first-class `textscatter` chart handle. The chart owns the text annotations and marker plot internally, so chart data and display properties can be queried and updated through `get` and `set`."
+    },
+    {
+      "question": "How are markers handled?",
+      "answer": "When `TextDensityPercentage` is below 100 and `MarkerColor` is not `none`, RunMat creates an internal scatter marker plot. At 100 percent density, markers are suppressed to match MATLAB behavior."
+    },
+    {
+      "question": "Can textscatter preserve gpuArray residency?",
+      "answer": "Not currently. Text annotations require host coordinate and label materialization. Marker rendering reuses the existing scatter plot path once the chart has been constructed."
+    }
+  ],
+  "links": [
+    {
+      "label": "textscatter3",
+      "url": "./textscatter3"
+    },
+    {
+      "label": "scatter",
+      "url": "./scatter"
+    },
+    {
+      "label": "text",
+      "url": "./text"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/textscatter.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/textscatter.rs"
+  }
+}

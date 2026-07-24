@@ -1,0 +1,88 @@
+{
+  "title": "cheb2ord",
+  "category": "math/signal",
+  "keywords": [
+    "cheb2ord",
+    "Chebyshev",
+    "Type II",
+    "filter order",
+    "IIR",
+    "signal processing"
+  ],
+  "summary": "Select the minimum Chebyshev Type II filter order.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Order selection is scalar host-side analysis. GPU-resident frequency inputs are gathered automatically."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 5,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::cheb2ord::tests"
+  },
+  "description": "`cheb2ord(Wp, Ws, Rp, Rs)` computes the minimum Chebyshev Type II filter order and natural cutoff `Wn` that satisfy passband ripple `Rp` and stopband attenuation `Rs`. Digital frequencies use MATLAB's normalized convention where `1` is Nyquist; add `'s'` for analog rad/s designs.",
+  "behaviors": [
+    "`[n, Wn] = cheb2ord(Wp, Ws, Rp, Rs)` returns an integer order `n` and Chebyshev Type II critical cutoff `Wn`.",
+    "Scalar `Wp` and `Ws` select lowpass when `Wp < Ws` and highpass when `Wp > Ws`.",
+    "Two-element edge vectors select bandpass when the stopband encloses the passband and bandstop when the passband encloses the stopband.",
+    "Digital inputs must be finite, positive, and less than 1. Analog inputs must be finite and positive.",
+    "`Rs` must be greater than `Rp`, and both values are specified in decibels."
+  ],
+  "examples": [
+    {
+      "description": "Lowpass order selection",
+      "input": "[n, Wn] = cheb2ord(0.2, 0.3, 1, 40)",
+      "output": "n is the minimum order and Wn is the Type II critical frequency."
+    },
+    {
+      "description": "Highpass order selection",
+      "input": "[n, Wn] = cheb2ord(0.5, 0.3, 1, 40)",
+      "output": "Wn lies between the stopband and passband edges."
+    },
+    {
+      "description": "Bandstop order selection",
+      "input": "[n, Wn] = cheb2ord([0.1 0.6], [0.2 0.5], 3, 60)",
+      "output": "Wn is a two-element critical-frequency row vector."
+    },
+    {
+      "description": "Analog lowpass order selection",
+      "input": "[n, Wn] = cheb2ord(10, 20, 1, 40, 's')",
+      "output": "Wn is returned in rad/s for analog designs."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does `Wn` represent?",
+      "answer": "`Wn` is the Chebyshev Type II critical frequency that satisfies the requested passband ripple and stopband attenuation. Scalar highpass designs return an edge between `Ws` and `Wp`; two-element designs return a sorted edge pair."
+    },
+    {
+      "question": "Does `cheb2ord` run on the GPU?",
+      "answer": "No. It only computes small order/cutoff parameters on the host. Those parameters can feed Chebyshev filter design, and the resulting coefficients can later be used by GPU-capable filtering paths."
+    }
+  ],
+  "links": [
+    {
+      "label": "buttord",
+      "url": "./buttord"
+    },
+    {
+      "label": "freqz",
+      "url": "./freqz"
+    },
+    {
+      "label": "filter",
+      "url": "./filter"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/cheb2ord.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/cheb2ord.rs"
+  }
+}

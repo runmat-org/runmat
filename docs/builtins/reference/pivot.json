@@ -1,0 +1,15 @@
+{
+  "title": "pivot",
+  "category": "table",
+  "keywords": ["pivot", "table", "groupsummary", "reshape"],
+  "summary": "Pivot table data into a wide grouped summary table.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Pivoting runs on host table variables."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 5, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests"},
+  "description": "`pivot(T, rowvars, colvars, datavar)` groups rows by `rowvars`, expands distinct `colvars` values into output variables, and summarizes `datavar` values into the wide result.",
+  "behaviors": ["The `\"Method\"` option selects the summary method and defaults to `\"sum\"`.", "Row, column, and data variables use table variable selector semantics.", "Output variable names are made valid and unique after combining column-key labels with data variable names."],
+  "examples": [{"description": "Grouped sum", "input": "P = pivot(T, 'Group', 'Kind', 'Value')", "output": "P = wide table with one summary column per Kind value"}],
+  "links": [{"label": "groupsummary", "url": "./groupsummary"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

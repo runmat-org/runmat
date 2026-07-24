@@ -1,0 +1,54 @@
+{
+  "title": "pointLocation",
+  "category": "geometry/triangulation",
+  "keywords": [
+    "pointLocation",
+    "DelaunayTri",
+    "triangulation",
+    "barycentric",
+    "geometry"
+  ],
+  "summary": "Locate query points in a DelaunayTri triangulation.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`pointLocation` reads host triangulation topology and returns dense host results."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::geometry::triangulation::tests",
+    "integration": null
+  },
+  "description": "`pointLocation(dt, q)` returns the containing triangle index for each query point in a 2-D `DelaunayTri` object. With two outputs, RunMat also returns barycentric coordinates.",
+  "behaviors": [
+    "Accepts query matrices or paired coordinate vectors.",
+    "Returns an N-by-1 tensor of one-based triangle indices.",
+    "Outside points return NaN.",
+    "With two requested outputs, returns `[ti, bc]` where `bc` is N-by-3."
+  ],
+  "examples": [
+    {
+      "description": "Locate a point",
+      "input": "dt = DelaunayTri([0 0; 1 0; 0 1]);\nti = pointLocation(dt, [0.25 0.25]);"
+    }
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "DelaunayTri",
+      "url": "./DelaunayTri"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/geometry/triangulation.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/geometry/triangulation.rs"
+  }
+}

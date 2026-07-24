@@ -1,0 +1,69 @@
+{
+  "title": "resample",
+  "category": "math/signal",
+  "keywords": ["resample", "sample rate", "polyphase", "antialiasing", "FIR", "signal processing"],
+  "summary": "Resample a signal by a rational factor with FIR antialiasing.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "none",
+    "notes": "Real, logical, and complex-interleaved GPU signal inputs use provider zeros_with_storage, scatter_linear, iir_filter, and gather_linear hooks to keep the resampled signal resident. Host real filter coefficients are uploaded as temporary provider buffers, and same-provider GPU-resident real custom filter coefficients are consumed directly without host materialization. Requesting the second output gathers the filter coefficients to return them as a host tensor."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 6, "constants": "inline" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::sample_rate::tests",
+    "integration": "runmat-vm basics upsample_downsample_builtin_executes_for_discrete_signal_workflow"
+  },
+  "description": "`y = resample(x,p,q)` changes the sample rate of `x` by the rational factor `p/q`. RunMat designs a Kaiser-windowed FIR antialiasing filter by default, compensates the filter delay, and operates along the first non-singleton dimension unless `Dimension` is specified.",
+  "behaviors": [
+    "Accepts numeric, logical, integer, complex, vector, matrix, N-D tensor, and GPU tensor inputs.",
+    "`p` and `q` must be finite positive integer scalars; the ratio is reduced before filter design and output sizing.",
+    "The output size along the operated dimension is `ceil(size(x,dim) * p / q)`; all other dimensions are preserved.",
+    "`resample(x,p,q,n)` uses a Kaiser-windowed FIR filter with `2*n*max(p,q)+1` taps after ratio reduction.",
+    "`resample(x,p,q,n,beta)` uses `beta` as the Kaiser window shape parameter.",
+    "`resample(x,p,q,b)` uses a caller-supplied real FIR coefficient vector.",
+    "`[y,b] = resample(...)` returns the resampled signal and the FIR coefficients used.",
+    "`Dimension`, `dim` resamples along an explicit one-based dimension.",
+    "Timetable and nonuniform time-vector syntaxes are not implemented yet; use `interp1`/timetable-specific workflows before rational resampling when those forms are needed."
+  ],
+  "examples": [
+    {
+      "description": "Upsample a row vector by a rational factor",
+      "input": "x = 1:5;\ny = resample(x, 3, 2)"
+    },
+    {
+      "description": "Return the filter coefficients",
+      "input": "[y,b] = resample(x, 4, 1, 8, 5)"
+    },
+    {
+      "description": "Resample along columns",
+      "input": "Y = resample(X, 2, 1, Dimension=2)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which dimension does `resample` use?",
+      "answer": "By default RunMat follows MATLAB's first non-singleton dimension rule. Use the `Dimension` name-value option to select a specific dimension."
+    },
+    {
+      "question": "Can I provide my own antialiasing filter?",
+      "answer": "Yes. Pass a real coefficient vector as the fourth argument, for example `resample(x,p,q,b)`."
+    },
+    {
+      "question": "Does `resample` support nonuniform time vectors or timetables?",
+      "answer": "Not yet. This implementation covers the uniform rational-rate signal forms and rejects unsupported time/timetable forms rather than returning a misleading result."
+    }
+  ],
+  "links": [
+    { "label": "upsample", "url": "./upsample" },
+    { "label": "downsample", "url": "./downsample" },
+    { "label": "filter", "url": "./filter" },
+    { "label": "interp1", "url": "./interp1" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/sample_rate.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/sample_rate.rs"
+  }
+}

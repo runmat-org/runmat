@@ -4,7 +4,7 @@
 
 use crate::builtins::common::shape::{is_scalar_shape, normalize_scalar_shape};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{SparseTensor, Tensor, Value};
 
 fn indexing_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
@@ -24,6 +24,68 @@ fn positive_integer_cell_index(value: f64, identifier: &str) -> Result<usize, Ru
         ));
     }
     Ok(value as usize)
+}
+
+fn positive_integer_index(value: f64, identifier: &str) -> Result<usize, RuntimeError> {
+    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 || value > usize::MAX as f64 {
+        return Err(indexing_error_with_identifier(
+            format!("Index {value} must be a positive integer"),
+            identifier,
+        ));
+    }
+    Ok(value as usize)
+}
+
+fn sparse_scalar_index(sparse: &SparseTensor, indices: &[f64]) -> Result<Value, RuntimeError> {
+    fn sparse_scalar(value: f64) -> Result<Value, RuntimeError> {
+        if value == 0.0 {
+            return Ok(Value::SparseTensor(SparseTensor::zeros(1, 1)));
+        }
+        Ok(Value::SparseTensor(
+            SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![value]).map_err(indexing_error)?,
+        ))
+    }
+
+    if indices.is_empty() {
+        return Err(indexing_error("At least one index is required"));
+    }
+    if indices.len() == 1 {
+        let idx = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
+        let total = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+            indexing_error_with_identifier("Sparse dimensions overflow", "RunMat:IndexOutOfBounds")
+        })?;
+        if idx > total {
+            return Err(indexing_error_with_identifier(
+                format!("Index {idx} out of bounds (1 to {total})"),
+                "RunMat:IndexOutOfBounds",
+            ));
+        }
+        let zero = idx - 1;
+        let row = zero % sparse.rows;
+        let col = zero / sparse.rows;
+        return sparse_scalar(sparse.get(row, col).unwrap_or(0.0));
+    }
+    if indices.len() == 2 {
+        let row = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
+        let col = positive_integer_index(indices[1], "RunMat:IndexOutOfBounds")?;
+        if row > sparse.rows || col > sparse.cols {
+            return Err(indexing_error_with_identifier(
+                format!(
+                    "Index ({row}, {col}) out of bounds for {}x{} sparse matrix",
+                    sparse.rows, sparse.cols
+                ),
+                "RunMat:IndexOutOfBounds",
+            ));
+        }
+        return sparse_scalar(sparse.get(row - 1, col - 1).unwrap_or(0.0));
+    }
+    Err(indexing_error_with_identifier(
+        format!(
+            "Sparse matrices support 1 or 2 indices, got {}",
+            indices.len()
+        ),
+        "RunMat:SliceNonTensor",
+    ))
 }
 
 fn cell_row_major_pos_from_linear(
@@ -210,6 +272,49 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 )))
             }
         }
+        Value::LogicalArray(array) => {
+            if indices.is_empty() {
+                return Err(indexing_error("At least one index is required"));
+            }
+
+            if indices.len() == 1 {
+                let idx = indices[0] as usize;
+                if idx < 1 || idx > array.data.len() {
+                    return Err(indexing_error_with_identifier(
+                        format!("Index {} out of bounds (1 to {})", idx, array.data.len()),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+                Ok(Value::Bool(array.data[idx - 1] != 0))
+            } else if indices.len() == 2 {
+                let row = indices[0] as usize;
+                let col = indices[1] as usize;
+                let shape = normalize_scalar_shape(&array.shape);
+                let rows = shape.first().copied().unwrap_or(1);
+                let cols = shape.get(1).copied().unwrap_or(1);
+
+                if row < 1 || row > rows {
+                    return Err(indexing_error_with_identifier(
+                        format!("Row index {} out of bounds (1 to {})", row, rows),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+                if col < 1 || col > cols {
+                    return Err(indexing_error_with_identifier(
+                        format!("Column index {} out of bounds (1 to {})", col, cols),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+
+                let linear_idx = (row - 1) + (col - 1) * rows;
+                Ok(Value::Bool(array.data[linear_idx] != 0))
+            } else {
+                Err(indexing_error(format!(
+                    "Logical arrays support 1 or 2 indices, got {}",
+                    indices.len()
+                )))
+            }
+        }
         Value::ComplexTensor(tensor) => {
             if indices.is_empty() {
                 return Err(indexing_error("At least one index is required"));
@@ -255,6 +360,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 )))
             }
         }
+        Value::SparseTensor(sparse) => sparse_scalar_index(sparse, indices),
         Value::SymbolicArray(array) => {
             if indices.is_empty() {
                 return Err(indexing_error("At least one index is required"));
@@ -433,7 +539,18 @@ async fn gpu_index_scalar(
 mod tests {
     use super::perform_indexing;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, SymbolicArray, SymbolicExpr, Value};
+    use runmat_builtins::{
+        CellArray, LogicalArray, SparseTensor, SymbolicArray, SymbolicExpr, Value,
+    };
+
+    fn sparse_scalar_value(value: Value) -> f64 {
+        match value {
+            Value::SparseTensor(sparse) if sparse.shape() == vec![1, 1] => {
+                sparse.get(0, 0).unwrap_or(0.0)
+            }
+            other => panic!("expected sparse scalar value, got {other:?}"),
+        }
+    }
 
     #[test]
     fn cell_index_rejects_fractional_before_cast() {
@@ -451,6 +568,71 @@ mod tests {
         let err = block_on(perform_indexing(&Value::Cell(cell), &[3.7]))
             .expect_err("fractional cell index should fail");
         assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
+    }
+
+    #[test]
+    fn sparse_indexing_reads_stored_unstored_and_linear_values() {
+        let sparse = SparseTensor::new(
+            3,
+            3,
+            vec![0, 2, 2, 3],
+            vec![0, 2, 1],
+            vec![10.0, 30.0, 23.0],
+        )
+        .unwrap();
+
+        assert_eq!(
+            sparse_scalar_value(
+                block_on(perform_indexing(
+                    &Value::SparseTensor(sparse.clone()),
+                    &[1.0, 1.0]
+                ))
+                .unwrap()
+            ),
+            10.0
+        );
+        assert_eq!(
+            sparse_scalar_value(
+                block_on(perform_indexing(
+                    &Value::SparseTensor(sparse.clone()),
+                    &[2.0, 1.0]
+                ))
+                .unwrap()
+            ),
+            0.0
+        );
+        assert_eq!(
+            sparse_scalar_value(
+                block_on(perform_indexing(&Value::SparseTensor(sparse), &[8.0])).unwrap()
+            ),
+            23.0
+        );
+    }
+
+    #[test]
+    fn logical_indexing_reads_linear_and_row_column_scalars() {
+        let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).expect("logical");
+
+        assert_eq!(
+            block_on(perform_indexing(
+                &Value::LogicalArray(logical.clone()),
+                &[1.0]
+            ))
+            .unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            block_on(perform_indexing(
+                &Value::LogicalArray(logical.clone()),
+                &[2.0, 1.0]
+            ))
+            .unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            block_on(perform_indexing(&Value::LogicalArray(logical), &[2.0, 2.0])).unwrap(),
+            Value::Bool(true)
+        );
     }
 
     #[test]

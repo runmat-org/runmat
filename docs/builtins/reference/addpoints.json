@@ -1,0 +1,100 @@
+{
+  "title": "addpoints",
+  "category": "plotting",
+  "keywords": [
+    "addpoints",
+    "animatedline",
+    "animated line",
+    "streaming plot",
+    "live plot",
+    "matlab plotting"
+  ],
+  "summary": "Append 2-D or 3-D coordinates to an animated line.",
+  "hero_image": null,
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`addpoints` mutates graphics handle state. GPU-resident coordinate inputs are accepted through the plotting input path and gathered before appending."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::addpoints::tests",
+    "integration": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`addpoints` appends coordinates to a handle returned by `animatedline`. It updates the underlying line geometry and honors the handle's `MaximumNumPoints` limit by trimming oldest samples.",
+  "behaviors": [
+    "`addpoints(an,x,y)` appends 2-D points to an animated line.",
+    "`addpoints(an,x,y,z)` appends 3-D points. An empty 2-D animated line is promoted to a 3-D line when Z data is first added, unless the handle has marker metadata that the 3-D renderer cannot preserve.",
+    "Coordinate inputs must be scalars or vectors with matching element counts.",
+    "If the target is already 3-D, callers must provide X, Y, and Z coordinates.",
+    "The function mutates graphics state and has no MATLAB output."
+  ],
+  "options": [
+    "The first argument must be an `animatedline` handle.",
+    "X, Y, and optional Z coordinates may be scalars, vectors, or GPU-resident vectors."
+  ],
+  "examples": [
+    {
+      "description": "Append samples to an animated line",
+      "input": "an = animatedline('MaximumNumPoints', 3);\naddpoints(an, [1 2], [10 20]);\naddpoints(an, [3 4], [30 40]);\nget(an, 'YData')",
+      "output": "ans =\n    20    30    40"
+    },
+    {
+      "description": "Append 3-D samples",
+      "input": "an = animatedline();\naddpoints(an, [1 2], [3 4], [5 6]);\nget(an, 'Type')",
+      "output": "ans =\n    'animatedline'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can addpoints be used with ordinary line handles?",
+      "answer": "No. The first argument must be a handle returned by `animatedline`; ordinary `line` and `plot` handles should be updated with `set(h,'XData',...)` and related properties."
+    },
+    {
+      "question": "Does addpoints clear the axes?",
+      "answer": "No. It mutates the existing animated-line object in place."
+    },
+    {
+      "question": "Can I promote a marker-styled 2-D animated line to 3-D?",
+      "answer": "No. RunMat rejects that promotion so marker metadata is not silently lost. Create a 3-D animated line without marker styling instead."
+    }
+  ],
+  "links": [
+    {
+      "label": "animatedline",
+      "url": "./animatedline"
+    },
+    {
+      "label": "line",
+      "url": "./line"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/addpoints.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/addpoints.rs"
+  },
+  "gpu_residency": "`addpoints` gathers GPU-resident coordinate vectors before appending to host-side animated-line graphics state.",
+  "gpu_behavior": [
+    "The operation preserves graphics handle identity while replacing the stored line data.",
+    "The updated line continues through RunMat's existing line or line3 rendering path."
+  ]
+}

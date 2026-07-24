@@ -1,0 +1,73 @@
+{
+  "title": "grpstats",
+  "category": "stats/summary",
+  "keywords": [
+    "grpstats",
+    "group",
+    "statistics",
+    "mean",
+    "std",
+    "confidence interval",
+    "table"
+  ],
+  "summary": "Compute summary statistics organized by group.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "Inputs are gathered to host and grouped on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::table::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`grpstats(X,group)` computes grouped summary statistics for numeric or logical matrices. `grpstats(T,groupvars,...)` returns a table containing grouping variables, group counts, and requested summary columns.",
+  "behaviors": [
+    "For matrix input, `group` can be numeric, logical, string, char, categorical, or cell text data. A cell array of grouping variables such as `{G1,G2}` creates groups from observed value combinations. Empty grouping such as `[]` computes one all-row group.",
+    "For matrix input, `whichstats` accepts `\"mean\"`, `\"sem\"`, `\"std\"`, `\"var\"`, `\"min\"`, `\"max\"`, `\"range\"`, `\"meanci\"`, `\"predci\"`, `\"numel\"`, and `\"gname\"`. Multiple requested statistics return one output per statistic when multiple outputs are requested.",
+    "`meanci` and `predci` return `ngroups x ncols x 2` tensors and honor the `\"Alpha\"` option. Intervals use Student's t critical values.",
+    "Rows with missing group labels are ignored. NaN values in data variables are omitted from numeric summaries.",
+    "For table input, `groupvars` accepts table variable selectors or `[]` for no grouping. Output tables include group variables, `GroupCount`, and one variable for each data variable/statistic combination. Interval statistics are stored as two-column table variables.",
+    "For table input, `\"DataVars\"` selects numeric or logical data variables and `\"VarNames\"` replaces the output variable names. Built-in function handles such as `@mean` and `@std` are accepted when they map to supported statistic names; custom function handles are rejected explicitly because general MATLAB function-handle dispatch is not yet implemented for `grpstats`."
+  ],
+  "examples": [
+    {
+      "description": "Compute group means for a matrix",
+      "input": "X = [1 10; 3 30; 2 20; 4 40];\ng = [2; 1; 2; 1];\nm = grpstats(X,g)",
+      "output": "m is [3.5 35; 1.5 15] for groups 1 and 2."
+    },
+    {
+      "description": "Return multiple matrix statistics and group names",
+      "input": "[m,s,names] = grpstats(X,g,[\"mean\",\"std\",\"gname\"])",
+      "output": "`m` and `s` are numeric arrays; `names` is a cell array of group labels."
+    },
+    {
+      "description": "Summarize a table with selected data variables",
+      "input": "T = table(G,X,Y);\nS = grpstats(T,\"G\",[\"mean\",\"max\"],\"DataVars\",\"X\")",
+      "output": "`S` contains `G`, `GroupCount`, `mean_X`, and `max_X`."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `grpstats` support function handles?",
+      "answer": "RunMat accepts built-in function handles whose names match supported statistics, such as `@mean` and `@std`. Custom function handles are not yet supported."
+    },
+    {
+      "question": "How are groups ordered?",
+      "answer": "Numeric and logical groups sort by value. Text groups preserve first-seen order, matching MATLAB's character and string grouping behavior."
+    }
+  ],
+  "links": [],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/table/object/analytics.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/object/analytics.rs"
+  }
+}

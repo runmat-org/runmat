@@ -1,0 +1,54 @@
+{
+  "title": "blsimpv",
+  "category": "finance",
+  "keywords": ["blsimpv", "Black-Scholes", "implied volatility", "option", "finance"],
+  "summary": "Compute Black-Scholes implied volatility from observed European option prices.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "scalar expansion over matching nonscalar inputs",
+    "notes": "`blsimpv` performs host-side root finding and gathers gpuArray inputs before solving."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 7,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::finance::black_scholes::tests"
+  },
+  "description": "`blsimpv(Price,Strike,Rate,Time,Value)` computes implied annualized volatility from an observed European option value under the Black-Scholes model.",
+  "behaviors": [
+    "Supports scalar expansion across matching nonscalar numeric inputs.",
+    "Name-value options include `Limit`, `Yield`, `Tolerance`, `Class`, and `Method`.",
+    "`Class` accepts logical values (`true` for call, `false` for put), strings, character vectors, string arrays, or cell arrays containing `call`/`put` values.",
+    "`Method` accepts `search` and `jackel2016`; the default is `jackel2016`, implemented with the same robust scalar solver but without applying caller `Limit`/`Tolerance` overrides.",
+    "Empty optional values use their documented defaults.",
+    "For `Method='search'`, if no implied volatility exists inside `[0, Limit]`, the output is `NaN`."
+  ],
+  "examples": [
+    {
+      "description": "Recover call implied volatility",
+      "input": "Volatility = blsimpv(100, 95, 0.10, 0.25, 13.6953)",
+      "output": "Volatility = 0.5000"
+    },
+    {
+      "description": "Put implied volatility with yield",
+      "input": "Volatility = blsimpv(910, 980, 0.02, 0.25, 90.4683, 'Yield', 0.025, 'Class', 'put')",
+      "output": "Volatility = 0.2500"
+    }
+  ],
+  "links": [
+    {
+      "label": "blsprice",
+      "url": "./blsprice"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/finance/black_scholes.rs",
+    "url": "crates/runmat-runtime/src/builtins/finance/black_scholes.rs"
+  }
+}

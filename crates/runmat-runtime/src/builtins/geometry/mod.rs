@@ -14,6 +14,8 @@ use crate::builtins::io::json::jsondecode::value_from_json;
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+pub mod triangulation;
+
 pub const GEOMETRY_ASSET_CLASS: &str = "geometry.Asset";
 const GEOMETRY_INSPECT_RESULT_CLASS: &str = "geometry.InspectResult";
 pub const GEOMETRY_ASSET_JSON_PROPERTY: &str = "__runmat_geometry_asset_json";
@@ -436,6 +438,7 @@ fn ensure_geometry_classes_registered() {
             properties: HashMap::new(),
             methods: HashMap::<String, MethodDef>::new(),
         });
+        triangulation::register_delaunaytri_class();
     });
 }
 

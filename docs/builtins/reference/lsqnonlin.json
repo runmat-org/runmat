@@ -1,0 +1,90 @@
+{
+  "title": "lsqnonlin",
+  "category": "math/optim",
+  "keywords": [
+    "lsqnonlin",
+    "least squares",
+    "optimization",
+    "bounds",
+    "jacobian"
+  ],
+  "introduced": "eval-loop",
+  "status": "supported",
+  "tests": {
+    "unit": "builtins::math::optim::lsqnonlin::tests",
+    "integration": "runmat-vm/tests/closures.rs::lsqnonlin_accepts_anonymous_residual_function"
+  },
+  "description": "`lsqnonlin` minimizes the squared 2-norm of a vector-valued residual callback `fun(x)` using RunMat's shared finite-difference Levenberg-Marquardt least-squares solver. Scalar, vector, and matrix `x0` inputs are supported and the returned solution preserves the shape of `x0`.",
+  "syntax": [
+    "x = lsqnonlin(fun, x0)",
+    "x = lsqnonlin(fun, x0, lb, ub)",
+    "x = lsqnonlin(fun, x0, lb, ub, options)",
+    "x = lsqnonlin(problem)",
+    "[x, resnorm] = lsqnonlin(___)",
+    "[x, resnorm, residual] = lsqnonlin(___)",
+    "[x, resnorm, residual, exitflag] = lsqnonlin(___)",
+    "[x, resnorm, residual, exitflag, output] = lsqnonlin(___)",
+    "[x, resnorm, residual, exitflag, output, lambda] = lsqnonlin(___)",
+    "[x, resnorm, residual, exitflag, output, lambda, jacobian] = lsqnonlin(___)",
+    "x = lsqnonlin(fun, x0, lb, ub, [], [], [], [], [], options)"
+  ],
+  "notes": [
+    "The residual callback is evaluated as `fun(x)` and must return a finite real numeric scalar, vector, or array. The residual output preserves the callback's initial shape.",
+    "Lower and upper bounds may be empty or contain up to `numel(x0)` elements. Supplied bounds apply to the leading variables; omitted trailing entries are unbounded, matching MATLAB's partial-bound convention.",
+    "`optimset` and `optimoptions` structs are accepted, and `[]` option placeholders are treated as defaults. `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, `Display`, and `Algorithm` are recognized.",
+    "RunMat accepts `Algorithm` values `trust-region-reflective` and `levenberg-marquardt` for compatibility metadata, but both execute through the shared finite-difference Levenberg-Marquardt host solver.",
+    "Linear and nonlinear constraints require MATLAB's newer interior-point constrained least-squares path. RunMat accepts empty placeholders in those argument positions but rejects non-empty constraints with a deterministic error.",
+    "Problem structs are supported when they provide `solver`, `objective` or `fun`, `x0`, optional `lb`, optional `ub`, and optional `options`. Constraint fields including `A`, `b`, `Aineq`, `bineq`, `Aeq`, `beq`, and `nonlcon` must be absent or empty.",
+    "The `output` struct includes `iterations`, `funcCount`, `firstorderopt`, `stepsize`, `cgiterations`, `lssteplength`, `algorithm`, and `message`."
+  ],
+  "examples": [
+    {
+      "label": "Fit a vector residual",
+      "input": "r = @(x) [x(1)-2; x(2)-3; x(1)+x(2)-5];\nx = lsqnonlin(r, [0; 0])",
+      "output": "x = [2; 3]"
+    },
+    {
+      "label": "Use bounds",
+      "input": "x = lsqnonlin(@(x) [x-2, x-2], 0, -1, 1)",
+      "output": "x = 1"
+    },
+    {
+      "label": "Request diagnostics",
+      "input": "opts = optimoptions(\"lsqnonlin\", \"Algorithm\", \"levenberg-marquardt\", \"Display\", \"off\");\n[x, resnorm, residual, exitflag, output, lambda, jacobian] = lsqnonlin(@(x) [x(1)-1, 2*x(2)-4], [0 0], [], [], opts)",
+      "output": "x approaches [1 2], resnorm approaches 0, and jacobian is 2-by-2."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does lsqnonlin support linear or nonlinear constraints?",
+      "answer": "Not yet. Empty A, b, Aineq, bineq, Aeq, beq, and nonlcon placeholders are accepted so common option-forwarding scripts run, but non-empty constraints are rejected because RunMat does not yet have the interior-point constrained least-squares infrastructure."
+    },
+    {
+      "question": "Does lsqnonlin run on the GPU?",
+      "answer": "The solver is host iterative work. Callback code may call GPU-aware builtins, but residuals and bounds are gathered for the solver. Provider-native nonlinear least-squares execution belongs to the queued GPU fast-path audit rather than this compatibility slice."
+    }
+  ],
+  "related": [
+    {
+      "label": "lsqcurvefit",
+      "url": "./lsqcurvefit"
+    },
+    {
+      "label": "fsolve",
+      "url": "./fsolve"
+    },
+    {
+      "label": "optimoptions",
+      "url": "./optimoptions"
+    },
+    {
+      "label": "optimset",
+      "url": "./optimset"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/lsqnonlin.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/lsqnonlin.rs"
+  },
+  "gpu_residency": "`lsqnonlin` gathers residuals and bounds to the host for iterative solving. Callback bodies can still use GPU-aware builtins; provider-native nonlinear least-squares is deferred to the GPU fast-path audit."
+}

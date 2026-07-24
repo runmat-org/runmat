@@ -1,0 +1,40 @@
+{
+  "name": "matfile",
+  "title": "matfile",
+  "category": "io/mat",
+  "keywords": ["matfile", "MAT-file", "Writable"],
+  "summary": "Create a MAT-file object for whole-variable reads and writes.",
+  "description": "`matfile(filename)` returns a `matlab.io.MatFile` compatibility object. RunMat supports `m.Properties`, whole-variable dot reads such as `m.A`, and whole-variable dot assignment when the object is constructed with `'Writable', true`.",
+  "signatures": [
+    {
+      "label": "m = matfile(filename)",
+      "description": "Create a read-only MAT-file object for `filename`."
+    },
+    {
+      "label": "m = matfile(filename, 'Writable', tf)",
+      "description": "Create a MAT-file object whose whole-variable dot assignments write Level-5 MAT-file data."
+    }
+  ],
+  "options": [
+    "`Writable` accepts a scalar logical or numeric value. When false or omitted, dot assignment through the object is rejected.",
+    "`m.Properties` returns a struct containing `Source` and `Writable`.",
+    "Dot reads load a complete variable from the MAT-file, preserving the existing `load` builtin's Level-5 MAT-file type support."
+  ],
+  "examples": [
+    {
+      "description": "Read a whole variable",
+      "input": "m = matfile('data.mat');\nA = m.A;",
+      "output": "A contains the variable loaded from data.mat."
+    },
+    {
+      "description": "Write whole variables",
+      "input": "m = matfile('data.mat', 'Writable', true);\nm.A = rand(3);\nm.flag = true;",
+      "output": "The MAT-file is rewritten with updated whole variables."
+    }
+  ],
+  "notes": [
+    "RunMat currently supports Level-5 MAT-files through the shared `load` and `save` MAT encoder/decoder.",
+    "Partial MAT-file reads/writes that avoid loading the full variable, HDF5-backed v7.3 MAT-files, `who(m)`, and `whos(m)` remain future MAT-file object work."
+  ],
+  "gpu_residency": "`matfile` is host file I/O. GPU-resident assignment values are gathered before MAT-file serialization."
+}

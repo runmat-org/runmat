@@ -126,6 +126,7 @@ mod tests {
 
         let _ = clim_builtin(vec![Value::Tensor(runmat_builtins::Tensor {
             data: vec![0.25, 0.75],
+            integer_data: None,
             shape: vec![1, 2],
             rows: 1,
             cols: 2,

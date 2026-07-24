@@ -1,0 +1,15 @@
+{
+  "title": "table2struct",
+  "category": "table",
+  "keywords": ["table2struct", "table", "struct", "ToScalar"],
+  "summary": "Convert a table into row structs or a scalar struct of variables.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Table and struct containers are host values."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
+  "description": "`table2struct(T)` converts each table row into a struct with fields matching table variable names. `table2struct(T, \"ToScalar\", true)` returns one scalar struct whose fields contain whole table variables.",
+  "behaviors": ["Variable order is preserved.", "The default conversion returns one row struct per table row.", "`\"ToScalar\"` controls whether table variables are kept whole in one scalar struct."],
+  "examples": [{"description": "Convert rows to structs", "input": "S = table2struct(T)", "output": "S = struct array with table variable fields"}, {"description": "Convert variables to one scalar struct", "input": "S = table2struct(T, 'ToScalar', true)", "output": "S = scalar struct with table variable fields"}],
+  "links": [{"label": "struct2table", "url": "./struct2table"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

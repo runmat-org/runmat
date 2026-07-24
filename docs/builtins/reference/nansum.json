@@ -1,0 +1,15 @@
+{
+  "title": "nansum",
+  "category": "missing",
+  "keywords": ["nansum", "sum", "omitnan"],
+  "summary": "Compute sums while ignoring NaN values.",
+  "gpu_support": {"elementwise": false, "reduction": true, "precisions": ["f32", "f64"], "broadcasting": "matlab", "notes": "Delegates to `sum(..., 'omitnan')`."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::missing::tests", "integration": "crates/runmat-vm/tests/missing_values.rs"},
+  "description": "`nansum(A, ...)` is a compatibility alias for `sum(A, ..., 'omitnan')`.",
+  "behaviors": ["All supported `sum` dimension and output-class options are forwarded."],
+  "examples": [{"description": "Ignore NaN values", "input": "s = nansum([1 NaN 3], 'all')", "output": "s = 4"}],
+  "links": [{"label": "sum", "url": "./sum"}, {"label": "nanmean", "url": "./nanmean"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/missing/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/missing/mod.rs"}
+}

@@ -1,0 +1,36 @@
+{
+  "title": "optimizableVariable",
+  "category": "stats/ml",
+  "keywords": ["optimizableVariable", "bayesopt", "optimization", "variable"],
+  "summary": "Create Bayesian optimization variable metadata.",
+  "description": "`optimizableVariable(Name,Range)` constructs a host metadata object describing a variable for Bayesian optimization workflows.",
+  "behaviors": [
+    "The variable name must be a nonempty text scalar.",
+    "Numeric ranges must contain exactly two finite, increasing bounds and default to `Type` `real`.",
+    "`Type` accepts `real`, `integer`, and `categorical`; integer ranges must use whole-number bounds.",
+    "Categorical ranges are accepted as string arrays, scalar strings with explicit `Type` `categorical`, or cell arrays of text scalars and must be nonempty and unique.",
+    "`Transform` accepts `none` and `log`; log transforms require positive real lower bounds or nonnegative integer lower bounds and are not accepted for categorical variables.",
+    "`Optimize` accepts scalar logical values and defaults to true.",
+    "The result is an `optimizableVariable` compatibility object with `Name`, `Range`, `Type`, `Transform`, and `Optimize` properties."
+  ],
+  "examples": [
+    {
+      "description": "Real Variable",
+      "input": "v = optimizableVariable(\"depth\", [1 10])",
+      "output": "optimizableVariable compatibility object."
+    },
+    {
+      "description": "Categorical Variable",
+      "input": "v = optimizableVariable(\"kernel\", [\"linear\" \"rbf\"], \"Type\", \"categorical\")",
+      "output": "optimizableVariable compatibility object."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "v = optimizableVariable(Name, Range)\nv = optimizableVariable(Name, Range, Name, Value)",
+      "output": "optimizableVariable compatibility object."
+    }
+  },
+  "gpu_residency": "`optimizableVariable` constructs host metadata for `bayesopt`; gpuArray range and option inputs are gathered before validation."
+}

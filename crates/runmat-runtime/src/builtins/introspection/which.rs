@@ -663,6 +663,9 @@ pub(crate) mod tests {
     #[test]
     fn which_finds_files() {
         let (_guard, _lock) = test_guard();
+        let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let temp = tempdir().expect("tempdir");
         let script_path = temp.path().join("script.m");
         File::create(&script_path)
@@ -817,6 +820,9 @@ pub(crate) mod tests {
     #[test]
     fn which_file_option_finds_directories() {
         let (_guard, _lock) = test_guard();
+        let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let temp = tempdir().expect("tempdir");
         let subdir = temp.path().join("helpers");
         std::fs::create_dir_all(&subdir).expect("create dir");

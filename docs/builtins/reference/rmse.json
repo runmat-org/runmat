@@ -1,0 +1,35 @@
+{
+  "title": "rmse",
+  "category": "stats/summary",
+  "keywords": ["rmse", "root mean squared error", "error", "statistics"],
+  "summary": "Compute root mean squared error between two arrays.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "elementwise",
+    "notes": "GPU inputs are gathered to host for compatibility until provider reduction hooks exist."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::descriptive::tests", "integration": null },
+  "description": "`rmse(F,A)` computes `sqrt(mean(abs(F-A).^2))`. MATLAB-compatible implicit expansion, dimension selection, `\"all\"`, missing-value flags, and `\"Weights\",W` for single-dimension reductions are supported.",
+  "behaviors": [
+    "`F` and `A` may be scalars or compatible-size numeric or complex arrays.",
+    "NaNs are included by default.",
+    "`\"omitnan\"` and `\"omitmissing\"` skip NaN residuals and NaN weights in each slice.",
+    "`\"Weights\",W` accepts scalar weights, full-size weights, or a vector matching the reduction dimension.",
+    "Weights are rejected with `\"all\"` or vector-dimension reductions.",
+    "Weights must be nonnegative; zero total weight returns `NaN`."
+  ],
+  "examples": [
+    { "description": "Root mean squared error", "input": "e = rmse(predicted, actual)" },
+    { "description": "Weighted column-wise error", "input": "e = rmse(F, A, 1, \"Weights\", W)" }
+  ],
+  "faqs": [{ "question": "How are weights normalized?", "answer": "Weighted RMSE uses `sqrt(sum(W.*E.^2)/sum(W))` over each reduction slice." }],
+  "links": [{ "label": "rms", "url": "./rms" }, { "label": "mean", "url": "./mean" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs"
+  }
+}

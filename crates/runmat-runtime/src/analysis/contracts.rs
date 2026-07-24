@@ -1,9 +1,12 @@
 use runmat_analysis_core::{AnalysisField, AnalysisFieldValues, AnalysisModel};
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
-use runmat_analysis_fea::{ComputeBackend, FeaRunResult};
+use runmat_analysis_fea::{ComputeBackend, FeaProgressEvent, FeaRunResult};
 use runmat_geometry_core::GeometryAsset;
-use runmat_meshing_core::RegionMeshMapping;
+use runmat_meshing::RegionMeshMapping;
+use runmat_meshing_core::VolumeMeshingOptions;
+use runmat_meshing_evidence::{MeshAuthoringNestedTetrahedronShellSummary, MeshAuthoringSummary};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 fn default_prep_coordinate_span_m() -> f64 {
     1.0
@@ -117,7 +120,7 @@ pub struct AnalysisRunPrepContext {
     pub topology_region_mesh_variance: f64,
     pub topology_triangle_family_ratio: f64,
     pub topology_quad_family_ratio: f64,
-    pub topology_tet_family_ratio: f64,
+    pub topology_tetrahedron_family_ratio: f64,
     pub topology_hex_family_ratio: f64,
     #[serde(default = "default_prep_coordinate_span_m")]
     pub coordinate_span_x_m: f64,
@@ -184,6 +187,7 @@ pub struct AnalysisRunPrepContext {
 pub enum AnalysisCreateModelProfile {
     LinearStaticStructural,
     ThermoMechanicalCoupled,
+    ElectroThermalCoupled,
     ThermalStandalone,
     ModalStructural,
     AcousticHarmonic,
@@ -194,6 +198,306 @@ pub enum AnalysisCreateModelProfile {
     CfdTransient,
     ChtCoupled,
     FsiCoupled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnalysisPhysicsProfileCatalogEntry {
+    pub profile: AnalysisCreateModelProfile,
+    pub label: &'static str,
+    pub family: &'static str,
+    pub target: &'static str,
+    pub value: &'static str,
+    pub default_outputs: &'static [AnalysisPhysicsProfileDefaultOutput],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnalysisPhysicsProfileDefaultOutput {
+    pub field: &'static str,
+    pub location: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisRuntimePhysicsProfileCatalogEntry {
+    pub profile: AnalysisCreateModelProfile,
+    pub label: String,
+    pub family: String,
+    pub target: String,
+    pub value: String,
+    pub default_outputs: Vec<AnalysisRuntimePhysicsProfileDefaultOutput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisRuntimePhysicsProfileDefaultOutput {
+    pub field: String,
+    pub location: String,
+}
+
+pub const ANALYSIS_PHYSICS_PROFILE_CATALOG: &[AnalysisPhysicsProfileCatalogEntry] = &[
+    AnalysisPhysicsProfileCatalogEntry {
+        profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        label: "Linear static structural",
+        family: "structural",
+        target: "solid mechanics",
+        value: "static stress and displacement",
+        default_outputs: &[
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "structural.displacement",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "structural.von_mises",
+                location: "elements",
+            },
+        ],
+    },
+    AnalysisPhysicsProfileCatalogEntry {
+        profile: AnalysisCreateModelProfile::ThermoMechanicalCoupled,
+        label: "Thermo-mechanical",
+        family: "coupled physics",
+        target: "coupled solid mechanics and heat transfer",
+        value: "coupled temperature, stress, and displacement",
+        default_outputs: &[
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "thermal.temperature",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "structural.displacement",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "structural.von_mises",
+                location: "elements",
+            },
+        ],
+    },
+    AnalysisPhysicsProfileCatalogEntry {
+        profile: AnalysisCreateModelProfile::ElectroThermalCoupled,
+        label: "Electro-thermal",
+        family: "coupled physics",
+        target: "coupled electromagnetics and heat transfer",
+        value: "resistive heating, temperature, and electrical fields",
+        default_outputs: &[
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "electro_thermal.temperature",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "electro_thermal.joule_heat",
+                location: "elements",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "electro_thermal.electric_potential",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "electro_thermal.current_density",
+                location: "elements",
+            },
+        ],
+    },
+    AnalysisPhysicsProfileCatalogEntry {
+        profile: AnalysisCreateModelProfile::ThermalStandalone,
+        label: "Thermal",
+        family: "thermal",
+        target: "heat transfer",
+        value: "temperature and heat flux",
+        default_outputs: &[
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "thermal.temperature",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "thermal.heat_flux",
+                location: "elements",
+            },
+        ],
+    },
+    AnalysisPhysicsProfileCatalogEntry {
+        profile: AnalysisCreateModelProfile::ModalStructural,
+        label: "Modal structural",
+        family: "modal",
+        target: "solid mechanics",
+        value: "natural frequencies and modes",
+        default_outputs: &[
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "structural.mode_shapes",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "structural.natural_frequencies",
+                location: "modes",
+            },
+        ],
+    },
+    AnalysisPhysicsProfileCatalogEntry {
+        profile: AnalysisCreateModelProfile::AcousticHarmonic,
+        label: "Acoustic harmonic",
+        family: "acoustic",
+        target: "acoustics",
+        value: "frequency-domain pressure",
+        default_outputs: &[
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "acoustic.pressure",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "acoustic.sound_pressure_level",
+                location: "nodes",
+            },
+        ],
+    },
+    AnalysisPhysicsProfileCatalogEntry {
+        profile: AnalysisCreateModelProfile::TransientStructural,
+        label: "Transient structural",
+        family: "structural",
+        target: "solid mechanics",
+        value: "time response",
+        default_outputs: &[
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "structural.displacement",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "structural.von_mises",
+                location: "elements",
+            },
+        ],
+    },
+    AnalysisPhysicsProfileCatalogEntry {
+        profile: AnalysisCreateModelProfile::NonlinearStructural,
+        label: "Nonlinear structural",
+        family: "structural",
+        target: "solid mechanics",
+        value: "large deformation or nonlinear material",
+        default_outputs: &[
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "structural.displacement",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "structural.von_mises",
+                location: "elements",
+            },
+        ],
+    },
+    AnalysisPhysicsProfileCatalogEntry {
+        profile: AnalysisCreateModelProfile::ElectromagneticStatic,
+        label: "Electromagnetic",
+        family: "electromagnetic",
+        target: "electromagnetics",
+        value: "electric and magnetic fields",
+        default_outputs: &[
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "em.electric_field",
+                location: "elements",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "em.magnetic_flux_density",
+                location: "elements",
+            },
+        ],
+    },
+    AnalysisPhysicsProfileCatalogEntry {
+        profile: AnalysisCreateModelProfile::CfdSteadyState,
+        label: "CFD steady state",
+        family: "CFD",
+        target: "fluid flow",
+        value: "steady flow fields",
+        default_outputs: &[
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "fluid.velocity",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "fluid.pressure",
+                location: "nodes",
+            },
+        ],
+    },
+    AnalysisPhysicsProfileCatalogEntry {
+        profile: AnalysisCreateModelProfile::CfdTransient,
+        label: "CFD transient",
+        family: "CFD",
+        target: "fluid flow",
+        value: "time-dependent flow fields",
+        default_outputs: &[
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "fluid.velocity",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "fluid.pressure",
+                location: "nodes",
+            },
+        ],
+    },
+    AnalysisPhysicsProfileCatalogEntry {
+        profile: AnalysisCreateModelProfile::ChtCoupled,
+        label: "Conjugate heat transfer",
+        family: "coupled physics",
+        target: "coupled fluid and solid heat transfer",
+        value: "fluid and solid heat transfer",
+        default_outputs: &[
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "thermal.temperature",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "fluid.velocity",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "fluid.pressure",
+                location: "nodes",
+            },
+        ],
+    },
+    AnalysisPhysicsProfileCatalogEntry {
+        profile: AnalysisCreateModelProfile::FsiCoupled,
+        label: "Fluid-structure interaction",
+        family: "coupled physics",
+        target: "coupled fluid and structural response",
+        value: "fluid loads and structural response",
+        default_outputs: &[
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "structural.displacement",
+                location: "nodes",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "structural.von_mises",
+                location: "elements",
+            },
+            AnalysisPhysicsProfileDefaultOutput {
+                field: "fluid.pressure",
+                location: "nodes",
+            },
+        ],
+    },
+];
+
+pub fn analysis_runtime_physics_profile_catalog() -> Vec<AnalysisRuntimePhysicsProfileCatalogEntry>
+{
+    ANALYSIS_PHYSICS_PROFILE_CATALOG
+        .iter()
+        .map(|entry| AnalysisRuntimePhysicsProfileCatalogEntry {
+            profile: entry.profile,
+            label: entry.label.to_string(),
+            family: entry.family.to_string(),
+            target: entry.target.to_string(),
+            value: entry.value.to_string(),
+            default_outputs: entry
+                .default_outputs
+                .iter()
+                .map(|output| AnalysisRuntimePhysicsProfileDefaultOutput {
+                    field: output.field.to_string(),
+                    location: output.location.to_string(),
+                })
+                .collect(),
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -323,6 +627,19 @@ pub enum QualityReasonCode {
     SolverNotConverged,
     SolverBackendFallback,
     FieldPromotionFallback,
+    FieldTopologyMismatch,
+    SolidMeshNoVolumeElements,
+    SolidMeshUnsupportedElementKind,
+    SolidMeshUnmappedLoadRegion,
+    SolidMeshUnmappedBoundaryConditionRegion,
+    SolidMeshMaterialCoverageIncomplete,
+    SolidMeshRenderTopologyIncomplete,
+    SolidMeshValidationEvidenceMissing,
+    SolidMeshValidationEvidenceFailed,
+    SolidMeshQualityMinJacobianFailed,
+    SolidMeshQualityAspectRatioWarn,
+    SolidMeshBoundaryProjectionWarn,
+    MissingSolidAnalysisMesh,
     ModalResidualExceeded,
     ModalOrthogonalityExceeded,
     ModalSeparationLow,
@@ -387,6 +704,8 @@ pub struct AnalysisRunOptions {
     #[serde(default)]
     pub prep_artifact_id: Option<String>,
     #[serde(default)]
+    pub analysis_mesh_artifact_path: Option<String>,
+    #[serde(default)]
     pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
@@ -437,6 +756,7 @@ impl Default for AnalysisRunOptions {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: None,
             prep_calibration_profile: None,
         }
     }
@@ -699,7 +1019,7 @@ impl AnalysisTransientRunOptions {
         Self::default()
     }
 
-    pub fn production_recommended() -> Self {
+    pub fn solid_recommended() -> Self {
         Self {
             quality_policy: QualityPolicy::Balanced,
             deterministic_mode: true,
@@ -840,7 +1160,7 @@ impl AnalysisNonlinearRunOptions {
         }
     }
 
-    pub fn production_recommended() -> Self {
+    pub fn solid_recommended() -> Self {
         Self {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -949,6 +1269,7 @@ pub struct AnalysisRenderTopology {
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisRenderTopologySource {
     SolverPrep,
+    AnalysisMesh,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -956,6 +1277,29 @@ pub struct AnalysisRenderMesh {
     pub mesh_id: String,
     pub vertices: Vec<[f64; 3]>,
     pub triangles: Vec<[u32; 3]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<AnalysisRenderRegion>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vertex_volume_node_indices: Vec<Option<usize>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triangle_volume_element_indices: Vec<Option<usize>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisRenderRegion {
+    pub region_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triangle_ranges: Vec<AnalysisRenderTriangleRange>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisRenderTriangleRange {
+    pub start: u32,
+    pub count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1054,7 +1398,7 @@ pub enum AnalysisFieldKind {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisFieldStorage {
     HostF64,
@@ -1075,6 +1419,200 @@ pub enum AnalysisFieldLocation {
     Unknown,
 }
 
+pub const ANALYSIS_FIELD_DEFAULT_PAGE_SIZE: usize = 4096;
+pub const ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT: usize = 256;
+pub const ANALYSIS_RUN_DATASET_SCHEMA_VERSION: u32 = 1;
+pub const ANALYSIS_FIELD_DESCRIPTORS_SCHEMA_VERSION: u32 = 1;
+pub const ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
+pub const ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
+pub const ANALYSIS_RUN_DATASET_KIND: &str = "finite_element_run_dataset";
+pub const ANALYSIS_DATASET_ARTIFACT_KIND: &str = "finite_element_dataset";
+pub const ANALYSIS_FIELD_DESCRIPTORS_ARTIFACT_KIND: &str = "finite_element_field_descriptors";
+pub const ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND: &str = "finite_element_diagnostics";
+pub const ANALYSIS_ARTIFACT_MANIFEST_KIND: &str = "finite_element_artifact_manifest";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisDocumentKind {
+    Study,
+    Sweep,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisRuntimeCapabilities {
+    pub supported_document_extensions: Vec<String>,
+    pub supported_geometry_extensions: Vec<String>,
+    #[serde(default)]
+    pub physics_profiles: Vec<AnalysisRuntimePhysicsProfileCatalogEntry>,
+    pub supports_check: bool,
+    pub supports_run: bool,
+    pub supports_results: bool,
+    pub supports_live_progress: bool,
+    pub visualization_backend: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisDocumentCheckResult {
+    pub path: String,
+    pub document_kind: AnalysisDocumentKind,
+    pub valid: bool,
+    pub validation: JsonValue,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<JsonValue>,
+    pub diagnostics: Vec<JsonValue>,
+    pub evidence_artifact_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisDocumentRunResult {
+    pub path: String,
+    pub document_kind: AnalysisDocumentKind,
+    pub run: JsonValue,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub results: Option<JsonValue>,
+    pub field_descriptors: Vec<AnalysisFieldDescriptor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_summary: Option<JsonValue>,
+    pub figure_handles: Vec<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_manifest: Option<JsonValue>,
+    pub diagnostics: Vec<JsonValue>,
+    pub progress_events: Vec<FeaProgressEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisFieldRequestOptions {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<usize>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisFieldPageResult {
+    pub run_id: String,
+    pub field_id: String,
+    pub descriptor: AnalysisFieldDescriptor,
+    pub values: Vec<f64>,
+    pub offset: usize,
+    pub count: usize,
+    pub total_count: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisRunDatasetStudyRef {
+    pub path: String,
+    pub document_kind: Option<AnalysisDocumentKind>,
+    pub valid: Option<bool>,
+    pub evidence_artifact_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisRunDatasetFieldPagingPolicy {
+    pub mode: String,
+    pub policy: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisRunDatasetPayload {
+    pub schema_version: u32,
+    pub kind: String,
+    pub run_id: String,
+    pub doc_path: String,
+    pub study: AnalysisRunDatasetStudyRef,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_profile: Option<AnalysisCreateModelProfile>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub physics_family: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_run_kind: Option<AnalysisRunKind>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available_output_summary: Option<String>,
+    pub run: JsonValue,
+    pub result_summary: JsonValue,
+    pub fields: Vec<AnalysisFieldDescriptor>,
+    pub field_paging: AnalysisRunDatasetFieldPagingPolicy,
+    pub diagnostics: Vec<JsonValue>,
+    pub artifact_manifest: JsonValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisFieldDescriptorsArtifactPayload {
+    pub schema_version: u32,
+    pub run_id: String,
+    pub fields: Vec<AnalysisFieldDescriptor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisDiagnosticsArtifactPayload {
+    pub schema_version: u32,
+    pub run_id: String,
+    pub diagnostics: Vec<JsonValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisObjectArtifactMetadata {
+    pub schema_version: u32,
+    pub artifact_id: String,
+    pub src: String,
+    pub bytes: u64,
+    pub mime: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handle: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisFieldPagingDescriptor {
+    pub mode: String,
+    pub value_unit: String,
+    pub total_count: Option<usize>,
+    pub page_size: usize,
+    pub page_count: Option<usize>,
+    pub default_materialize_limit: usize,
+}
+
+impl AnalysisFieldPagingDescriptor {
+    pub fn for_value_count(value_count: usize) -> Self {
+        Self {
+            mode: "paged".to_string(),
+            value_unit: "scalar_component".to_string(),
+            total_count: Some(value_count),
+            page_size: ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
+            page_count: Some(value_count.div_ceil(ANALYSIS_FIELD_DEFAULT_PAGE_SIZE)),
+            default_materialize_limit: ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisFieldStorageRef {
+    pub kind: String,
+    pub field_id: String,
+    pub storage: AnalysisFieldStorage,
+    pub size_bytes: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalysisFieldDescriptor {
     pub field_id: String,
@@ -1082,6 +1620,10 @@ pub struct AnalysisFieldDescriptor {
     pub family: String,
     #[serde(default)]
     pub quantity: String,
+    #[serde(default)]
+    pub topology_id: Option<String>,
+    #[serde(default)]
+    pub element_kind: Option<String>,
     pub class_name: String,
     pub kind: AnalysisFieldKind,
     pub dtype: String,
@@ -1091,10 +1633,17 @@ pub struct AnalysisFieldDescriptor {
     pub location: AnalysisFieldLocation,
     pub shape: Vec<usize>,
     pub element_count: usize,
+    #[serde(default)]
+    pub entity_count: usize,
+    #[serde(default)]
+    pub value_count: usize,
     pub component_count: Option<usize>,
     pub residency: String,
     pub storage: AnalysisFieldStorage,
     pub size_bytes: Option<u64>,
+    pub paging: AnalysisFieldPagingDescriptor,
+    #[serde(rename = "storageRef")]
+    pub storage_ref: AnalysisFieldStorageRef,
 }
 
 impl AnalysisFieldDescriptor {
@@ -1116,26 +1665,60 @@ impl AnalysisFieldDescriptor {
             AnalysisFieldStorage::DeviceRef => "gpu",
         }
         .to_string();
-        let element_count = field.element_count();
+        let location = infer_field_location(&field.field_id);
+        let component_count = infer_component_count(&field.field_id, &field.shape);
+        let value_count = field.element_count();
+        let entity_count = infer_entity_count(&field.shape, location, component_count);
+        let size_bytes = value_count
+            .checked_mul(std::mem::size_of::<f64>())
+            .map(|bytes| bytes as u64);
         Self {
             field_id: field.field_id.clone(),
             family: infer_field_family(&field.field_id).to_string(),
             quantity: infer_field_quantity(&field.field_id).to_string(),
+            topology_id: infer_field_topology_id(&field.field_id, location).map(str::to_string),
+            element_kind: infer_field_element_kind(&field.field_id, location).map(str::to_string),
             class_name,
             kind,
             dtype: "double".to_string(),
             unit: infer_field_unit(&field.field_id).map(str::to_string),
-            location: infer_field_location(&field.field_id),
+            location,
             shape: field.shape.clone(),
-            element_count,
-            component_count: infer_component_count(&field.field_id, &field.shape),
+            element_count: value_count,
+            entity_count,
+            value_count,
+            component_count,
             residency,
             storage,
-            size_bytes: element_count
-                .checked_mul(std::mem::size_of::<f64>())
-                .map(|bytes| bytes as u64),
+            size_bytes,
+            paging: AnalysisFieldPagingDescriptor::for_value_count(value_count),
+            storage_ref: AnalysisFieldStorageRef {
+                kind: "runtime_field".to_string(),
+                field_id: field.field_id.clone(),
+                storage,
+                size_bytes,
+            },
         }
     }
+}
+
+fn infer_entity_count(
+    shape: &[usize],
+    location: AnalysisFieldLocation,
+    component_count: Option<usize>,
+) -> usize {
+    if matches!(
+        location,
+        AnalysisFieldLocation::Global | AnalysisFieldLocation::Mode
+    ) {
+        return shape.iter().product();
+    }
+    if let Some(first_dim) = shape.first().copied() {
+        if shape.len() > 1 || component_count.is_some() {
+            return first_dim;
+        }
+    }
+    shape.iter().product()
 }
 
 fn infer_field_family(field_id: &str) -> &str {
@@ -1284,6 +1867,9 @@ fn infer_field_unit(field_id: &str) -> Option<&'static str> {
 
 fn infer_field_location(field_id: &str) -> AnalysisFieldLocation {
     let normalized = field_id.to_ascii_lowercase();
+    if normalized.contains("nodal_von_mises") {
+        return AnalysisFieldLocation::Node;
+    }
     if normalized.contains("vector_potential") {
         return AnalysisFieldLocation::Edge;
     }
@@ -1301,6 +1887,9 @@ fn infer_field_location(field_id: &str) -> AnalysisFieldLocation {
         && !normalized.contains("orthogonality")
     {
         return AnalysisFieldLocation::Mode;
+    }
+    if normalized.contains("energy_density") {
+        return AnalysisFieldLocation::Element;
     }
     if normalized.contains("residual")
         || normalized.contains("equation_scale")
@@ -1344,6 +1933,56 @@ fn infer_field_location(field_id: &str) -> AnalysisFieldLocation {
         return AnalysisFieldLocation::Node;
     }
     AnalysisFieldLocation::Element
+}
+
+fn infer_field_topology_id(
+    field_id: &str,
+    location: AnalysisFieldLocation,
+) -> Option<&'static str> {
+    let normalized = field_id.to_ascii_lowercase();
+    if location == AnalysisFieldLocation::Global || location == AnalysisFieldLocation::Mode {
+        return None;
+    }
+    if normalized.starts_with("structural.")
+        || normalized.starts_with("thermo_mechanical.")
+        || normalized.starts_with("transient.")
+        || normalized.starts_with("nonlinear.")
+    {
+        return Some("analysis_mesh");
+    }
+    if normalized.starts_with("thermal.")
+        || normalized.starts_with("electro_thermal.")
+        || normalized.starts_with("em.")
+        || normalized.starts_with("acoustic.")
+        || normalized.starts_with("cfd.")
+        || normalized.starts_with("cht.")
+        || normalized.starts_with("fsi.")
+    {
+        return Some("analysis_topology");
+    }
+    None
+}
+
+fn infer_field_element_kind(
+    field_id: &str,
+    location: AnalysisFieldLocation,
+) -> Option<&'static str> {
+    let normalized = field_id.to_ascii_lowercase();
+    if normalized.contains("beam_") {
+        return Some("beam2");
+    }
+    if normalized.contains("shell_") {
+        return Some("tri3");
+    }
+    if normalized.starts_with("structural.")
+        && matches!(
+            location,
+            AnalysisFieldLocation::Element | AnalysisFieldLocation::BoundaryFace
+        )
+    {
+        return Some("tetrahedron4");
+    }
+    None
 }
 
 fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
@@ -1681,6 +2320,16 @@ impl Default for AnalysisTrendsQuery {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisOutputRequest {
+    pub id: String,
+    pub field_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisStudySpec {
     pub study_id: String,
@@ -1690,6 +2339,14 @@ pub struct AnalysisStudySpec {
     pub model: Option<AnalysisModel>,
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
+    #[serde(default)]
+    pub mesh_options: Option<VolumeMeshingOptions>,
+    #[serde(default)]
+    pub outputs: Vec<AnalysisOutputRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis_mesh_artifact_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis_mesh_evidence_artifact_path: Option<String>,
     #[serde(default)]
     pub linear_static_run_options: Option<AnalysisRunOptions>,
     #[serde(default)]
@@ -1710,6 +2367,109 @@ pub struct AnalysisStudySpec {
     pub nonlinear_run_options: Option<AnalysisNonlinearRunOptions>,
     #[serde(default)]
     pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct AnalysisStudyDiagramObservation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_mime_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material_region_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary_condition_region_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub driving_condition_region_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structural_force_n: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudyAuthoringIntent {
+    pub study_id: String,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    pub geometry: GeometryAsset,
+    pub mesh_authoring_summary: MeshAuthoringSummary,
+    pub profile: AnalysisCreateModelProfile,
+    pub run_kind: AnalysisRunKind,
+    pub backend: ComputeBackend,
+    #[serde(default)]
+    pub analysis_mesh_artifact_path: Option<String>,
+    #[serde(default)]
+    pub analysis_mesh_evidence_artifact_path: Option<String>,
+    #[serde(default)]
+    pub material_region_id: Option<String>,
+    #[serde(default)]
+    pub boundary_condition_region_id: Option<String>,
+    #[serde(default)]
+    pub driving_condition_region_id: Option<String>,
+    #[serde(default)]
+    pub structural_force_n: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagram_observation: Option<AnalysisStudyDiagramObservation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudyAuthoringData {
+    pub study: AnalysisStudySpec,
+    pub evidence: AnalysisStudyAuthoringEvidence,
+    pub evidence_artifact_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudyAuthoringEvidence {
+    pub schema_version: String,
+    pub mesh_id: String,
+    pub mesh_authoring_summary_schema_version: String,
+    #[serde(default)]
+    pub tetrahedron_generation_family: String,
+    #[serde(default)]
+    pub tetrahedron_generation_attempted_family_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_rejected_family_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_selected_family_index: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_interior_support_candidate_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_interior_support_accepted_count: usize,
+    #[serde(
+        default,
+        skip_serializing_if = "MeshAuthoringNestedTetrahedronShellSummary::is_empty"
+    )]
+    pub nested_tetrahedron_shell: MeshAuthoringNestedTetrahedronShellSummary,
+    pub selected_material_region_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_boundary_condition_region_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_driving_condition_region_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_driving_condition_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_structural_force_n: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagram_artifact_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagram_source_mime_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagram_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagram_confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis_mesh_artifact_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis_mesh_evidence_artifact_path: Option<String>,
+    pub material_region_source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary_condition_region_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub driving_condition_region_source: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1748,6 +2508,7 @@ pub struct AnalysisStudyPlanData {
 pub struct AnalysisStudyRunData {
     pub study_id: String,
     pub model_id: String,
+    pub model_profile: AnalysisCreateModelProfile,
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
     #[serde(default)]
@@ -1756,6 +2517,14 @@ pub struct AnalysisStudyRunData {
     pub run_options: serde_json::Value,
     #[serde(default)]
     pub prep_artifact_id: Option<String>,
+    #[serde(default)]
+    pub analysis_mesh_artifact_path: Option<String>,
+    #[serde(default)]
+    pub analysis_mesh_evidence_artifact_path: Option<String>,
+    #[serde(default)]
+    pub refined_analysis_mesh_artifact_path: Option<String>,
+    #[serde(default)]
+    pub refined_analysis_mesh_evidence_artifact_path: Option<String>,
     pub study_fingerprint: String,
     pub operation_sequence: Vec<String>,
     pub run_operation: String,
@@ -1876,10 +2645,47 @@ pub enum AnalysisRunKind {
 }
 
 impl AnalysisCreateModelProfile {
+    pub fn from_snake_case(value: &str) -> Option<Self> {
+        serde_json::from_value(JsonValue::String(value.trim().to_ascii_lowercase())).ok()
+    }
+
+    pub fn as_snake_case(self) -> &'static str {
+        match self {
+            AnalysisCreateModelProfile::LinearStaticStructural => "linear_static_structural",
+            AnalysisCreateModelProfile::ThermoMechanicalCoupled => "thermo_mechanical_coupled",
+            AnalysisCreateModelProfile::ElectroThermalCoupled => "electro_thermal_coupled",
+            AnalysisCreateModelProfile::ThermalStandalone => "thermal_standalone",
+            AnalysisCreateModelProfile::ModalStructural => "modal_structural",
+            AnalysisCreateModelProfile::AcousticHarmonic => "acoustic_harmonic",
+            AnalysisCreateModelProfile::TransientStructural => "transient_structural",
+            AnalysisCreateModelProfile::NonlinearStructural => "nonlinear_structural",
+            AnalysisCreateModelProfile::ElectromagneticStatic => "electromagnetic_static",
+            AnalysisCreateModelProfile::CfdSteadyState => "cfd_steady_state",
+            AnalysisCreateModelProfile::CfdTransient => "cfd_transient",
+            AnalysisCreateModelProfile::ChtCoupled => "cht_coupled",
+            AnalysisCreateModelProfile::FsiCoupled => "fsi_coupled",
+        }
+    }
+
+    pub fn catalog_entry(self) -> &'static AnalysisPhysicsProfileCatalogEntry {
+        ANALYSIS_PHYSICS_PROFILE_CATALOG
+            .iter()
+            .find(|entry| entry.profile == self)
+            .expect("analysis profile catalog must contain every profile variant")
+    }
+
     pub fn derived_run_kind(self) -> AnalysisRunKind {
+        debug_assert!(
+            ANALYSIS_PHYSICS_PROFILE_CATALOG
+                .iter()
+                .any(|entry| entry.profile == self),
+            "analysis profile catalog is missing {:?}",
+            self
+        );
         match self {
             AnalysisCreateModelProfile::LinearStaticStructural => AnalysisRunKind::LinearStatic,
             AnalysisCreateModelProfile::ThermoMechanicalCoupled => AnalysisRunKind::Transient,
+            AnalysisCreateModelProfile::ElectroThermalCoupled => AnalysisRunKind::Transient,
             AnalysisCreateModelProfile::ThermalStandalone => AnalysisRunKind::Thermal,
             AnalysisCreateModelProfile::ModalStructural => AnalysisRunKind::Modal,
             AnalysisCreateModelProfile::AcousticHarmonic => AnalysisRunKind::Acoustic,
@@ -1890,6 +2696,23 @@ impl AnalysisCreateModelProfile {
             | AnalysisCreateModelProfile::CfdTransient => AnalysisRunKind::Cfd,
             AnalysisCreateModelProfile::ChtCoupled => AnalysisRunKind::Cht,
             AnalysisCreateModelProfile::FsiCoupled => AnalysisRunKind::Fsi,
+        }
+    }
+}
+
+impl AnalysisRunKind {
+    pub const fn as_snake_case(self) -> &'static str {
+        match self {
+            AnalysisRunKind::LinearStatic => "linear_static",
+            AnalysisRunKind::Modal => "modal",
+            AnalysisRunKind::Acoustic => "acoustic",
+            AnalysisRunKind::Thermal => "thermal",
+            AnalysisRunKind::Transient => "transient",
+            AnalysisRunKind::Cfd => "cfd",
+            AnalysisRunKind::Cht => "cht",
+            AnalysisRunKind::Fsi => "fsi",
+            AnalysisRunKind::Nonlinear => "nonlinear",
+            AnalysisRunKind::Electromagnetic => "electromagnetic",
         }
     }
 }
@@ -2161,5 +2984,129 @@ pub(crate) fn format_quality_policy(mode: QualityPolicy) -> String {
         QualityPolicy::Strict => "strict".to_string(),
         QualityPolicy::Balanced => "balanced".to_string(),
         QualityPolicy::Exploratory => "exploratory".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn physics_profile_catalog_covers_every_supported_profile_once() {
+        let expected_profiles = [
+            AnalysisCreateModelProfile::LinearStaticStructural,
+            AnalysisCreateModelProfile::ThermoMechanicalCoupled,
+            AnalysisCreateModelProfile::ElectroThermalCoupled,
+            AnalysisCreateModelProfile::ThermalStandalone,
+            AnalysisCreateModelProfile::ModalStructural,
+            AnalysisCreateModelProfile::AcousticHarmonic,
+            AnalysisCreateModelProfile::TransientStructural,
+            AnalysisCreateModelProfile::NonlinearStructural,
+            AnalysisCreateModelProfile::ElectromagneticStatic,
+            AnalysisCreateModelProfile::CfdSteadyState,
+            AnalysisCreateModelProfile::CfdTransient,
+            AnalysisCreateModelProfile::ChtCoupled,
+            AnalysisCreateModelProfile::FsiCoupled,
+        ];
+
+        assert_eq!(
+            ANALYSIS_PHYSICS_PROFILE_CATALOG.len(),
+            expected_profiles.len()
+        );
+
+        let mut seen = HashSet::new();
+        for entry in ANALYSIS_PHYSICS_PROFILE_CATALOG {
+            let serialized_profile = serde_json::to_value(entry.profile)
+                .expect("profile should serialize")
+                .as_str()
+                .expect("profile should serialize as string")
+                .to_string();
+            assert!(
+                expected_profiles.contains(&entry.profile),
+                "catalog contains unsupported profile {:?}",
+                entry.profile
+            );
+            assert_eq!(entry.profile.as_snake_case(), serialized_profile);
+            assert_eq!(
+                AnalysisCreateModelProfile::from_snake_case(entry.profile.as_snake_case()),
+                Some(entry.profile)
+            );
+            assert!(
+                seen.insert(entry.profile as u8),
+                "catalog contains duplicate profile {:?}",
+                entry.profile
+            );
+            assert!(!entry.label.trim().is_empty());
+            assert!(!entry.family.trim().is_empty());
+            assert!(!entry.target.trim().is_empty());
+            assert!(!entry.value.trim().is_empty());
+            assert!(
+                !entry.default_outputs.is_empty(),
+                "catalog profile {:?} needs at least one default output",
+                entry.profile
+            );
+            for output in entry.default_outputs {
+                assert!(!output.field.trim().is_empty());
+                assert!(!output.location.trim().is_empty());
+            }
+        }
+
+        for run_kind in [
+            AnalysisRunKind::LinearStatic,
+            AnalysisRunKind::Modal,
+            AnalysisRunKind::Acoustic,
+            AnalysisRunKind::Thermal,
+            AnalysisRunKind::Transient,
+            AnalysisRunKind::Cfd,
+            AnalysisRunKind::Cht,
+            AnalysisRunKind::Fsi,
+            AnalysisRunKind::Nonlinear,
+            AnalysisRunKind::Electromagnetic,
+        ] {
+            let serialized_run_kind = serde_json::to_value(run_kind)
+                .expect("run kind should serialize")
+                .as_str()
+                .expect("run kind should serialize as string")
+                .to_string();
+            assert_eq!(run_kind.as_snake_case(), serialized_run_kind);
+        }
+    }
+
+    #[test]
+    fn runtime_physics_profile_catalog_exposes_full_family_set() {
+        let runtime_catalog = analysis_runtime_physics_profile_catalog();
+
+        assert_eq!(
+            runtime_catalog.len(),
+            ANALYSIS_PHYSICS_PROFILE_CATALOG.len(),
+            "runtime profile catalog must serialize every supported physics profile"
+        );
+
+        let families: HashSet<&str> = runtime_catalog
+            .iter()
+            .map(|entry| entry.family.as_str())
+            .collect();
+        for family in [
+            "structural",
+            "modal",
+            "thermal",
+            "coupled physics",
+            "electromagnetic",
+            "acoustic",
+            "CFD",
+        ] {
+            assert!(
+                families.contains(family),
+                "runtime profile catalog is missing {family}"
+            );
+        }
+
+        for entry in runtime_catalog {
+            assert!(!entry.label.trim().is_empty());
+            assert!(!entry.target.trim().is_empty());
+            assert!(!entry.value.trim().is_empty());
+            assert!(!entry.default_outputs.is_empty());
+        }
     }
 }

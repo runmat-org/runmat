@@ -7,30 +7,38 @@
 //! is initialized; subsequent callers can query [`shared_wgpu_context`] to
 //! determine whether zero-copy rendering is possible.
 
-#[cfg(not(target_arch = "wasm32"))]
-use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{AccelContextHandle, AccelContextKind, WgpuContextHandle};
 #[cfg(target_arch = "wasm32")]
 use runmat_thread_local::runmat_thread_local;
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{OnceLock, RwLock};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 /// Process-wide WGPU context exported by the acceleration provider (if any).
 #[cfg(not(target_arch = "wasm32"))]
-static SHARED_WGPU_CONTEXT: OnceCell<WgpuContextHandle> = OnceCell::new();
+static SHARED_WGPU_CONTEXT: OnceLock<RwLock<Option<WgpuContextHandle>>> = OnceLock::new();
 
 #[cfg(target_arch = "wasm32")]
 runmat_thread_local! {
     static SHARED_WGPU_CONTEXT: RefCell<Option<WgpuContextHandle>> = RefCell::new(None);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn shared_context_slot() -> &'static RwLock<Option<WgpuContextHandle>> {
+    SHARED_WGPU_CONTEXT.get_or_init(|| RwLock::new(None))
+}
+
 /// Returns the cached shared WGPU context, if one has been installed.
 pub fn shared_wgpu_context() -> Option<WgpuContextHandle> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        SHARED_WGPU_CONTEXT.get().cloned()
+        shared_context_slot()
+            .read()
+            .ok()
+            .and_then(|context| context.clone())
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -43,7 +51,9 @@ pub fn shared_wgpu_context() -> Option<WgpuContextHandle> {
 pub fn install_wgpu_context(context: &WgpuContextHandle) {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = SHARED_WGPU_CONTEXT.set(context.clone());
+        if let Ok(mut slot) = shared_context_slot().write() {
+            *slot = Some(context.clone());
+        }
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -54,25 +64,28 @@ pub fn install_wgpu_context(context: &WgpuContextHandle) {
     propagate_to_plot_crate(context);
 }
 
-/// Ensure the shared context is populated by calling back into the acceleration
-/// provider. Returns the cached context when available.
+/// Refresh the shared context from the active acceleration provider, falling
+/// back to the most recently installed context when no provider is active.
 pub fn ensure_context_from_provider() -> BuiltinResult<WgpuContextHandle> {
+    // Ask the active provider first on every call. Providers can be replaced
+    // during a process lifetime, and a buffer created by the new provider must
+    // never be submitted through a device cached from the previous one.
+    if let Some(handle) = runmat_accelerate_api::export_context(AccelContextKind::Plotting) {
+        return match handle {
+            AccelContextHandle::Wgpu(ctx) => {
+                install_wgpu_context(&ctx);
+                Ok(ctx)
+            }
+        };
+    }
+
     if let Some(ctx) = shared_wgpu_context() {
         return Ok(ctx);
     }
 
-    let handle =
-        runmat_accelerate_api::export_context(AccelContextKind::Plotting).ok_or_else(|| {
-            context_error(
-                "plotting context unavailable (GPU provider did not export a shared device)",
-            )
-        })?;
-    match handle {
-        AccelContextHandle::Wgpu(ctx) => {
-            install_wgpu_context(&ctx);
-            Ok(ctx)
-        }
-    }
+    Err(context_error(
+        "plotting context unavailable (GPU provider did not export a shared device)",
+    ))
 }
 
 fn context_error(message: impl Into<String>) -> RuntimeError {

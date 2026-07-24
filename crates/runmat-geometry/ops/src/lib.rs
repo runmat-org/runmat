@@ -4,11 +4,16 @@ pub mod bounds;
 pub mod quality;
 pub mod queries;
 pub mod stats;
+pub mod triangulation;
 
 pub use bounds::{compute_axis_aligned_bounds, AxisAlignedBounds};
 pub use quality::{evaluate_quality, QualityReport};
 pub use queries::{find_region, QueryError};
 pub use stats::{compute_stats, GeometryStats};
+pub use triangulation::{
+    boundary_edges, delaunay_2d, nearest_neighbor_indices, point_locations, Delaunay2d,
+    TriangulationError,
+};
 
 #[cfg(test)]
 mod tests {
@@ -31,6 +36,7 @@ mod tests {
                 kind: SourceGeometryKind::Mesh,
                 assembly: None,
                 material_evidence: vec![],
+                cad_evaluators: Vec::new(),
             },
             tessellation_profile: TessellationProfile::default(),
             units: UnitSystem::Meter,

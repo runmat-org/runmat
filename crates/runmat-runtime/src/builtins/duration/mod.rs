@@ -431,6 +431,61 @@ fn duration_object_from_days(
     duration_object_from_days_tensor(tensor, format)
 }
 
+async fn duration_unit_value(
+    value: Value,
+    unit_name: &str,
+    days_per_unit: f64,
+) -> BuiltinResult<Value> {
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| duration_error(format!("{unit_name}: {}", err.message())))?;
+    if is_duration_object(&value) {
+        let days = duration_tensor_from_duration_value(&value)?;
+        let data = days
+            .data
+            .iter()
+            .map(|day| day / days_per_unit)
+            .collect::<Vec<_>>();
+        return if data.len() == 1 {
+            Ok(Value::Num(data[0]))
+        } else {
+            Ok(Value::Tensor(
+                Tensor::new(
+                    data,
+                    tensor::default_shape_for(&days.shape, days.data.len()),
+                )
+                .map_err(|err| duration_error(format!("{unit_name}: {err}")))?,
+            ))
+        };
+    }
+    let numeric = component_tensor(value, unit_name)?;
+    let days = numeric
+        .data
+        .iter()
+        .map(|value| {
+            if !value.is_finite() {
+                Err(duration_error(format!(
+                    "{unit_name}: values must be finite"
+                )))
+            } else {
+                let days = value * days_per_unit;
+                if days.is_finite() {
+                    Ok(days)
+                } else {
+                    Err(duration_error(format!(
+                        "{unit_name}: resulting duration is outside supported range"
+                    )))
+                }
+            }
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    duration_object_from_days(
+        days,
+        tensor::default_shape_for(&numeric.shape, numeric.data.len()),
+        DEFAULT_DURATION_FORMAT,
+    )
+}
+
 fn broadcast_component_data(
     arrays: &[Tensor],
     labels: &[&str],
@@ -517,6 +572,9 @@ fn format_seconds_field(seconds: f64) -> String {
 }
 
 fn format_duration_value(days: f64, format: &str) -> BuiltinResult<String> {
+    if days.is_nan() {
+        return Ok("NaN".to_string());
+    }
     if !days.is_finite() {
         return Err(duration_error("duration: values must be finite"));
     }
@@ -761,6 +819,83 @@ async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 }
 
 #[runmat_macros::runtime_builtin(
+    name = "days",
+    builtin_path = "crate::builtins::duration",
+    category = "datetime",
+    summary = "Create duration values from days or convert duration values to day counts.",
+    keywords = "days,duration,datetime"
+)]
+async fn days_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    duration_unit_value(value, "days", 1.0).await
+}
+
+#[runmat_macros::runtime_builtin(
+    name = "hours",
+    builtin_path = "crate::builtins::duration",
+    category = "datetime",
+    summary = "Create duration values from hours or convert duration values to hour counts.",
+    keywords = "hours,duration,datetime"
+)]
+async fn hours_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    duration_unit_value(value, "hours", 1.0 / 24.0).await
+}
+
+#[runmat_macros::runtime_builtin(
+    name = "minutes",
+    builtin_path = "crate::builtins::duration",
+    category = "datetime",
+    summary = "Create duration values from minutes or convert duration values to minute counts.",
+    keywords = "minutes,duration,datetime"
+)]
+async fn minutes_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    duration_unit_value(value, "minutes", 1.0 / (24.0 * 60.0)).await
+}
+
+#[runmat_macros::runtime_builtin(
+    name = "seconds",
+    builtin_path = "crate::builtins::duration",
+    category = "datetime",
+    summary = "Create duration values from seconds or convert duration values to second counts.",
+    keywords = "seconds,duration,datetime"
+)]
+async fn seconds_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    duration_unit_value(value, "seconds", 1.0 / SECONDS_PER_DAY).await
+}
+
+#[runmat_macros::runtime_builtin(
+    name = "milliseconds",
+    builtin_path = "crate::builtins::duration",
+    category = "datetime",
+    summary = "Create duration values from milliseconds or convert duration values to millisecond counts.",
+    keywords = "milliseconds,duration,datetime"
+)]
+async fn milliseconds_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    duration_unit_value(value, "milliseconds", 1.0 / (SECONDS_PER_DAY * 1000.0)).await
+}
+
+#[runmat_macros::runtime_builtin(
+    name = "years",
+    builtin_path = "crate::builtins::duration",
+    category = "datetime",
+    summary = "Create fixed-length duration values from years or convert durations to fixed-length years.",
+    keywords = "years,duration,datetime"
+)]
+async fn years_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    duration_unit_value(value, "years", 365.2425).await
+}
+
+#[runmat_macros::runtime_builtin(
+    name = "isduration",
+    builtin_path = "crate::builtins::duration",
+    category = "datetime",
+    summary = "Return true for duration values.",
+    keywords = "isduration,duration,predicate"
+)]
+fn isduration_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    Ok(Value::Bool(is_duration_object(&value)))
+}
+
+#[runmat_macros::runtime_builtin(
     name = "duration.subsref",
     descriptor(crate::builtins::duration::DURATION_SUBSREF_DESCRIPTOR),
     builtin_path = "crate::builtins::duration"
@@ -980,6 +1115,59 @@ mod tests {
             .expect("duration text");
         assert!(rendered.contains("01:15:00"));
         assert!(rendered.contains("02:45:00"));
+    }
+
+    #[test]
+    fn duration_missing_days_render_without_error() {
+        let value = duration_object_from_days_tensor(
+            Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap(),
+            DEFAULT_DURATION_FORMAT,
+        )
+        .expect("duration object");
+        let rendered = duration_string_array(&value)
+            .expect("string array")
+            .expect("duration strings");
+        assert_eq!(rendered.data, vec!["NaN".to_string()]);
+        assert_eq!(
+            duration_display_text(&value).expect("display"),
+            Some("NaN".to_string())
+        );
+    }
+
+    #[test]
+    fn duration_unit_helpers_create_and_convert_values() {
+        let one_day = futures::executor::block_on(days_builtin(Value::Num(1.0))).expect("days");
+        assert!(is_duration_object(&one_day));
+        let as_hours = futures::executor::block_on(hours_builtin(one_day.clone())).expect("hours");
+        assert_eq!(as_hours, Value::Num(24.0));
+        let as_minutes =
+            futures::executor::block_on(minutes_builtin(one_day.clone())).expect("minutes");
+        assert_eq!(as_minutes, Value::Num(1440.0));
+        let as_seconds =
+            futures::executor::block_on(seconds_builtin(one_day.clone())).expect("seconds");
+        assert_eq!(as_seconds, Value::Num(86_400.0));
+        let as_millis =
+            futures::executor::block_on(milliseconds_builtin(one_day.clone())).expect("millis");
+        assert_eq!(as_millis, Value::Num(86_400_000.0));
+
+        let two_hours = futures::executor::block_on(hours_builtin(Value::Num(2.0))).expect("hours");
+        let rendered = duration_display_text(&two_hours)
+            .expect("display")
+            .expect("duration text");
+        assert_eq!(rendered, "02:00:00");
+
+        let year = futures::executor::block_on(years_builtin(Value::Num(1.0))).expect("years");
+        let year_days = duration_tensor_from_duration_value(&year).expect("duration tensor");
+        assert!((year_days.data[0] - 365.2425).abs() < 1e-9);
+        assert_eq!(
+            isduration_builtin(year).expect("isduration"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            isduration_builtin(Value::Num(1.0)).expect("isduration"),
+            Value::Bool(false)
+        );
+        assert!(futures::executor::block_on(years_builtin(Value::Num(f64::MAX))).is_err());
     }
 
     #[test]

@@ -48,6 +48,55 @@ fn has_object_class(values: &[runmat_builtins::Value], class_name: &str) -> bool
     })
 }
 
+fn has_class_ref(values: &[runmat_builtins::Value], class_name: &str) -> bool {
+    values
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::ClassRef(name) if name == class_name))
+}
+
+fn has_numeric_tensor(values: &[runmat_builtins::Value], expected: &[f64]) -> bool {
+    values.iter().any(|value| match value {
+        runmat_builtins::Value::Tensor(tensor) => {
+            tensor.data.len() == expected.len()
+                && tensor
+                    .data
+                    .iter()
+                    .zip(expected)
+                    .all(|(actual, expected)| (*actual - *expected).abs() < 1e-9)
+        }
+        _ => false,
+    })
+}
+
+fn cell_char_row_values(value: &runmat_builtins::Value) -> Option<((usize, usize), Vec<String>)> {
+    let runmat_builtins::Value::Cell(cell) = value else {
+        return None;
+    };
+    let values = cell
+        .data
+        .iter()
+        .map(|entry| match entry {
+            runmat_builtins::Value::CharArray(chars) => Some(chars.data.iter().collect::<String>()),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(((cell.rows, cell.cols), values))
+}
+
+fn has_cell_char_row(values: &[runmat_builtins::Value], expected: &[&str]) -> bool {
+    values.iter().any(|value| {
+        cell_char_row_values(value).is_some_and(|((rows, cols), actual)| {
+            rows == 1
+                && cols == expected.len()
+                && actual
+                    == expected
+                        .iter()
+                        .map(|entry| entry.to_string())
+                        .collect::<Vec<_>>()
+        })
+    })
+}
+
 fn has_object_num_property(
     values: &[runmat_builtins::Value],
     class_name: &str,
@@ -59,6 +108,23 @@ fn has_object_num_property(
             matches!(
                 obj.properties.get(property_name),
                 Some(runmat_builtins::Value::Num(n)) if (*n - expected).abs() < 1e-9
+            )
+        }
+        _ => false,
+    })
+}
+
+fn has_object_string_property(
+    values: &[runmat_builtins::Value],
+    class_name: &str,
+    property_name: &str,
+    expected: &str,
+) -> bool {
+    values.iter().any(|v| match v {
+        runmat_builtins::Value::Object(obj) if obj.class_name == class_name => {
+            matches!(
+                obj.properties.get(property_name),
+                Some(runmat_builtins::Value::String(s)) if s == expected
             )
         }
         _ => false,
@@ -147,6 +213,142 @@ fn assert_import_ambiguity_error(err: &runmat_runtime::RuntimeError) {
         Some("RunMat:ImportAmbiguous"),
         "expected import ambiguity identifier, got: {}",
         err.message()
+    );
+}
+
+#[test]
+fn arguments_block_accepts_extended_validation_family() {
+    let values = execute_source(
+        r#"
+        y = checked(3, 'alpha', 'on');
+        function out = checked(x, name, mode)
+            arguments
+                x (1,1) double {mustBeNumeric, mustBeFloat, mustBeInteger, mustBeInRange(1, 5)}
+                name {mustBeTextScalar, mustBeNonzeroLengthText, mustBeValidVariableName}
+                mode {mustBeMember('on')}
+            end
+            out = x + 4;
+        end
+        "#,
+    );
+    assert!(
+        has_num(&values, 7.0),
+        "expected checked output, got {values:?}"
+    );
+}
+
+#[test]
+fn arguments_block_extended_validator_failures_are_runtime_errors() {
+    let err = execute_source_result(
+        r#"
+        y = checked(8);
+        function out = checked(x)
+            arguments
+                x {mustBeInRange(1, 5)}
+            end
+            out = x;
+        end
+        "#,
+    )
+    .expect_err("out-of-range argument should fail validation");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:ArgumentValidationFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+    assert!(
+        err.message().contains("mustBeInRange"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn arguments_block_in_range_honors_exclusive_interval_flag() {
+    let err = execute_source_result(
+        r#"
+        y = checked(1);
+        function out = checked(x)
+            arguments
+                x {mustBeInRange(1, 5, 'exclusive')}
+            end
+            out = x;
+        end
+        "#,
+    )
+    .expect_err("exclusive lower endpoint should fail validation");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:ArgumentValidationFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+    assert!(
+        err.message().contains("mustBeInRange"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn arguments_block_in_range_accepts_explicit_argument_form() {
+    let values = execute_source(
+        r#"
+        y = checked(3);
+        function out = checked(x)
+            arguments
+                x {mustBeInRange(x, 1, 5)}
+            end
+            out = x + 4;
+        end
+        "#,
+    );
+    assert!(
+        has_num(&values, 7.0),
+        "expected checked output, got {values:?}"
+    );
+
+    let err = execute_source_result(
+        r#"
+        y = checked(1);
+        function out = checked(x)
+            arguments
+                x {mustBeInRange(x, 1, 5, 'exclusive')}
+            end
+            out = x;
+        end
+        "#,
+    )
+    .expect_err("exclusive lower endpoint should fail validation");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:ArgumentValidationFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn argument_validation_helpers_are_callable_builtins() {
+    let values = execute_source(
+        r#"
+        mustBePositive(3);
+        mustBeMember('on', {'on', 'off'});
+        tf = isvarname('alpha_1');
+        args = namedargs2cell(struct('Name', 'Ada', 'Value', 7));
+        n = numel(args);
+        "#,
+    );
+    assert!(
+        values
+            .iter()
+            .any(|v| matches!(v, runmat_builtins::Value::Bool(true))),
+        "expected isvarname true value, got {values:?}"
+    );
+    assert!(
+        has_num(&values, 4.0),
+        "expected namedargs2cell numel, got {values:?}"
     );
 }
 
@@ -356,7 +558,7 @@ fn unresolved_qualified_external_function_handle_uses_external_handle_instructio
     let bytecode = compile_source("h = @pkg.remote_inc; y = feval(h, 1);")
         .expect("qualified handle source should compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 1)
@@ -376,7 +578,7 @@ fn unresolved_qualified_external_handle_zero_output_feval_uses_typed_instruction
     let bytecode = compile_source(source)
         .expect("qualified external handle zero-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0)
@@ -396,7 +598,7 @@ fn unresolved_qualified_external_handle_multi_output_feval_uses_typed_instructio
     let bytecode = compile_source(source)
         .expect("qualified external handle multi-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
@@ -417,7 +619,7 @@ fn unresolved_qualified_external_handle_expand_zero_output_feval_uses_typed_inst
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded zero-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -440,7 +642,7 @@ fn unresolved_qualified_external_handle_expand_feval_uses_typed_instruction() {
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded feval source should compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -462,7 +664,7 @@ fn unresolved_qualified_external_handle_expand_multi_output_feval_uses_typed_ins
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded multi-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -484,7 +686,7 @@ fn unresolved_nested_qualified_external_handle_feval_uses_external_handle_instru
     let source = "h = @pkg.sub.remote; y = feval(h, 1);";
     let bytecode = compile_source(source).expect("nested qualified external handle feval compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 1)
@@ -505,7 +707,7 @@ fn unresolved_nested_qualified_external_handle_zero_output_feval_uses_typed_inst
     let bytecode = compile_source(source)
         .expect("nested qualified external handle zero-output feval compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0)
@@ -526,7 +728,7 @@ fn unresolved_nested_qualified_external_handle_multi_output_feval_uses_typed_ins
     let bytecode = compile_source(source)
         .expect("nested qualified external handle multi-output feval compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
@@ -547,7 +749,7 @@ fn unresolved_nested_qualified_external_handle_expand_zero_output_feval_uses_typ
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded zero-output feval compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -571,7 +773,7 @@ fn unresolved_nested_qualified_external_handle_expand_single_output_feval_uses_t
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded single-output feval compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -595,7 +797,7 @@ fn unresolved_nested_qualified_external_handle_expand_feval_uses_typed_instructi
     let bytecode =
         compile_source(source).expect("nested qualified external handle expanded feval compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -617,7 +819,7 @@ fn unresolved_qualified_external_handle_direct_call_uses_external_handle_instruc
     let source = "h = @pkg.remote_inc; y = h(1);";
     let bytecode = compile_source(source).expect("qualified external handle direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(
         bytecode
@@ -642,7 +844,7 @@ fn unresolved_qualified_external_handle_zero_output_direct_call_uses_typed_instr
     let bytecode =
         compile_source(source).expect("qualified external handle zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0)
@@ -663,7 +865,7 @@ fn unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_inst
     let bytecode = compile_source(source)
         .expect("qualified external handle multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
@@ -684,7 +886,7 @@ fn unresolved_qualified_external_handle_expand_zero_output_direct_call_uses_type
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -707,7 +909,7 @@ fn unresolved_qualified_external_handle_expand_direct_call_uses_typed_instructio
     let bytecode =
         compile_source(source).expect("qualified external handle expanded direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -730,7 +932,7 @@ fn unresolved_qualified_external_handle_expand_multi_output_direct_call_uses_typ
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -753,7 +955,7 @@ fn unresolved_nested_qualified_external_handle_direct_call_uses_external_handle_
     let bytecode =
         compile_source(source).expect("nested qualified external handle direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(
         bytecode
@@ -778,7 +980,7 @@ fn unresolved_nested_qualified_external_handle_zero_output_direct_call_uses_type
     let bytecode = compile_source(source)
         .expect("nested qualified external handle zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0)
@@ -800,7 +1002,7 @@ fn unresolved_nested_qualified_external_handle_multi_output_direct_call_uses_typ
     let bytecode = compile_source(source)
         .expect("nested qualified external handle multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
@@ -823,7 +1025,7 @@ fn unresolved_nested_qualified_external_handle_expand_zero_output_direct_call_us
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -847,7 +1049,7 @@ fn unresolved_nested_qualified_external_handle_expand_direct_call_uses_typed_ins
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -871,7 +1073,7 @@ fn unresolved_nested_qualified_external_handle_expand_multi_output_direct_call_u
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -1734,6 +1936,21 @@ fn inputname_reports_feval_caller_argument_names() {
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::String(s) if s.is_empty())));
+}
+
+#[test]
+fn display_script_surface_uses_variable_header() {
+    let source = r#"
+        txt = evalc("alpha = [1 2; 3 4]; display(alpha);");
+    "#;
+    let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_display_probe.m");
+    assert!(vars.iter().any(|v| matches!(
+        v,
+        runmat_builtins::Value::String(s)
+            if s.contains("alpha =")
+                && s.contains("1       2")
+                && s.contains("3       4")
+    )));
 }
 
 #[test]
@@ -3072,7 +3289,7 @@ fn unresolved_external_function_handle_index_call_errors_with_identifier() {
     let bytecode = compile_source(source).expect("compile unresolved external handle index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+        runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
     assert!(
         bytecode
@@ -3098,7 +3315,7 @@ fn unresolved_external_function_handle_index_zero_output_errors_with_identifier(
         compile_source(source).expect("compile unresolved external handle zero-output index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+        runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -3122,7 +3339,7 @@ fn unresolved_external_function_handle_index_multi_output_errors_with_identifier
         compile_source(source).expect("compile unresolved external handle multi-output index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+        runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -3146,7 +3363,7 @@ fn unresolved_external_function_handle_expand_index_call_errors_with_identifier(
         compile_source(source).expect("compile unresolved external expanded-handle index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+        runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -3171,7 +3388,7 @@ fn unresolved_external_function_handle_expand_index_zero_output_errors_with_iden
         .expect("compile unresolved external expanded-handle zero-output index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+        runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -3196,7 +3413,7 @@ fn unresolved_external_function_handle_expand_index_multi_output_errors_with_ide
         .expect("compile unresolved external expanded-handle multi-output index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+        runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -3901,6 +4118,189 @@ fn metaclass_postfix_member_and_method() {
 }
 
 #[test]
+fn metaclass_builtin_script_surface_reports_runtime_class_refs() {
+    let program = r#"
+        __register_test_classes();
+        p = new_object('Point');
+        mc_obj = metaclass(p);
+        mc_char = metaclass('Point');
+        mc_string = metaclass("Point");
+    "#;
+    let vars = execute_source(program);
+    assert!(has_class_ref(&vars, "Point"));
+    assert!(has_class_ref(&vars, "char"));
+    assert!(has_class_ref(&vars, "string"));
+}
+
+#[test]
+fn superclasses_script_surface_reports_registered_parent_chain() {
+    let program = r#"
+        __register_test_classes();
+        c = new_object('Circle');
+        s_obj = superclasses(c);
+        s_name = superclasses('Circle');
+        s_ref = superclasses(classref('Circle'));
+        s_none = superclasses('Point');
+    "#;
+    let vars = execute_source(program);
+    assert!(has_cell_char_row(&vars, &["Shape"]));
+    assert!(
+        vars.iter()
+            .filter(|value| {
+                cell_char_row_values(value).is_some_and(|((rows, cols), actual)| {
+                    rows == 1 && cols == 1 && actual == vec!["Shape".to_string()]
+                })
+            })
+            .count()
+            >= 3
+    );
+    assert!(has_cell_char_row(&vars, &[]));
+}
+
+#[test]
+fn ismethod_script_surface_checks_registered_class_methods() {
+    let program = r#"
+        __register_test_classes();
+        p = new_object('Point');
+        circle = new_object('Circle');
+        ok = ismethod(p, 'move') && ismethod(p, "origin") && ismethod('Point', 'move') && ismethod("Point", "origin") && ~ismethod(p, 'missing') && ~ismethod('Point', 'missing') && ismethod(circle, 'area');
+    "#;
+    let vars = execute_source(program);
+    assert!(
+        matches!(vars.last(), Some(runmat_builtins::Value::Bool(true))),
+        "expected per-case ismethod checks to produce ok=true: {vars:?}"
+    );
+}
+
+#[test]
+fn underlying_type_script_surface() {
+    let program = r#"
+        __register_test_classes();
+        p = new_object('Point');
+        a = underlyingType(1);
+        b = underlyingType(single([1 2]));
+        c = underlyingType(true);
+        d = underlyingType('abc');
+        e = underlyingType("abc");
+        f = underlyingType(p);
+        ok = isUnderlyingType(single([3 4]), "single") && isUnderlyingType(true, 'logical') && ~isUnderlyingType(p, "double");
+    "#;
+    let vars = execute_source(program);
+    for expected in ["double", "single", "logical", "char", "string", "Point"] {
+        assert!(
+            vars.iter()
+                .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == expected)),
+            "expected underlyingType output {expected:?}; vars={vars:?}"
+        );
+    }
+    assert!(
+        matches!(vars.last(), Some(runmat_builtins::Value::Bool(true))),
+        "expected isUnderlyingType combined predicate to be true: {vars:?}"
+    );
+}
+
+#[test]
+fn num_arguments_from_subscript_script_surface() {
+    let program = r#"
+        C = {"one", 2, "three"};
+        S = struct();
+        S.type = '{}';
+        S.subs = {[1 2]};
+        n1 = numArgumentsFromSubscript(C, S, 'Statement');
+
+        S2 = struct();
+        S2.type = '{}';
+        S2.subs = {':'};
+        ctx = classref('matlab.indexing.IndexingContext').Statement;
+        n2 = numArgumentsFromSubscript(C, S2, ctx);
+
+        __register_test_classes();
+        o = new_object('OverIdx');
+        o = setfield(o, 'nargs', 6);
+        S3 = struct();
+        S3.type = '.';
+        S3.subs = 'field';
+        n3 = numArgumentsFromSubscript(o, S3, 'Expression');
+    "#;
+    let vars = execute_source(program);
+    assert!(has_num(&vars, 2.0), "expected two brace outputs: {vars:?}");
+    assert!(
+        has_num(&vars, 3.0),
+        "expected colon brace output count: {vars:?}"
+    );
+    assert!(
+        has_num(&vars, 6.0),
+        "expected object overload to supply output count: {vars:?}"
+    );
+}
+
+#[test]
+fn object_saveobj_loadobj_script_surface() {
+    let program = r#"
+        __register_test_classes();
+        o = new_object('OverIdx');
+        o = setfield(o, 'k', 21);
+        o = setfield(o, 'nargs', 4);
+        payload = saveobj(o);
+        saved_by = getfield(payload, 'saved_by');
+        restored = classref('OverIdx').loadobj(payload);
+    "#;
+    let vars = execute_source(program);
+    assert!(
+        vars.iter()
+            .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "OverIdx.saveobj")),
+        "expected saveobj payload marker: {vars:?}"
+    );
+    assert!(
+        has_object_num_property(&vars, "OverIdx", "k", 21.0),
+        "expected loadobj-restored OverIdx.k property: {vars:?}"
+    );
+    assert!(
+        has_object_string_property(&vars, "OverIdx", "loaded_by", "OverIdx.loadobj"),
+        "expected loadobj marker property: {vars:?}"
+    );
+}
+
+#[test]
+fn findobj_script_surface_finds_graphics_handles() {
+    let program = r#"
+        figure('Visible', 'off');
+        h = plot([1 2 3], 'DisplayName', 'series-a');
+        fig = gcf();
+        by_type = findobj('Type', 'line');
+        by_name = findobj(gca(), 'DisplayName', 'series-a');
+        flat = findobj(fig, 'flat');
+    "#;
+    let vars = execute_source(program);
+    let line_handle = vars
+        .iter()
+        .find_map(|value| match value {
+            runmat_builtins::Value::Num(value) if *value > 1.0e6 => Some(*value),
+            _ => None,
+        })
+        .expect("line handle");
+    let figure_handle = vars
+        .iter()
+        .find_map(|value| match value {
+            runmat_builtins::Value::Num(value) if *value > 0.0 && *value < 1.0e6 => Some(*value),
+            _ => None,
+        })
+        .expect("figure handle");
+
+    assert!(
+        vars.iter()
+            .filter(|value| matches!(
+                value,
+                runmat_builtins::Value::Tensor(tensor)
+                    if tensor.data.len() == 1 && (tensor.data[0] - line_handle).abs() < 1e-9
+            ))
+            .count()
+            >= 2
+    );
+    assert!(has_numeric_tensor(&vars, &[figure_handle]));
+}
+
+#[test]
 fn classdef_with_attributes_enforced() {
     // Define class A with private get and public set on property p, then enforce via getfield/setfield
     let src = "classdef A\n  properties(GetAccess=private, SetAccess=public)\n    p\n  end\nend\n a = new_object('A'); a = setfield(a,'p',5); try; v = getfield(a,'p'); catch e; ok=1; end";
@@ -3908,6 +4308,35 @@ fn classdef_with_attributes_enforced() {
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
+}
+
+#[test]
+fn dynamicprops_class_supports_addprop_dot_access_and_delete() {
+    let src = r#"
+classdef DynPoint < dynamicprops
+end
+d = new_object('DynPoint');
+p = addprop(d, 'gain');
+d.gain = 7;
+observed = d.gain;
+p.Hidden = true;
+hidden = p.Hidden;
+is_dyn = isa(d, 'dynamicprops');
+supers = superclasses(d);
+delete(p);
+try
+  missing = d.gain;
+catch e
+  removed = 1;
+end
+"#;
+    let vars = execute_source(src);
+    assert!(has_num(&vars, 7.0));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Bool(true))));
+    assert!(has_cell_char_row(&vars, &["dynamicprops", "handle"]));
+    assert!(has_num(&vars, 1.0));
 }
 
 #[test]

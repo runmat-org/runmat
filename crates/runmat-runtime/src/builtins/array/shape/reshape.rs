@@ -251,8 +251,8 @@ async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
 fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
-            let Tensor { data, .. } = tensor;
-            Tensor::new(data, dims.to_vec())
+            tensor
+                .reshape(dims.to_vec())
                 .map(Value::Tensor)
                 .map_err(|e| reshape_error(format!("reshape: {e}")))
         }

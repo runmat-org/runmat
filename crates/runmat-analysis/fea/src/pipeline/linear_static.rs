@@ -3,7 +3,7 @@ use runmat_analysis_core::{
 };
 
 use crate::{
-    assembly::assemble_linear_system,
+    assembly::{try_assemble_linear_system, AssemblySummary},
     contracts::{
         ComputeBackend, FeaRunError, FeaRunResult, LinearStaticSolveOptions,
         FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
@@ -67,13 +67,25 @@ pub fn run_linear_static_with_options(
         Some(1),
         Some(5),
     );
-    let summary = assemble_linear_system(
+    let summary = try_assemble_linear_system(
         model,
         options.prep_context.clone(),
+        options.analysis_mesh.clone(),
         options.thermo_mechanical_context,
         options.electro_thermal_context,
-    );
+    )
+    .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
     super::validate_rotational_dof_targets(model, &summary)?;
+    let analysis_mesh_present = options.analysis_mesh.is_some();
+    if options.require_analysis_mesh_for_solid
+        && !analysis_mesh_present
+        && !model_has_explicit_structural_elements(model)
+    {
+        return Err(FeaRunError::InvalidModel(
+            "linear static solid continuum studies require an analysis mesh; generate or provide analysis_mesh_artifact_path before solve"
+                .to_string(),
+        ));
+    }
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::ModelAssembly,
@@ -174,6 +186,28 @@ pub fn run_linear_static_with_options(
             solve_result.preconditioner,
         ),
     }];
+    if let Some(path) = options.analysis_mesh_artifact_path.as_ref() {
+        let mesh_summary = options
+            .analysis_mesh
+            .as_ref()
+            .map(|mesh| {
+                format!(
+                    " analysis_mesh_node_count={} analysis_mesh_volume_element_count={} analysis_mesh_boundary_face_count={}",
+                    mesh.nodes.len(),
+                    mesh.volume_elements.len(),
+                    mesh.boundary_faces.len()
+                )
+            })
+            .unwrap_or_default();
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_ANALYSIS_MESH_REFERENCE".to_string(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!("analysis_mesh_artifact_path={path}{mesh_summary}"),
+        });
+    }
+    if let Some(diagnostic) = structural_solid_assembly_diagnostic(&summary) {
+        diagnostics.push(diagnostic);
+    }
     if let (Some(residual_norm), Some(equation_scale)) = (
         scalar_field_value(&fields, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM),
         scalar_field_value(&fields, FEA_FIELD_STRUCTURAL_EQUATION_SCALE),
@@ -220,20 +254,23 @@ pub fn run_linear_static_with_options(
     let recovery_metrics = structural_field_recovery_metrics(&summary, &solve_result.solution);
     diagnostics.push(FeaDiagnostic {
         code: "FEA_STRUCTURAL_FIELD_RECOVERY".to_string(),
-        severity: if recovery_metrics.active_stiffness_edge_count > 0
-            && recovery_metrics.recovery_element_count > 0
+        severity: if recovery_metrics.recovery_element_count > 0
+            && (recovery_metrics.active_stiffness_edge_count > 0
+                || recovery_metrics.solver_mesh_element_count > 0)
         {
             FeaDiagnosticSeverity::Info
         } else {
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis={} active_stiffness_edge_count={} prep_recovery_edge_count={} constrained_edge_count={} recovery_element_count={} max_edge_displacement_jump={} max_edge_strain_norm={} mean_edge_stiffness_ratio={} mean_edge_length_m={} strain_component_coverage_ratio={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={}",
+            "basis={} active_stiffness_edge_count={} prep_recovery_edge_count={} constrained_edge_count={} recovery_element_count={} solver_mesh_node_count={} solver_mesh_element_count={} max_edge_displacement_jump={} max_edge_strain_norm={} mean_edge_stiffness_ratio={} mean_edge_length_m={} strain_component_coverage_ratio={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={}",
             recovery_metrics.basis,
             recovery_metrics.active_stiffness_edge_count,
             recovery_metrics.prep_recovery_edge_count,
             recovery_metrics.constrained_edge_count,
             recovery_metrics.recovery_element_count,
+            recovery_metrics.solver_mesh_node_count,
+            recovery_metrics.solver_mesh_element_count,
             recovery_metrics.max_edge_displacement_jump,
             recovery_metrics.max_edge_strain_norm,
             recovery_metrics.mean_edge_stiffness_ratio,
@@ -284,6 +321,72 @@ pub fn run_linear_static_with_options(
         solver_host_sync_count: solve_result.host_sync_count,
         diagnostics,
         fields,
+    })
+}
+
+fn model_has_explicit_structural_elements(model: &AnalysisModel) -> bool {
+    model
+        .structural
+        .as_ref()
+        .is_some_and(|structural| !structural.elements.is_empty())
+}
+
+fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<FeaDiagnostic> {
+    if summary.structural_solid_element_count == 0
+        && summary.operator.stiffness_dense.is_none()
+        && summary.operator.stiffness_csr.is_none()
+    {
+        return None;
+    }
+
+    let stiffness_nnz = summary
+        .operator
+        .stiffness_csr
+        .as_ref()
+        .map(|csr| csr.values.iter().filter(|value| value.abs() > 0.0).count())
+        .or_else(|| {
+            summary
+                .operator
+                .stiffness_dense
+                .as_ref()
+                .map(|dense| dense.iter().filter(|value| value.abs() > 0.0).count())
+        })
+        .unwrap_or(0);
+    let rhs_nonzero_count = summary
+        .operator
+        .rhs
+        .iter()
+        .filter(|value| value.abs() > 0.0)
+        .count();
+    let has_solid_stiffness = (summary.operator.stiffness_csr.is_some()
+        || summary.operator.stiffness_dense.is_some())
+        && summary.structural_solid_element_count > 0;
+    let storage = if summary.operator.stiffness_csr.is_some() {
+        "sparse_csr"
+    } else if summary.operator.stiffness_dense.is_some() {
+        "dense"
+    } else {
+        "none"
+    };
+
+    Some(FeaDiagnostic {
+        code: "FEA_STRUCTURAL_SOLID_ASSEMBLY".to_string(),
+        severity: if has_solid_stiffness {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "basis=solid_tetrahedron4_stiffness storage={} solid_node_count={} solid_element_count={} dof_count={} constrained_dof_count={} stiffness_nnz={} rhs_nonzero_count={} stiffness_present={}",
+            storage,
+            summary.structural_node_count,
+            summary.structural_solid_element_count,
+            summary.dof_count,
+            summary.constrained_dof_count,
+            stiffness_nnz,
+            rhs_nonzero_count,
+            has_solid_stiffness
+        ),
     })
 }
 

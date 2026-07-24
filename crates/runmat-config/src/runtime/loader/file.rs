@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::runtime::{
     AccelerateConfig, FeaConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig,
@@ -27,7 +27,6 @@ struct RuntimeFileSection {
     callstack_limit: Option<usize>,
     error_namespace: Option<String>,
     verbose: Option<bool>,
-    snapshot_path: Option<PathBuf>,
     language: Option<LanguageConfig>,
     logging: Option<LoggingConfig>,
     telemetry: Option<TelemetryConfig>,
@@ -48,9 +47,6 @@ impl RuntimeFileSection {
         }
         if let Some(verbose) = self.verbose {
             config.runtime.verbose = verbose;
-        }
-        if let Some(snapshot_path) = self.snapshot_path {
-            config.runtime.snapshot_path = Some(snapshot_path);
         }
         if let Some(language) = self.language {
             config.language = language;
@@ -86,7 +82,6 @@ impl From<&RunMatRuntimeConfig> for RuntimeFileDocument {
                 callstack_limit: Some(value.runtime.callstack_limit),
                 error_namespace: Some(value.runtime.error_namespace.clone()),
                 verbose: Some(value.runtime.verbose),
-                snapshot_path: value.runtime.snapshot_path.clone(),
                 language: Some(value.language.clone()),
                 logging: Some(value.logging.clone()),
                 telemetry: Some(value.telemetry.clone()),
@@ -203,5 +198,27 @@ fn parse_document(content: &str, format: ConfigFormat, path: &Path) -> Result<Ru
             .with_context(|| format!("Failed to parse TOML config: {}", path.display())),
         ConfigFormat::Json => serde_json::from_str(content)
             .with_context(|| format!("Failed to parse JSON config: {}", path.display())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{generate_sample_config, parse_document, ConfigFormat};
+    use std::path::Path;
+
+    #[test]
+    fn removed_snapshot_path_is_rejected() {
+        let error = parse_document(
+            "[runtime]\nsnapshot_path = \"stdlib.snapshot\"\n",
+            ConfigFormat::Toml,
+            Path::new("runmat.toml"),
+        )
+        .expect_err("removed startup snapshot configuration must be rejected");
+        assert!(format!("{error:#}").contains("snapshot_path"));
+    }
+
+    #[test]
+    fn generated_config_has_no_startup_snapshot_setting() {
+        assert!(!generate_sample_config().contains("snapshot_path"));
     }
 }

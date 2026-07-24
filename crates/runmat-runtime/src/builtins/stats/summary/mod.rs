@@ -1,8 +1,26 @@
 //! Summary statistics builtins.
 
+pub(crate) mod binscatter;
+pub(crate) mod boxplot;
+pub(crate) mod corr;
 pub(crate) mod corrcoef;
 pub(crate) mod cov;
+pub(crate) mod covariance_conversion;
+pub(crate) mod descriptive;
+pub(crate) mod distribution_math;
+pub(crate) mod distributions;
+pub(crate) mod ecdf;
+pub(crate) mod encoding;
+pub(crate) mod fitdist;
+pub(crate) mod hypothesis;
+pub(crate) mod lsline;
 pub(crate) mod mode;
+pub(crate) mod normalize;
+pub(crate) mod order_stats;
+pub(crate) mod outliers;
+pub(crate) mod qqplot;
+pub(crate) mod refline;
+pub(crate) mod scatterhist;
 
 pub use corrcoef::corrcoef_from_tensors;
 pub use cov::{cov_from_tensors, CovWeightSpec};

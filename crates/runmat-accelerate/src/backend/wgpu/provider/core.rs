@@ -134,7 +134,7 @@ impl WgpuProvider {
             buffer,
             len,
             shape: shape.clone(),
-            storage: storage.clone(),
+            storage,
             precision: self.precision,
             usage,
             last_submission_id: None,
@@ -323,13 +323,18 @@ impl WgpuProvider {
             ));
         }
         let guard = self.buffers.lock().expect("buffer mutex poisoned");
+        let handle_storage = runmat_accelerate_api::handle_storage(handle);
         guard
             .get(&handle.buffer_id)
             .map(|entry| BufferEntry {
                 buffer: entry.buffer.clone(),
                 len: entry.len,
                 shape: entry.shape.clone(),
-                storage: entry.storage.clone(),
+                storage: if handle_storage == GpuTensorStorage::ComplexInterleaved {
+                    GpuTensorStorage::ComplexInterleaved
+                } else {
+                    entry.storage
+                },
                 precision: entry.precision,
                 usage: entry.usage,
                 last_submission_id: entry.last_submission_id,

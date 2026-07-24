@@ -1,0 +1,12 @@
+{
+  "title": "groupcounts",
+  "category": "array/grouping",
+  "keywords": ["groupcounts", "groups", "count", "table"],
+  "summary": "Count the number of elements in each group.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Grouping runs on the host."},
+  "tested": {"unit": "builtins::array::grouping::tests"},
+  "description": "`B = groupcounts(A)` returns counts for each sorted nonmissing group in array data. For table input, `groupcounts(T,vars)` returns a table with grouping variables, `GroupCount`, and `Percent`.",
+  "behaviors": ["Supports array, cell-array-of-grouping-vectors, and table grouping inputs.", "Missing groups are excluded from the count output."],
+  "examples": [{"description": "Count groups", "input": "B = groupcounts([1;1;2])", "output": "B = [2; 1]"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/array/grouping.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/grouping.rs"}
+}

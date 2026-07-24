@@ -1,0 +1,52 @@
+{
+  "title": "random",
+  "category": "stats/random",
+  "keywords": ["random", "fitdist", "probability distribution", "sampling", "statistics"],
+  "summary": "Generate random samples from a fitted or named probability distribution.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "size arguments",
+    "notes": "Sampling currently uses the host RNG and returns CPU arrays."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::fitdist::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`random(pd)` and `random(pd,sz...)` generate random samples from a `ProbabilityDistribution` object returned by `fitdist`. `random(distname,params...,sz...)` samples supported named distributions directly.",
+  "behaviors": [
+    "`pd` must be a fitted distribution object returned by `fitdist`, or `distname` must name a supported distribution.",
+    "`random(pd)` returns one scalar sample.",
+    "`random(pd,m,n,...)` returns an array with the requested size. A vector size argument such as `[m n]` is also accepted.",
+    "Named normal, exponential, lognormal, gamma, Weibull, and Poisson distributions are supported with scalar parameters followed by optional size arguments.",
+    "Normal, exponential, lognormal, gamma, Weibull, and Poisson fitted distributions are supported."
+  ],
+  "examples": [
+    {
+      "description": "Draw a matrix of samples",
+      "input": "pd = fitdist([1;2;3], \"Normal\"); r = random(pd, 2, 3)"
+    },
+    {
+      "description": "Draw from a named Weibull distribution",
+      "input": "r = random(\"Weibull\", 2, 3, 4, 5)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does random support named distribution parameters?",
+      "answer": "Yes for normal, exponential, lognormal, gamma, Weibull, and Poisson with scalar parameters. Distribution-specific random helpers such as `normrnd` remain available separately."
+    }
+  ],
+  "links": [
+    { "label": "fitdist", "url": "./fitdist" },
+    { "label": "normrnd", "url": "./normrnd" },
+    { "label": "gamrnd", "url": "./gamrnd" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/fitdist.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/fitdist.rs"
+  }
+}

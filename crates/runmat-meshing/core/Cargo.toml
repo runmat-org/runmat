@@ -10,7 +10,11 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 runmat-geometry-core = { workspace = true }
+runmat-meshing-size = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
+
+[features]
+default = []

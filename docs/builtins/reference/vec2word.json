@@ -1,0 +1,86 @@
+{
+  "title": "vec2word",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "vec2word",
+    "wordEmbedding",
+    "text analytics",
+    "nearest words"
+  ],
+  "summary": "Map embedding vectors to nearest vocabulary words.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`vec2word` compares host-resident word embedding model data; it does not use provider kernels in this slice."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 5,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::embeddings::tests",
+    "integration": null
+  },
+  "description": "`vec2word(emb, M)` returns the nearest vocabulary word for each row of `M`. `[words, dist] = vec2word(emb, M, k)` returns the `k` nearest words and distances.",
+  "behaviors": [
+    "`emb` must be a RunMat `wordEmbedding` compatibility object.",
+    "`M` must be an `n`-by-`emb.Dimension` numeric matrix.",
+    "`k` is an optional positive integer from `1` through the vocabulary size. The default is `1`.",
+    "The default distance metric is cosine distance. `vec2word(___, 'Distance', 'euclidean')` uses Euclidean distance.",
+    "`words` is an `n`-by-`k` string array. `dist` is an `n`-by-`k` numeric matrix.",
+    "For zero-norm query or vocabulary vectors under cosine distance, RunMat reports infinite distance so finite matches sort ahead of them."
+  ],
+  "examples": [
+    {
+      "description": "Find Nearest Words",
+      "input": "emb = readWordEmbedding('vectors.vec');\nM = word2vec(emb, [\"king\" \"queen\"]);\nwords = vec2word(emb, M)",
+      "output": "`words` contains the nearest vocabulary word for each vector row."
+    },
+    {
+      "description": "Return Multiple Neighbors",
+      "input": "[words, dist] = vec2word(emb, M, 3, \"Distance\", \"cosine\")",
+      "output": "`words` and `dist` have three columns."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which distances are supported?",
+      "answer": "RunMat supports `\"cosine\"` and `\"euclidean\"` in this slice."
+    },
+    {
+      "question": "Does `vec2word` execute on the GPU?",
+      "answer": "No. It compares the host-resident embedding model."
+    }
+  ],
+  "links": [
+    {
+      "label": "readWordEmbedding",
+      "url": "./readWordEmbedding"
+    },
+    {
+      "label": "word2vec",
+      "url": "./word2vec"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "words = vec2word(emb, M)\n[words, dist] = vec2word(emb, M, k)\n[words, dist] = vec2word(emb, M, k, 'Distance', distance)",
+      "output": "`words` is a string array. `dist` is a numeric matrix."
+    },
+    "points": [
+      "`distance` must be `\"cosine\"` or `\"euclidean\"`.",
+      "`M` columns must equal `emb.Dimension`."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs"
+  },
+  "gpu_residency": "`vec2word` currently compares host text-model storage and has no provider kernel."
+}

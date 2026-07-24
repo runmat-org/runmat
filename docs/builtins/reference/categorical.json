@@ -1,0 +1,15 @@
+{
+  "title": "categorical",
+  "category": "table",
+  "keywords": ["categorical", "categories", "table", "ordinal"],
+  "summary": "Create a categorical array object.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Categorical arrays are host metadata objects."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
+  "description": "`categorical(A)` maps input labels to integer category codes and stores category labels in object metadata.",
+  "behaviors": ["String, char, cellstr, numeric, and logical inputs are supported.", "`categorical(A)` derives sorted unique categories from non-missing labels.", "String labels preserve leading and trailing whitespace.", "`categorical(A, valueset)` uses the supplied values as the category order and marks unmatched labels as missing.", "`categorical(A, valueset, catnames)` maps source values through `valueset` and stores the corresponding category names from `catnames`; `valueset` entries must be unique.", "Empty labels become missing category codes.", "`\"Ordinal\"` and `\"Protected\"` are accepted as name-value options, while those same words can still be used as positional category labels when not followed by logical option values.", "Categorical-to-categorical comparisons require matching category lists.", "Ordinal categorical arrays support equality, relational comparisons, `min`, and `max` by category order.", "Use `ordinal(...)` as a compatibility constructor for categoricals whose category order is meaningful."],
+  "examples": [{"description": "Create categories", "input": "C = categorical({'red'; 'blue'; 'red'})", "output": "C = categorical object"}],
+  "links": [{"label": "iscategorical", "url": "./iscategorical"}, {"label": "ordinal", "url": "./ordinal"}, {"label": "isordinal", "url": "./isordinal"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

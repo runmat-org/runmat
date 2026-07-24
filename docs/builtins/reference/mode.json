@@ -26,7 +26,8 @@
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::stats::summary::mode::tests"
+    "unit": "builtins::stats::summary::mode::tests",
+    "integration": "builtins::stats::summary::mode::tests::mode_gathers_gpu_input_for_host_order_statistics"
   },
   "description": "`mode(A)` returns the most frequent value along a dimension. Tie-breaking, frequency outputs, and optional tied-value cell outputs follow MATLAB semantics.",
   "behaviors": [
@@ -130,5 +131,10 @@
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/stats/summary/mode.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/mode.rs"
-  }
+  },
+  "gpu_residency": "`mode` is an order-statistics residency sink today. GPU-resident real or logical inputs are gathered through the active provider, evaluated by the host MATLAB-compatible tie/frequency implementation, and returned as host values. Complex gpuArray inputs gather to host complex tensors and are rejected by the same complex-input diagnostic as host complex values.",
+  "gpu_behavior": [
+    "`runmat-accelerate-api` defines the provider-side `mode_values` contract for modal values, optional resident frequency counts, and optional sorted tied-set data for MATLAB cell output `C`, but the runtime does not route `mode` through it yet.",
+    "Future native GPU support should implement backend sorting/counting kernels behind that provider hook and then route supported real dense gpuArray forms through it rather than hiding sorting/counting logic in the runtime builtin."
+  ]
 }

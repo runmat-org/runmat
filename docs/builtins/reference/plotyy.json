@@ -1,0 +1,104 @@
+{
+  "title": "plotyy",
+  "category": "plotting",
+  "keywords": [
+    "plotyy",
+    "dual y axis",
+    "plotting",
+    "legacy"
+  ],
+  "summary": "Plot two data sets with independent left and right Y axes.",
+  "status": "done",
+  "version_added": "0.5.3",
+  "tests": {
+    "unit": "builtins::plotting::plotyy::tests",
+    "vm": "runmat-vm plotting::plotyy_dispatches_and_returns_dual_axes_outputs"
+  },
+  "description": "`plotyy` creates two overlaid Cartesian axes in the current figure, plots the first data set against the left Y axis, plots the second data set against the right Y axis, and returns the axes and line handles. It is a legacy MATLAB compatibility helper; new MATLAB code generally uses `yyaxis`.",
+  "syntax": [
+    "ax = plotyy(X1, Y1, X2, Y2)",
+    "[ax, h1, h2] = plotyy(X1, Y1, X2, Y2)",
+    "[ax, h1, h2] = plotyy(X1, Y1, X2, Y2, fun)",
+    "[ax, h1, h2] = plotyy(X1, Y1, X2, Y2, fun1, fun2)"
+  ],
+  "arguments": [
+    {
+      "name": "X1, Y1",
+      "type": "numeric arrays",
+      "description": "Data plotted against the left Y axis. Data shape handling is delegated to the low-level `line` primitive."
+    },
+    {
+      "name": "X2, Y2",
+      "type": "numeric arrays",
+      "description": "Data plotted against the right Y axis. Data shape handling is delegated to the low-level `line` primitive."
+    },
+    {
+      "name": "fun, fun1, fun2",
+      "type": "function handle | string | character vector",
+      "description": "Optional plotting function selectors. Supported values are `plot`, `line`, `semilogx`, `semilogy`, and `loglog`."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "ax",
+      "type": "numeric row vector",
+      "description": "Two axes handles `[left right]`."
+    },
+    {
+      "name": "h1",
+      "type": "numeric scalar | numeric row vector",
+      "description": "Line handle or handles for the left axes."
+    },
+    {
+      "name": "h2",
+      "type": "numeric scalar | numeric row vector",
+      "description": "Line handle or handles for the right axes."
+    }
+  ],
+  "examples": [
+    {
+      "description": "Plot two series with separate Y axes",
+      "input": "[ax,h1,h2] = plotyy(1:3, [10 20 30], 1:3, [100 400 900]);\nget(ax(2), 'YAxisLocation')",
+      "output": "right"
+    },
+    {
+      "description": "Use logarithmic plotting functions",
+      "input": "[ax,h1,h2] = plotyy(1:3, [10 20 30], 1:3, [100 400 900], 'semilogx', 'semilogy');\n{get(ax(1),'XScale'), get(ax(2),'YScale')}",
+      "output": "{'log', 'log'}"
+    }
+  ],
+  "notes": [
+    "`plotyy` returns the left axes as the current axes after plotting.",
+    "The right axes shares the primary plot viewport and stores `YAxisLocation` as `right`.",
+    "For compatibility with existing RunMat plotting primitives, line creation uses the same handle and data-shape behavior as `line`."
+  ],
+  "gpu_residency": "`plotyy` is a plotting sink. It delegates line creation to the existing low-level `line` path, so GPU-resident inputs follow the same residency behavior as `line` and are not gathered by `plotyy` itself.",
+  "related": [
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "line",
+      "url": "./line"
+    },
+    {
+      "label": "semilogx",
+      "url": "./semilogx"
+    },
+    {
+      "label": "semilogy",
+      "url": "./semilogy"
+    },
+    {
+      "label": "loglog",
+      "url": "./loglog"
+    }
+  ],
+  "implemented_in": [
+    {
+      "label": "crates/runmat-runtime/src/builtins/plotting/ops/plotyy.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/plotyy.rs"
+    }
+  ]
+}

@@ -44,7 +44,7 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
     let baseline = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions::production_recommended(),
+        AnalysisNonlinearRunOptions::solid_recommended(),
         OperationContext::new(Some("trace-prep-solve-base".to_string()), None),
     )
     .expect("baseline nonlinear run should succeed");
@@ -54,7 +54,7 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             prep_artifact_id: Some(prep.data.prep_artifact_id.clone()),
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(Some("trace-prep-solve-enhanced".to_string()), None),
     )
@@ -64,7 +64,7 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             prep_artifact_id: Some(prep.data.prep_artifact_id.clone()),
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(Some("trace-prep-solve-enhanced-replay".to_string()), None),
     )

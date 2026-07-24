@@ -181,7 +181,7 @@ See [bindings/ts/README.md](bindings/ts/README.md) and [WASM & TypeScript/JavaSc
 | Filesystem and config | `runmat-filesystem`, `runmat-config` |
 | CLI and remote services | `runmat-cli`, `runmat-server-client` |
 | Browser bindings | `runmat-wasm`, `bindings/ts` |
-| Tooling | `runmat-lsp`, `runmat-snapshot`, `runmat-telemetry`, `runmat-logging` |
+| Tooling | `runmat-lsp`, `runmat-telemetry`, `runmat-logging` |
 
 The runtime is host-neutral. The CLI, WASM bindings, LSP, and future application hosts all submit source through the same session/execution boundary and consume structured results.
 

@@ -1,9 +1,9 @@
-use crate::builtins::plotting::type_resolvers::bool_type;
-use runmat_builtins::Value;
+use crate::builtins::plotting::type_resolvers::handle_logical_type;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{LogicalArray, Value};
 use runmat_macros::runtime_builtin;
 
 const ISHANDLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -52,23 +52,40 @@ pub const ISHANDLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     summary = "Return true if the input is a valid plotting handle.",
     keywords = "ishandle,plotting,handle",
     suppress_auto_output = true,
-    type_resolver(bool_type),
+    type_resolver(handle_logical_type),
     descriptor(crate::builtins::plotting::ishandle::ISHANDLE_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::ishandle"
 )]
-pub fn ishandle_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
+pub fn ishandle_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let Some(value) = args.first() else {
-        return Ok(false);
+        return Ok(Value::Bool(false));
     };
-    if let Some(v) = match value {
-        Value::Num(v) => Some(*v),
-        _ => None,
-    } {
-        if !v.is_finite() || v <= 0.0 {
-            return Ok(false);
+    Ok(handle_predicate_value(value, "ishandle"))
+}
+
+fn handle_predicate_value(value: &Value, builtin: &'static str) -> Value {
+    match value {
+        Value::Tensor(tensor) => {
+            let data = tensor
+                .data
+                .iter()
+                .map(|&handle| u8::from(handle_is_valid(handle, builtin)))
+                .collect();
+            Value::LogicalArray(
+                LogicalArray::new(data, tensor.shape.clone()).expect("logical shape from tensor"),
+            )
         }
+        _ => Value::Bool(
+            crate::builtins::plotting::properties::resolve_plot_handle(value, builtin).is_ok(),
+        ),
     }
-    Ok(crate::builtins::plotting::properties::resolve_plot_handle(value, "ishandle").is_ok())
+}
+
+fn handle_is_valid(handle: f64, builtin: &'static str) -> bool {
+    if !handle.is_finite() || handle < 0.0 {
+        return false;
+    }
+    crate::builtins::plotting::properties::resolve_plot_handle(&Value::Num(handle), builtin).is_ok()
 }
 
 #[cfg(test)]
@@ -84,5 +101,18 @@ mod tests {
             .collect();
         assert!(labels.contains(&"tf = ishandle()"));
         assert!(labels.contains(&"tf = ishandle(h)"));
+    }
+
+    #[test]
+    fn ishandle_vectorizes_numeric_handle_arrays() {
+        let handles = runmat_builtins::Tensor::new(vec![f64::NAN, -1.0], vec![2, 1]).unwrap();
+        let result = ishandle_builtin(vec![Value::Tensor(handles)]).unwrap();
+        match result {
+            Value::LogicalArray(logical) => {
+                assert_eq!(logical.shape, vec![2, 1]);
+                assert_eq!(logical.data, vec![0, 0]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
     }
 }

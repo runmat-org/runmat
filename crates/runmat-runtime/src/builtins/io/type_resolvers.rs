@@ -38,6 +38,19 @@ pub fn importdata_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::tensor(), Type::Struct { known_fields: None }])
 }
 
+pub fn open_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Unknown
+}
+
+pub fn opentoline_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Void
+}
+
+pub fn pcode_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Void
+}
+
 pub fn audioread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::tensor()
@@ -158,6 +171,14 @@ pub fn save_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
+pub fn matfile_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Unknown
+}
+
+pub fn matfile_subsref_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Unknown
+}
+
 pub fn accept_type(args: &[Type], ctx: &ResolveContext) -> Type {
     struct_type(args, ctx)
 }
@@ -220,9 +241,40 @@ pub fn fullfile_type(args: &[Type], ctx: &ResolveContext) -> Type {
     string_type(args, ctx)
 }
 
+pub fn fileparts_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::OutputList(vec![Type::String, Type::String, Type::String])
+}
+
+pub fn fileattrib_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Union(vec![
+        Type::Num,
+        Type::OutputList(vec![Type::Num, Type::Struct { known_fields: None }]),
+    ])
+}
+
+pub fn system_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Union(vec![
+        Type::Num,
+        Type::OutputList(vec![Type::Num, Type::String]),
+    ])
+}
+
+pub fn getpref_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Unknown
+}
+
+pub fn readlines_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::String
+}
+
 pub fn uigetfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])
+}
+
+pub fn uigetdir_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Union(vec![Type::String, Type::Num])
 }
 
 pub fn uiputfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
@@ -307,6 +359,15 @@ pub fn xlsread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
         Type::tensor(),
         Type::OutputList(vec![Type::tensor(), Type::cell()]),
         Type::OutputList(vec![Type::tensor(), Type::cell(), Type::cell()]),
+    ])
+}
+
+pub fn xlswrite_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Union(vec![
+        Type::Bool,
+        Type::OutputList(vec![Type::Bool]),
+        Type::OutputList(vec![Type::Bool, Type::Struct { known_fields: None }]),
     ])
 }
 
@@ -523,6 +584,12 @@ mod tests {
         Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])
     );
     assert_resolver!(
+        uigetdir_type_resolver,
+        uigetdir_type,
+        &[],
+        Type::Union(vec![Type::String, Type::Num])
+    );
+    assert_resolver!(
         uiputfile_type_resolver,
         uiputfile_type,
         &[],
@@ -573,6 +640,16 @@ mod tests {
     );
     assert_resolver!(writecell_type_resolver, num_type, &[], Type::Num);
     assert_resolver!(writematrix_type_resolver, num_type, &[], Type::Num);
+    assert_resolver!(
+        xlswrite_type_resolver,
+        xlswrite_type,
+        &[],
+        Type::Union(vec![
+            Type::Bool,
+            Type::OutputList(vec![Type::Bool]),
+            Type::OutputList(vec![Type::Bool, Type::Struct { known_fields: None },]),
+        ])
+    );
 
     assert_resolver!(
         data_dataset_type_resolver,

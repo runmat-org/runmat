@@ -5,12 +5,17 @@ use runmat_accelerate::ShapeInfo;
 use runmat_builtins::Value;
 use runmat_vm::{EndExpr, Instr};
 use std::convert::TryInto;
+use std::path::Path;
 use test_helpers::compile_source;
 use test_helpers::interpret;
 
 fn execute_source(source: &str) -> Vec<Value> {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).expect("execute bytecode")
+}
+
+fn matlab_single_quoted_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\'', "''")
 }
 
 #[test]
@@ -47,6 +52,79 @@ fn bare_random_builtin_identifiers_execute_as_zero_arg_calls() {
     assert_eq!(out.data[1], 6.0);
     assert_eq!(out.data[2], 1.0);
     assert_eq!(out.data[3], 7.0);
+}
+
+#[test]
+fn rand_legacy_seed_forms_execute_from_source() {
+    let input = "\
+        rand(\"seed\", 2026);
+        prefix = rand(1, 4);
+        s = rand('seed');
+        a = rand(1, 4);
+        rand('seed', s);
+        b = rand(1, 4);
+        result = [sum(abs(a - b)), abs(s - 2026)];
+    ";
+    let vars = execute_source(input);
+    let result = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 2] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected result tensor");
+    assert!(result.data[0].abs() < 1.0e-12);
+    assert!(result.data[1] > 1.0);
+}
+
+#[test]
+fn opentoline_dispatches_editor_navigation_request() {
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "runmat_opentoline_vm_{}_{}.m",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::write(&path, "a = 1;\nb = 2;\n").expect("write temp script");
+    let quoted = matlab_single_quoted_path(&path);
+    let source = format!("opentoline('{quoted}', 2, 1); ok = 1;");
+
+    let vars = execute_source(&source);
+    let _ = std::fs::remove_file(&path);
+
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(v) if *v == 1.0)));
+}
+
+#[test]
+fn opentoline_command_form_dispatches_text_line_and_column() {
+    let mut dir = std::env::temp_dir();
+    dir.push(format!(
+        "runmat_opentoline_vm_dir_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::create_dir(&dir).expect("create temp dir");
+    let path = dir.join("opentoline_command_form.m");
+    std::fs::write(&path, "alpha = 1;\nbeta = 2;\n").expect("write temp script");
+    let quoted_dir = matlab_single_quoted_path(&dir);
+    let source =
+        format!("addpath('{quoted_dir}'); opentoline opentoline_command_form 2 1; ok = 1;");
+
+    let vars = execute_source(&source);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
+
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(v) if *v == 1.0)));
 }
 
 #[test]
@@ -232,22 +310,44 @@ fn upsample_downsample_builtin_executes_for_discrete_signal_workflow() {
         up = upsample(x, 2);
         down = downsample(x, 2);
         shifted = downsample(x, 2, 1);
+        resampled = resample(x, 2, 1, [0 1 0]);
         out = [numel(up), up(1), up(2), up(9), up(10), ...
                numel(down), down(1), down(3), ...
-               numel(shifted), shifted(1), shifted(2)];
+               numel(shifted), shifted(1), shifted(2), ...
+               numel(resampled), resampled(1), resampled(2), resampled(9), resampled(10)];
     "#;
     let vars = execute_source(input);
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 11] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape == vec![1, 16] => Some(tensor),
             _ => None,
         })
         .expect("expected sample-rate summary tensor");
     assert_eq!(
         out.data,
-        vec![10.0, 1.0, 0.0, 5.0, 0.0, 3.0, 1.0, 5.0, 2.0, 2.0, 4.0]
+        vec![10.0, 1.0, 0.0, 5.0, 0.0, 3.0, 1.0, 5.0, 2.0, 2.0, 4.0, 10.0, 1.0, 0.0, 5.0, 0.0,]
     );
+}
+
+#[test]
+fn nanmax_builtin_executes_for_reduction_and_pairwise_workflows() {
+    let input = r#"
+        A = [NaN 4 2; 3 NaN NaN];
+        M = nanmax(A);
+        D = nanmax(A, [], 2);
+        P = nanmax([NaN 2 NaN], [3 NaN NaN]);
+        out = [M(1), M(2), M(3), D(1), D(2), P(1), P(2), isnan(P(3))];
+    "#;
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 8] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected nanmax summary tensor");
+    assert_eq!(out.data, vec![3.0, 4.0, 2.0, 4.0, 3.0, 3.0, 2.0, 1.0]);
 }
 
 #[test]
@@ -773,6 +873,32 @@ fn fft_output_supports_complex_range_assignment_with_end_div() {
         }),
         "expected true/equivalent marker in vars, got {vars:?}"
     );
+}
+
+#[test]
+fn fftshift_accepts_abs_of_fft2_complex_output() {
+    let input = r#"
+        A = [1 2; 3 4];
+        M = abs(fft2(A));
+        C = fftshift(M);
+        out = [numel(M), size(M, 1), size(M, 2), numel(C), size(C, 1), size(C, 2)];
+    "#;
+    let vars = execute_source(input);
+    let m = match &vars[1] {
+        Value::Tensor(tensor) => tensor,
+        other => panic!("abs(fft2(A)) should produce a real tensor, got {other:?}"),
+    };
+    assert_eq!(m.shape, vec![2, 2]);
+    assert_eq!(m.data, vec![10.0, 4.0, 2.0, 0.0]);
+
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 6] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected shape summary tensor");
+    assert_eq!(out.data, vec![4.0, 2.0, 2.0, 4.0, 2.0, 2.0]);
 }
 
 #[test]

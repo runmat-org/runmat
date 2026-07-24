@@ -1,4 +1,5 @@
 use runmat_analysis_core::AnalysisField;
+use runmat_meshing_core::AnalysisMeshArtifact;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -9,10 +10,12 @@ use crate::solve::{
 pub const FEA_FIELD_STRUCTURAL_DISPLACEMENT: &str = "structural.displacement";
 pub const FEA_FIELD_STRUCTURAL_ROTATION: &str = "structural.rotation";
 pub const FEA_FIELD_STRUCTURAL_VON_MISES: &str = "structural.von_mises";
+pub const FEA_FIELD_STRUCTURAL_NODAL_VON_MISES: &str = "structural.nodal_von_mises";
 pub const FEA_FIELD_STRUCTURAL_STRAIN: &str = "structural.strain";
 pub const FEA_FIELD_STRUCTURAL_STRESS: &str = "structural.stress";
 pub const FEA_FIELD_STRUCTURAL_REACTION_FORCE: &str = "structural.reaction_force";
 pub const FEA_FIELD_STRUCTURAL_REACTION_MOMENT: &str = "structural.reaction_moment";
+pub const FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY: &str = "structural.strain_energy_density";
 pub const FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY: &str = "structural.total_strain_energy";
 pub const FEA_FIELD_STRUCTURAL_RESIDUAL_NORM: &str = "structural.residual_norm";
 pub const FEA_FIELD_STRUCTURAL_EQUATION_SCALE: &str = "structural.equation_scale";
@@ -396,7 +399,7 @@ pub struct FeaPrepContext {
     pub topology_region_mesh_variance: f64,
     pub topology_triangle_family_ratio: f64,
     pub topology_quad_family_ratio: f64,
-    pub topology_tet_family_ratio: f64,
+    pub topology_tetrahedron_family_ratio: f64,
     pub topology_hex_family_ratio: f64,
     #[serde(default = "default_prep_coordinate_span_m")]
     pub coordinate_span_x_m: f64,
@@ -539,6 +542,9 @@ pub struct LinearStaticSolveOptions {
     pub preconditioner_kind: SpdPreconditionerKind,
     pub algebra_backend_kind: LinearAlgebraBackendKind,
     pub prep_context: Option<FeaPrepContext>,
+    pub analysis_mesh_artifact_path: Option<String>,
+    pub analysis_mesh: Option<AnalysisMeshArtifact>,
+    pub require_analysis_mesh_for_solid: bool,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
@@ -549,6 +555,9 @@ impl Default for LinearStaticSolveOptions {
             preconditioner_kind: SpdPreconditionerKind::Jacobi,
             algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
             prep_context: None,
+            analysis_mesh_artifact_path: None,
+            analysis_mesh: None,
+            require_analysis_mesh_for_solid: true,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
         }
@@ -725,6 +734,8 @@ pub struct FeaNonlinearRunResult {
 pub enum FeaRunError {
     #[error("FEA_MODEL_INVALID: {0}")]
     InvalidModel(String),
+    #[error("FEA_ASSEMBLY_FAILED: {0}")]
+    Assembly(String),
     #[error("FEA_CANCELLED: execution cancelled by user")]
     Cancelled,
 }

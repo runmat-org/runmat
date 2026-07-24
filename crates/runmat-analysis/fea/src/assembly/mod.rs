@@ -1,12 +1,18 @@
 pub mod dofs;
 pub mod elements;
+pub mod solid;
+mod solid_boundary;
+
+use std::{collections::BTreeMap, fmt};
 
 use runmat_analysis_core::{
     AnalysisModel, BeamSectionModel, BoundaryConditionKind, LoadKind, ShellSectionModel,
     StructuralElementKind, StructuralModel,
 };
+use runmat_meshing_core::AnalysisMeshArtifact;
 use serde::{Deserialize, Serialize};
 
+use self::elements::solid::SolidMaterial;
 use self::{
     dofs::{StructuralDofKind, StructuralDofLayout, StructuralNodeDofSet},
     elements::beam::{
@@ -17,9 +23,14 @@ use self::{
         global_stiffness_matrix as shell_global_stiffness_matrix, ShellElementGeometry,
         ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT,
     },
+    solid::{
+        assemble_solid_stiffness_csr_with_materials, solid_topology_from_analysis_mesh,
+        SolidAssemblyError,
+    },
+    solid_boundary::apply_analysis_mesh_structural_regions,
 };
 
-use crate::operator::OperatorSystem;
+use crate::operator::{CsrMatrix, OperatorSystem};
 use crate::physics::coupling::thermo_mechanical;
 use crate::{
     FeaElectroThermalContext, FeaPrepCalibrationProfile, FeaPrepContext, FeaThermoMechanicalContext,
@@ -41,6 +52,8 @@ pub struct AssemblySummary {
     #[serde(default)]
     pub structural_direct_rotational_moment_load_count: usize,
     #[serde(default)]
+    pub structural_wrench_lowering: Vec<WrenchLoweringSummary>,
+    #[serde(default)]
     pub structural_rotational_constraint_count: usize,
     #[serde(default)]
     pub structural_beam_element_count: usize,
@@ -48,6 +61,8 @@ pub struct AssemblySummary {
     pub structural_shell_element_count: usize,
     #[serde(default)]
     pub structural_solid_element_count: usize,
+    #[serde(default)]
+    pub structural_solid_recovery: Vec<SolidRecoveryElementSummary>,
     #[serde(default)]
     pub structural_dof_layout: StructuralDofLayout,
     #[serde(default)]
@@ -70,6 +85,64 @@ pub struct AssemblySummary {
     pub thermo_mechanical: Option<ThermoMechanicalAssemblySummary>,
     pub electro_thermal: Option<ElectroThermalAssemblySummary>,
     pub operator: OperatorSystem,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinearAssemblyError {
+    SolidStiffness(SolidAssemblyError),
+    AnalysisMeshRegionMapping(AnalysisMeshRegionMappingError),
+}
+
+impl fmt::Display for LinearAssemblyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LinearAssemblyError::SolidStiffness(err) => {
+                write!(f, "solid stiffness assembly failed: {err:?}")
+            }
+            LinearAssemblyError::AnalysisMeshRegionMapping(err) => {
+                write!(f, "{err}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for LinearAssemblyError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnalysisMeshRegionMappingError {
+    UnmappedLoadRegion {
+        load_id: String,
+        region_id: String,
+        load_kind: &'static str,
+    },
+    UnmappedBoundaryConditionRegion {
+        bc_id: String,
+        region_id: String,
+        boundary_condition_kind: &'static str,
+    },
+}
+
+impl fmt::Display for AnalysisMeshRegionMappingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AnalysisMeshRegionMappingError::UnmappedLoadRegion {
+                load_id,
+                region_id,
+                load_kind,
+            } => write!(
+                f,
+                "analysis mesh load region did not resolve to solver boundary entities: load_id={load_id} region_id={region_id} load_kind={load_kind}"
+            ),
+            AnalysisMeshRegionMappingError::UnmappedBoundaryConditionRegion {
+                bc_id,
+                region_id,
+                boundary_condition_kind,
+            } => write!(
+                f,
+                "analysis mesh boundary condition region did not resolve to solver boundary entities: bc_id={bc_id} region_id={region_id} boundary_condition_kind={boundary_condition_kind}"
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -102,6 +175,26 @@ pub struct ShellRecoveryElementSummary {
     pub area_m2: f64,
     pub section: ShellSection,
     pub material: ShellMaterial,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SolidRecoveryElementSummary {
+    pub element_id: String,
+    pub region_id: String,
+    pub node_indices: [usize; 4],
+    pub coordinates_m: [[f64; 3]; 4],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WrenchLoweringSummary {
+    pub load_id: String,
+    pub region_id: String,
+    pub target_node_count: usize,
+    pub applied_force: [f64; 3],
+    pub applied_moment_at_point: [f64; 3],
+    pub force_residual: [f64; 3],
+    pub moment_residual: [f64; 3],
+    pub moment_couple_applied: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -141,7 +234,7 @@ pub struct PrepElementAssemblySummary {
     pub assembled_element_count: usize,
     pub triangle_element_count: usize,
     pub quad_element_count: usize,
-    pub tet_element_count: usize,
+    pub tetrahedron_element_count: usize,
     pub hex_element_count: usize,
     pub mixed_element_count: usize,
     pub scatter_nnz_count: usize,
@@ -156,7 +249,7 @@ pub struct PrepElementConnectivitySummary {
     pub damping_offdiag_nnz_count: usize,
     pub triangle_contrib_share: f64,
     pub quad_contrib_share: f64,
-    pub tet_contrib_share: f64,
+    pub tetrahedron_contrib_share: f64,
     pub hex_contrib_share: f64,
     pub mixed_contrib_share: f64,
     pub mean_connectivity_hop: f64,
@@ -194,7 +287,7 @@ pub struct PrepCalibrationSummary {
     pub profile: String,
     pub triangle_weight: f64,
     pub quad_weight: f64,
-    pub tet_weight: f64,
+    pub tetrahedron_weight: f64,
     pub hex_weight: f64,
     pub mixed_weight: f64,
     pub stiffness_calibration_scale: f64,
@@ -281,23 +374,65 @@ pub struct ElectroThermalAssemblySummary {
 pub fn assemble_linear_system(
     model: &AnalysisModel,
     prep_context: Option<FeaPrepContext>,
+    analysis_mesh: Option<AnalysisMeshArtifact>,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
 ) -> AssemblySummary {
-    if let Some(summary) = assemble_beam_system(model) {
-        return summary;
+    assemble_linear_system_impl(
+        model,
+        prep_context,
+        analysis_mesh,
+        thermo_mechanical_context,
+        electro_thermal_context,
+        false,
+    )
+    .expect("non-strict assembly should build operator topology")
+}
+
+pub fn try_assemble_linear_system(
+    model: &AnalysisModel,
+    prep_context: Option<FeaPrepContext>,
+    analysis_mesh: Option<AnalysisMeshArtifact>,
+    thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
+    electro_thermal_context: Option<FeaElectroThermalContext>,
+) -> Result<AssemblySummary, LinearAssemblyError> {
+    assemble_linear_system_impl(
+        model,
+        prep_context,
+        analysis_mesh,
+        thermo_mechanical_context,
+        electro_thermal_context,
+        true,
+    )
+}
+
+fn assemble_linear_system_impl(
+    model: &AnalysisModel,
+    prep_context: Option<FeaPrepContext>,
+    analysis_mesh: Option<AnalysisMeshArtifact>,
+    thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
+    electro_thermal_context: Option<FeaElectroThermalContext>,
+    strict_analysis_mesh_stiffness: bool,
+) -> Result<AssemblySummary, LinearAssemblyError> {
+    if analysis_mesh.is_none() {
+        if let Some(summary) = assemble_beam_system(model) {
+            return Ok(summary);
+        }
     }
 
     let base_dof_count = (model.loads.len() * 3).max(3);
     let prep_context_ref = prep_context.as_ref();
-    let dof_count = if let Some(prep) = prep_context_ref {
-        let prep_dof = ((prep.prepared_node_count as f64) * prep.topology_dof_multiplier)
-            .round()
-            .max(base_dof_count as f64) as usize;
-        prep_dof.clamp(base_dof_count, base_dof_count.saturating_mul(6).max(3))
-    } else {
-        base_dof_count
-    };
+    let solid_topology = analysis_mesh
+        .as_ref()
+        .and_then(|mesh| solid_topology_from_analysis_mesh(mesh, base_dof_count).ok());
+    let dof_count = solid_topology
+        .as_ref()
+        .map(|topology| topology.dof_count)
+        .unwrap_or(base_dof_count);
+    let structural_solid_recovery = analysis_mesh
+        .as_ref()
+        .map(solid_recovery_from_analysis_mesh)
+        .unwrap_or_default();
 
     let avg_youngs_modulus = if model.materials.is_empty() {
         1.0e9
@@ -385,6 +520,15 @@ pub fn assemble_linear_system(
                 }
             }
             runmat_analysis_core::LoadKind::Moment { .. } => {}
+            runmat_analysis_core::LoadKind::Wrench { fx, fy, fz, .. } => {
+                rhs[base] += *fx;
+                if base + 1 < dof_count {
+                    rhs[base + 1] += *fy;
+                }
+                if base + 2 < dof_count {
+                    rhs[base + 2] += *fz;
+                }
+            }
             runmat_analysis_core::LoadKind::Pressure { magnitude_pa } => {
                 rhs[base] += magnitude_pa * 1.0e-3;
                 if base + 1 < dof_count {
@@ -429,15 +573,27 @@ pub fn assemble_linear_system(
             0
         };
 
-    let constrained_dof_count = model.boundary_conditions.len().min(dof_count);
+    let legacy_constrained_dof_count = model.boundary_conditions.len().min(dof_count);
     let mut constrained = vec![false; dof_count];
     let constraint_offset = prep_context_ref
         .map(|prep| (prep.layout_seed as usize) % dof_count.max(1))
         .unwrap_or(0);
-    for idx in 0..constrained_dof_count {
+    for idx in 0..legacy_constrained_dof_count {
         let dof = (constraint_offset + idx * 2) % dof_count.max(1);
         constrained[dof] = true;
         rhs[dof] = 0.0;
+    }
+    let mut structural_wrench_lowering = Vec::new();
+    if let (Some(mesh), Some(_)) = (analysis_mesh.as_ref(), solid_topology.as_ref()) {
+        structural_wrench_lowering = apply_analysis_mesh_structural_regions(
+            model,
+            mesh,
+            &structural_dof_layout,
+            &mut constrained,
+            &mut rhs,
+            strict_analysis_mesh_stiffness,
+        )
+        .map_err(LinearAssemblyError::AnalysisMeshRegionMapping)?;
     }
 
     let mut prep_load_bonus = 0usize;
@@ -907,7 +1063,42 @@ pub fn assemble_linear_system(
         }
     }
 
-    AssemblySummary {
+    let stiffness_csr = match analysis_mesh.as_ref() {
+        Some(mesh) => match assemble_solid_stiffness_csr_with_materials(
+            mesh,
+            SolidMaterial {
+                youngs_modulus_pa: structural_material.youngs_modulus_pa,
+                poisson_ratio: structural_material.poisson_ratio,
+            },
+            &solid_materials_by_region(model),
+            base_dof_count,
+        ) {
+            Ok(dense) => Some(dense),
+            Err(err) if strict_analysis_mesh_stiffness => {
+                return Err(LinearAssemblyError::SolidStiffness(err));
+            }
+            Err(_) => None,
+        },
+        None => None,
+    };
+    if let Some(csr) = stiffness_csr.as_ref() {
+        apply_csr_constraints(csr, &constrained, &mut rhs, dof_count);
+        for (i, diagonal) in stiffness_diag.iter_mut().enumerate().take(dof_count) {
+            let start = csr.row_offsets[i];
+            let end = csr.row_offsets[i + 1];
+            *diagonal = csr.column_indices[start..end]
+                .iter()
+                .zip(csr.values[start..end].iter())
+                .find_map(|(&column, &value)| (column == i).then_some(value.abs()))
+                .unwrap_or(1.0e-12)
+                .max(1.0e-12);
+        }
+        stiffness_upper.fill(0.0);
+    }
+
+    let constrained_dof_count = constrained.iter().filter(|value| **value).count();
+
+    Ok(AssemblySummary {
         dof_count,
         structural_node_count: structural_dof_layout.node_count(),
         structural_translational_dof_count: structural_dof_layout.translational_dof_count(),
@@ -915,12 +1106,15 @@ pub fn assemble_linear_system(
         structural_rotation_node_count: structural_dof_layout.rotation_node_count(),
         structural_moment_load_count,
         structural_direct_rotational_moment_load_count,
+        structural_wrench_lowering,
         structural_rotational_constraint_count: 0,
         structural_beam_element_count: 0,
         structural_shell_element_count: 0,
-        structural_solid_element_count: prep_context_ref
-            .map(|prep| prep.prepared_element_count.max(prep.prepared_mesh_count))
-            .unwrap_or_else(|| element_count_for_legacy_dofs(dof_count)),
+        structural_solid_element_count: solid_topology
+            .as_ref()
+            .map(|topology| topology.volume_element_count)
+            .unwrap_or(0),
+        structural_solid_recovery,
         structural_dof_layout,
         structural_beam_recovery: Vec::new(),
         structural_shell_recovery: Vec::new(),
@@ -943,13 +1137,45 @@ pub fn assemble_linear_system(
             dof_count,
             constrained,
             stiffness_dense: None,
+            stiffness_csr,
             stiffness_diag,
             stiffness_upper,
             mass_diag,
             damping_diag,
             rhs,
         },
-    }
+    })
+}
+
+fn solid_recovery_from_analysis_mesh(
+    mesh: &AnalysisMeshArtifact,
+) -> Vec<SolidRecoveryElementSummary> {
+    let node_indices = mesh
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.node_id, index))
+        .collect::<BTreeMap<_, _>>();
+
+    mesh.volume_elements
+        .iter()
+        .filter(|element| element.node_ids.len() == 4)
+        .filter_map(|element| {
+            let mut indices = [0_usize; 4];
+            let mut coordinates_m = [[0.0_f64; 3]; 4];
+            for (local, node_id) in element.node_ids.iter().copied().enumerate() {
+                let node_index = *node_indices.get(&node_id)?;
+                indices[local] = node_index;
+                coordinates_m[local] = mesh.nodes.get(node_index)?.coordinates_m;
+            }
+            Some(SolidRecoveryElementSummary {
+                element_id: element.element_id.clone(),
+                region_id: element.material_region_id.clone(),
+                node_indices: indices,
+                coordinates_m,
+            })
+        })
+        .collect()
 }
 
 fn electro_thermal_fingerprint(
@@ -1008,10 +1234,6 @@ fn topology_fingerprint(
         hash = hash.wrapping_mul(1099511628211_u64);
     }
     hash
-}
-
-fn element_count_for_legacy_dofs(dof_count: usize) -> usize {
-    dof_count.div_ceil(3).max(1)
 }
 
 fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
@@ -1142,6 +1364,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
     }
 
     let mut direct_rotational_moment_load_count = 0usize;
+    let mut structural_wrench_lowering = Vec::new();
     for load in &model.loads {
         let target_nodes = structural_target_nodes(structural, &load.region_id);
         if target_nodes.is_empty() {
@@ -1199,6 +1422,32 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
                         mz * scale,
                     );
                 }
+            }
+            LoadKind::Wrench {
+                fx,
+                fy,
+                fz,
+                mx,
+                my,
+                mz,
+                px,
+                py,
+                pz,
+            } => {
+                let summary = add_wrench_rhs(
+                    structural,
+                    &structural_dof_layout,
+                    &mut rhs,
+                    &target_nodes,
+                    [fx, fy, fz],
+                    [mx, my, mz],
+                    [px, py, pz],
+                );
+                structural_wrench_lowering.push(WrenchLoweringSummary {
+                    load_id: load.load_id.clone(),
+                    region_id: load.region_id.clone(),
+                    ..summary
+                });
             }
             _ => {}
         }
@@ -1303,10 +1552,12 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
             .filter(|load| matches!(load.kind, LoadKind::Moment { .. }))
             .count(),
         structural_direct_rotational_moment_load_count: direct_rotational_moment_load_count,
+        structural_wrench_lowering,
         structural_rotational_constraint_count: rotational_constraint_count,
         structural_beam_element_count: beam_elements.len(),
         structural_shell_element_count: shell_elements.len(),
         structural_solid_element_count: 0,
+        structural_solid_recovery: Vec::new(),
         structural_dof_layout,
         structural_beam_recovery,
         structural_shell_recovery,
@@ -1329,6 +1580,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
             dof_count,
             constrained,
             stiffness_dense: Some(dense),
+            stiffness_csr: None,
             stiffness_diag,
             stiffness_upper,
             mass_diag,
@@ -1379,6 +1631,29 @@ fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSumma
         lame_lambda_pa,
         shear_modulus_pa,
     }
+}
+
+fn solid_materials_by_region(model: &AnalysisModel) -> BTreeMap<String, SolidMaterial> {
+    let materials_by_id = model
+        .materials
+        .iter()
+        .map(|material| (material.material_id.as_str(), material))
+        .collect::<BTreeMap<_, _>>();
+
+    model
+        .material_assignments
+        .iter()
+        .filter_map(|assignment| {
+            let material = materials_by_id.get(assignment.assigned_material_id.as_str())?;
+            Some((
+                assignment.region_id.clone(),
+                SolidMaterial {
+                    youngs_modulus_pa: material.mechanical.youngs_modulus_pa.max(1.0),
+                    poisson_ratio: material.mechanical.poisson_ratio.clamp(0.0, 0.49),
+                },
+            ))
+        })
+        .collect()
 }
 
 fn structural_node_index(structural: &StructuralModel, node_id: u32) -> Option<usize> {
@@ -1577,6 +1852,210 @@ fn add_rhs(
     }
 }
 
+fn add_wrench_rhs(
+    structural: &StructuralModel,
+    layout: &StructuralDofLayout,
+    rhs: &mut [f64],
+    target_nodes: &[usize],
+    force: [f64; 3],
+    moment_at_point: [f64; 3],
+    point_m: [f64; 3],
+) -> WrenchLoweringSummary {
+    if target_nodes.is_empty() {
+        return WrenchLoweringSummary {
+            load_id: String::new(),
+            region_id: String::new(),
+            target_node_count: 0,
+            applied_force: [0.0; 3],
+            applied_moment_at_point: [0.0; 3],
+            force_residual: force,
+            moment_residual: moment_at_point,
+            moment_couple_applied: false,
+        };
+    }
+
+    let centroid = target_centroid(structural, target_nodes);
+    let scale = 1.0 / target_nodes.len() as f64;
+    let mut nodal_forces = Vec::with_capacity(target_nodes.len());
+    for &node_index in target_nodes {
+        let nodal_force = scale_vec(force, scale);
+        add_translational_rhs(layout, rhs, node_index, nodal_force);
+        nodal_forces.push(nodal_force);
+    }
+
+    let force_arm = [
+        centroid[0] - point_m[0],
+        centroid[1] - point_m[1],
+        centroid[2] - point_m[2],
+    ];
+    let force_moment = cross(force_arm, force);
+    let couple = [
+        moment_at_point[0] - force_moment[0],
+        moment_at_point[1] - force_moment[1],
+        moment_at_point[2] - force_moment[2],
+    ];
+    let mut moment_couple_applied = false;
+
+    if !couple
+        .iter()
+        .all(|component| component.abs() <= f64::EPSILON)
+    {
+        let mut coupling = [[0.0_f64; 3]; 3];
+        let offsets = target_nodes
+            .iter()
+            .map(|&node_index| {
+                let node = structural.nodes[node_index].coordinates_m;
+                [
+                    node[0] - centroid[0],
+                    node[1] - centroid[1],
+                    node[2] - centroid[2],
+                ]
+            })
+            .collect::<Vec<_>>();
+        for offset in &offsets {
+            let r2 = dot(*offset, *offset);
+            for row in 0..3 {
+                coupling[row][row] += r2;
+                for col in 0..3 {
+                    coupling[row][col] -= offset[row] * offset[col];
+                }
+            }
+        }
+
+        if let Some(inv) = invert_3x3(coupling) {
+            let lambda = mat_vec(inv, couple);
+            for ((&node_index, offset), nodal_force) in target_nodes
+                .iter()
+                .zip(offsets.iter())
+                .zip(nodal_forces.iter_mut())
+            {
+                let couple_force = cross(lambda, *offset);
+                add_translational_rhs(layout, rhs, node_index, couple_force);
+                nodal_force[0] += couple_force[0];
+                nodal_force[1] += couple_force[1];
+                nodal_force[2] += couple_force[2];
+            }
+            moment_couple_applied = true;
+        }
+    }
+
+    let (applied_force, applied_moment_at_point) =
+        wrench_resultants(structural, target_nodes, &nodal_forces, point_m);
+    WrenchLoweringSummary {
+        load_id: String::new(),
+        region_id: String::new(),
+        target_node_count: target_nodes.len(),
+        applied_force,
+        applied_moment_at_point,
+        force_residual: [
+            force[0] - applied_force[0],
+            force[1] - applied_force[1],
+            force[2] - applied_force[2],
+        ],
+        moment_residual: [
+            moment_at_point[0] - applied_moment_at_point[0],
+            moment_at_point[1] - applied_moment_at_point[1],
+            moment_at_point[2] - applied_moment_at_point[2],
+        ],
+        moment_couple_applied,
+    }
+}
+
+fn add_translational_rhs(
+    layout: &StructuralDofLayout,
+    rhs: &mut [f64],
+    node_index: usize,
+    force: [f64; 3],
+) {
+    add_rhs(layout, rhs, node_index, StructuralDofKind::Ux, force[0]);
+    add_rhs(layout, rhs, node_index, StructuralDofKind::Uy, force[1]);
+    add_rhs(layout, rhs, node_index, StructuralDofKind::Uz, force[2]);
+}
+
+fn target_centroid(structural: &StructuralModel, target_nodes: &[usize]) -> [f64; 3] {
+    let mut centroid = [0.0_f64; 3];
+    for &node_index in target_nodes {
+        let node = structural.nodes[node_index].coordinates_m;
+        centroid[0] += node[0];
+        centroid[1] += node[1];
+        centroid[2] += node[2];
+    }
+    scale_vec(centroid, 1.0 / target_nodes.len() as f64)
+}
+
+fn wrench_resultants(
+    structural: &StructuralModel,
+    target_nodes: &[usize],
+    nodal_forces: &[[f64; 3]],
+    point_m: [f64; 3],
+) -> ([f64; 3], [f64; 3]) {
+    let mut applied_force = [0.0_f64; 3];
+    let mut applied_moment = [0.0_f64; 3];
+    for (&node_index, &force) in target_nodes.iter().zip(nodal_forces.iter()) {
+        applied_force[0] += force[0];
+        applied_force[1] += force[1];
+        applied_force[2] += force[2];
+        let node = structural.nodes[node_index].coordinates_m;
+        let arm = [
+            node[0] - point_m[0],
+            node[1] - point_m[1],
+            node[2] - point_m[2],
+        ];
+        let moment = cross(arm, force);
+        applied_moment[0] += moment[0];
+        applied_moment[1] += moment[1];
+        applied_moment[2] += moment[2];
+    }
+    (applied_force, applied_moment)
+}
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn scale_vec(value: [f64; 3], scale: f64) -> [f64; 3] {
+    [value[0] * scale, value[1] * scale, value[2] * scale]
+}
+
+fn mat_vec(matrix: [[f64; 3]; 3], value: [f64; 3]) -> [f64; 3] {
+    [
+        dot(matrix[0], value),
+        dot(matrix[1], value),
+        dot(matrix[2], value),
+    ]
+}
+
+fn invert_3x3(matrix: [[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
+    let m = matrix;
+    let c00 = m[1][1] * m[2][2] - m[1][2] * m[2][1];
+    let c01 = -(m[1][0] * m[2][2] - m[1][2] * m[2][0]);
+    let c02 = m[1][0] * m[2][1] - m[1][1] * m[2][0];
+    let c10 = -(m[0][1] * m[2][2] - m[0][2] * m[2][1]);
+    let c11 = m[0][0] * m[2][2] - m[0][2] * m[2][0];
+    let c12 = -(m[0][0] * m[2][1] - m[0][1] * m[2][0]);
+    let c20 = m[0][1] * m[1][2] - m[0][2] * m[1][1];
+    let c21 = -(m[0][0] * m[1][2] - m[0][2] * m[1][0]);
+    let c22 = m[0][0] * m[1][1] - m[0][1] * m[1][0];
+    let det = m[0][0] * c00 + m[0][1] * c01 + m[0][2] * c02;
+    if det.abs() <= 1.0e-18 {
+        return None;
+    }
+    let inv_det = 1.0 / det;
+    Some([
+        [c00 * inv_det, c10 * inv_det, c20 * inv_det],
+        [c01 * inv_det, c11 * inv_det, c21 * inv_det],
+        [c02 * inv_det, c12 * inv_det, c22 * inv_det],
+    ])
+}
+
 fn constrain_dof(
     layout: &StructuralDofLayout,
     constrained: &mut [bool],
@@ -1604,6 +2083,22 @@ fn apply_dense_constraints(dense: &[f64], constrained: &[bool], rhs: &mut [f64],
     }
 }
 
+fn apply_csr_constraints(csr: &CsrMatrix, constrained: &[bool], rhs: &mut [f64], dof_count: usize) {
+    for row in 0..dof_count {
+        if constrained[row] {
+            continue;
+        }
+        let start = csr.row_offsets[row];
+        let end = csr.row_offsets[row + 1];
+        for entry in start..end {
+            let column = csr.column_indices[entry];
+            if constrained[column] {
+                rhs[row] -= csr.values[entry] * rhs[column];
+            }
+        }
+    }
+}
+
 fn apply_prep_native_element_assembly(
     prep: &FeaPrepContext,
     dof_count: usize,
@@ -1622,17 +2117,18 @@ fn apply_prep_native_element_assembly(
     .round() as usize;
     let quad_count =
         ((element_count as f64) * prep.topology_quad_family_ratio.clamp(0.0, 1.0)).round() as usize;
-    let tet_count =
-        ((element_count as f64) * prep.topology_tet_family_ratio.clamp(0.0, 1.0)).round() as usize;
+    let tetrahedron_count = ((element_count as f64)
+        * prep.topology_tetrahedron_family_ratio.clamp(0.0, 1.0))
+    .round() as usize;
     let mut hex_count =
         ((element_count as f64) * prep.topology_hex_family_ratio.clamp(0.0, 1.0)).round() as usize;
-    let assigned = triangle_count + quad_count + tet_count + hex_count;
+    let assigned = triangle_count + quad_count + tetrahedron_count + hex_count;
     if assigned > element_count {
         let overflow = assigned - element_count;
         hex_count = hex_count.saturating_sub(overflow);
     }
     let mixed_count =
-        element_count.saturating_sub(triangle_count + quad_count + tet_count + hex_count);
+        element_count.saturating_sub(triangle_count + quad_count + tetrahedron_count + hex_count);
 
     let mut touched_diag = vec![false; dof_count];
     let mut touched_rhs = vec![false; dof_count];
@@ -1673,7 +2169,7 @@ fn apply_prep_native_element_assembly(
 
     apply_family(triangle_count, 0.92, 0.95);
     apply_family(quad_count, 1.00, 1.00);
-    apply_family(tet_count, 1.07, 1.05);
+    apply_family(tetrahedron_count, 1.07, 1.05);
     apply_family(hex_count, 1.15, 1.12);
     apply_family(mixed_count, 0.98, 1.02);
 
@@ -1683,7 +2179,7 @@ fn apply_prep_native_element_assembly(
         assembled_element_count: element_count,
         triangle_element_count: triangle_count,
         quad_element_count: quad_count,
-        tet_element_count: tet_count,
+        tetrahedron_element_count: tetrahedron_count,
         hex_element_count: hex_count,
         mixed_element_count: mixed_count,
         scatter_nnz_count,
@@ -1693,7 +2189,7 @@ fn apply_prep_native_element_assembly(
                 element_count,
                 triangle_count,
                 quad_count,
-                tet_count,
+                tetrahedron_count,
                 hex_count,
                 mixed_count,
                 scatter_nnz_count,
@@ -1722,7 +2218,7 @@ fn apply_prep_element_connectivity_scatter(
             damping_offdiag_nnz_count: 0,
             triangle_contrib_share: 0.0,
             quad_contrib_share: 0.0,
-            tet_contrib_share: 0.0,
+            tetrahedron_contrib_share: 0.0,
             hex_contrib_share: 0.0,
             mixed_contrib_share: 0.0,
             mean_connectivity_hop: 0.0,
@@ -1881,7 +2377,7 @@ fn apply_prep_element_connectivity_scatter(
         damping_offdiag_nnz_count,
         triangle_contrib_share: shares[0],
         quad_contrib_share: shares[1],
-        tet_contrib_share: shares[2],
+        tetrahedron_contrib_share: shares[2],
         hex_contrib_share: shares[3],
         mixed_contrib_share: shares[4],
         mean_connectivity_hop,
@@ -1942,13 +2438,13 @@ fn apply_prep_calibration(
 
     let triangle_weight = (0.95 + 0.08 * prep.topology_triangle_family_ratio) * profile_gain;
     let quad_weight = (1.0 + 0.06 * prep.topology_quad_family_ratio) * profile_gain;
-    let tet_weight = (1.04 + 0.10 * prep.topology_tet_family_ratio) * profile_gain;
+    let tetrahedron_weight = (1.04 + 0.10 * prep.topology_tetrahedron_family_ratio) * profile_gain;
     let hex_weight = (1.08 + 0.12 * prep.topology_hex_family_ratio) * profile_gain;
     let mixed_weight = (0.9 + 0.05 * prep.topology_mixed_family_ratio) * profile_gain;
 
     let stiffness_calibration_scale = (triangle_weight * prep.topology_triangle_family_ratio
         + quad_weight * prep.topology_quad_family_ratio
-        + tet_weight * prep.topology_tet_family_ratio
+        + tetrahedron_weight * prep.topology_tetrahedron_family_ratio
         + hex_weight * prep.topology_hex_family_ratio
         + mixed_weight * prep.topology_mixed_family_ratio.max(0.01))
     .clamp(0.8, 1.3);
@@ -1980,7 +2476,7 @@ fn apply_prep_calibration(
         profile: profile_name.to_string(),
         triangle_weight,
         quad_weight,
-        tet_weight,
+        tetrahedron_weight,
         hex_weight,
         mixed_weight,
         stiffness_calibration_scale,
@@ -2095,7 +2591,7 @@ fn build_prep_graph_edges(
     let family_counts = [
         element_summary.triangle_element_count,
         element_summary.quad_element_count,
-        element_summary.tet_element_count,
+        element_summary.tetrahedron_element_count,
         element_summary.hex_element_count,
         element_summary.mixed_element_count,
     ];
@@ -2304,7 +2800,7 @@ struct ElementAssemblyFingerprintInputs {
     element_count: usize,
     triangle_count: usize,
     quad_count: usize,
-    tet_count: usize,
+    tetrahedron_count: usize,
     hex_count: usize,
     mixed_count: usize,
     scatter_nnz_count: usize,
@@ -2321,13 +2817,13 @@ fn element_assembly_fingerprint(
         inputs.element_count as u64,
         inputs.triangle_count as u64,
         inputs.quad_count as u64,
-        inputs.tet_count as u64,
+        inputs.tetrahedron_count as u64,
         inputs.hex_count as u64,
         inputs.mixed_count as u64,
         inputs.scatter_nnz_count as u64,
         prep.topology_triangle_family_ratio.to_bits(),
         prep.topology_quad_family_ratio.to_bits(),
-        prep.topology_tet_family_ratio.to_bits(),
+        prep.topology_tetrahedron_family_ratio.to_bits(),
         prep.topology_hex_family_ratio.to_bits(),
         prep.topology_mixed_family_ratio.to_bits(),
     ] {
@@ -2420,7 +2916,7 @@ fn calibration_fingerprint(
         damping_scale.to_bits(),
         prep.topology_triangle_family_ratio.to_bits(),
         prep.topology_quad_family_ratio.to_bits(),
-        prep.topology_tet_family_ratio.to_bits(),
+        prep.topology_tetrahedron_family_ratio.to_bits(),
         prep.topology_hex_family_ratio.to_bits(),
     ] {
         hash ^= value;
@@ -2643,4 +3139,405 @@ fn region_hash(region_id: &str) -> u64 {
         hash = hash.wrapping_mul(1099511628211_u64);
     }
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fixtures::{fixture_model, FixtureId};
+    use runmat_meshing_core::{
+        contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace,
+        AnalysisMeshArtifact, AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport,
+        AnalysisVolumeElement, BoundaryElementKind, MeshSizingField, VolumeElementKind,
+    };
+
+    #[test]
+    fn analysis_mesh_populates_sparse_solid_stiffness_operator() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let summary = assemble_linear_system(&model, None, Some(tetrahedron4_mesh()), None, None);
+
+        assert_eq!(summary.dof_count, 12);
+        assert_eq!(summary.structural_solid_element_count, 1);
+        assert_eq!(summary.structural_solid_recovery.len(), 1);
+        assert_eq!(
+            summary.structural_solid_recovery[0].node_indices,
+            [0, 1, 2, 3]
+        );
+        assert_eq!(
+            summary.structural_solid_recovery[0].coordinates_m,
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        );
+        assert!(summary.operator.stiffness_dense.is_none());
+        let csr = summary
+            .operator
+            .stiffness_csr
+            .as_ref()
+            .expect("analysis mesh should assemble a sparse solid stiffness matrix");
+        assert_eq!(csr.row_offsets.len(), summary.dof_count + 1);
+        assert_eq!(csr.row_offsets.last().copied(), Some(csr.values.len()));
+        assert_eq!(csr.column_indices.len(), csr.values.len());
+        assert!(summary
+            .operator
+            .stiffness_diag
+            .iter()
+            .all(|value| *value > 0.0));
+        for row in 0..summary.dof_count {
+            let start = csr.row_offsets[row];
+            let end = csr.row_offsets[row + 1];
+            let diagonal = csr.column_indices[start..end]
+                .iter()
+                .zip(csr.values[start..end].iter())
+                .find_map(|(&column, &value)| (column == row).then_some(value.abs()))
+                .expect("csr row should include diagonal");
+            assert!((summary.operator.stiffness_diag[row] - diagonal) <= 1.0e-8);
+        }
+    }
+
+    #[test]
+    fn analysis_mesh_preempts_explicit_beam_topology() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.structural = Some(runmat_analysis_core::StructuralModel {
+            nodes: vec![
+                runmat_analysis_core::StructuralNode {
+                    node_id: 1,
+                    coordinates_m: [0.0, 0.0, 0.0],
+                },
+                runmat_analysis_core::StructuralNode {
+                    node_id: 2,
+                    coordinates_m: [1.0, 0.0, 0.0],
+                },
+            ],
+            elements: vec![runmat_analysis_core::StructuralElement {
+                element_id: "beam_1".to_string(),
+                region_id: "span".to_string(),
+                kind: runmat_analysis_core::StructuralElementKind::Beam(
+                    runmat_analysis_core::BeamElementModel {
+                        node_ids: [1, 2],
+                        section_id: "rect".to_string(),
+                        reference_axis: [0.0, 1.0, 0.0],
+                    },
+                ),
+            }],
+            beam_sections: vec![runmat_analysis_core::BeamSectionModel {
+                section_id: "rect".to_string(),
+                area_m2: 1.0e-4,
+                iy_m4: 1.0e-9,
+                iz_m4: 1.0e-9,
+                torsion_j_m4: 1.0e-9,
+                outer_fiber_y_m: 0.01,
+                outer_fiber_z_m: 0.01,
+                torsion_outer_radius_m: 0.01,
+            }],
+            shell_sections: Vec::new(),
+        });
+
+        let summary = assemble_linear_system(&model, None, Some(tetrahedron4_mesh()), None, None);
+
+        assert_eq!(summary.structural_solid_element_count, 1);
+        assert_eq!(summary.structural_solid_recovery.len(), 1);
+        assert_eq!(summary.structural_beam_element_count, 0);
+        assert!(summary.operator.stiffness_csr.is_some());
+        assert!(summary.operator.stiffness_dense.is_none());
+    }
+
+    #[test]
+    fn analysis_mesh_material_regions_select_assigned_solid_materials() {
+        let mut soft_model = fixture_model(FixtureId::CantileverLinearStatic);
+        let mut hard = soft_model.materials[0].clone();
+        hard.material_id = "mat_hard".to_string();
+        hard.mechanical.youngs_modulus_pa = 200.0e9;
+        hard.mechanical.poisson_ratio = 0.3;
+        let mut soft = hard.clone();
+        soft.material_id = "mat_soft".to_string();
+        soft.mechanical.youngs_modulus_pa = 20.0e9;
+        soft_model.materials = vec![hard.clone(), soft.clone()];
+        soft_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
+            region_id: "soft_region".to_string(),
+            expected_material_id: "mat_hard".to_string(),
+            assigned_material_id: "mat_soft".to_string(),
+            confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+        }];
+        let mut soft_mesh = tetrahedron4_mesh();
+        soft_mesh.volume_elements[0].material_region_id = "soft_region".to_string();
+
+        let mut hard_model = soft_model.clone();
+        hard_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
+            region_id: "soft_region".to_string(),
+            expected_material_id: "mat_hard".to_string(),
+            assigned_material_id: "mat_hard".to_string(),
+            confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+        }];
+        let hard_mesh = soft_mesh.clone();
+
+        let soft_summary = assemble_linear_system(&soft_model, None, Some(soft_mesh), None, None);
+        let hard_summary = assemble_linear_system(&hard_model, None, Some(hard_mesh), None, None);
+
+        assert!(
+            first_csr_diagonal(&soft_summary) < first_csr_diagonal(&hard_summary) * 0.2,
+            "soft material assignment should lower solid element stiffness"
+        );
+        assert_eq!(
+            soft_summary.structural_solid_recovery[0].region_id,
+            "soft_region"
+        );
+    }
+
+    #[test]
+    fn strict_analysis_mesh_assembly_rejects_invalid_tetrahedron4_stiffness() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let mut mesh = tetrahedron4_mesh();
+        mesh.volume_elements[0].node_ids = vec![1, 3, 2, 4];
+        mesh.boundary_faces = vec![
+            boundary_face("root_face", vec![1, 2, 3], &["root"]),
+            boundary_face("tip_face", vec![1, 2, 4], &["tip"]),
+        ];
+
+        let err = try_assemble_linear_system(&model, None, Some(mesh), None, None).expect_err(
+            "strict analysis mesh assembly should reject inverted Tetrahedron4 stiffness",
+        );
+
+        assert!(matches!(
+            err,
+            LinearAssemblyError::SolidStiffness(SolidAssemblyError::ElementStiffness { .. })
+        ));
+    }
+
+    #[test]
+    fn analysis_mesh_boundary_regions_drive_solid_loads_and_constraints() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
+            bc_id: "fixed_root".to_string(),
+            region_id: "root".to_string(),
+            kind: BoundaryConditionKind::Fixed,
+        }];
+        model.loads = vec![runmat_analysis_core::LoadCase {
+            load_id: "load_tip".to_string(),
+            region_id: "tip".to_string(),
+            kind: LoadKind::Force {
+                fx: 0.0,
+                fy: -12.0,
+                fz: 0.0,
+            },
+        }];
+        let mut mesh = tetrahedron4_mesh();
+        mesh.boundary_faces = vec![
+            boundary_face("root_face", vec![1, 2, 3], &["root"]),
+            boundary_face("tip_face", vec![1, 2, 4], &["tip"]),
+        ];
+
+        let summary = assemble_linear_system(&model, None, Some(mesh), None, None);
+
+        assert_eq!(summary.constrained_dof_count, 9);
+        assert!(summary.operator.constrained[0]);
+        assert!(summary.operator.constrained[1]);
+        assert!(summary.operator.constrained[2]);
+        assert_eq!(summary.operator.rhs[10], -4.0);
+    }
+
+    #[test]
+    fn strict_analysis_mesh_assembly_rejects_unmapped_load_region() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
+            bc_id: "fixed_root".to_string(),
+            region_id: "root".to_string(),
+            kind: BoundaryConditionKind::Fixed,
+        }];
+        model.loads = vec![runmat_analysis_core::LoadCase {
+            load_id: "load_tip".to_string(),
+            region_id: "missing_tip".to_string(),
+            kind: LoadKind::Force {
+                fx: 0.0,
+                fy: -12.0,
+                fz: 0.0,
+            },
+        }];
+        let mut mesh = tetrahedron4_mesh();
+        mesh.boundary_faces = vec![boundary_face("root_face", vec![1, 2, 3], &["root"])];
+
+        let err = try_assemble_linear_system(&model, None, Some(mesh), None, None)
+            .expect_err("strict analysis mesh assembly should reject unmapped loads");
+
+        assert!(matches!(
+            err,
+            LinearAssemblyError::AnalysisMeshRegionMapping(
+                AnalysisMeshRegionMappingError::UnmappedLoadRegion { .. }
+            )
+        ));
+        let message = err.to_string();
+        assert!(message.contains("load_id=load_tip"));
+        assert!(message.contains("region_id=missing_tip"));
+    }
+
+    #[test]
+    fn strict_analysis_mesh_assembly_rejects_unmapped_constraint_region() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
+            bc_id: "fixed_root".to_string(),
+            region_id: "missing_root".to_string(),
+            kind: BoundaryConditionKind::Fixed,
+        }];
+        model.loads = vec![runmat_analysis_core::LoadCase {
+            load_id: "load_tip".to_string(),
+            region_id: "tip".to_string(),
+            kind: LoadKind::Force {
+                fx: 0.0,
+                fy: -12.0,
+                fz: 0.0,
+            },
+        }];
+        let mut mesh = tetrahedron4_mesh();
+        mesh.boundary_faces = vec![boundary_face("tip_face", vec![1, 2, 4], &["tip"])];
+
+        let err = try_assemble_linear_system(&model, None, Some(mesh), None, None)
+            .expect_err("strict analysis mesh assembly should reject unmapped constraints");
+
+        assert!(matches!(
+            err,
+            LinearAssemblyError::AnalysisMeshRegionMapping(
+                AnalysisMeshRegionMappingError::UnmappedBoundaryConditionRegion { .. }
+            )
+        ));
+        let message = err.to_string();
+        assert!(message.contains("bc_id=fixed_root"));
+        assert!(message.contains("region_id=missing_root"));
+    }
+
+    #[test]
+    fn analysis_mesh_boundary_regions_integrate_pressure_loads() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.boundary_conditions = Vec::new();
+        model.loads = vec![runmat_analysis_core::LoadCase {
+            load_id: "pressure_tip".to_string(),
+            region_id: "tip".to_string(),
+            kind: LoadKind::Pressure { magnitude_pa: 12.0 },
+        }];
+        let mut mesh = tetrahedron4_mesh();
+        mesh.boundary_faces = vec![boundary_face("tip_face", vec![1, 2, 4], &["tip"])];
+
+        let summary = assemble_linear_system(&model, None, Some(mesh), None, None);
+
+        assert_close(summary.operator.rhs[1], -2.0);
+        assert_close(summary.operator.rhs[4], -2.0);
+        assert_close(summary.operator.rhs[10], -2.0);
+    }
+
+    #[test]
+    fn analysis_mesh_boundary_regions_lower_wrench_moments() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.boundary_conditions = Vec::new();
+        model.loads = vec![runmat_analysis_core::LoadCase {
+            load_id: "wrench_tip".to_string(),
+            region_id: "tip".to_string(),
+            kind: LoadKind::Wrench {
+                fx: 0.0,
+                fy: 0.0,
+                fz: 0.0,
+                mx: 0.0,
+                my: 6.0,
+                mz: 0.0,
+                px: 0.0,
+                py: 0.0,
+                pz: 0.0,
+            },
+        }];
+        let mut mesh = tetrahedron4_mesh();
+        mesh.boundary_faces = vec![boundary_face("tip_face", vec![1, 2, 4], &["tip"])];
+
+        let summary = assemble_linear_system(&model, None, Some(mesh), None, None);
+
+        assert_eq!(summary.structural_wrench_lowering.len(), 1);
+        let lowering = &summary.structural_wrench_lowering[0];
+        assert_eq!(lowering.load_id, "wrench_tip");
+        assert_eq!(lowering.region_id, "tip");
+        assert!(lowering.moment_couple_applied);
+        assert_close(lowering.applied_moment_at_point[1], 6.0);
+        assert_close(lowering.moment_residual[1], 0.0);
+        assert!(summary.operator.rhs.iter().any(|value| value.abs() > 0.0));
+    }
+
+    fn tetrahedron4_mesh() -> AnalysisMeshArtifact {
+        let mut mesh = AnalysisMeshArtifact {
+            schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
+            mesh_id: "unit_tetrahedron".to_string(),
+            nodes: vec![
+                node(1, [0.0, 0.0, 0.0]),
+                node(2, [1.0, 0.0, 0.0]),
+                node(3, [0.0, 1.0, 0.0]),
+                node(4, [0.0, 0.0, 1.0]),
+            ],
+            volume_elements: vec![AnalysisVolumeElement {
+                element_id: "tetrahedron_1".to_string(),
+                kind: VolumeElementKind::Tetrahedron4,
+                node_ids: vec![1, 2, 3, 4],
+                material_region_id: "solid".to_string(),
+                provenance: Vec::new(),
+            }],
+            boundary_faces: Vec::new(),
+            boundary_edges: Vec::new(),
+            quality: AnalysisMeshQualityReport::default(),
+            sizing: MeshSizingField::default(),
+            field_topology: Vec::new(),
+            backend: Default::default(),
+            adaptive_iterations: Vec::new(),
+            provenance: AnalysisMeshProvenance {
+                algorithm: "test".to_string(),
+                source_geometry_id: "geo:test".to_string(),
+                source_geometry_revision: 1,
+                source_geometry_sha256: None,
+            },
+        };
+        mesh.refresh_field_topology();
+        mesh
+    }
+
+    fn boundary_face(
+        face_id: &str,
+        node_ids: Vec<u32>,
+        region_ids: &[&str],
+    ) -> AnalysisBoundaryFace {
+        AnalysisBoundaryFace {
+            face_id: face_id.to_string(),
+            kind: BoundaryElementKind::Tri3,
+            node_ids,
+            adjacent_volume_element_ids: Vec::new(),
+            region_ids: region_ids
+                .iter()
+                .map(|region| (*region).to_string())
+                .collect(),
+            provenance: Vec::new(),
+        }
+    }
+
+    fn assert_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() <= 1.0e-8,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    fn first_csr_diagonal(summary: &AssemblySummary) -> f64 {
+        let csr = summary
+            .operator
+            .stiffness_csr
+            .as_ref()
+            .expect("analysis mesh should assemble CSR stiffness");
+        csr.column_indices[csr.row_offsets[0]..csr.row_offsets[1]]
+            .iter()
+            .zip(csr.values[csr.row_offsets[0]..csr.row_offsets[1]].iter())
+            .find_map(|(&column, &value)| (column == 0).then_some(value.abs()))
+            .expect("first row should contain diagonal")
+    }
+
+    fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
+        AnalysisMeshNode {
+            node_id,
+            coordinates_m,
+            provenance: Vec::new(),
+        }
+    }
 }

@@ -1,0 +1,11 @@
+{
+  "title": "adjacency",
+  "category": "graph",
+  "keywords": ["adjacency", "graph", "matrix"],
+  "summary": "Return a dense graph adjacency matrix.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`adjacency(G)` returns a dense double matrix. Undirected graphs mirror edges across the diagonal; directed graphs preserve source-to-target direction.",
+  "signatures": [{"label": "A = adjacency(G)", "description": "Return an `n`-by-`n` adjacency matrix."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

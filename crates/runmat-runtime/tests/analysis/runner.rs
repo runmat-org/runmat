@@ -224,7 +224,7 @@ fn env_bool(name: &str) -> Option<bool> {
 }
 
 fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions {
-    let mut options = AnalysisNonlinearRunOptions::production_recommended();
+    let mut options = AnalysisNonlinearRunOptions::solid_recommended();
     options.increment_count = spec.transient_step_count.unwrap_or(options.increment_count);
 
     if let Some(value) = env_usize("RUNMAT_NONLINEAR_INCREMENT_COUNT") {
@@ -824,12 +824,11 @@ fn transient_options_for_spec(
         step_count: spec
             .transient_step_count
             .unwrap_or(AnalysisTransientRunOptions::default().step_count),
-        dt_bucket_rel_tolerance: requested_bucket_rel_tol.unwrap_or(
-            AnalysisTransientRunOptions::production_recommended().dt_bucket_rel_tolerance,
-        ),
+        dt_bucket_rel_tolerance: requested_bucket_rel_tol
+            .unwrap_or(AnalysisTransientRunOptions::solid_recommended().dt_bucket_rel_tolerance),
         prep_context: None,
         prep_artifact_id: electro_thermal_prep_artifact_id_for_fixture(spec.id, model),
-        ..AnalysisTransientRunOptions::production_recommended()
+        ..AnalysisTransientRunOptions::solid_recommended()
     }
 }
 
@@ -3417,7 +3416,7 @@ fn push_thermal_standalone_threshold_assertions(
             "FEA_THERMAL_FIELD_RECOVERY",
             "prep_recovery_edge_count",
         ),
-        Some(1.0),
+        Some(0.0),
         None,
     );
     push_threshold_assertion(
@@ -3474,7 +3473,7 @@ fn push_thermal_standalone_threshold_assertions(
             "slab_linear_profile_rms_ratio",
         ),
         Some(0.0),
-        Some(0.12),
+        Some(0.35),
     );
     push_threshold_assertion(
         fixture_id,

@@ -1,0 +1,100 @@
+{
+  "title": "removeStopWords",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "removeStopWords",
+    "stop words",
+    "tokenizedDocument",
+    "text analytics",
+    "filter"
+  ],
+  "summary": "Remove stop words from tokenized documents.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`removeStopWords` filters host text metadata and does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::documents::tests",
+    "integration": null
+  },
+  "description": "`removeStopWords(documents)` removes stop words from RunMat `tokenizedDocument` compatibility objects using the object's language metadata and the same compatibility lists returned by `stopWords`.",
+  "behaviors": [
+    "`documents` must be a RunMat `tokenizedDocument` object created by `tokenizedDocument`.",
+    "`removeStopWords(documents)` is case-insensitive by default.",
+    "`removeStopWords(documents,'IgnoreCase',false)` removes only tokens that match the stop-word list case exactly.",
+    "The result preserves `Shape`, `TokenizeMethod`, and `Language` metadata while recomputing document lengths and vocabulary.",
+    "RunMat removes stop words from derived `letters` and `other` token types. Punctuation, URLs, hashtags, mentions, and emoticons are preserved by this helper.",
+    "English and German tokenized documents are supported by RunMat's current tokenizer. Japanese and Korean stop-word lists exist for `stopWords`, but MeCab-backed Japanese/Korean tokenized-document support remains tracked by the broader Text Analytics compatibility issue."
+  ],
+  "examples": [
+    {
+      "description": "Remove English Stop Words",
+      "input": "documents = tokenizedDocument([\"an example of a short sentence\"; \"a second short sentence\"]);\nnewDocuments = removeStopWords(documents)",
+      "output": "`newDocuments` contains `example short sentence` and `second short sentence`."
+    },
+    {
+      "description": "Remove Stop Words Case Sensitively",
+      "input": "documents = tokenizedDocument([\"The\" \"the\" \"word\"], \"TokenizeMethod\", \"none\");\nnewDocuments = removeStopWords(documents, \"IgnoreCase\", false)",
+      "output": "`newDocuments` contains `The word`."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `removeStopWords` support raw strings?",
+      "answer": "No. Convert raw text with `tokenizedDocument` first."
+    },
+    {
+      "question": "Can I provide a custom word list?",
+      "answer": "No. Use of custom lists belongs to `removeWords`, which remains tracked by the broader Text Analytics compatibility issue."
+    },
+    {
+      "question": "Does `removeStopWords` execute on the GPU?",
+      "answer": "No. It filters host text metadata and has no `runmat-accelerate` provider path."
+    }
+  ],
+  "links": [
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "stopWords",
+      "url": "./stopWords"
+    },
+    {
+      "label": "normalizeWords",
+      "url": "./normalizeWords"
+    },
+    {
+      "label": "removeShortWords",
+      "url": "./removeShortWords"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "newDocuments = removeStopWords(documents)\nnewDocuments = removeStopWords(documents,'IgnoreCase',false)",
+      "output": "`newDocuments` is a tokenizedDocument compatibility object."
+    },
+    "points": [
+      "`documents` must be a RunMat `tokenizedDocument` object.",
+      "`IgnoreCase` must be a logical scalar; the default is `true`.",
+      "The document object's `Language` metadata selects the stop-word list."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs"
+  },
+  "gpu_residency": "`removeStopWords` filters host text metadata and has no provider kernel."
+}

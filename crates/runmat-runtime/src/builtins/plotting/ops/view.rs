@@ -241,6 +241,7 @@ fn scalar_or_tensor(value: &Value) -> crate::BuiltinResult<Tensor> {
             cols: 1,
             shape: vec![1, 1],
             data: vec![*v],
+            integer_data: None,
             dtype: runmat_builtins::NumericDType::F64,
         }),
         Value::Int(i) => Ok(Tensor {
@@ -248,6 +249,7 @@ fn scalar_or_tensor(value: &Value) -> crate::BuiltinResult<Tensor> {
             cols: 1,
             shape: vec![1, 1],
             data: vec![i.to_f64()],
+            integer_data: None,
             dtype: runmat_builtins::NumericDType::F64,
         }),
         other => Tensor::try_from(other).map_err(|_| view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
@@ -276,6 +278,7 @@ pub fn view_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             cols: 2,
             shape: vec![1, 2],
             data: vec![az, el],
+            integer_data: None,
             dtype: runmat_builtins::NumericDType::F64,
         }));
     }
@@ -286,6 +289,7 @@ pub fn view_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         cols: 2,
         shape: vec![1, 2],
         data: vec![az as f64, el as f64],
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     }))
 }
@@ -375,6 +379,7 @@ mod tests {
                 cols: 2,
                 shape: vec![1, 2],
                 data: vec![180.0, -30.0],
+                integer_data: None,
                 dtype: runmat_builtins::NumericDType::F64,
             }),
         ])

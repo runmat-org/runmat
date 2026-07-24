@@ -1,0 +1,30 @@
+{
+  "title": "harmmean",
+  "category": "stats/summary",
+  "keywords": ["harmmean", "harmonic mean", "statistics", "summary"],
+  "summary": "Compute the harmonic mean of numeric data.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host for compatibility until provider reduction hooks exist."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::descriptive::tests", "integration": null },
+  "description": "`harmmean(X)` computes the harmonic mean along the first non-singleton dimension. Dimension, vector-dimension, `\"all\"`, `\"includenan\"`, and `\"omitnan\"` forms are supported.",
+  "behaviors": [
+    "NaNs are included by default.",
+    "`\"omitnan\"` skips NaNs in each slice; empty slices return `NaN`.",
+    "A zero in a slice produces a zero harmonic mean for that slice.",
+    "Numeric and logical inputs are promoted to double precision."
+  ],
+  "examples": [{ "description": "Harmonic mean across all values", "input": "m = harmmean([1 2 4], \"all\")" }],
+  "faqs": [{ "question": "Can I reduce over several dimensions?", "answer": "Yes. Pass a dimension vector such as `harmmean(X,[1 3])`." }],
+  "links": [{ "label": "geomean", "url": "./geomean" }, { "label": "mean", "url": "./mean" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs"
+  }
+}

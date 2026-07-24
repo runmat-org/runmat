@@ -43,13 +43,14 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         .format(format_log_record)
         .init();
 
-    let accel_options: AccelerateInitOptions = (&config.accelerate).into();
-    runmat_accelerate::initialize_acceleration_provider_with(&accel_options);
-
     info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
     debug!("Configuration loaded: {config:?}");
 
     configure_gc_from_config(&config)?;
+
+    let accel_options: AccelerateInitOptions = (&config.accelerate).into();
+    runmat_accelerate::initialize_acceleration_provider_with(&accel_options);
+
     configure_plotting_from_config(&config);
     configure_analysis_from_config(&config)?;
     report_plot_context_status(&config);
@@ -150,9 +151,6 @@ fn apply_cli_overrides(config: &mut RunMatRuntimeConfig, cli: &Cli, sources: &Cl
     }
     if sources.verbose {
         config.runtime.verbose = cli.verbose;
-    }
-    if let Some(snapshot) = &cli.snapshot {
-        config.runtime.snapshot_path = Some(snapshot.clone());
     }
     if config.runtime.error_namespace.trim().is_empty() {
         config.runtime.error_namespace =

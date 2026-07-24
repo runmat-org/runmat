@@ -17,6 +17,7 @@ use crate::builtins::common::{
     broadcast::BroadcastPlan, gpu_helpers, map_control_flow_with_builtin,
     random_args::complex_tensor_into_value, random_args::keyword_of, tensor,
 };
+use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::symbolic::{
     symbolic_binary, symbolic_binary_broadcast, SymbolicBinaryOp,
 };
@@ -319,6 +320,16 @@ fn power_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     }
     if let Some(result) = symbolic_binary(&lhs, &rhs, SymbolicBinaryOp::Pow) {
         return Ok(result);
+    }
+    // Character arrays participate in numeric power through their Unicode code
+    // points. An exact-integer operand on the other side must not claim this
+    // operation before the character operand is converted below.
+    if !matches!(lhs, Value::CharArray(_)) && !matches!(rhs, Value::CharArray(_)) {
+        if let Some(result) = try_integer_binary(&lhs, &rhs, IntegerBinaryOp::Power, BUILTIN_NAME)
+            .map_err(builtin_error)?
+        {
+            return Ok(result);
+        }
     }
     if let Some(result) = scalar_power_value(&lhs, &rhs) {
         return Ok(result);
@@ -876,7 +887,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, SymbolicArray, SymbolicExpr, Tensor, Type};
+    use runmat_builtins::{
+        IntValue, IntegerStorage, ResolveContext, SymbolicArray, SymbolicExpr, Tensor, Type,
+    };
 
     fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::power_builtin(lhs, rhs, rest))
@@ -935,6 +948,32 @@ pub(crate) mod tests {
             Value::Num(v) => assert!((v - 8.0).abs() < 1e-12),
             other => panic!("expected scalar numeric result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn power_integer_arrays_preserve_storage_and_uint64_precision() {
+        let base = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 2, 0]), vec![1, 3])
+            .expect("integer base");
+        let exponent = Tensor::new_integer(IntegerStorage::U64(vec![1, 64, 0]), vec![1, 3])
+            .expect("integer exponent");
+        let result =
+            power_builtin(Value::Tensor(base), Value::Tensor(exponent), Vec::new()).expect("power");
+        assert_eq!(
+            result,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, u64::MAX, 1]), vec![1, 3])
+                    .expect("integer result")
+            )
+        );
+    }
+
+    #[test]
+    fn power_integer_scalar_exponent_preserves_exact_uint64_value() {
+        let base = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("integer base");
+        let result =
+            power_builtin(Value::Tensor(base), Value::Num(1.0), Vec::new()).expect("power");
+        assert_eq!(result, Value::Int(IntValue::U64(u64::MAX)));
     }
 
     #[test]

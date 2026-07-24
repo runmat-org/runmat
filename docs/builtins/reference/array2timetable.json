@@ -1,0 +1,15 @@
+{
+  "title": "array2timetable",
+  "category": "table",
+  "keywords": ["array2timetable", "array", "timetable", "RowTimes"],
+  "summary": "Convert an array into a timetable.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Inputs are gathered before timetable materialization."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 3, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests"},
+  "description": "`array2timetable(A, 'RowTimes', times)` splits array columns into timetable variables.",
+  "behaviors": ["`\"VariableNames\"`, `\"RowNames\"`, and `\"RowTimes\"` are supported.", "If row times are omitted, sequential numeric row times are generated."],
+  "examples": [{"description": "Array to timetable", "input": "TT = array2timetable([10;20], 'RowTimes', [1;2])", "output": "TT = timetable object"}],
+  "links": [{"label": "timetable", "url": "./timetable"}, {"label": "array2table", "url": "./array2table"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

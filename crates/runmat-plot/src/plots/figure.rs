@@ -27,6 +27,7 @@ pub struct Figure {
     pub name: Option<String>,
     pub number_title: bool,
     pub visible: bool,
+    pub position: [f64; 4],
     pub title: Option<String>,
     pub sg_title: Option<String>,
     pub x_label: Option<String>,
@@ -130,12 +131,24 @@ impl Default for LegendStyle {
 #[derive(Debug, Clone, Default)]
 pub struct AxesMetadata {
     pub axes_kind: AxesKind,
+    pub overlay_parent: Option<usize>,
+    pub y_axis_location: String,
+    pub position: [f64; 4],
+    pub position_explicit: bool,
+    pub units: String,
     pub title: Option<String>,
+    pub subtitle: Option<String>,
     pub x_label: Option<String>,
     pub y_label: Option<String>,
     pub z_label: Option<String>,
+    pub x_ticks: Option<Vec<f64>>,
+    pub y_ticks: Option<Vec<f64>>,
     pub x_tick_labels: Option<Vec<String>>,
     pub y_tick_labels: Option<Vec<String>>,
+    pub x_tick_format: Option<String>,
+    pub y_tick_format: Option<String>,
+    pub x_tick_label_rotation: Option<f64>,
+    pub y_tick_label_rotation: Option<f64>,
     pub x_limits: Option<(f64, f64)>,
     pub y_limits: Option<(f64, f64)>,
     pub z_limits: Option<(f64, f64)>,
@@ -147,14 +160,19 @@ pub struct AxesMetadata {
     pub grid_enabled: bool,
     pub minor_grid_enabled: bool,
     pub minor_grid_explicit: bool,
+    pub hidden_line_removal: bool,
     pub box_enabled: bool,
     pub axis_equal: bool,
+    pub data_aspect_ratio: [f64; 3],
+    pub data_aspect_ratio_mode: String,
     pub legend_enabled: bool,
     pub colorbar_enabled: bool,
     pub colormap: ColorMap,
+    pub color_order: Option<Vec<Vec4>>,
     pub color_limits: Option<(f64, f64)>,
     pub axes_style: TextStyle,
     pub title_style: TextStyle,
+    pub subtitle_style: TextStyle,
     pub x_label_style: TextStyle,
     pub y_label_style: TextStyle,
     pub z_label_style: TextStyle,
@@ -235,6 +253,32 @@ pub enum PlotType {
 }
 
 impl Figure {
+    fn default_axes_metadata() -> AxesMetadata {
+        AxesMetadata {
+            axes_kind: AxesKind::Cartesian,
+            overlay_parent: None,
+            y_axis_location: "left".into(),
+            position: [0.13, 0.11, 0.775, 0.815],
+            position_explicit: false,
+            units: "normalized".into(),
+            x_limits: None,
+            y_limits: None,
+            z_limits: None,
+            grid_enabled: true,
+            minor_grid_enabled: false,
+            hidden_line_removal: true,
+            box_enabled: true,
+            axis_equal: false,
+            data_aspect_ratio: [1.0, 1.0, 1.0],
+            data_aspect_ratio_mode: "auto".into(),
+            legend_enabled: true,
+            colorbar_enabled: false,
+            colormap: ColorMap::Parula,
+            color_limits: None,
+            ..Default::default()
+        }
+    }
+
     /// Create a new empty figure
     pub fn new() -> Self {
         Self {
@@ -242,6 +286,7 @@ impl Figure {
             name: None,
             number_title: true,
             visible: true,
+            position: [0.0, 0.0, 560.0, 420.0],
             title: None,
             sg_title: None,
             x_label: None,
@@ -267,42 +312,14 @@ impl Figure {
             axes_cols: 1,
             plot_axes_indices: Vec::new(),
             active_axes_index: 0,
-            axes_metadata: vec![AxesMetadata {
-                axes_kind: AxesKind::Cartesian,
-                x_limits: None,
-                y_limits: None,
-                z_limits: None,
-                grid_enabled: true,
-                minor_grid_enabled: false,
-                box_enabled: true,
-                axis_equal: false,
-                legend_enabled: true,
-                colorbar_enabled: false,
-                colormap: ColorMap::Parula,
-                color_limits: None,
-                ..Default::default()
-            }],
+            axes_metadata: vec![Self::default_axes_metadata()],
             sg_title_style: TextStyle::default(),
         }
     }
 
     fn ensure_axes_metadata_capacity(&mut self, min_len: usize) {
         while self.axes_metadata.len() < min_len.max(1) {
-            self.axes_metadata.push(AxesMetadata {
-                axes_kind: AxesKind::Cartesian,
-                x_limits: None,
-                y_limits: None,
-                z_limits: None,
-                grid_enabled: true,
-                minor_grid_enabled: false,
-                box_enabled: true,
-                axis_equal: false,
-                legend_enabled: true,
-                colorbar_enabled: false,
-                colormap: ColorMap::Parula,
-                color_limits: None,
-                ..Default::default()
-            });
+            self.axes_metadata.push(Self::default_axes_metadata());
         }
     }
 
@@ -323,7 +340,7 @@ impl Figure {
             self.axis_equal = meta.axis_equal;
             self.legend_enabled = meta.legend_enabled;
             self.colorbar_enabled = meta.colorbar_enabled;
-            self.colormap = meta.colormap;
+            self.colormap = meta.colormap.clone();
             self.color_limits = meta.color_limits;
         }
     }
@@ -332,6 +349,15 @@ impl Figure {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         self.active_axes_index = axes_index;
         self.sync_legacy_fields_from_active_axes();
+        self.dirty = true;
+    }
+
+    pub fn ensure_axes(&mut self, axes_index: usize) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.axes_kind = AxesKind::Cartesian;
+            meta.overlay_parent = None;
+        }
         self.dirty = true;
     }
 
@@ -378,6 +404,11 @@ impl Figure {
         self.dirty = true;
     }
 
+    pub fn set_position(&mut self, position: [f64; 4]) {
+        self.position = position;
+        self.dirty = true;
+    }
+
     pub fn window_title(&self, handle: Option<u32>) -> String {
         let name = self.name.as_deref().map(str::trim).unwrap_or_default();
         let numbered = if self.number_title {
@@ -400,7 +431,7 @@ impl Figure {
             || self
                 .axes_metadata
                 .iter()
-                .any(|meta| non_empty(meta.title.as_deref()))
+                .any(|meta| non_empty(meta.title.as_deref()) || non_empty(meta.subtitle.as_deref()))
     }
 
     /// Set the figure title
@@ -433,6 +464,14 @@ impl Figure {
         }
         if axes_index == self.active_axes_index {
             self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_subtitle<S: Into<String>>(&mut self, axes_index: usize, subtitle: S) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.subtitle = Some(subtitle.into());
         }
         self.dirty = true;
     }
@@ -581,6 +620,48 @@ impl Figure {
         self.dirty = true;
     }
 
+    pub fn set_axes_tick_formats(
+        &mut self,
+        axes_index: usize,
+        x_format: Option<String>,
+        y_format: Option<String>,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_tick_format = x_format;
+            meta.y_tick_format = y_format;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_tick_label_rotations(
+        &mut self,
+        axes_index: usize,
+        x_angle: Option<f64>,
+        y_angle: Option<f64>,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_tick_label_rotation = x_angle;
+            meta.y_tick_label_rotation = y_angle;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_ticks(
+        &mut self,
+        axes_index: usize,
+        x_ticks: Option<Vec<f64>>,
+        y_ticks: Option<Vec<f64>>,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_ticks = x_ticks;
+            meta.y_ticks = y_ticks;
+        }
+        self.dirty = true;
+    }
+
     pub fn set_axes_style(&mut self, axes_index: usize, style: TextStyle) {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
@@ -593,6 +674,14 @@ impl Figure {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
             meta.title_style = style;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_subtitle_style(&mut self, axes_index: usize, style: TextStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.subtitle_style = style;
         }
         self.dirty = true;
     }
@@ -786,6 +875,28 @@ impl Figure {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
             meta.axis_equal = enabled;
+            meta.data_aspect_ratio_mode = if enabled { "manual" } else { "auto" }.into();
+            if enabled {
+                meta.data_aspect_ratio = [1.0, 1.0, 1.0];
+            }
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_data_aspect_ratio(
+        &mut self,
+        axes_index: usize,
+        ratio: [f64; 3],
+        mode: impl Into<String>,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.data_aspect_ratio = ratio;
+            meta.data_aspect_ratio_mode = mode.into();
+            meta.axis_equal = meta.data_aspect_ratio_mode == "manual" && ratio == [1.0, 1.0, 1.0];
         }
         if axes_index == self.active_axes_index {
             self.sync_legacy_fields_from_active_axes();
@@ -816,6 +927,92 @@ impl Figure {
         (self.axes_rows, self.axes_cols)
     }
 
+    pub fn axes_count(&self) -> usize {
+        let plotted_axes = self
+            .plot_axes_indices
+            .iter()
+            .copied()
+            .max()
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let overlay_axes = self
+            .axes_metadata
+            .iter()
+            .enumerate()
+            .filter(|(_, meta)| meta.overlay_parent.is_some())
+            .map(|(index, _)| index + 1)
+            .max()
+            .unwrap_or(0);
+        self.total_axes()
+            .max(plotted_axes)
+            .max(overlay_axes)
+            .max(self.axes_metadata.len())
+            .max(1)
+    }
+
+    pub fn ensure_overlay_axes(&mut self, parent_axes_index: usize) -> usize {
+        let parent = parent_axes_index.min(self.total_axes().saturating_sub(1));
+        if let Some((index, _)) = self
+            .axes_metadata
+            .iter()
+            .enumerate()
+            .find(|(_, meta)| meta.overlay_parent == Some(parent))
+        {
+            return index;
+        }
+
+        let index = self.axes_metadata.len().max(self.total_axes());
+        self.ensure_axes_metadata_capacity(index + 1);
+        if let Some(parent_meta) = self.axes_metadata.get(parent).cloned() {
+            if let Some(meta) = self.axes_metadata.get_mut(index) {
+                *meta = parent_meta;
+                meta.overlay_parent = Some(parent);
+                meta.y_axis_location = "right".into();
+                meta.y_limits = None;
+                meta.y_ticks = None;
+                meta.y_tick_labels = None;
+                meta.y_tick_format = None;
+                meta.y_label = None;
+                meta.legend_enabled = false;
+                meta.grid_enabled = false;
+                meta.minor_grid_enabled = false;
+            }
+        }
+        self.dirty = true;
+        index
+    }
+
+    pub fn axes_overlay_parent(&self, axes_index: usize) -> Option<usize> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.overlay_parent)
+    }
+
+    pub fn set_axes_y_axis_location(&mut self, axes_index: usize, location: impl Into<String>) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.y_axis_location = location.into();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_position(&mut self, axes_index: usize, position: [f64; 4]) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.position = position;
+            meta.position_explicit = true;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_units(&mut self, axes_index: usize, units: impl Into<String>) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.units = units.into();
+        }
+        self.dirty = true;
+    }
+
     /// Axes index mapping for plots (length equals number of plots)
     pub fn plot_axes_indices(&self) -> &[usize] {
         &self.plot_axes_indices
@@ -832,7 +1029,7 @@ impl Figure {
                 "assign_plot_to_axes: index {plot_index} out of bounds"
             ));
         }
-        let max_axes = self.axes_rows.max(1) * self.axes_cols.max(1);
+        let max_axes = self.axes_count();
         let ai = axes_index.min(max_axes.saturating_sub(1));
         self.plot_axes_indices[plot_index] = ai;
         self.dirty = true;
@@ -842,7 +1039,20 @@ impl Figure {
     pub fn set_subplot_grid(&mut self, rows: usize, cols: usize) {
         self.axes_rows = rows.max(1);
         self.axes_cols = cols.max(1);
-        self.ensure_axes_metadata_capacity(self.axes_rows * self.axes_cols);
+        let grid_axes = self.axes_rows * self.axes_cols;
+        self.ensure_axes_metadata_capacity(grid_axes);
+        for axes_index in 0..grid_axes {
+            if self
+                .axes_metadata
+                .get(axes_index)
+                .is_some_and(|meta| meta.overlay_parent.is_some())
+            {
+                self.clear_axes(axes_index);
+                if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+                    *meta = Self::default_axes_metadata();
+                }
+            }
+        }
         self.active_axes_index = self.active_axes_index.min(
             self.axes_rows
                 .saturating_mul(self.axes_cols)
@@ -902,6 +1112,14 @@ impl Figure {
         self.dirty = true;
     }
 
+    pub fn set_axes_hidden_line_removal(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.hidden_line_removal = enabled;
+        }
+        self.dirty = true;
+    }
+
     pub fn set_axes_colorbar_enabled(&mut self, axes_index: usize, enabled: bool) {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
@@ -916,14 +1134,14 @@ impl Figure {
     pub fn set_axes_colormap(&mut self, axes_index: usize, cmap: ColorMap) {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
-            meta.colormap = cmap;
+            meta.colormap = cmap.clone();
         }
         for (idx, plot) in self.plots.iter_mut().enumerate() {
             if self.plot_axes_indices.get(idx).copied().unwrap_or(0) != axes_index {
                 continue;
             }
             if let PlotElement::Surface(surface) = plot {
-                *surface = surface.clone().with_colormap(cmap);
+                *surface = surface.clone().with_colormap(cmap.clone());
             }
         }
         if axes_index == self.active_axes_index {
@@ -951,12 +1169,91 @@ impl Figure {
         self.dirty = true;
     }
 
+    pub fn set_axes_color_order(&mut self, axes_index: usize, colors: Vec<Vec4>) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.color_order = Some(colors.clone());
+        }
+        self.recolor_axes_plots(axes_index, &colors);
+        self.dirty = true;
+    }
+
+    pub fn set_all_axes_color_order(&mut self, colors: Vec<Vec4>) {
+        let total_axes = self.total_axes().max(1);
+        self.ensure_axes_metadata_capacity(total_axes);
+        for axes_index in 0..total_axes {
+            if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+                meta.color_order = Some(colors.clone());
+            }
+            self.recolor_axes_plots(axes_index, &colors);
+        }
+        self.dirty = true;
+    }
+
+    fn recolor_axes_plots(&mut self, axes_index: usize, colors: &[Vec4]) {
+        if colors.is_empty() {
+            return;
+        }
+        let mut series = 0usize;
+        for (plot_index, plot) in self.plots.iter_mut().enumerate() {
+            if self.plot_axes_indices.get(plot_index).copied().unwrap_or(0) != axes_index {
+                continue;
+            }
+            let color = colors[series % colors.len()];
+            match plot {
+                PlotElement::Line(line) => {
+                    line.set_color(color);
+                    series += 1;
+                }
+                PlotElement::Scatter(scatter) => {
+                    scatter.set_color(color);
+                    scatter.set_edge_color(color);
+                    series += 1;
+                }
+                PlotElement::Bar(bar) => {
+                    bar.set_color(color);
+                    series += 1;
+                }
+                PlotElement::Stairs(stairs) => {
+                    stairs.color = color;
+                    series += 1;
+                }
+                PlotElement::Stem(stem) => {
+                    stem.color = color;
+                    series += 1;
+                }
+                PlotElement::Area(area) => {
+                    area.color = Vec4::new(color.x, color.y, color.z, area.color.w);
+                    series += 1;
+                }
+                PlotElement::ErrorBar(errorbar) => {
+                    errorbar.color = color;
+                    series += 1;
+                }
+                PlotElement::Quiver(quiver) => {
+                    quiver.color = color;
+                    series += 1;
+                }
+                PlotElement::Line3(line) => {
+                    line.color = color;
+                    series += 1;
+                }
+                PlotElement::Scatter3(scatter) => {
+                    *scatter = scatter.clone().with_color(color);
+                    scatter.edge_color = color;
+                    series += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn total_axes(&self) -> usize {
         self.axes_rows.max(1) * self.axes_cols.max(1)
     }
 
     fn normalize_axes_index(&self, axes_index: usize) -> usize {
-        let total = self.total_axes().max(1);
+        let total = self.axes_count();
         axes_index.min(total - 1)
     }
 
@@ -966,6 +1263,11 @@ impl Figure {
         self.plot_axes_indices.push(idx);
         self.dirty = true;
         self.plots.len() - 1
+    }
+
+    /// Add an already-built plot element to the figure.
+    pub fn add_plot_element_on_axes(&mut self, element: PlotElement, axes_index: usize) -> usize {
+        self.push_plot(element, axes_index)
     }
 
     /// Add a line plot to the figure
@@ -1179,6 +1481,33 @@ impl Figure {
         self.bounds.unwrap()
     }
 
+    /// Get the combined bounds of visible data plots assigned to one axes.
+    ///
+    /// Reference lines are intentionally excluded so helpers that need the axes'
+    /// data extent do not feed previously-created reference annotations back into
+    /// their own range calculations.
+    pub fn data_bounds_for_axes(&mut self, axes_index: usize) -> BoundingBox {
+        let axes_index = self.normalize_axes_index(axes_index);
+        let mut combined_bounds = None;
+
+        for (plot_index, plot) in self.plots.iter_mut().enumerate() {
+            if self.plot_axes_indices.get(plot_index).copied().unwrap_or(0) != axes_index {
+                continue;
+            }
+            if !plot.is_visible() || matches!(plot, PlotElement::ReferenceLine(_)) {
+                continue;
+            }
+
+            let plot_bounds = plot.bounds();
+            combined_bounds = match combined_bounds {
+                None => Some(plot_bounds),
+                Some(existing) => Some(existing.union(&plot_bounds)),
+            };
+        }
+
+        combined_bounds.unwrap_or_default()
+    }
+
     /// Compute the combined bounds from all plots
     fn compute_bounds(&mut self) {
         if self.plots.is_empty() {
@@ -1294,10 +1623,15 @@ impl Figure {
             let axes_view_bounds = axes_view_bounds
                 .and_then(|bounds| bounds.get(axes_index).copied())
                 .flatten();
+            let hidden_line_removal = self
+                .axes_metadata
+                .get(axes_index)
+                .map(|meta| meta.hidden_line_removal)
+                .unwrap_or(true);
             if let PlotElement::Surface(s) = p {
                 if let Some(meta) = self.axes_metadata.get(axes_index) {
                     s.set_color_limits(meta.color_limits);
-                    *s = s.clone().with_colormap(meta.colormap);
+                    *s = s.clone().with_colormap(meta.colormap.clone());
                 }
             }
 
@@ -1400,7 +1734,10 @@ impl Figure {
                 }
                 PlotElement::Mesh(plot) => {
                     out.push((axes_index, plot.render_data()));
-                    if let Some(edge_data) = plot.edge_render_data() {
+                    if let Some(mut edge_data) = plot.edge_render_data() {
+                        if !hidden_line_removal {
+                            edge_data.pipeline_type = crate::core::PipelineType::LinesNoDepth;
+                        }
                         out.push((axes_index, edge_data));
                     }
                     if let Some(vector_data) = plot.vector_render_data() {
@@ -1422,6 +1759,15 @@ impl Figure {
                         gpu,
                     ),
                 )),
+                PlotElement::Surface(plot) => {
+                    let mut render_data = plot.render_data();
+                    if !hidden_line_removal
+                        && render_data.pipeline_type == crate::core::PipelineType::Lines
+                    {
+                        render_data.pipeline_type = crate::core::PipelineType::LinesNoDepth;
+                    }
+                    out.push((axes_index, render_data));
+                }
                 _ => out.push((axes_index, p.render_data())),
             }
         }
@@ -1482,6 +1828,9 @@ impl Figure {
         let mut entries = Vec::new();
 
         for plot in &self.plots {
+            if plot.is_hidden_from_legend() {
+                continue;
+            }
             if let Some(label) = plot.label() {
                 entries.push(LegendEntry {
                     label,
@@ -1512,6 +1861,9 @@ impl Figure {
                     }
                 }
                 _ => {
+                    if plot.is_hidden_from_legend() {
+                        continue;
+                    }
                     if let Some(label) = plot.label() {
                         entries.push(LegendEntry {
                             label,
@@ -1658,6 +2010,42 @@ impl Figure {
             .and_then(|meta| meta.y_tick_labels.clone())
     }
 
+    pub fn x_axis_tick_format_for_axes(&self, axes_index: usize) -> Option<String> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.x_tick_format.clone())
+    }
+
+    pub fn y_axis_tick_format_for_axes(&self, axes_index: usize) -> Option<String> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.y_tick_format.clone())
+    }
+
+    pub fn x_axis_tick_label_rotation_for_axes(&self, axes_index: usize) -> Option<f64> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.x_tick_label_rotation)
+    }
+
+    pub fn y_axis_tick_label_rotation_for_axes(&self, axes_index: usize) -> Option<f64> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.y_tick_label_rotation)
+    }
+
+    pub fn x_axis_ticks_for_axes(&self, axes_index: usize) -> Option<Vec<f64>> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.x_ticks.clone())
+    }
+
+    pub fn y_axis_ticks_for_axes(&self, axes_index: usize) -> Option<Vec<f64>> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.y_ticks.clone())
+    }
+
     pub fn histogram_axis_edges_for_axes(&self, axes_index: usize) -> Option<(bool, Vec<f64>)> {
         for (plot_idx, plot) in self.plots.iter().enumerate() {
             let plot_axes = *self.plot_axes_indices.get(plot_idx).unwrap_or(&0);
@@ -1741,6 +2129,13 @@ impl PlotElement {
             PlotElement::ContourFill(plot) => plot.label.clone(),
             PlotElement::ReferenceLine(plot) => plot.label_for_legend(),
         }
+    }
+
+    fn is_hidden_from_legend(&self) -> bool {
+        matches!(
+            self,
+            PlotElement::Line(plot) if plot.handle_visibility.eq_ignore_ascii_case("off")
+        )
     }
 
     /// Mutate label
@@ -1980,6 +2375,7 @@ pub mod matlab_compat {
 mod tests {
     use super::*;
     use crate::plots::line::LineStyle;
+    use glam::Vec3;
 
     #[test]
     fn test_figure_creation() {
@@ -2413,6 +2809,54 @@ mod tests {
     }
 
     #[test]
+    fn hidden_line_removal_off_uses_no_depth_pipeline_for_mesh_edges() {
+        let mut figure = Figure::new();
+        let mesh = MeshPlot::new(
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 1.0),
+            ],
+            vec![[0, 1, 2]],
+        )
+        .unwrap();
+        figure.add_mesh_plot(mesh);
+        figure.set_axes_hidden_line_removal(0, false);
+
+        let render_data = figure.render_data();
+        assert_eq!(render_data.len(), 2);
+        assert_eq!(
+            render_data[0].pipeline_type,
+            crate::core::PipelineType::Triangles
+        );
+        assert_eq!(
+            render_data[1].pipeline_type,
+            crate::core::PipelineType::LinesNoDepth
+        );
+    }
+
+    #[test]
+    fn hidden_line_removal_off_uses_no_depth_pipeline_for_wireframe_surfaces() {
+        let mut figure = Figure::new();
+        let surface = SurfacePlot::new(
+            vec![0.0, 1.0],
+            vec![0.0, 1.0],
+            vec![vec![0.0, 1.0], vec![1.0, 0.0]],
+        )
+        .unwrap()
+        .with_wireframe(true);
+        figure.add_surface_plot(surface);
+        figure.set_axes_hidden_line_removal(0, false);
+
+        let render_data = figure.render_data();
+        assert_eq!(render_data.len(), 1);
+        assert_eq!(
+            render_data[0].pipeline_type,
+            crate::core::PipelineType::LinesNoDepth
+        );
+    }
+
+    #[test]
     fn stem_render_data_includes_marker_pass() {
         let mut figure = Figure::new();
         figure.add_stem_plot(StemPlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap());
@@ -2482,6 +2926,27 @@ mod tests {
         assert!(right.colorbar_enabled);
         assert_eq!(format!("{:?}", right.colormap), "Hot");
         assert_eq!(right.color_limits, Some((0.0, 10.0)));
+    }
+
+    #[test]
+    fn subplot_grid_expansion_reclaims_overlay_axes_slots() {
+        let mut figure = Figure::new();
+        let overlay_axes = figure.ensure_overlay_axes(0);
+        assert_eq!(overlay_axes, 1);
+        figure.add_line_plot_on_axes(
+            LinePlot::new(vec![0.0, 1.0], vec![10.0, 20.0]).unwrap(),
+            overlay_axes,
+        );
+        assert_eq!(figure.axes_overlay_parent(overlay_axes), Some(0));
+        assert_eq!(figure.axes_count(), 2);
+
+        figure.set_subplot_grid(2, 1);
+
+        let second_subplot = figure.axes_metadata(1).unwrap();
+        assert_eq!(second_subplot.overlay_parent, None);
+        assert_eq!(second_subplot.y_axis_location, "left");
+        assert!(figure.plot_axes_indices().is_empty());
+        assert_eq!(figure.axes_count(), 2);
     }
 
     #[test]

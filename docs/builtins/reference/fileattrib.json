@@ -1,0 +1,35 @@
+{
+  "title": "fileattrib",
+  "category": "io/repl_fs",
+  "keywords": [
+    "fileattrib"
+  ],
+  "summary": "Return filesystem attribute metadata for a path.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::compat::tests",
+    "integration": null
+  },
+  "description": "Return filesystem attribute metadata for a path.",
+  "behaviors": [
+    "Reads file metadata and returns status plus an attribute struct containing Name, hidden, directory, and user/group/other permission flags.",
+    "Supports common writable flag mutation with +w and -w through the active filesystem provider.",
+    "Accepts read flags as no-op compatibility forms and rejects unsupported attribute flags explicitly."
+  ],
+  "examples": [],
+  "faqs": [],
+  "links": []
+}

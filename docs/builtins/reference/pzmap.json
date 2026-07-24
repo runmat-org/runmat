@@ -1,0 +1,129 @@
+{
+  "title": "pzmap",
+  "category": "control",
+  "keywords": [
+    "pzmap",
+    "pole zero map",
+    "poles",
+    "zeros",
+    "control system",
+    "transfer function",
+    "state space",
+    "ss",
+    "tf"
+  ],
+  "summary": "Plot or return pole-zero locations for SISO transfer-function and state-space models.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`pzmap` computes host-side polynomial roots from transfer-function metadata, converting SISO state-space models to an equivalent transfer function before extraction. GPU-resident coefficient inputs are gathered by `tf` or `ss` before model construction."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`pzmap` performs model analysis and plotting, so it terminates numeric fusion chains."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::pzmap::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`pzmap(sys)` plots poles and zeros for supported SISO `tf` and `ss` models. Output forms return pole and zero locations as column vectors.",
+  "behaviors": [
+    "Supports SISO `tf` objects with real or complex coefficients.",
+    "Supports SISO `ss` objects by converting the state-space model to a transfer-function numerator and denominator.",
+    "No-output calls plot poles with `x` markers and zeros with `o` markers on the complex plane.",
+    "Statement-form plotting accepts one or more `tf` or `ss` systems.",
+    "Statement-form plotting accepts optional line-spec color/style arguments after each system, such as `pzmap(sys1, 'r', sys2, 'b')`; pole and zero markers for the same system use the same color.",
+    "Two-output calls return `[p, z]`, where each output is a column vector.",
+    "Single-output calls return the pole column vector.",
+    "Outputs use complex tensors when any pole or zero has a nonzero imaginary component.",
+    "Input/output delays raise clear unsupported-model diagnostics."
+  ],
+  "examples": [
+    {
+      "description": "Return poles and zeros",
+      "input": "H = tf([1 3 2], [1 4]);\n[p, z] = pzmap(H);\nfprintf(\"%.0f %.0f %.0f\\n\", p(1), z(1), z(2));",
+      "output": "-4 -1 -2"
+    },
+    {
+      "description": "Plot a pole-zero map",
+      "input": "s = tf('s');\nH = (s + 2) / (s^2 + 3*s + 4);\npzmap(H);\nfprintf(\"ok\\n\");",
+      "output": "ok"
+    },
+    {
+      "description": "Handle state-space models",
+      "input": "sys = ss(-1, 1, 1, 0);\n[p, z] = pzmap(sys);\nfprintf(\"%.0f %d\\n\", p(1), length(z));",
+      "output": "-1 0"
+    },
+    {
+      "description": "Handle complex poles",
+      "input": "H = tf(1, [1 0 1]);\n[p, z] = pzmap(H);\nfprintf(\"%d %d\\n\", length(p), length(z));",
+      "output": "2 0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `pzmap` support state-space models?",
+      "answer": "Yes. RunMat supports SISO `ss` models by converting the state-space matrices to a transfer-function representation before computing poles and zeros. MIMO state-space models are rejected with an unsupported-model diagnostic."
+    },
+    {
+      "question": "What does `pzmap` return with one output?",
+      "answer": "RunMat returns the pole column vector. Use `[p, z] = pzmap(sys)` when zero locations are needed."
+    },
+    {
+      "question": "Does `pzmap` run on the GPU?",
+      "answer": "No. It is a model-analysis and plotting operation and returns host-resident tensors."
+    }
+  ],
+  "links": [
+    {
+      "label": "tf",
+      "url": "./tf"
+    },
+    {
+      "label": "ss",
+      "url": "./ss"
+    },
+    {
+      "label": "pole",
+      "url": "./pole"
+    },
+    {
+      "label": "zero",
+      "url": "./zero"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/pzmap.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/pzmap.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "pzmap(sys)\npzmap(sys1, 'r', sys2, 'b')\np = pzmap(sys)\n[p, z] = pzmap(sys)",
+      "output": "Pole-zero locations are returned when outputs are requested; otherwise a plot is rendered."
+    },
+    "points": [
+      "`sys` must be a SISO `tf` or `ss` object.",
+      "`p` and `z` are column vectors.",
+      "No-output calls render a plot through RunMat's plotting backend."
+    ]
+  },
+  "validation": {
+    "summary": "`pzmap` validates object class, delay properties, output shapes, real and complex root extraction, plotting smoke, multi-system statement form, and VM dispatch.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/pzmap.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/pzmap.rs"
+    }
+  },
+  "gpu_residency": "`pzmap` returns host-resident pole and zero tensors."
+}

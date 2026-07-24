@@ -66,6 +66,7 @@ pub(crate) struct OcctCadTopology {
     pub triangles: Vec<[u32; 3]>,
     pub triangle_face_ids: Vec<u64>,
     pub faces: Vec<OcctCadFace>,
+    pub face_evaluation_samples: Vec<OcctRawFaceEvaluationSample>,
     pub assembly: Option<AssemblyNode>,
     pub warnings: Vec<String>,
 }
@@ -100,6 +101,7 @@ pub(crate) struct OcctRawTopology {
     pub face_ids: Vec<u64>,
     pub face_names: Vec<String>,
     pub face_semantics: Vec<OcctRawFaceSemantic>,
+    pub face_evaluation_samples: Vec<OcctRawFaceEvaluationSample>,
     pub assembly_nodes: Vec<OcctRawAssemblyNode>,
     pub warnings: Vec<String>,
 }
@@ -127,6 +129,16 @@ pub(crate) struct OcctRawFaceSemantic {
     pub material_density_value_type: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OcctRawFaceEvaluationSample {
+    pub face_id: u64,
+    pub u: f64,
+    pub v: f64,
+    pub point_m: [f64; 3],
+    pub unit_normal: [f64; 3],
+    pub projection_error_m: f64,
+}
+
 #[cfg(any(
     all(not(target_arch = "wasm32"), feature = "occt-native"),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
@@ -135,6 +147,11 @@ pub(crate) struct OcctRawAssemblyNode {
     pub node_id: String,
     pub parent_node_id: String,
     pub label: String,
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub(crate) fn native_cad_backend_was_used() -> bool {
+    native::native_cad_backend_was_used()
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
@@ -381,6 +398,7 @@ pub(crate) fn topology_from_raw(
         vertices,
         triangles,
         triangle_face_ids: payload.triangle_face_ids,
+        face_evaluation_samples: payload.face_evaluation_samples,
         faces,
         assembly,
         warnings: payload.warnings,
@@ -431,6 +449,7 @@ fn face_ownership_by_id(
 
         let entry = CadRegionOwnership {
             face_id: Some(row.face_id),
+            curve_id: None,
             label,
             owner_path,
             layers: row.layer_names.into_iter().filter_map(non_empty).collect(),

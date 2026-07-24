@@ -368,8 +368,13 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
 
-    fn run_gc<T>(f: impl FnOnce() -> T) -> T {
-        runmat_gc::gc_test_context(f)
+    fn parser_with_root() -> (Value, runmat_gc::ExplicitRoot) {
+        let parser = block_on(input_parser_builtin()).expect("inputParser");
+        let Value::HandleObject(handle) = &parser else {
+            panic!("expected inputParser handle, got {parser:?}");
+        };
+        let root = runmat_gc::gc_root(handle.target).expect("root inputParser handle");
+        (parser, root)
     }
 
     fn property(value: &Value, name: &str) -> Value {
@@ -403,101 +408,90 @@ mod tests {
 
     #[test]
     fn input_parser_returns_valid_handle_with_empty_results() {
-        run_gc(|| {
-            let parser = block_on(input_parser_builtin()).expect("inputParser");
-            let Value::HandleObject(handle) = &parser else {
-                panic!("expected handle");
-            };
-            assert_eq!(handle.class_name, CLASS_NAME);
-            assert!(crate::is_handle_valid(handle));
-            let Value::Struct(results) = property(&parser, RESULTS_PROPERTY) else {
-                panic!("expected Results struct");
-            };
-            assert!(results.fields.is_empty());
-        });
+        let (parser, _root) = parser_with_root();
+        let Value::HandleObject(handle) = &parser else {
+            panic!("expected handle");
+        };
+        assert_eq!(handle.class_name, CLASS_NAME);
+        assert!(crate::is_handle_valid(handle));
+        let Value::Struct(results) = property(&parser, RESULTS_PROPERTY) else {
+            panic!("expected Results struct");
+        };
+        assert!(results.fields.is_empty());
     }
 
     #[test]
     fn add_parameter_stores_defaults_and_rejects_duplicates() {
-        run_gc(|| {
-            let parser = block_on(input_parser_builtin()).expect("inputParser");
-            run_add_parameter(parser.clone(), Value::from("scale"), Value::Num(2.0))
-                .expect("addParameter");
-            assert_eq!(result_number(&parser, "scale"), 2.0);
+        let (parser, _root) = parser_with_root();
+        run_add_parameter(parser.clone(), Value::from("scale"), Value::Num(2.0))
+            .expect("addParameter");
+        assert_eq!(result_number(&parser, "scale"), 2.0);
 
-            let err = run_add_parameter(parser, Value::from("scale"), Value::Num(3.0)).unwrap_err();
-            assert_eq!(
-                err.identifier(),
-                Some("RunMat:inputParser:DuplicateParameter")
-            );
-        });
+        let err = run_add_parameter(parser, Value::from("scale"), Value::Num(3.0)).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:inputParser:DuplicateParameter")
+        );
     }
 
     #[test]
     fn parse_applies_overrides_preserves_defaults_and_resets_between_parses() {
-        run_gc(|| {
-            let parser = block_on(input_parser_builtin()).expect("inputParser");
-            run_add_parameter(parser.clone(), Value::from("scale"), Value::Num(2.0))
-                .expect("add scale");
-            run_add_parameter(parser.clone(), Value::from("offset"), Value::Num(10.0))
-                .expect("add offset");
+        let (parser, _root) = parser_with_root();
+        run_add_parameter(parser.clone(), Value::from("scale"), Value::Num(2.0))
+            .expect("add scale");
+        run_add_parameter(parser.clone(), Value::from("offset"), Value::Num(10.0))
+            .expect("add offset");
 
-            run_parse(parser.clone(), vec![Value::from("scale"), Value::Num(4.0)])
-                .expect("parse override");
-            assert_eq!(result_number(&parser, "scale"), 4.0);
-            assert_eq!(result_number(&parser, "offset"), 10.0);
+        run_parse(parser.clone(), vec![Value::from("scale"), Value::Num(4.0)])
+            .expect("parse override");
+        assert_eq!(result_number(&parser, "scale"), 4.0);
+        assert_eq!(result_number(&parser, "offset"), 10.0);
 
-            run_parse(parser.clone(), Vec::new()).expect("parse defaults");
-            assert_eq!(result_number(&parser, "scale"), 2.0);
-            assert_eq!(result_number(&parser, "offset"), 10.0);
-        });
+        run_parse(parser.clone(), Vec::new()).expect("parse defaults");
+        assert_eq!(result_number(&parser, "scale"), 2.0);
+        assert_eq!(result_number(&parser, "offset"), 10.0);
     }
 
     #[test]
     fn parse_accepts_char_name_values() {
-        run_gc(|| {
-            let parser = block_on(input_parser_builtin()).expect("inputParser");
-            run_add_parameter(
-                parser.clone(),
+        let (parser, _root) = parser_with_root();
+        run_add_parameter(
+            parser.clone(),
+            Value::CharArray(CharArray::new_row("scale")),
+            Value::Num(2.0),
+        )
+        .expect("add char parameter");
+        run_parse(
+            parser.clone(),
+            vec![
                 Value::CharArray(CharArray::new_row("scale")),
-                Value::Num(2.0),
-            )
-            .expect("add char parameter");
-            run_parse(
-                parser.clone(),
-                vec![
-                    Value::CharArray(CharArray::new_row("scale")),
-                    Value::Num(4.0),
-                ],
-            )
-            .expect("parse char name");
-            assert_eq!(result_number(&parser, "scale"), 4.0);
-        });
+                Value::Num(4.0),
+            ],
+        )
+        .expect("parse char name");
+        assert_eq!(result_number(&parser, "scale"), 4.0);
     }
 
     #[test]
     fn invalid_parser_name_arity_and_unknown_parameter_have_stable_identifiers() {
-        run_gc(|| {
-            let err =
-                run_add_parameter(Value::Num(1.0), Value::from("x"), Value::Num(0.0)).unwrap_err();
-            assert_eq!(err.identifier(), Some("RunMat:inputParser:InvalidParser"));
+        let err =
+            run_add_parameter(Value::Num(1.0), Value::from("x"), Value::Num(0.0)).unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:inputParser:InvalidParser"));
 
-            let parser = block_on(input_parser_builtin()).expect("inputParser");
-            let err =
-                run_add_parameter(parser.clone(), Value::Num(1.0), Value::Num(0.0)).unwrap_err();
-            assert_eq!(
-                err.identifier(),
-                Some("RunMat:inputParser:InvalidParameterName")
-            );
+        let (parser, _root) = parser_with_root();
+        let err = run_add_parameter(parser.clone(), Value::Num(1.0), Value::Num(0.0)).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:inputParser:InvalidParameterName")
+        );
 
-            let err = run_parse(parser.clone(), vec![Value::from("x")]).unwrap_err();
-            assert_eq!(err.identifier(), Some("RunMat:inputParser:NameValuePairs"));
+        let err = run_parse(parser.clone(), vec![Value::from("x")]).unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:inputParser:NameValuePairs"));
 
-            let err = run_parse(parser, vec![Value::from("x"), Value::Num(1.0)]).unwrap_err();
-            assert_eq!(
-                err.identifier(),
-                Some("RunMat:inputParser:UnknownParameter")
-            );
-        });
+        let err = run_parse(parser, vec![Value::from("x"), Value::Num(1.0)]).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:inputParser:UnknownParameter")
+        );
     }
 }

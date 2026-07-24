@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Runs on the GPU when rows='all' and no weight vector is supplied; other modes transparently fall back to the CPU reference path."
+    "notes": "Runs on the GPU when rows='all'. Observation weight vectors are supported when the provider accepts resident real weights or a host weight vector can be uploaded temporarily; omitrows and partialrows transparently fall back to the CPU reference path."
   },
   "fusion": {
     "elementwise": false,
@@ -78,7 +78,7 @@
     },
     {
       "question": "How do I provide observation weights?",
-      "answer": "Supply a weight vector whose length equals the number of observations. The covariance is frequency-weighted using the MATLAB formula. Weighted covariance currently falls back to the CPU implementation when running on the GPU."
+      "answer": "Supply a weight vector whose length equals the number of observations. The covariance is frequency-weighted using the MATLAB formula. With gpuArray data and rows='all', RunMat keeps the result resident when the active provider supports weighted covariance; row-filtering modes fall back to the CPU implementation."
     },
     {
       "question": "What happens when columns contain constant values?",
@@ -119,8 +119,8 @@
     "label": "`crates/runmat-runtime/src/builtins/stats/summary/cov.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/cov.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray`. Expressions such as `cov(sin(X))` keep temporary results on the GPU as long as the active provider handles the operation. The builtin gathers to the CPU only when weights, `'omitrows'`, or `'partialrows'` are requested, or when the provider does not implement the covariance hook. Explicitly calling `gpuArray` remains supported for MATLAB compatibility and to seed GPU residency when you are unsure about planner decisions.",
+  "gpu_residency": "You usually do **not** need to call `gpuArray`. Expressions such as `cov(sin(X))` keep temporary results on the GPU as long as the active provider handles the operation. For rows='all', observation weight vectors can also stay on the provider path: host weights are uploaded temporarily and resident real gpuArray row or column vectors are used directly when they belong to the same provider. The builtin gathers to the CPU for `'omitrows'`, `'partialrows'`, unsupported complex/provider-mismatched resident weights, or when the provider does not implement the covariance hook. Explicitly calling `gpuArray` remains supported for MATLAB compatibility and to seed GPU residency when you are unsure about planner decisions.",
   "gpu_behavior": [
-    "RunMat invokes provider-specific GPU kernels when:\n\n1. All inputs already reside on the GPU; 2. No weight vector is supplied; 3. The rows option is `'all'`; and 4. The active provider exposes the custom `covariance` hook.\n\nIf any of these conditions is not met, RunMat gathers the data to the host, evaluates the reference implementation, and returns a dense host tensor. This guarantees MATLAB-compatible behaviour regardless of GPU support."
+    "RunMat invokes provider-specific GPU kernels when:\n\n1. Data inputs already reside on the GPU; 2. The rows option is `'all'`; 3. Any weight vector is either a host numeric/logical vector that can be uploaded temporarily or a real gpuArray vector on the same provider; and 4. The active provider exposes the custom `covariance` hook.\n\nIf any of these conditions is not met, RunMat gathers the data to the host, evaluates the reference implementation, and returns a dense host tensor. This guarantees MATLAB-compatible behaviour regardless of GPU support."
   ]
 }

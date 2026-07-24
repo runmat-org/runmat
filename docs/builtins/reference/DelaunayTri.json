@@ -1,0 +1,84 @@
+{
+  "title": "DelaunayTri",
+  "category": "geometry/triangulation",
+  "keywords": [
+    "DelaunayTri",
+    "delaunay",
+    "triangulation",
+    "geometry",
+    "mesh"
+  ],
+  "summary": "Create a legacy 2-D Delaunay triangulation object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`DelaunayTri` builds host topology using a combinatorial geometry algorithm. GPU-resident numeric inputs are gathered at the constructor boundary; there is no runmat-accelerate kernel because the result is object topology rather than an elementwise or reduction tensor."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::geometry::triangulation::tests",
+    "integration": "builtins::plotting::triplot::tests::triplot_accepts_delaunaytri_object"
+  },
+  "description": "`DelaunayTri` creates the legacy MATLAB triangulation object shape for 2-D point inputs. RunMat stores both legacy properties (`X`, `Triangulation`, `Constraints`) and modern triangulation-compatible aliases (`Points`, `ConnectivityList`) so downstream helpers such as `triplot`, `freeBoundary`, `nearestNeighbor`, and `pointLocation` can consume the same object.",
+  "behaviors": [
+    "`DelaunayTri()` returns an empty 2-D triangulation object with 0-by-2 points and 0-by-3 connectivity.",
+    "`DelaunayTri(X)` accepts an N-by-2 finite point matrix and constructs one-based triangle connectivity.",
+    "`DelaunayTri(x, y)` accepts equal-length coordinate vectors.",
+    "Duplicate point coordinates are ignored for triangulation while the public point matrix preserves the supplied rows.",
+    "Nonempty constrained triangulation inputs and 3-D point forms return explicit unsupported-target errors rather than placeholder topology."
+  ],
+  "examples": [
+    {
+      "description": "Create a 2-D triangulation from a point matrix",
+      "input": "X = [0 0; 1 0; 0 1; 1 1];\ndt = DelaunayTri(X);\ntri = dt.Triangulation;"
+    },
+    {
+      "description": "Create from coordinate vectors and plot the mesh",
+      "input": "x = [0 1 0 1];\ny = [0 0 1 1];\ndt = DelaunayTri(x, y);\ntriplot(dt);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which DelaunayTri properties are available?",
+      "answer": "RunMat exposes `X`, `Triangulation`, `Constraints`, `Points`, `ConnectivityList`, and `Dimension`."
+    },
+    {
+      "question": "Does RunMat support constrained or 3-D DelaunayTri inputs?",
+      "answer": "Not yet. Those forms fail deterministically with `RunMat:DelaunayTri:Unsupported`."
+    },
+    {
+      "question": "Does DelaunayTri preserve gpuArray residency?",
+      "answer": "No. The constructor gathers numeric inputs because triangulation creates CPU object topology and not a dense numeric GPU result."
+    }
+  ],
+  "links": [
+    {
+      "label": "triplot",
+      "url": "./triplot"
+    },
+    {
+      "label": "freeBoundary",
+      "url": "./freeBoundary"
+    },
+    {
+      "label": "nearestNeighbor",
+      "url": "./nearestNeighbor"
+    },
+    {
+      "label": "pointLocation",
+      "url": "./pointLocation"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/geometry/triangulation.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/geometry/triangulation.rs"
+  }
+}

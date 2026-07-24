@@ -1,0 +1,81 @@
+{
+  "title": "pdist",
+  "category": "stats/ml",
+  "keywords": [
+    "pdist",
+    "pairwise",
+    "distance",
+    "statistics",
+    "machine learning",
+    "clustering"
+  ],
+  "summary": "Compute pairwise distances between rows of an observation matrix.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Pairwise distance kernels run on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::distance::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`pdist(X)` returns a condensed row vector containing distances between every pair of rows in `X`, ordered like MATLAB's lower-left distance triangle: `(2,1), (3,1), ..., (n,1), (3,2), ...`.",
+  "behaviors": [
+    "`X` must be a real numeric vector or 2-D matrix. Rows are observations and columns are variables.",
+    "The default metric is Euclidean distance.",
+    "Supported metrics are `\"euclidean\"`, `\"squaredeuclidean\"`, `\"cityblock\"`, `\"chebychev\"`, `\"minkowski\"`, `\"seuclidean\"`, `\"mahalanobis\"`, `\"cosine\"`, `\"correlation\"`, `\"hamming\"`, `\"jaccard\"`, and `\"spearman\"`.",
+    "`pdist(X,\"minkowski\",P)` uses positive finite exponent `P`.",
+    "`pdist(X,\"seuclidean\",S)` uses positive finite standard-deviation vector `S`; without `S`, RunMat computes column variances from `X` with NaNs omitted from scale estimation.",
+    "`pdist(X,\"mahalanobis\",C)` uses covariance matrix `C`; without `C`, RunMat computes the covariance from `X` and inverts it."
+  ],
+  "examples": [
+    {
+      "description": "Compute Euclidean distances",
+      "input": "X = [0 0; 3 4; 4 0; 0 2];\nD = pdist(X)",
+      "output": "D starts with [5 4 2], the distances from rows 2, 3, and 4 to row 1."
+    },
+    {
+      "description": "Use a cityblock metric",
+      "input": "D = pdist(X, \"cityblock\")",
+      "output": "D contains Manhattan distances between row pairs."
+    },
+    {
+      "description": "Use Minkowski distance",
+      "input": "D = pdist(X, \"minkowski\", 3)",
+      "output": "D contains pairwise L3 distances."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why is the output a row vector?",
+      "answer": "MATLAB stores pairwise distances in condensed form to avoid duplicating the symmetric matrix. Use `squareform` to expand the vector."
+    },
+    {
+      "question": "Are custom distance functions supported?",
+      "answer": "No. RunMat currently supports the standard named numeric distance metrics."
+    }
+  ],
+  "links": [
+    {
+      "label": "pdist2",
+      "url": "./pdist2"
+    },
+    {
+      "label": "squareform",
+      "url": "./squareform"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/distance.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/distance.rs"
+  }
+}

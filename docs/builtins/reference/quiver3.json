@@ -1,0 +1,119 @@
+{
+  "title": "quiver3",
+  "category": "plotting",
+  "keywords": [
+    "quiver3",
+    "3-D vector field",
+    "arrow plot",
+    "matlab quiver3",
+    "direction field"
+  ],
+  "summary": "Visualize 3-D vector fields with MATLAB-compatible quiver3 plots.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-scatter3-3D-point-cloud.webp",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`quiver3` is a rendering sink. RunMat currently gathers GPU inputs once to build 3-D quiver geometry; direct WGPU geometry packing is tracked by the eval-loop GPU fast-path audit."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 6,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::quiver3::tests",
+    "integration": "runmat-plot/src/plots/quiver.rs::tests"
+  },
+  "description": "`quiver3` draws arrows anchored at 3-D coordinates and returns a graphics handle. It supports implicit grid coordinates from `Z`, explicit `X`, `Y`, and `Z` coordinates, axes targeting, numeric scale factors, line-style shorthand, and name/value styling.",
+  "behaviors": [
+    "`quiver3(Z, U, V, W)` builds default X/Y grid coordinates from the shape of `Z`.",
+    "`quiver3(X, Y, Z, U, V, W)` accepts matching coordinate arrays or meshgrid-style X/Y vectors for matrix vector fields.",
+    "The returned graphics handle exposes XData, YData, ZData, UData, VData, WData, Color, LineWidth, AutoScaleFactor, MaxHeadSize, Parent, Children, and Type through `get` and style updates through `set`.",
+    "3-D arrow geometry is stored in the shared quiver plot primitive, so replay/export preserves Z/W data and 3-D bounds.",
+    "Changing scale, head size, color, or data properties invalidates cached quiver geometry before the next render."
+  ],
+  "options": [
+    "A numeric argument after the vector data controls the arrow scale factor.",
+    "`'AutoScaleFactor'` / `'Scale'` controls arrow scaling.",
+    "`'MaxHeadSize'` / `'HeadSize'` controls the size of arrowheads.",
+    "Line-style color and width workflows use the same parser as other line-like plotting builtins."
+  ],
+  "examples": [
+    {
+      "description": "Create a 3-D vector field from Z and vector components",
+      "input": "[X, Y] = meshgrid(-2:1:2, -2:1:2);\nZ = X.^2 - Y.^2;\nU = -Y;\nV = X;\nW = ones(size(Z));\nquiver3(Z, U, V, W);"
+    },
+    {
+      "description": "Provide explicit coordinates and style the arrows",
+      "input": "[X, Y, Z] = meshgrid(-1:1, -1:1, 0:1);\nU = -Y;\nV = X;\nW = 0.5 * ones(size(Z));\nh = quiver3(X, Y, Z, U, V, W, 1.5, 'r');\nset(h, 'DisplayName', 'flow', 'MaxHeadSize', 0.2);\nview(45, 30);"
+    },
+    {
+      "description": "Target a specific axes",
+      "input": "ax = axes;\nquiver3(ax, 1:3, 1:3, 1:3, [1 0 -1], [0 1 0], [0 0 1]);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I control arrow lengths in a quiver3 plot?",
+      "answer": "Pass a numeric scale after the vector data or set the `'AutoScaleFactor'` property.\n\n```matlab\nh = quiver3(X, Y, Z, U, V, W, 0.75);\nset(h, 'AutoScaleFactor', 1.5);\n```"
+    },
+    {
+      "question": "Can I inspect the 3-D vector data after plotting?",
+      "answer": "Yes. Use `get(h, 'XData')`, `get(h, 'YData')`, `get(h, 'ZData')`, `get(h, 'UData')`, `get(h, 'VData')`, and `get(h, 'WData')` on the returned handle."
+    },
+    {
+      "question": "Does quiver3 keep GPU data resident?",
+      "answer": "Not yet on the direct geometry path. RunMat gathers GPU inputs once and preserves the same plotting and handle semantics; direct WGPU packing for 3-D arrows is tracked by the eval-loop GPU fast-path audit."
+    }
+  ],
+  "links": [
+    {
+      "label": "quiver",
+      "url": "./quiver"
+    },
+    {
+      "label": "plot3",
+      "url": "./plot3"
+    },
+    {
+      "label": "scatter3",
+      "url": "./scatter3"
+    },
+    {
+      "label": "view",
+      "url": "./view"
+    },
+    {
+      "label": "zlabel",
+      "url": "./zlabel"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/quiver3.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/quiver3.rs"
+  },
+  "gpu_residency": "`quiver3` is currently a gather-immediate plotting sink. GPU-resident inputs are materialized once before building 3-D arrow geometry; direct provider-backed geometry emission is intentionally left to the queued GPU fast-path audit.",
+  "gpu_behavior": [
+    "Host and GPU-fallback paths produce the same handle semantics and replay/export data.",
+    "A future direct WGPU path should mirror the existing 2-D `quiver` GPU packer with Z/W coordinate buffers."
+  ]
+}

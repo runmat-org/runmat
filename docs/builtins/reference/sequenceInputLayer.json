@@ -1,0 +1,26 @@
+{
+  "title": "sequenceInputLayer",
+  "category": "deep_learning",
+  "keywords": ["sequenceInputLayer", "deep learning", "sequence"],
+  "summary": "Create a sequence input layer compatibility object.",
+  "description": "`sequenceInputLayer(inputSize)` creates metadata for sequence network definitions.",
+  "behaviors": [
+    "`inputSize` may be a positive integer scalar or numeric vector of positive integers.",
+    "Common name-value options are preserved as properties."
+  ],
+  "examples": [
+    {
+      "description": "Create Sequence Input",
+      "input": "layer = sequenceInputLayer(12, 'Name', 'tokens')",
+      "output": "`layer` stores input-size and name metadata."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "layer = sequenceInputLayer(inputSize)\nlayer = sequenceInputLayer(inputSize, Name, Value)",
+      "output": "Layer compatibility object."
+    }
+  },
+  "gpu_residency": "Layer construction is host metadata work and has no provider kernel."
+}

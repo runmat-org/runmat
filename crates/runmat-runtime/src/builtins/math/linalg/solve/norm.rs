@@ -209,7 +209,7 @@ async fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum NormOrder {
+pub(super) enum NormOrder {
     Default,
     One,
     Two,
@@ -378,17 +378,20 @@ fn vector_norm_from_magnitudes(magnitudes: &[f64], order: NormOrder) -> BuiltinR
     }
 }
 
-fn root_sum_of_squares(values: &[f64]) -> f64 {
+pub(super) fn root_sum_of_squares(values: &[f64]) -> f64 {
     let mut scale = 0.0f64;
     let mut sumsq = 1.0f64;
     let mut count = 0usize;
     for &value in values {
-        if value == 0.0 {
-            continue;
-        }
         let abs = value.abs();
         if abs.is_nan() {
             return f64::NAN;
+        }
+        if abs.is_infinite() {
+            return f64::INFINITY;
+        }
+        if abs == 0.0 {
+            continue;
         }
         if scale < abs {
             let ratio = if scale == 0.0 { 0.0 } else { scale / abs };

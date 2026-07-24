@@ -1,0 +1,41 @@
+{
+  "title": "ecdf",
+  "category": "stats/summary",
+  "keywords": ["ecdf", "empirical cdf", "survivor", "cumulative hazard", "statistics"],
+  "summary": "Compute or plot empirical distribution functions.",
+  "signatures": [
+    "[f,x] = ecdf(y)",
+    "[f,x] = ecdf(y,Name,Value)",
+    "[f,x,flo,fup] = ecdf(___)",
+    "ecdf(___)",
+    "ecdf(ax,___)"
+  ],
+  "description": "`ecdf(y)` computes the empirical cumulative distribution function for numeric sample data. With no requested outputs it plots the empirical function; with outputs it returns column vectors for function values, evaluation points, and confidence bounds.",
+  "notes": [
+    "NaN sample, censoring, and frequency entries are omitted.",
+    "`Function` accepts `\"cdf\"`, `\"survivor\"`, and `\"cumulative hazard\"`.",
+    "`Frequency` supplies nonnegative observation counts.",
+    "`Censoring` supports fully observed data (`0`), left-censored observations (`-1`), and right-censored observations (`1`). Interval and double-censored Turnbull estimation are reported as unsupported instead of approximated.",
+    "`Function`, `\"cumulative hazard\"` uses Nelson-Aalen cumulative hazard steps for fully observed and right-censored data.",
+    "`Alpha` controls pointwise confidence bounds. `Bounds`, `\"on\"` includes confidence-bound lines when plotting."
+  ],
+  "examples": [
+    {
+      "description": "Compute an empirical CDF",
+      "input": "[f,x] = ecdf([3;1;2;2])",
+      "output": "f = [0; 0.25; 0.75; 1]\nx = [1; 1; 2; 3]"
+    },
+    {
+      "description": "Compute a survivor function with frequencies",
+      "input": "[s,x] = ecdf([1;2;3], \"Frequency\", [2;1;1], \"Function\", \"survivor\")"
+    },
+    {
+      "description": "Plot an empirical CDF",
+      "input": "ecdf(randn(100,1))"
+    }
+  ],
+  "links": [
+    { "label": "cdfplot", "url": "./cdfplot" },
+    { "label": "stairs", "url": "./stairs" }
+  ]
+}

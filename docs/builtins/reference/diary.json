@@ -1,0 +1,101 @@
+{
+  "title": "diary",
+  "category": "io",
+  "keywords": [
+    "diary",
+    "log",
+    "command window",
+    "console",
+    "file"
+  ],
+  "summary": "Log command-window text to a file.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host. Diary writes use the active filesystem provider and never operate on GPU buffers."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::diary::tests",
+    "integration": "diary_logs_command_window_output_to_file_provider"
+  },
+  "description": "`diary` records command-window stdout and stderr text to an append-only log file. It supports MATLAB function syntax and command syntax for enabling, disabling, toggling, and selecting the diary file.",
+  "behaviors": [
+    "`diary` with no input toggles logging on or off using the current diary file. The default file is `diary`.",
+    "`diary filename` and `diary('filename')` select a file and enable logging. Existing files are appended to rather than replaced.",
+    "`diary on` enables logging to the current file, and `diary off` disables logging.",
+    "The filename/state argument must be a string scalar, string scalar array, or character row. Empty text and nonscalar text values are rejected.",
+    "Diary writes go through the active RunMat filesystem provider, so sandboxed and virtual filesystem hosts receive the same file operations as normal file I/O builtins.",
+    "Command-window text captured by `evalc` is not written to the diary while the capture scope is active.",
+    "`diary` is a side-effecting sink and does not return output arguments. Requesting an output raises `RunMat:diary:TooManyOutputs`."
+  ],
+  "examples": [
+    {
+      "description": "Log command-window output to a file",
+      "input": "diary runmat_session.log\nA = magic(3);\ndisp(A)\ndiary off"
+    },
+    {
+      "description": "Use function syntax to select a diary file",
+      "input": "diary('experiment.log')\ndisp('started')\ndiary off"
+    },
+    {
+      "description": "Toggle the current diary state",
+      "input": "diary\ndisp('this line is logged')\ndiary"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `diary` overwrite an existing file?",
+      "answer": "No. RunMat opens the selected diary file in append mode, matching MATLAB diary behavior."
+    },
+    {
+      "question": "Does `diary` log text captured by `evalc`?",
+      "answer": "No. Text captured by `evalc` is diverted into the returned string and is not written to the normal command stream or diary log."
+    },
+    {
+      "question": "Does `diary` log workspace variables or figure state?",
+      "answer": "No. It logs command-window text only. It does not change variables, figures, or execution state beyond the diary on/off state and selected filename."
+    },
+    {
+      "question": "Can `diary` return an output value?",
+      "answer": "No. Like MATLAB, `diary` is controlled for side effects. Assigning its result raises `RunMat:diary:TooManyOutputs`."
+    },
+    {
+      "question": "Can `diary` write to host-specific filesystems?",
+      "answer": "Yes. It uses the active RunMat filesystem provider, so desktop, sandboxed, and embedded hosts control where the log is created."
+    },
+    {
+      "question": "Does GPU residency matter for `diary`?",
+      "answer": "No. `diary` is a host-side file sink and does not create GPU kernels, participate in fusion, or preserve GPU residency."
+    }
+  ],
+  "links": [
+    {
+      "label": "disp",
+      "url": "./disp"
+    },
+    {
+      "label": "evalc",
+      "url": "./evalc"
+    },
+    {
+      "label": "fprintf",
+      "url": "./fprintf"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/diary.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/diary.rs"
+  },
+  "gpu_behavior": [
+    "`diary` is a host-side logging builtin. It writes command-window text through the filesystem provider and is excluded from GPU execution and fusion planning."
+  ]
+}

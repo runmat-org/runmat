@@ -1,0 +1,90 @@
+{
+  "title": "opentoline",
+  "category": "io/repl_fs",
+  "keywords": [
+    "opentoline",
+    "open",
+    "editor",
+    "file",
+    "line",
+    "column"
+  ],
+  "summary": "Open a file to a requested editor line in MATLAB-compatible code.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side editor navigation request. gpuArray scalar position inputs are gathered before validation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::opentoline::tests",
+    "vm": "basics::opentoline_dispatches_editor_navigation_request"
+  },
+  "description": "`opentoline(filename,line)` resolves a file and validates a host-safe editor-navigation request. RunMat runtimes are noninteractive, so successful calls complete without launching an editor.",
+  "behaviors": [
+    "`opentoline(filename,line)` accepts a string scalar, row character vector, or scalar string array filename plus a positive integer line number.",
+    "`opentoline(filename,line,column)` also validates a positive integer column number.",
+    "`opentoline(filename,line,column,'select')` accepts MATLAB-style selection intent as a no-op navigation option in noninteractive hosts.",
+    "Command-style numeric line and column arguments passed as text, such as `opentoline file.m 10 4`, are accepted when they parse as positive integers.",
+    "File names are resolved using the RunMat search path and the same general MATLAB-style file extensions used by `open`.",
+    "A missing file raises `RunMat:opentoline:FileNotFound`.",
+    "Non-scalar, nonfinite, fractional, zero, or negative line and column values raise `RunMat:opentoline:InvalidPosition`.",
+    "Requesting output arguments raises `RunMat:opentoline:TooManyOutputs`."
+  ],
+  "examples": [
+    {
+      "description": "Open a script at a line",
+      "input": "opentoline('setup.m', 12)",
+      "output": "% setup.m is resolved and the editor-navigation request succeeds without returned output."
+    },
+    {
+      "description": "Open a script at a line and column",
+      "input": "opentoline('setup.m', 12, 4)",
+      "output": "% RunMat validates the file, line, and column."
+    },
+    {
+      "description": "Use command-style text numbers",
+      "input": "opentoline setup.m 12 4",
+      "output": "% Text line and column arguments are parsed as positive integers."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `opentoline` launch a desktop editor?",
+      "answer": "No. RunMat's runtime implementation is host-safe and noninteractive. It resolves the file and validates the requested position; the actual editor navigation completes as a no-op."
+    },
+    {
+      "question": "Why is this builtin under `io/repl_fs` instead of plotting?",
+      "answer": "`opentoline` is an editor/file navigation helper. It appeared in a plotting/UI token bucket, but its runtime ownership belongs with REPL-facing filesystem and editor-style operations."
+    }
+  ],
+  "links": [
+    {
+      "label": "open",
+      "url": "./open"
+    },
+    {
+      "label": "which",
+      "url": "./which"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/opentoline.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/opentoline.rs"
+  },
+  "gpu_behavior": [
+    "`opentoline` is a host-side editor navigation operation and does not participate in GPU fusion or provider-native execution."
+  ]
+}
