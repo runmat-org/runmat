@@ -33,7 +33,12 @@ pub(crate) fn try_integer_remainder(
     let right = integer_operand(rhs);
     match (left, right) {
         (None, None) => Ok(None),
-        (Some(_), None) | (None, Some(_)) => Ok(None),
+        (Some(integer), None) => {
+            apply_integer_remainder_scalar(integer, rhs, true, operation, builtin)
+        }
+        (None, Some(integer)) => {
+            apply_integer_remainder_scalar(integer, lhs, false, operation, builtin)
+        }
         (Some(left), Some(right)) => {
             if left.target != right.target {
                 return Err(format!(
@@ -52,6 +57,33 @@ pub(crate) fn try_integer_remainder(
             integer_values_into_value(left.target, values, plan.output_shape().to_vec()).map(Some)
         }
     }
+}
+
+fn apply_integer_remainder_scalar(
+    integer: IntegerOperand<'_>,
+    other: &Value,
+    integer_is_left: bool,
+    operation: IntegerRemainderOp,
+    builtin: &str,
+) -> Result<Option<Value>, String> {
+    let Some(scalar) = real_scalar(other) else {
+        return Err(format!(
+            "{builtin}: integer arrays can only be combined with scalar double or logical values"
+        ));
+    };
+    let Some(scalar) = exact_integer_scalar(integer.target, scalar) else {
+        return Ok(None);
+    };
+    let mut values = Vec::with_capacity(integer.storage.len());
+    for index in 0..integer.storage.len() {
+        let value = integer.storage.value_at(index);
+        values.push(if integer_is_left {
+            exact_integer_remainder(value, scalar.clone(), operation)
+        } else {
+            exact_integer_remainder(scalar.clone(), value, operation)
+        });
+    }
+    integer_values_into_value(integer.target, values, integer.shape).map(Some)
 }
 
 /// Applies a MATLAB integer binary operation when either operand is integer
@@ -878,5 +910,40 @@ mod tests {
         )
         .expect_err("mixed classes must fail");
         assert!(error.contains("same integer class"));
+    }
+
+    #[test]
+    fn exact_remainder_supports_integral_scalar_double_without_64_bit_loss() {
+        let rem = try_integer_remainder(
+            &Value::Int(IntValue::U64(u64::MAX)),
+            &Value::Num(2.0),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(rem, Value::Int(IntValue::U64(1)));
+
+        let modulus = try_integer_remainder(
+            &Value::Num(4.0),
+            &integer(IntegerStorage::I64(vec![-7, 7]), vec![1, 2]),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(
+            modulus,
+            integer(IntegerStorage::I64(vec![-3, 4]), vec![1, 2])
+        );
+
+        let nonscalar = try_integer_remainder(
+            &Value::Int(IntValue::I8(1)),
+            &Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("double tensor")),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect_err("integer with nonscalar double must fail");
+        assert!(nonscalar.contains("scalar double"));
     }
 }
