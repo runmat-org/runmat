@@ -10,7 +10,7 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, Tensor, Value,
+    IntegerStorage, LogicalArray, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -1105,12 +1105,31 @@ fn finalize_like(tensor: Tensor, proto: &Value) -> BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => tensor_to_logical(tensor),
         Value::GpuTensor(handle) => tensor_to_gpu(tensor, handle),
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => Ok(Value::Tensor(tensor)),
+        Value::Tensor(prototype) => match prototype.integer_storage() {
+            Some(storage) => tensor_to_integer_like(tensor, storage),
+            None => Ok(Value::Tensor(tensor)),
+        },
+        Value::Int(value) => {
+            tensor_to_integer_like(tensor, &IntegerStorage::from_scalar(value.clone()))
+        }
+        Value::Num(_) => Ok(Value::Tensor(tensor)),
         Value::ComplexTensor(_) | Value::Complex(_, _) => Ok(Value::Tensor(tensor)),
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => Ok(Value::Tensor(tensor)),
         Value::Cell(_) => Ok(Value::Tensor(tensor)),
         _ => Ok(Value::Tensor(tensor)),
     }
+}
+
+fn tensor_to_integer_like(tensor: Tensor, prototype: &IntegerStorage) -> BuiltinResult<Value> {
+    let tensor = crate::builtins::common::tensor::integer_tensor_from_f64_like(
+        prototype,
+        tensor.data,
+        &tensor.shape,
+    )
+    .map_err(|e| {
+        readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
+    })?;
+    Ok(Value::Tensor(tensor))
 }
 
 fn tensor_to_gpu(
@@ -1517,6 +1536,38 @@ pub(crate) mod tests {
         let mut path = std::env::temp_dir();
         path.push(format!("runmat_{prefix}_{}_{}", std::process::id(), millis));
         path
+    }
+
+    #[test]
+    fn readmatrix_like_preserves_every_exact_integer_class() {
+        let prototypes = [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ];
+
+        for storage in prototypes {
+            let expected = storage
+                .from_same_class_values(
+                    [1.0, 2.5, -3.0]
+                        .into_iter()
+                        .map(|value| storage.cast_f64_assignment(value))
+                        .collect(),
+                )
+                .expect("expected storage");
+            let source = Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap();
+            let prototype = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+            let output = finalize_like(source, &prototype).expect("integer like output");
+            let Value::Tensor(output) = output else {
+                panic!("expected tensor output");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
     }
 
     #[test]

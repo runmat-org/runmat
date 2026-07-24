@@ -6,7 +6,7 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, Tensor, Value,
+    CharArray, IntegerStorage, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -1148,12 +1148,37 @@ fn adjust_output_for_like(
             }
             ensure_char_result(data)
         }
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => Ok(data),
+        Value::Tensor(tensor) => match tensor.integer_storage() {
+            Some(storage) => tensor_to_integer_like(data, storage),
+            None => Ok(data),
+        },
+        Value::Int(value) => {
+            tensor_to_integer_like(data, &IntegerStorage::from_scalar(value.clone()))
+        }
+        Value::Num(_) => Ok(data),
         Value::ComplexTensor(_) | Value::Complex(_, _) => {
             Err("fread: complex prototypes are not supported yet".to_string())
         }
         Value::Cell(_) => Err("fread: cell prototypes are not supported".to_string()),
         _ => Ok(data),
+    }
+}
+
+fn tensor_to_integer_like(data: Value, prototype: &IntegerStorage) -> Result<Value, String> {
+    match data {
+        Value::Tensor(tensor) => {
+            let tensor = crate::builtins::common::tensor::integer_tensor_from_f64_like(
+                prototype,
+                tensor.data,
+                &tensor.shape,
+            )?;
+            Ok(Value::Tensor(tensor))
+        }
+        Value::CharArray(_) => Err(
+            "fread: character output cannot be converted to an integer 'like' prototype"
+                .to_string(),
+        ),
+        other => Ok(other),
     }
 }
 
@@ -1507,6 +1532,39 @@ pub(crate) mod tests {
 
     fn run_fclose(args: &[Value]) -> BuiltinResult<fclose::FcloseEval> {
         futures::executor::block_on(fclose::evaluate(args))
+    }
+
+    #[test]
+    fn fread_like_preserves_every_exact_integer_class() {
+        let prototypes = [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ];
+
+        for storage in prototypes {
+            let expected = storage
+                .from_same_class_values(
+                    [1.0, 2.5, -3.0]
+                        .into_iter()
+                        .map(|value| storage.cast_f64_assignment(value))
+                        .collect(),
+                )
+                .expect("expected storage");
+            let data = Value::Tensor(Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap());
+            let prototype = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+            let output = adjust_output_for_like(data, &prototype, PrecisionSpec::default())
+                .expect("integer like output");
+            let Value::Tensor(output) = output else {
+                panic!("expected tensor output");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
     }
 
     #[cfg(feature = "wgpu")]
