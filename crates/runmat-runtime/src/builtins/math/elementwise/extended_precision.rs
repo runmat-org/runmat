@@ -17,12 +17,16 @@ pub(crate) struct Extended {
 }
 
 impl Extended {
+    pub(crate) fn from_bigint(value: BigInt) -> Self {
+        Self::round(value, 0)
+    }
+
     pub(crate) fn from_i128(value: i128) -> Self {
-        Self::round(BigInt::from(value), 0)
+        Self::from_bigint(BigInt::from(value))
     }
 
     pub(crate) fn from_u64(value: u64) -> Self {
-        Self::round(BigInt::from(value), 0)
+        Self::from_bigint(BigInt::from(value))
     }
 
     pub(crate) fn from_f64(value: f64) -> Option<Self> {
@@ -186,6 +190,13 @@ mod tests {
 
         let sum = maximum.add(&Extended::from_u64(1));
         assert_eq!(sum.trunc_to_bigint(), BigInt::from(u64::MAX) + 1);
+    }
+
+    #[test]
+    fn accepts_intermediate_values_larger_than_uint64() {
+        let value = BigInt::one() << 200_usize;
+        let extended = Extended::from_bigint(value.clone());
+        assert_eq!(extended.trunc_to_bigint(), value);
     }
 
     #[test]

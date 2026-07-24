@@ -146,13 +146,7 @@ fn extended_from_int_value(value: &IntValue) -> Extended {
 }
 
 fn extended_from_bigint(value: &BigInt) -> Extended {
-    if let Some(value) = value.to_i128() {
-        Extended::from_i128(value)
-    } else {
-        // Quotients in this path are bounded by the finite input magnitudes;
-        // values outside the target range only arise before final saturation.
-        Extended::from_u64(value.to_u64().unwrap_or(u64::MAX))
-    }
+    Extended::from_bigint(value.clone())
 }
 
 fn integer_target_zero(prototype: &IntValue) -> IntValue {
