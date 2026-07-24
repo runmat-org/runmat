@@ -48,21 +48,64 @@ impl WgpuProvider {
             entry_a.storage == GpuTensorStorage::Real && entry_b.storage == GpuTensorStorage::Real,
             "{operation_name}: complex integer gpuArray arithmetic is not supported"
         );
+        use crate::backend::wgpu::params::{AlignedU32, BCAST_MAX_RANK};
+
+        let same_shape = entry_a.shape == entry_b.shape;
+        let mut shape_a = entry_a.shape.clone();
+        let mut shape_b = entry_b.shape.clone();
+        let rank = shape_a.len().max(shape_b.len());
         ensure!(
-            entry_a.shape == entry_b.shape,
-            "{operation_name}: shape mismatch between inputs"
+            rank <= BCAST_MAX_RANK,
+            "{operation_name}: broadcast rank exceeds limit"
+        );
+        if shape_a.len() < rank {
+            let mut padded = vec![1usize; rank - shape_a.len()];
+            padded.extend_from_slice(&shape_a);
+            shape_a = padded;
+        }
+        if shape_b.len() < rank {
+            let mut padded = vec![1usize; rank - shape_b.len()];
+            padded.extend_from_slice(&shape_b);
+            shape_b = padded;
+        }
+        let mut output_shape = vec![1usize; rank];
+        for index in 0..rank {
+            output_shape[index] = match (shape_a[index], shape_b[index]) {
+                (left, right) if left == right => left,
+                (1, right) => right,
+                (left, 1) => left,
+                _ => return Err(anyhow!("{operation_name}: shape mismatch between inputs")),
+            };
+        }
+        let len = output_shape.iter().try_fold(1usize, |product, &dim| {
+            product
+                .checked_mul(dim)
+                .ok_or_else(|| anyhow!("{operation_name}: broadcast output length overflow"))
+        })?;
+        let a_len = shape_a.iter().try_fold(1usize, |product, &dim| {
+            product
+                .checked_mul(dim)
+                .ok_or_else(|| anyhow!("{operation_name}: broadcast lhs length overflow"))
+        })?;
+        let b_len = shape_b.iter().try_fold(1usize, |product, &dim| {
+            product
+                .checked_mul(dim)
+                .ok_or_else(|| anyhow!("{operation_name}: broadcast rhs length overflow"))
+        })?;
+        ensure!(
+            entry_a.len == a_len,
+            "{operation_name}: logical lhs length mismatch"
         );
         ensure!(
-            entry_a.len == entry_b.len,
-            "{operation_name}: logical element count mismatch between inputs"
+            entry_b.len == b_len,
+            "{operation_name}: logical rhs length mismatch"
         );
-        let len = entry_a.len;
         let raw_len = integer_word_count(integer_type, len)?;
         let bytes = (raw_len as u64).saturating_mul(4);
         if len == 0 {
             return Ok(self.register_integer_buffer(
                 self.create_storage_buffer(0, "runmat-integer-arithmetic-empty"),
-                entry_a.shape,
+                output_shape,
                 0,
                 integer_type,
                 0,
@@ -79,9 +122,14 @@ impl WgpuProvider {
             offset: u32,
             total: u32,
             integer_type: u32,
+            rank: u32,
             _pad0: u32,
             _pad1: u32,
-            _pad2: u32,
+            out_shape: [AlignedU32; BCAST_MAX_RANK],
+            a_shape: [AlignedU32; BCAST_MAX_RANK],
+            b_shape: [AlignedU32; BCAST_MAX_RANK],
+            a_strides: [AlignedU32; BCAST_MAX_RANK],
+            b_strides: [AlignedU32; BCAST_MAX_RANK],
         }
         let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
         let shader = crate::backend::wgpu::shaders::integer::arithmetic_shader(workgroup_size);
@@ -124,17 +172,59 @@ impl WgpuProvider {
         let capacity = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize
             * workgroup_size as usize;
         let mut offset = 0;
+        let mut a_strides = [AlignedU32::new(0); BCAST_MAX_RANK];
+        let mut b_strides = [AlignedU32::new(0); BCAST_MAX_RANK];
+        let mut a_stride = 1usize;
+        let mut b_stride = 1usize;
+        for index in 0..rank {
+            a_strides[index] = AlignedU32::new(
+                u32::try_from(if shape_a[index] == 1 { 0 } else { a_stride })
+                    .map_err(|_| anyhow!("{operation_name}: lhs broadcast stride exceeds u32"))?,
+            );
+            b_strides[index] = AlignedU32::new(
+                u32::try_from(if shape_b[index] == 1 { 0 } else { b_stride })
+                    .map_err(|_| anyhow!("{operation_name}: rhs broadcast stride exceeds u32"))?,
+            );
+            a_stride = a_stride
+                .checked_mul(shape_a[index])
+                .ok_or_else(|| anyhow!("{operation_name}: lhs broadcast stride overflow"))?;
+            b_stride = b_stride
+                .checked_mul(shape_b[index])
+                .ok_or_else(|| anyhow!("{operation_name}: rhs broadcast stride overflow"))?;
+        }
+        let mut out_shape_params = [AlignedU32::new(0); BCAST_MAX_RANK];
+        let mut a_shape_params = [AlignedU32::new(0); BCAST_MAX_RANK];
+        let mut b_shape_params = [AlignedU32::new(0); BCAST_MAX_RANK];
+        for index in 0..rank {
+            out_shape_params[index] = AlignedU32::new(
+                u32::try_from(output_shape[index])
+                    .map_err(|_| anyhow!("{operation_name}: broadcast dimension exceeds u32"))?,
+            );
+            a_shape_params[index] =
+                AlignedU32::new(u32::try_from(shape_a[index]).map_err(|_| {
+                    anyhow!("{operation_name}: lhs broadcast dimension exceeds u32")
+                })?);
+            b_shape_params[index] =
+                AlignedU32::new(u32::try_from(shape_b[index]).map_err(|_| {
+                    anyhow!("{operation_name}: rhs broadcast dimension exceeds u32")
+                })?);
+        }
         while offset < len {
             let chunk = (len - offset).min(capacity);
             let params = Params {
                 len: chunk as u32,
                 op,
                 offset: offset as u32,
-                total: len as u32,
+                total: u32::try_from(len).expect("integer dispatch length was checked"),
                 integer_type: integer_type_code(integer_type),
+                rank: if same_shape { 0 } else { rank as u32 },
                 _pad0: 0,
                 _pad1: 0,
-                _pad2: 0,
+                out_shape: out_shape_params,
+                a_shape: a_shape_params,
+                b_shape: b_shape_params,
+                a_strides,
+                b_strides,
             };
             let uniform = self.uniform_buffer(&params, "runmat-integer-arithmetic-params");
             let group = self
@@ -172,7 +262,7 @@ impl WgpuProvider {
             );
             offset += chunk;
         }
-        Ok(self.register_integer_buffer(out, entry_a.shape, len, integer_type, bytes))
+        Ok(self.register_integer_buffer(out, output_shape, len, integer_type, bytes))
     }
 
     pub(crate) fn integer_minmax_exec(

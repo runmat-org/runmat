@@ -2764,6 +2764,112 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wgpu_native_integer_arithmetic_broadcasts_all_classes_column_major() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let lhs_shape = [2, 1];
+        let rhs_shape = [1, 3];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[2, -2]),
+                HostIntegerDataView::I8(&[1, 2, 3]),
+                HostIntegerDataOwned::I8(vec![3, -1, 4, 0, 5, 1]),
+                HostIntegerDataOwned::I8(vec![1, -3, 0, -4, -1, -5]),
+                HostIntegerDataOwned::I8(vec![2, -2, 4, -4, 6, -6]),
+            ),
+            (
+                HostIntegerDataView::I16(&[2, -2]),
+                HostIntegerDataView::I16(&[1, 2, 3]),
+                HostIntegerDataOwned::I16(vec![3, -1, 4, 0, 5, 1]),
+                HostIntegerDataOwned::I16(vec![1, -3, 0, -4, -1, -5]),
+                HostIntegerDataOwned::I16(vec![2, -2, 4, -4, 6, -6]),
+            ),
+            (
+                HostIntegerDataView::I32(&[2, -2]),
+                HostIntegerDataView::I32(&[1, 2, 3]),
+                HostIntegerDataOwned::I32(vec![3, -1, 4, 0, 5, 1]),
+                HostIntegerDataOwned::I32(vec![1, -3, 0, -4, -1, -5]),
+                HostIntegerDataOwned::I32(vec![2, -2, 4, -4, 6, -6]),
+            ),
+            (
+                HostIntegerDataView::I64(&[2, -2]),
+                HostIntegerDataView::I64(&[1, 2, 3]),
+                HostIntegerDataOwned::I64(vec![3, -1, 4, 0, 5, 1]),
+                HostIntegerDataOwned::I64(vec![1, -3, 0, -4, -1, -5]),
+                HostIntegerDataOwned::I64(vec![2, -2, 4, -4, 6, -6]),
+            ),
+            (
+                HostIntegerDataView::U8(&[2, 4]),
+                HostIntegerDataView::U8(&[1, 2, 3]),
+                HostIntegerDataOwned::U8(vec![3, 5, 4, 6, 5, 7]),
+                HostIntegerDataOwned::U8(vec![1, 3, 0, 2, 0, 1]),
+                HostIntegerDataOwned::U8(vec![2, 4, 4, 8, 6, 12]),
+            ),
+            (
+                HostIntegerDataView::U16(&[2, 4]),
+                HostIntegerDataView::U16(&[1, 2, 3]),
+                HostIntegerDataOwned::U16(vec![3, 5, 4, 6, 5, 7]),
+                HostIntegerDataOwned::U16(vec![1, 3, 0, 2, 0, 1]),
+                HostIntegerDataOwned::U16(vec![2, 4, 4, 8, 6, 12]),
+            ),
+            (
+                HostIntegerDataView::U32(&[2, 4]),
+                HostIntegerDataView::U32(&[1, 2, 3]),
+                HostIntegerDataOwned::U32(vec![3, 5, 4, 6, 5, 7]),
+                HostIntegerDataOwned::U32(vec![1, 3, 0, 2, 0, 1]),
+                HostIntegerDataOwned::U32(vec![2, 4, 4, 8, 6, 12]),
+            ),
+            (
+                HostIntegerDataView::U64(&[2, 4]),
+                HostIntegerDataView::U64(&[1, 2, 3]),
+                HostIntegerDataOwned::U64(vec![3, 5, 4, 6, 5, 7]),
+                HostIntegerDataOwned::U64(vec![1, 3, 0, 2, 0, 1]),
+                HostIntegerDataOwned::U64(vec![2, 4, 4, 8, 6, 12]),
+            ),
+        ];
+
+        for (left, right, expected_add, expected_subtract, expected_multiply) in cases {
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &lhs_shape,
+                })
+                .expect("upload lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &rhs_shape,
+                })
+                .expect("upload rhs");
+            let add = provider.elem_add(&lhs, &rhs).await.expect("broadcast add");
+            let subtract = provider
+                .elem_sub(&lhs, &rhs)
+                .await
+                .expect("broadcast subtract");
+            let multiply = provider
+                .elem_mul(&lhs, &rhs)
+                .await
+                .expect("broadcast multiply");
+            for (handle, expected) in [
+                (&add, expected_add),
+                (&subtract, expected_subtract),
+                (&multiply, expected_multiply),
+            ] {
+                let downloaded = provider
+                    .download_integer(handle)
+                    .await
+                    .expect("download broadcast result");
+                assert_eq!(downloaded.shape, vec![2, 3]);
+                assert_eq!(downloaded.data, expected);
+            }
+            for handle in [&lhs, &rhs, &add, &subtract, &multiply] {
+                provider.free(handle).expect("free broadcast handle");
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn wgpu_provider_parity_samples_real_unary_and_broadcast_binary_paths() {
         let Some(provider) = register_wgpu_provider_for_test() else {
             return;

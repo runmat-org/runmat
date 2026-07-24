@@ -232,7 +232,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 const INTEGER_ARITHMETIC_SHADER: &str = r#"
 struct Words { data: array<u32> };
-struct Params { len: u32, op: u32, offset: u32, total: u32, integer_type: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
+struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
+alias PackedArray = array<PackedValue, 128>;
+struct Params { len: u32, op: u32, offset: u32, total: u32, integer_type: u32, rank: u32, _pad0: u32, _pad1: u32, out_shape: PackedArray, a_shape: PackedArray, b_shape: PackedArray, a_strides: PackedArray, b_strides: PackedArray };
 @group(0) @binding(0) var<storage, read> A: Words;
 @group(0) @binding(1) var<storage, read> B: Words;
 @group(0) @binding(2) var<storage, read_write> Out: Words;
@@ -353,17 +355,38 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let index = params.offset + gid.x;
     if (index >= params.total) { return; }
     let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
+    var a_index = index;
+    var b_index = index;
+    if (params.rank != 0u) {
+        var tmp = index;
+        var d: u32 = 0u;
+        a_index = 0u;
+        b_index = 0u;
+        loop {
+            if (d >= params.rank) { break; }
+            let dim = params.out_shape[d].value;
+            let coordinate = tmp % dim;
+            tmp = tmp / dim;
+            let a_coordinate = select(coordinate, 0u, params.a_shape[d].value == 1u);
+            let b_coordinate = select(coordinate, 0u, params.b_shape[d].value == 1u);
+            a_index = a_index + a_coordinate * params.a_strides[d].value;
+            b_index = b_index + b_coordinate * params.b_strides[d].value;
+            d = d + 1u;
+        }
+    }
     let lane = index * lanes;
-    let a = A.data[lane]; let b = B.data[lane];
+    let a_lane = a_index * lanes;
+    let b_lane = b_index * lanes;
+    let a = A.data[a_lane]; let b = B.data[b_lane];
     switch params.integer_type {
         case 0u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx8(a), sx8(b), 0x80u, 0x7fu); } else { Out.data[lane] = bitcast<u32>(signed32(sx8(a), sx8(b), -128, 127)); } }
         case 1u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx16(a), sx16(b), 0x8000u, 0x7fffu); } else { Out.data[lane] = bitcast<u32>(signed32(sx16(a), sx16(b), -32768, 32767)); } }
         case 2u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(bitcast<i32>(a), bitcast<i32>(b), 0x80000000u, 0x7fffffffu); } else { Out.data[lane] = bitcast<u32>(signed32(bitcast<i32>(a), bitcast<i32>(b), -2147483648, 2147483647)); } }
-        case 3u: { if (params.op == 2u) { write_multiply64(lane, a, A.data[lane + 1u], b, B.data[lane + 1u], true); } else { write64(lane, a, A.data[lane + 1u], b, B.data[lane + 1u], true); } }
+        case 3u: { if (params.op == 2u) { write_multiply64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } else { write64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } }
         case 4u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a & 0xffu, b & 0xffu, 0xffu); } else { Out.data[lane] = min(unsigned32(a & 0xffu, b & 0xffu, 0xffu), 0xffu); } }
         case 5u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu); } else { Out.data[lane] = min(unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu), 0xffffu); } }
         case 6u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a, b, 0xffffffffu); } else { Out.data[lane] = unsigned32(a, b, 0xffffffffu); } }
-        case 7u: { if (params.op == 2u) { write_multiply64(lane, a, A.data[lane + 1u], b, B.data[lane + 1u], false); } else { write64(lane, a, A.data[lane + 1u], b, B.data[lane + 1u], false); } }
+        case 7u: { if (params.op == 2u) { write_multiply64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false); } else { write64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false); } }
         default: {}
     }
 }
