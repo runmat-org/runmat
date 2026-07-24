@@ -1217,6 +1217,84 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn fwrite_uint64_narrowing_stays_in_integer_domain() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fwrite_uint64_to_uint32");
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("w+b"),
+            Value::from("ieee-be"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![2, 1],
+        )
+        .expect("typed uint64 tensor");
+
+        let eval = run_evaluate(
+            &Value::Num(fid as f64),
+            &Value::Tensor(tensor),
+            &vec![Value::from("uint32")],
+        )
+        .expect("fwrite");
+        assert_eq!(eval.count(), 2);
+        run_fclose(&[Value::Num(fid as f64)]).expect("fclose");
+
+        let bytes = test_support::fs::read(&path).expect("read");
+        assert_eq!(
+            bytes,
+            [u32::MAX.to_be_bytes(), u32::MAX.to_be_bytes()].concat()
+        );
+        test_support::fs::remove_file(path).expect("remove file");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fwrite_signed_integer_to_unsigned_target_saturates_without_f64_rounding() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fwrite_int64_to_uint16");
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("w+b"),
+            Value::from("ieee-be"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let tensor = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, -1, 65_535, i64::MAX]),
+            vec![4, 1],
+        )
+        .expect("typed int64 tensor");
+
+        let eval = run_evaluate(
+            &Value::Num(fid as f64),
+            &Value::Tensor(tensor),
+            &vec![Value::from("uint16")],
+        )
+        .expect("fwrite");
+        assert_eq!(eval.count(), 4);
+        run_fclose(&[Value::Num(fid as f64)]).expect("fclose");
+
+        let bytes = test_support::fs::read(&path).expect("read");
+        assert_eq!(
+            bytes,
+            [
+                0_u16.to_be_bytes(),
+                0_u16.to_be_bytes(),
+                65_535_u16.to_be_bytes(),
+                u16::MAX.to_be_bytes(),
+            ]
+            .concat()
+        );
+        test_support::fs::remove_file(path).expect("remove file");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn fwrite_double_precision_writes_native_endian() {
         let _guard = registry_guard();
         registry::reset_for_tests();
