@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -116,6 +116,7 @@ fn builtin_error_with_detail(
 async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => abs_gpu(handle).await,
+        Value::Int(value) => Ok(Value::Int(abs_integer_scalar(value))),
         Value::Complex(re, im) => Ok(Value::Num(complex_magnitude(re, im))),
         Value::ComplexTensor(ct) => {
             crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "abs")?;
@@ -149,9 +150,47 @@ fn abs_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn abs_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+    if let Some(storage) = tensor.integer_storage() {
+        return Tensor::new_integer(abs_integer_storage(storage), tensor.shape.clone())
+            .map_err(|e| builtin_error_with_detail(&ABS_ERROR_INTERNAL, e));
+    }
     let data = tensor.data.iter().map(|&v| v.abs()).collect::<Vec<_>>();
     Tensor::new(data, tensor.shape.clone())
         .map_err(|e| builtin_error_with_detail(&ABS_ERROR_INTERNAL, e))
+}
+
+fn abs_integer_scalar(value: IntValue) -> IntValue {
+    match value {
+        IntValue::I8(value) => IntValue::I8(value.saturating_abs()),
+        IntValue::I16(value) => IntValue::I16(value.saturating_abs()),
+        IntValue::I32(value) => IntValue::I32(value.saturating_abs()),
+        IntValue::I64(value) => IntValue::I64(value.saturating_abs()),
+        IntValue::U8(value) => IntValue::U8(value),
+        IntValue::U16(value) => IntValue::U16(value),
+        IntValue::U32(value) => IntValue::U32(value),
+        IntValue::U64(value) => IntValue::U64(value),
+    }
+}
+
+fn abs_integer_storage(storage: &IntegerStorage) -> IntegerStorage {
+    match storage {
+        IntegerStorage::I8(values) => {
+            IntegerStorage::I8(values.iter().map(|value| value.saturating_abs()).collect())
+        }
+        IntegerStorage::I16(values) => {
+            IntegerStorage::I16(values.iter().map(|value| value.saturating_abs()).collect())
+        }
+        IntegerStorage::I32(values) => {
+            IntegerStorage::I32(values.iter().map(|value| value.saturating_abs()).collect())
+        }
+        IntegerStorage::I64(values) => {
+            IntegerStorage::I64(values.iter().map(|value| value.saturating_abs()).collect())
+        }
+        IntegerStorage::U8(values) => IntegerStorage::U8(values.clone()),
+        IntegerStorage::U16(values) => IntegerStorage::U16(values.clone()),
+        IntegerStorage::U32(values) => IntegerStorage::U32(values.clone()),
+        IntegerStorage::U64(values) => IntegerStorage::U64(values.clone()),
+    }
 }
 
 fn abs_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -250,11 +289,57 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn abs_int_promotes() {
+    fn abs_integer_scalar_preserves_class_and_saturates_signed_minimum() {
         let result = abs_builtin(Value::Int(IntValue::I32(-8))).expect("abs");
-        match result {
-            Value::Num(n) => assert!((n - 8.0).abs() < 1e-12),
-            other => panic!("expected scalar result, got {other:?}"),
+        assert_eq!(result, Value::Int(IntValue::I32(8)));
+        assert_eq!(
+            abs_builtin(Value::Int(IntValue::I64(i64::MIN))).expect("abs"),
+            Value::Int(IntValue::I64(i64::MAX))
+        );
+    }
+
+    #[test]
+    fn abs_preserves_all_typed_integer_array_classes_exactly() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![i8::MIN, -4, 0, i8::MAX]),
+                IntegerStorage::I8(vec![i8::MAX, 4, 0, i8::MAX]),
+            ),
+            (
+                IntegerStorage::I16(vec![i16::MIN, -4, 0, i16::MAX]),
+                IntegerStorage::I16(vec![i16::MAX, 4, 0, i16::MAX]),
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MIN, -4, 0, i32::MAX]),
+                IntegerStorage::I32(vec![i32::MAX, 4, 0, i32::MAX]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MIN, -4, 0, i64::MAX]),
+                IntegerStorage::I64(vec![i64::MAX, 4, 0, i64::MAX]),
+            ),
+            (
+                IntegerStorage::U8(vec![0, 4, u8::MAX]),
+                IntegerStorage::U8(vec![0, 4, u8::MAX]),
+            ),
+            (
+                IntegerStorage::U16(vec![0, 4, u16::MAX]),
+                IntegerStorage::U16(vec![0, 4, u16::MAX]),
+            ),
+            (
+                IntegerStorage::U32(vec![0, 4, u32::MAX]),
+                IntegerStorage::U32(vec![0, 4, u32::MAX]),
+            ),
+            (
+                IntegerStorage::U64(vec![0, 4, u64::MAX]),
+                IntegerStorage::U64(vec![0, 4, u64::MAX]),
+            ),
+        ];
+        for (input, expected) in cases {
+            let input = Tensor::new_integer(input, vec![1, expected.len()]).expect("tensor");
+            let Value::Tensor(result) = abs_builtin(Value::Tensor(input)).expect("abs") else {
+                panic!("expected tensor");
+            };
+            assert_eq!(result.integer_storage(), Some(&expected));
         }
     }
 
