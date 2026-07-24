@@ -370,16 +370,12 @@ fn collect_file_ids(value: &Value) -> BuiltinResult<Vec<i32>> {
 
 fn parse_scalar_fid(value: &Value) -> BuiltinResult<i32> {
     match value {
-        Value::Int(i) => {
-            let v = i.to_i64();
-            if v < i32::MIN as i64 || v > i32::MAX as i64 {
-                return Err(fclose_error_with_detail(
-                    &FCLOSE_ERROR_INVALID_INPUT,
-                    "file identifier is out of range",
-                ));
-            }
-            Ok(v as i32)
-        }
+        Value::Int(i) => i.try_to_i32().ok_or_else(|| {
+            fclose_error_with_detail(
+                &FCLOSE_ERROR_INVALID_INPUT,
+                "file identifier is out of range",
+            )
+        }),
         Value::Num(n) => parse_fid_from_f64(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         _ => Err(fclose_error_with_detail(
@@ -435,7 +431,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fopen, registry};
-    use runmat_builtins::{CellArray, LogicalArray, StringArray, Tensor};
+    use runmat_builtins::{CellArray, IntValue, LogicalArray, StringArray, Tensor};
     use runmat_time::system_time_now;
     use std::future::Future;
     use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
@@ -609,6 +605,12 @@ pub(crate) mod tests {
         assert!(labels.contains(&"status = fclose(fid)"));
         assert!(labels.contains(&"status = fclose(\"all\")"));
         assert!(labels.contains(&"[status, msg] = fclose(...)"));
+    }
+
+    #[test]
+    fn typed_file_identifier_parser_rejects_unrepresentable_uint64() {
+        assert_eq!(parse_scalar_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
+        assert!(parse_scalar_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
     }
 
     fn unique_path(prefix: &str) -> PathBuf {

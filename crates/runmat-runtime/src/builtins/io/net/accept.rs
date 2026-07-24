@@ -405,8 +405,12 @@ fn extract_server_id(value: &Value) -> BuiltinResult<u64> {
                 )
             })?;
             let id = match id_value {
-                Value::Int(IntValue::U64(id)) => *id,
-                Value::Int(iv) => iv.to_i64() as u64,
+                Value::Int(iv) => iv.try_to_u64().ok_or_else(|| {
+                    accept_flow(
+                        &ACCEPT_ERROR_INVALID_SERVER,
+                        "accept: tcpserver struct has invalid internal identifier",
+                    )
+                })?,
                 other => {
                     return Err(accept_flow(
                         &ACCEPT_ERROR_INVALID_SERVER,
@@ -694,6 +698,16 @@ pub(crate) mod tests {
 
     fn assert_error_identifier(err: RuntimeError, expected: &str) {
         assert_eq!(err.identifier(), Some(expected));
+    }
+
+    #[test]
+    fn typed_negative_server_handle_is_rejected() {
+        let mut server = StructValue::new();
+        server
+            .fields
+            .insert(SERVER_FIELD.to_string(), Value::Int(IntValue::I8(-1)));
+        let err = extract_server_id(&Value::Struct(server)).unwrap_err();
+        assert_error_identifier(err, ACCEPT_ERROR_INVALID_SERVER.identifier.unwrap());
     }
 
     fn run_accept(server: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

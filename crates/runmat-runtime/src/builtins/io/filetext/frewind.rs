@@ -215,7 +215,12 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<()> {
 fn parse_fid(value: &Value) -> BuiltinResult<i32> {
     match value {
         Value::Num(n) => parse_scalar_fid(*n),
-        Value::Int(int) => parse_scalar_fid(int.to_f64()),
+        Value::Int(int) => int.try_to_i32().ok_or_else(|| {
+            frewind_error_with_detail(
+                &FREWIND_ERROR_INVALID_INPUT,
+                "file identifier is out of range",
+            )
+        }),
         Value::Tensor(t) => {
             if t.data.len() == 1 {
                 parse_scalar_fid(t.data[0])
@@ -271,6 +276,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fclose, fopen, fread, registry};
     use crate::RuntimeError;
+    use runmat_builtins::IntValue;
     use runmat_filesystem::File;
     use runmat_time::system_time_now;
     use std::io::Write;
@@ -310,6 +316,12 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"frewind(fid)"));
+    }
+
+    #[test]
+    fn typed_file_identifier_parser_rejects_unrepresentable_uint64() {
+        assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
+        assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -316,15 +316,6 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
         Ok(n as i32)
     }
 
-    fn checked_i64_to_i32(n: i64) -> BuiltinResult<i32> {
-        i32::try_from(n).map_err(|_| {
-            fgets_error_with_detail(
-                &FGETS_ERROR_INVALID_INPUT,
-                "file identifier is out of range",
-            )
-        })
-    }
-
     match value {
         Value::Num(n) => {
             if !n.is_finite() {
@@ -341,7 +332,12 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
             }
             checked_f64_to_i32(*n)
         }
-        Value::Int(i) => checked_i64_to_i32(i.to_i64()),
+        Value::Int(i) => i.try_to_i32().ok_or_else(|| {
+            fgets_error_with_detail(
+                &FGETS_ERROR_INVALID_INPUT,
+                "file identifier is out of range",
+            )
+        }),
         Value::Tensor(t) if t.data.len() == 1 => {
             let n = t.data[0];
             if !n.is_finite() {
@@ -395,16 +391,9 @@ async fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
             }
             Ok(Some(n as usize))
         }
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(fgets_error_with_detail(
-                    &FGETS_ERROR_INVALID_INPUT,
-                    NCHAR_NONNEGATIVE_INTEGER_DETAIL,
-                ));
-            }
-            Ok(Some(raw as usize))
-        }
+        Value::Int(i) => i.try_to_usize().map(Some).ok_or_else(|| {
+            fgets_error_with_detail(&FGETS_ERROR_INVALID_INPUT, NCHAR_NONNEGATIVE_INTEGER_DETAIL)
+        }),
         Value::Tensor(t) if t.data.len() == 1 => {
             let n = t.data[0];
             if !n.is_finite() {
@@ -485,6 +474,17 @@ pub(crate) mod tests {
         assert!(labels.contains(&"tline = fgets(fid)"));
         assert!(labels.contains(&"tline = fgets(fid, nchar)"));
         assert!(labels.contains(&"[tline, terminators] = fgets(fid, ...)"));
+    }
+
+    #[test]
+    fn typed_fid_and_nchar_parsers_preserve_integer_bounds() {
+        assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
+        assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+
+        let nchar =
+            futures::executor::block_on(parse_nchar(&[Value::Int(IntValue::U16(64))])).unwrap();
+        assert_eq!(nchar, Some(64));
+        assert!(futures::executor::block_on(parse_nchar(&[Value::Int(IntValue::I8(-1))])).is_err());
     }
 
     fn unique_path(prefix: &str) -> PathBuf {

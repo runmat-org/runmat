@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, IntegerStorage, StructValue, Tensor, Value,
+    CharArray, IntegerStorage, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::io::{self, Read};
@@ -697,9 +697,25 @@ async fn parse_arguments(rest: Vec<Value>) -> BuiltinResult<ReadOptions> {
 }
 
 fn parse_count(value: &Value) -> BuiltinResult<usize> {
+    if let Value::Int(int) = value {
+        return int.try_to_usize().ok_or_else(|| {
+            let (error, detail) = if int.try_to_u64().is_some() {
+                (
+                    &READ_ERROR_INVALID_COUNT,
+                    "read: count exceeds the maximum supported size",
+                )
+            } else {
+                (
+                    &READ_ERROR_INVALID_COUNT,
+                    "read: count must be a non-negative finite value",
+                )
+            };
+            read_flow(error, detail)
+        });
+    }
+
     let numeric = match value {
         Value::Num(n) => *n,
-        Value::Int(i) => i.to_f64(),
         Value::Tensor(t) if t.data.len() == 1 => t.data[0],
         _ => {
             return Err(read_flow(
@@ -773,8 +789,12 @@ fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
         )
     })?;
     match id_value {
-        Value::Int(IntValue::U64(id)) => Ok(*id),
-        Value::Int(iv) => Ok(iv.to_i64() as u64),
+        Value::Int(iv) => iv.try_to_u64().ok_or_else(|| {
+            read_flow(
+                &READ_ERROR_INVALID_CLIENT,
+                "read: tcpclient struct has invalid handle field",
+            )
+        }),
         _ => Err(read_flow(
             &READ_ERROR_INVALID_CLIENT,
             "read: tcpclient struct has invalid handle field",
@@ -854,6 +874,26 @@ pub(crate) mod tests {
 
     fn assert_error_identifier(err: RuntimeError, expected: &str) {
         assert_eq!(err.identifier(), Some(expected));
+    }
+
+    #[test]
+    fn typed_read_count_and_handle_parsers_are_exact() {
+        assert_eq!(parse_count(&Value::Int(IntValue::U64(42))).unwrap(), 42);
+        assert!(parse_count(&Value::Int(IntValue::I8(-1))).is_err());
+        let maximum = parse_count(&Value::Int(IntValue::U64(u64::MAX)));
+        if usize::BITS == 64 {
+            assert_eq!(maximum.unwrap(), usize::MAX);
+        } else {
+            assert!(maximum.is_err());
+        }
+
+        let mut client = StructValue::new();
+        client.fields.insert(
+            CLIENT_HANDLE_FIELD.to_string(),
+            Value::Int(IntValue::I8(-1)),
+        );
+        let err = extract_client_id(&client).unwrap_err();
+        assert_error_identifier(err, READ_ERROR_INVALID_CLIENT.identifier.unwrap());
     }
 
     fn run_read(client: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

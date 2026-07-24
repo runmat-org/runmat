@@ -166,6 +166,12 @@ impl IntValue {
         }
     }
 
+    /// Returns the `int32` representation when it is exactly representable.
+    pub fn try_to_i32(&self) -> Option<i32> {
+        self.try_to_i64()
+            .and_then(|value| i32::try_from(value).ok())
+    }
+
     /// Returns the platform signed representation when it is exactly
     /// representable.
     ///
@@ -293,6 +299,9 @@ mod int_value_tests {
         assert_eq!(IntValue::I64(i64::MIN).try_to_i64(), Some(i64::MIN));
         assert_eq!(IntValue::U64(i64::MAX as u64).try_to_i64(), Some(i64::MAX));
         assert_eq!(IntValue::U64(u64::MAX).try_to_i64(), None);
+        assert_eq!(IntValue::I32(i32::MIN).try_to_i32(), Some(i32::MIN));
+        assert_eq!(IntValue::U64(i32::MAX as u64).try_to_i32(), Some(i32::MAX));
+        assert_eq!(IntValue::U64(u64::MAX).try_to_i32(), None);
         assert_eq!(IntValue::I64(-1).try_to_u64(), None);
         assert_eq!(IntValue::U64(u64::MAX).try_to_u64(), Some(u64::MAX));
         assert_eq!(

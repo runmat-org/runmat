@@ -542,7 +542,14 @@ impl PortParseError {
 
 pub(crate) fn parse_port(value: &Value) -> Result<u16, PortParseError> {
     let port = match value {
-        Value::Int(int) => int.to_i64(),
+        Value::Int(int) => {
+            let port = int
+                .try_to_u64()
+                .ok_or_else(|| PortParseError::new("port must be non-negative"))?;
+            return u16::try_from(port).map_err(|_| {
+                PortParseError::new(format!("port {port} is outside the valid range 0–65535"))
+            });
+        }
         Value::Num(num) => {
             if !num.is_finite() {
                 return Err(PortParseError::new("port must be finite"));
@@ -666,6 +673,17 @@ pub(crate) mod tests {
             .collect();
         assert!(labels.contains(&"server = tcpserver(address, port)"));
         assert!(labels.contains(&"server = tcpserver(address, port, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn typed_port_parser_preserves_range_boundaries() {
+        assert_eq!(
+            parse_port(&Value::Int(IntValue::U16(u16::MAX))).unwrap(),
+            u16::MAX
+        );
+        assert!(parse_port(&Value::Int(IntValue::I8(-1))).is_err());
+        assert!(parse_port(&Value::Int(IntValue::U32(u16::MAX as u32 + 1))).is_err());
+        assert!(parse_port(&Value::Int(IntValue::U64(u64::MAX))).is_err());
     }
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {

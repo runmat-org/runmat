@@ -257,15 +257,6 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
         Ok(n as i32)
     }
 
-    fn checked_i64_to_i32(n: i64) -> BuiltinResult<i32> {
-        i32::try_from(n).map_err(|_| {
-            fgetl_error_with_detail(
-                &FGETL_ERROR_INVALID_INPUT,
-                "file identifier is out of range",
-            )
-        })
-    }
-
     match value {
         Value::Num(n) => {
             if !n.is_finite() {
@@ -282,7 +273,12 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
             }
             checked_f64_to_i32(*n)
         }
-        Value::Int(i) => checked_i64_to_i32(i.to_i64()),
+        Value::Int(i) => i.try_to_i32().ok_or_else(|| {
+            fgetl_error_with_detail(
+                &FGETL_ERROR_INVALID_INPUT,
+                "file identifier is out of range",
+            )
+        }),
         Value::Tensor(t) if t.data.len() == 1 => {
             let n = t.data[0];
             if !n.is_finite() {
@@ -423,6 +419,16 @@ pub(crate) mod tests {
         );
         assert_eq!(
             int_too_large,
+            format!(
+                "{}: file identifier is out of range",
+                FGETL_ERROR_INVALID_INPUT.message
+            )
+        );
+
+        let uint64_too_large =
+            unwrap_error_message(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).unwrap_err());
+        assert_eq!(
+            uint64_too_large,
             format!(
                 "{}: file identifier is out of range",
                 FGETL_ERROR_INVALID_INPUT.message

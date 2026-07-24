@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, StructValue, Value,
+    StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::io::{self, Write};
@@ -808,8 +808,12 @@ fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
             )
         })?;
     match id_value {
-        Value::Int(IntValue::U64(id)) => Ok(*id),
-        Value::Int(iv) => Ok(iv.to_i64() as u64),
+        Value::Int(iv) => iv.try_to_u64().ok_or_else(|| {
+            write_flow(
+                &WRITE_ERROR_INVALID_CLIENT,
+                "write: tcpclient struct has invalid handle field",
+            )
+        }),
         _ => Err(write_flow(
             &WRITE_ERROR_INVALID_CLIENT,
             "write: tcpclient struct has invalid handle field",
@@ -895,6 +899,17 @@ pub(crate) mod tests {
 
     fn assert_error_identifier(err: RuntimeError, expected: &str) {
         assert_eq!(err.identifier(), Some(expected));
+    }
+
+    #[test]
+    fn typed_negative_client_handle_is_rejected() {
+        let mut client = StructValue::new();
+        client.fields.insert(
+            CLIENT_HANDLE_FIELD.to_string(),
+            Value::Int(IntValue::I8(-1)),
+        );
+        let err = extract_client_id(&client).unwrap_err();
+        assert_error_identifier(err, WRITE_ERROR_INVALID_CLIENT.identifier.unwrap());
     }
 
     fn run_write(client: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

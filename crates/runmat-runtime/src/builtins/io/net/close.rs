@@ -322,16 +322,9 @@ fn is_network_command_token(raw: &str) -> bool {
 
 fn value_to_u64(value: &Value) -> Option<u64> {
     match value {
-        Value::Int(int) => {
-            let raw = int.to_i64();
-            if raw >= 0 {
-                Some(raw as u64)
-            } else {
-                None
-            }
-        }
+        Value::Int(int) => int.try_to_u64(),
         Value::Num(num) => {
-            if num.is_finite() && *num >= 0.0 && num.fract() == 0.0 {
+            if num.is_finite() && *num >= 0.0 && *num < u64::MAX as f64 && num.fract() == 0.0 {
                 Some(*num as u64)
             } else {
                 None
@@ -371,6 +364,16 @@ pub(crate) mod tests {
 
     fn assert_error_identifier(err: RuntimeError, expected: &str) {
         assert_eq!(err.identifier(), Some(expected));
+    }
+
+    #[test]
+    fn typed_network_handle_parser_rejects_negative_and_out_of_range_values() {
+        assert_eq!(
+            value_to_u64(&Value::Int(IntValue::U64(u64::MAX))),
+            Some(u64::MAX)
+        );
+        assert_eq!(value_to_u64(&Value::Int(IntValue::I8(-1))), None);
+        assert_eq!(value_to_u64(&Value::Num(u64::MAX as f64)), None);
     }
 
     fn run_close(args: Vec<Value>) -> BuiltinResult<Value> {
