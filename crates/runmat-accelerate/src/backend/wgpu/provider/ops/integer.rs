@@ -24,13 +24,17 @@ fn integer_word_count(element_type: IntegerElementType, len: usize) -> Result<us
 }
 
 impl WgpuProvider {
-    pub(crate) fn integer_add_sub_exec(
+    pub(crate) fn integer_arithmetic_exec(
         &self,
-        subtract: bool,
+        op: u32,
         operation_name: &str,
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        ensure!(
+            op <= 2,
+            "{operation_name}: unsupported integer arithmetic opcode"
+        );
         let entry_a = self.get_entry_raw(a)?;
         let entry_b = self.get_entry_raw(b)?;
         let integer_type = entry_a
@@ -124,7 +128,7 @@ impl WgpuProvider {
             let chunk = (len - offset).min(capacity);
             let params = Params {
                 len: chunk as u32,
-                op: u32::from(subtract),
+                op,
                 offset: offset as u32,
                 total: len as u32,
                 integer_type: integer_type_code(integer_type),

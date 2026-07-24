@@ -251,6 +251,85 @@ fn unsigned32(a: u32, b: u32, maxv: u32) -> u32 {
     let r = a + b;
     return select(r, maxv, r < a);
 }
+fn mul_hi_u32(a: u32, b: u32) -> u32 {
+    let a_hi = a >> 16u;
+    let a_lo = a & 0xffffu;
+    let b_hi = b >> 16u;
+    let b_lo = b & 0xffffu;
+    let p0 = a_lo * b_lo;
+    let p1 = a_lo * b_hi;
+    let p2 = a_hi * b_lo;
+    let p3 = a_hi * b_hi;
+    let mid = (p0 >> 16u) + (p1 & 0xffffu) + (p2 & 0xffffu);
+    return p3 + (p1 >> 16u) + (p2 >> 16u) + (mid >> 16u);
+}
+fn multiply_unsigned32(a: u32, b: u32, maxv: u32) -> u32 {
+    let lo = a * b;
+    let hi = mul_hi_u32(a, b);
+    return select(lo, maxv, hi != 0u || lo > maxv);
+}
+fn multiply_signed32(a: i32, b: i32, min_bits: u32, max_bits: u32) -> u32 {
+    let negative = (a < 0) != (b < 0);
+    let a_bits = bitcast<u32>(a);
+    let b_bits = bitcast<u32>(b);
+    let a_abs = select(a_bits, 0u - a_bits, a < 0);
+    let b_abs = select(b_bits, 0u - b_bits, b < 0);
+    let lo = a_abs * b_abs;
+    let hi = mul_hi_u32(a_abs, b_abs);
+    let limit = select(max_bits, min_bits, negative);
+    if (hi != 0u || lo > limit) { return select(max_bits, min_bits, negative); }
+    return select(lo, 0u - lo, negative);
+}
+fn add_with_carry(a: u32, b: u32, carry: u32) -> vec2<u32> {
+    let first = a + b;
+    let second = first + carry;
+    return vec2<u32>(second, select(0u, 1u, first < a) + select(0u, 1u, second < first));
+}
+fn multiply_unsigned64(a0: u32, a1: u32, b0: u32, b1: u32) -> vec4<u32> {
+    let p00_lo = a0 * b0;
+    let p00_hi = mul_hi_u32(a0, b0);
+    let p01_lo = a0 * b1;
+    let p01_hi = mul_hi_u32(a0, b1);
+    let p10_lo = a1 * b0;
+    let p10_hi = mul_hi_u32(a1, b0);
+    let p11_lo = a1 * b1;
+    let p11_hi = mul_hi_u32(a1, b1);
+    let word1 = add_with_carry(p00_hi, p01_lo, 0u);
+    let word1_final = add_with_carry(word1.x, p10_lo, 0u);
+    let word2 = add_with_carry(p01_hi, p10_hi, word1.y + word1_final.y);
+    let word2_final = add_with_carry(word2.x, p11_lo, 0u);
+    return vec4<u32>(p00_lo, word1_final.x, word2_final.x, p11_hi + word2.y + word2_final.y);
+}
+fn negate64(lo: u32, hi: u32) -> vec2<u32> {
+    let neg_lo = 0u - lo;
+    return vec2<u32>(neg_lo, ~hi + select(0u, 1u, neg_lo == 0u));
+}
+fn multiply_signed64(a0: u32, a1: u32, b0: u32, b1: u32) -> vec2<u32> {
+    let a_negative = bitcast<i32>(a1) < 0;
+    let b_negative = bitcast<i32>(b1) < 0;
+    let negative = a_negative != b_negative;
+    let abs_a = select(vec2<u32>(a0, a1), negate64(a0, a1), a_negative);
+    let abs_b = select(vec2<u32>(b0, b1), negate64(b0, b1), b_negative);
+    let product = multiply_unsigned64(abs_a.x, abs_a.y, abs_b.x, abs_b.y);
+    let limit = select(vec2<u32>(0xffffffffu, 0x7fffffffu), vec2<u32>(0u, 0x80000000u), negative);
+    if (product.z != 0u || product.w != 0u || product.y > limit.y || (product.y == limit.y && product.x > limit.x)) {
+        return limit;
+    }
+    return select(vec2<u32>(product.x, product.y), negate64(product.x, product.y), negative);
+}
+fn write_multiply64(lane: u32, a0: u32, a1: u32, b0: u32, b1: u32, signed: bool) {
+    if (signed) {
+        let result = multiply_signed64(a0, a1, b0, b1);
+        Out.data[lane] = result.x; Out.data[lane + 1u] = result.y;
+        return;
+    }
+    let product = multiply_unsigned64(a0, a1, b0, b1);
+    if (product.z != 0u || product.w != 0u) {
+        Out.data[lane] = 0xffffffffu; Out.data[lane + 1u] = 0xffffffffu;
+        return;
+    }
+    Out.data[lane] = product.x; Out.data[lane + 1u] = product.y;
+}
 fn write64(lane: u32, a0: u32, a1: u32, b0: u32, b1: u32, signed: bool) {
     let sub = params.op == 1u;
     let lo = select(a0 + b0, a0 - b0, sub);
@@ -277,14 +356,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let lane = index * lanes;
     let a = A.data[lane]; let b = B.data[lane];
     switch params.integer_type {
-        case 0u: { Out.data[lane] = bitcast<u32>(signed32(sx8(a), sx8(b), -128, 127)); }
-        case 1u: { Out.data[lane] = bitcast<u32>(signed32(sx16(a), sx16(b), -32768, 32767)); }
-        case 2u: { Out.data[lane] = bitcast<u32>(signed32(bitcast<i32>(a), bitcast<i32>(b), -2147483648, 2147483647)); }
-        case 3u: { write64(lane, a, A.data[lane + 1u], b, B.data[lane + 1u], true); }
-        case 4u: { Out.data[lane] = min(unsigned32(a & 0xffu, b & 0xffu, 0xffu), 0xffu); }
-        case 5u: { Out.data[lane] = min(unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu), 0xffffu); }
-        case 6u: { Out.data[lane] = unsigned32(a, b, 0xffffffffu); }
-        case 7u: { write64(lane, a, A.data[lane + 1u], b, B.data[lane + 1u], false); }
+        case 0u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx8(a), sx8(b), 0x80u, 0x7fu); } else { Out.data[lane] = bitcast<u32>(signed32(sx8(a), sx8(b), -128, 127)); } }
+        case 1u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx16(a), sx16(b), 0x8000u, 0x7fffu); } else { Out.data[lane] = bitcast<u32>(signed32(sx16(a), sx16(b), -32768, 32767)); } }
+        case 2u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(bitcast<i32>(a), bitcast<i32>(b), 0x80000000u, 0x7fffffffu); } else { Out.data[lane] = bitcast<u32>(signed32(bitcast<i32>(a), bitcast<i32>(b), -2147483648, 2147483647)); } }
+        case 3u: { if (params.op == 2u) { write_multiply64(lane, a, A.data[lane + 1u], b, B.data[lane + 1u], true); } else { write64(lane, a, A.data[lane + 1u], b, B.data[lane + 1u], true); } }
+        case 4u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a & 0xffu, b & 0xffu, 0xffu); } else { Out.data[lane] = min(unsigned32(a & 0xffu, b & 0xffu, 0xffu), 0xffu); } }
+        case 5u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu); } else { Out.data[lane] = min(unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu), 0xffffu); } }
+        case 6u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a, b, 0xffffffffu); } else { Out.data[lane] = unsigned32(a, b, 0xffffffffu); } }
+        case 7u: { if (params.op == 2u) { write_multiply64(lane, a, A.data[lane + 1u], b, B.data[lane + 1u], false); } else { write64(lane, a, A.data[lane + 1u], b, B.data[lane + 1u], false); } }
         default: {}
     }
 }

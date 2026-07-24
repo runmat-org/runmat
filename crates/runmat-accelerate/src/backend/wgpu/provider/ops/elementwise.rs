@@ -1275,10 +1275,13 @@ impl WgpuProvider {
         {
             return match op {
                 crate::backend::wgpu::types::BinaryOpCode::Add => {
-                    self.integer_add_sub_exec(false, "elem_add", a, b)
+                    self.integer_arithmetic_exec(0, "elem_add", a, b)
                 }
                 crate::backend::wgpu::types::BinaryOpCode::Sub => {
-                    self.integer_add_sub_exec(true, "elem_sub", a, b)
+                    self.integer_arithmetic_exec(1, "elem_sub", a, b)
+                }
+                crate::backend::wgpu::types::BinaryOpCode::Mul => {
+                    self.integer_arithmetic_exec(2, "elem_mul", a, b)
                 }
                 crate::backend::wgpu::types::BinaryOpCode::Min => {
                     self.integer_minmax_exec(true, "elem_min", a, b)
@@ -2592,63 +2595,89 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wgpu_native_integer_add_subtract_preserve_all_classes_and_saturate() {
+    async fn wgpu_native_integer_arithmetic_preserves_all_classes_and_saturates() {
         let Some(provider) = register_wgpu_provider_for_test() else {
             return;
         };
-        let shape = [3, 1];
+        let shape = [5, 1];
         let cases = [
             (
-                HostIntegerDataView::I8(&[i8::MAX, i8::MIN, 12]),
-                HostIntegerDataView::I8(&[1, 1, -120]),
-                HostIntegerDataOwned::I8(vec![i8::MAX, i8::MIN + 1, -108]),
-                HostIntegerDataOwned::I8(vec![i8::MAX - 1, i8::MIN, i8::MAX]),
+                HostIntegerDataView::I8(&[i8::MAX, i8::MIN, 12, -3, i8::MIN]),
+                HostIntegerDataView::I8(&[1, 1, -120, 7, -1]),
+                HostIntegerDataOwned::I8(vec![i8::MAX, i8::MIN + 1, -108, 4, i8::MIN]),
+                HostIntegerDataOwned::I8(vec![i8::MAX - 1, i8::MIN, i8::MAX, -10, i8::MIN + 1]),
+                HostIntegerDataOwned::I8(vec![i8::MAX, i8::MIN, i8::MIN, -21, i8::MAX]),
             ),
             (
-                HostIntegerDataView::I16(&[i16::MAX, i16::MIN, 12]),
-                HostIntegerDataView::I16(&[1, 1, -32_760]),
-                HostIntegerDataOwned::I16(vec![i16::MAX, i16::MIN + 1, -32_748]),
-                HostIntegerDataOwned::I16(vec![i16::MAX - 1, i16::MIN, i16::MAX]),
+                HostIntegerDataView::I16(&[i16::MAX, i16::MIN, 12, -3, i16::MIN]),
+                HostIntegerDataView::I16(&[1, 1, -32_760, 7, -1]),
+                HostIntegerDataOwned::I16(vec![i16::MAX, i16::MIN + 1, -32_748, 4, i16::MIN]),
+                HostIntegerDataOwned::I16(vec![
+                    i16::MAX - 1,
+                    i16::MIN,
+                    i16::MAX,
+                    -10,
+                    i16::MIN + 1,
+                ]),
+                HostIntegerDataOwned::I16(vec![i16::MAX, i16::MIN, i16::MIN, -21, i16::MAX]),
             ),
             (
-                HostIntegerDataView::I32(&[i32::MAX, i32::MIN, 12]),
-                HostIntegerDataView::I32(&[1, 1, -2_147_483_640]),
-                HostIntegerDataOwned::I32(vec![i32::MAX, i32::MIN + 1, i32::MIN + 20]),
-                HostIntegerDataOwned::I32(vec![i32::MAX - 1, i32::MIN, i32::MAX]),
+                HostIntegerDataView::I32(&[i32::MAX, i32::MIN, 12, -3, i32::MIN]),
+                HostIntegerDataView::I32(&[1, 1, -2_147_483_640, 7, -1]),
+                HostIntegerDataOwned::I32(vec![i32::MAX, i32::MIN + 1, i32::MIN + 20, 4, i32::MIN]),
+                HostIntegerDataOwned::I32(vec![
+                    i32::MAX - 1,
+                    i32::MIN,
+                    i32::MAX,
+                    -10,
+                    i32::MIN + 1,
+                ]),
+                HostIntegerDataOwned::I32(vec![i32::MAX, i32::MIN, i32::MIN, -21, i32::MAX]),
             ),
             (
-                HostIntegerDataView::I64(&[i64::MAX, i64::MIN, 12]),
-                HostIntegerDataView::I64(&[1, 1, i64::MIN + 8]),
-                HostIntegerDataOwned::I64(vec![i64::MAX, i64::MIN + 1, i64::MIN + 20]),
-                HostIntegerDataOwned::I64(vec![i64::MAX - 1, i64::MIN, i64::MAX]),
+                HostIntegerDataView::I64(&[i64::MAX, i64::MIN, 12, -3, i64::MIN]),
+                HostIntegerDataView::I64(&[1, 1, i64::MIN + 8, 7, -1]),
+                HostIntegerDataOwned::I64(vec![i64::MAX, i64::MIN + 1, i64::MIN + 20, 4, i64::MIN]),
+                HostIntegerDataOwned::I64(vec![
+                    i64::MAX - 1,
+                    i64::MIN,
+                    i64::MAX,
+                    -10,
+                    i64::MIN + 1,
+                ]),
+                HostIntegerDataOwned::I64(vec![i64::MAX, i64::MIN, i64::MIN, -21, i64::MAX]),
             ),
             (
-                HostIntegerDataView::U8(&[u8::MAX, 0, 10]),
-                HostIntegerDataView::U8(&[1, 1, 250]),
-                HostIntegerDataOwned::U8(vec![u8::MAX, 1, u8::MAX]),
-                HostIntegerDataOwned::U8(vec![u8::MAX - 1, 0, 0]),
+                HostIntegerDataView::U8(&[u8::MAX, 0, 10, 3, 0]),
+                HostIntegerDataView::U8(&[1, 1, 250, 7, 1]),
+                HostIntegerDataOwned::U8(vec![u8::MAX, 1, u8::MAX, 10, 1]),
+                HostIntegerDataOwned::U8(vec![u8::MAX - 1, 0, 0, 0, 0]),
+                HostIntegerDataOwned::U8(vec![u8::MAX, 0, u8::MAX, 21, 0]),
             ),
             (
-                HostIntegerDataView::U16(&[u16::MAX, 0, 10]),
-                HostIntegerDataView::U16(&[1, 1, u16::MAX - 5]),
-                HostIntegerDataOwned::U16(vec![u16::MAX, 1, u16::MAX]),
-                HostIntegerDataOwned::U16(vec![u16::MAX - 1, 0, 0]),
+                HostIntegerDataView::U16(&[u16::MAX, 0, 10, 3, 0]),
+                HostIntegerDataView::U16(&[1, 1, u16::MAX - 5, 7, 1]),
+                HostIntegerDataOwned::U16(vec![u16::MAX, 1, u16::MAX, 10, 1]),
+                HostIntegerDataOwned::U16(vec![u16::MAX - 1, 0, 0, 0, 0]),
+                HostIntegerDataOwned::U16(vec![u16::MAX, 0, u16::MAX, 21, 0]),
             ),
             (
-                HostIntegerDataView::U32(&[u32::MAX, 0, 10]),
-                HostIntegerDataView::U32(&[1, 1, u32::MAX - 5]),
-                HostIntegerDataOwned::U32(vec![u32::MAX, 1, u32::MAX]),
-                HostIntegerDataOwned::U32(vec![u32::MAX - 1, 0, 0]),
+                HostIntegerDataView::U32(&[u32::MAX, 0, 10, 3, 0]),
+                HostIntegerDataView::U32(&[1, 1, u32::MAX - 5, 7, 1]),
+                HostIntegerDataOwned::U32(vec![u32::MAX, 1, u32::MAX, 10, 1]),
+                HostIntegerDataOwned::U32(vec![u32::MAX - 1, 0, 0, 0, 0]),
+                HostIntegerDataOwned::U32(vec![u32::MAX, 0, u32::MAX, 21, 0]),
             ),
             (
-                HostIntegerDataView::U64(&[u64::MAX, 0, 10]),
-                HostIntegerDataView::U64(&[1, 1, u64::MAX - 5]),
-                HostIntegerDataOwned::U64(vec![u64::MAX, 1, u64::MAX]),
-                HostIntegerDataOwned::U64(vec![u64::MAX - 1, 0, 0]),
+                HostIntegerDataView::U64(&[u64::MAX, 0, 10, 0x0000_0001_0000_0001, 0]),
+                HostIntegerDataView::U64(&[1, 1, u64::MAX - 5, 2, 1]),
+                HostIntegerDataOwned::U64(vec![u64::MAX, 1, u64::MAX, 0x0000_0001_0000_0003, 1]),
+                HostIntegerDataOwned::U64(vec![u64::MAX - 1, 0, 0, 0x0000_0000_ffff_ffff, 0]),
+                HostIntegerDataOwned::U64(vec![u64::MAX, 0, u64::MAX, 0x0000_0002_0000_0002, 0]),
             ),
         ];
 
-        for (left, right, expected_add, expected_subtract) in cases {
+        for (left, right, expected_add, expected_subtract, expected_multiply) in cases {
             let integer_type = left.element_type();
             let lhs = provider
                 .upload_integer(&HostIntegerTensorView {
@@ -2667,7 +2696,11 @@ mod tests {
                 .elem_sub(&lhs, &rhs)
                 .await
                 .expect("integer subtract");
-            for handle in [&add, &subtract] {
+            let multiply = provider
+                .elem_mul(&lhs, &rhs)
+                .await
+                .expect("integer multiply");
+            for handle in [&add, &subtract, &multiply] {
                 assert_eq!(
                     runmat_accelerate_api::handle_integer_type(handle),
                     Some(integer_type)
@@ -2689,14 +2722,22 @@ mod tests {
                     .data,
                 expected_subtract
             );
-            for handle in [&lhs, &rhs, &add, &subtract] {
+            assert_eq!(
+                provider
+                    .download_integer(&multiply)
+                    .await
+                    .expect("download multiply")
+                    .data,
+                expected_multiply
+            );
+            for handle in [&lhs, &rhs, &add, &subtract, &multiply] {
                 provider.free(handle).expect("free arithmetic handle");
             }
         }
     }
 
     #[tokio::test]
-    async fn wgpu_native_integer_add_rejects_mixed_classes() {
+    async fn wgpu_native_integer_arithmetic_rejects_mixed_classes() {
         let Some(provider) = register_wgpu_provider_for_test() else {
             return;
         };
@@ -2714,7 +2755,7 @@ mod tests {
             })
             .expect("upload unsigned integer");
         let error = provider
-            .elem_add(&signed, &unsigned)
+            .elem_mul(&signed, &unsigned)
             .await
             .expect_err("mixed native integer classes must not use an implicit promotion");
         assert!(error.to_string().contains("same class"));
