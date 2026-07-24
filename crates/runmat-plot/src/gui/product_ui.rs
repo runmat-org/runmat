@@ -152,7 +152,7 @@ pub(crate) fn toolbar_primary_text_button(
         0.0,
         ToolbarVisuals {
             fill,
-            stroke: egui::Stroke::new(1.0, theme.primary_stroke),
+            stroke: egui::Stroke::new(1.0_f32, theme.primary_stroke),
             content: theme.primary_text,
         },
     );
@@ -203,7 +203,7 @@ fn show_toolbar_tooltip(
 fn tooltip_frame(theme: &ProductToolbarTheme, scale: f32) -> egui::Frame {
     egui::Frame::NONE
         .fill(theme.tooltip_fill)
-        .stroke(egui::Stroke::new(1.0, theme.tooltip_stroke))
+        .stroke(egui::Stroke::new(1.0_f32, theme.tooltip_stroke))
         .corner_radius(scaled_corner_radius(2.0 * scale))
 }
 
@@ -211,7 +211,7 @@ fn tooltip_frame(theme: &ProductToolbarTheme, scale: f32) -> egui::Frame {
 fn tooltip_frame(theme: &ProductToolbarTheme, scale: f32) -> egui::Frame {
     egui::Frame::none()
         .fill(theme.tooltip_fill)
-        .stroke(egui::Stroke::new(1.0, theme.tooltip_stroke))
+        .stroke(egui::Stroke::new(1.0_f32, theme.tooltip_stroke))
         .rounding(scaled_corner_radius(2.0 * scale))
 }
 
@@ -240,7 +240,7 @@ fn toolbar_visuals(
     };
     ToolbarVisuals {
         fill,
-        stroke: egui::Stroke::new(1.0, stroke_color),
+        stroke: egui::Stroke::new(1.0_f32, stroke_color),
         content,
     }
 }

@@ -145,7 +145,7 @@ impl CadOverlayState {
                 ui.painter().rect_filled(strip_rect, 0.0, theme.strip_bg);
                 ui.painter().line_segment(
                     [strip_rect.left_bottom(), strip_rect.right_bottom()],
-                    egui::Stroke::new(1.0, theme.strip_border),
+                    egui::Stroke::new(1.0_f32, theme.strip_border),
                 );
 
                 if matches!(
@@ -708,7 +708,7 @@ fn visibility_checkbox(
 ) -> egui::Response {
     let size = egui::vec2(14.0 * scale, 14.0 * scale);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-    let stroke = egui::Stroke::new(1.0, theme.checkbox_border);
+    let stroke = egui::Stroke::new(1.0_f32, theme.checkbox_border);
     #[cfg(target_arch = "wasm32")]
     ui.painter().rect(
         rect,
@@ -726,9 +726,9 @@ fn visibility_checkbox(
             let p1 = egui::pos2(rect.left() + 6.0 * scale, rect.bottom() - 3.0 * scale);
             let p2 = egui::pos2(rect.right() - 3.0 * scale, rect.top() + 3.0 * scale);
             ui.painter()
-                .line_segment([p0, p1], egui::Stroke::new(1.6, theme.checkbox_mark));
+                .line_segment([p0, p1], egui::Stroke::new(1.6_f32, theme.checkbox_mark));
             ui.painter()
-                .line_segment([p1, p2], egui::Stroke::new(1.6, theme.checkbox_mark));
+                .line_segment([p1, p2], egui::Stroke::new(1.6_f32, theme.checkbox_mark));
         }
         VisibilityState::Mixed => {
             let y = rect.center().y;
@@ -737,7 +737,7 @@ fn visibility_checkbox(
                     egui::pos2(rect.left() + 3.0 * scale, y),
                     egui::pos2(rect.right() - 3.0 * scale, y),
                 ],
-                egui::Stroke::new(1.6, theme.checkbox_mark),
+                egui::Stroke::new(1.6_f32, theme.checkbox_mark),
             );
         }
         VisibilityState::Hidden => {}
@@ -752,7 +752,7 @@ fn region_icon(ui: &mut egui::Ui, scale: f32, theme: &CadOverlayTheme) {
     ui.painter().circle_stroke(
         center,
         4.5 * scale,
-        egui::Stroke::new(1.0, theme.checkbox_border),
+        egui::Stroke::new(1.0_f32, theme.checkbox_border),
     );
     ui.painter()
         .circle_filled(center, 2.0 * scale, theme.region_dot);
@@ -836,7 +836,7 @@ fn strip_height(scale: f32) -> f32 {
 fn panel_frame(theme: &CadOverlayTheme, scale: f32) -> egui::Frame {
     egui::Frame::NONE
         .fill(theme.panel_bg)
-        .stroke(egui::Stroke::new(1.0, theme.panel_border))
+        .stroke(egui::Stroke::new(1.0_f32, theme.panel_border))
         .corner_radius(scaled_corner_radius(PANEL_CORNER_RADIUS * scale))
         .inner_margin(scaled_margin_same(10.0 * scale))
 }
@@ -845,7 +845,7 @@ fn panel_frame(theme: &CadOverlayTheme, scale: f32) -> egui::Frame {
 fn panel_frame(theme: &CadOverlayTheme, scale: f32) -> egui::Frame {
     egui::Frame::none()
         .fill(theme.panel_bg)
-        .stroke(egui::Stroke::new(1.0, theme.panel_border))
+        .stroke(egui::Stroke::new(1.0_f32, theme.panel_border))
         .rounding(scaled_corner_radius(PANEL_CORNER_RADIUS * scale))
         .inner_margin(scaled_margin_same(10.0 * scale))
 }

@@ -1,3 +1,4 @@
+use super::selectors::parse_row_selector_for_object;
 use super::*;
 
 pub(in crate::builtins::table) fn table_member_get(

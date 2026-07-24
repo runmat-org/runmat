@@ -280,7 +280,7 @@ impl PlotOverlay {
                     Pos2::new(x_screen, border_bottom),
                     Pos2::new(x_screen, border_bottom + tick_length),
                 ],
-                Stroke::new(1.0, axis_color),
+                Stroke::new(1.0_f32, axis_color),
             );
             ui.painter().text(
                 Pos2::new(x_screen, border_bottom + label_offset),
@@ -823,7 +823,7 @@ impl PlotOverlay {
     }
 
     fn draw_2d_border(&self, ui: &mut egui::Ui, plot_rect: Rect) {
-        let stroke = Stroke::new(1.5, self.theme_axis_color());
+        let stroke = Stroke::new(1.5_f32, self.theme_axis_color());
         let ppp = ui.ctx().pixels_per_point();
         let (left, right, top, bottom) =
             Self::border_centerline_edges(plot_rect, ppp, stroke.width);
@@ -1497,7 +1497,7 @@ impl PlotOverlay {
                         .or_else(|| plot_renderer.data_bounds())
                     {
                         let axis_color = self.theme_axis_color();
-                        let zero_stroke = Stroke::new(1.5, axis_color);
+                        let zero_stroke = Stroke::new(1.5_f32, axis_color);
                         if y_min < 0.0 && y_max > 0.0 {
                             let y_screen = centered_plot_rect.max.y
                                 - ((0.0 - y_min) / (y_max - y_min)) as f32
@@ -1628,12 +1628,12 @@ impl PlotOverlay {
             ui.painter().rect_stroke(
                 bar_rect,
                 0.0,
-                Stroke::new(1.0, border),
+                Stroke::new(1.0_f32, border),
                 egui::StrokeKind::Inside,
             );
             #[cfg(not(target_arch = "wasm32"))]
             ui.painter()
-                .rect_stroke(bar_rect, 0.0, Stroke::new(1.0, border));
+                .rect_stroke(bar_rect, 0.0, Stroke::new(1.0_f32, border));
         }
 
         if config.show_cad_overlay {
@@ -1770,7 +1770,7 @@ impl PlotOverlay {
                                 Pos2::new(x_screen, plot_rect.max.y),
                             ],
                             Stroke::new(
-                                if is_major { 0.8 } else { 0.6 },
+                                if is_major { 0.8_f32 } else { 0.6_f32 },
                                 if is_major {
                                     grid_color_major
                                 } else {
@@ -1805,7 +1805,7 @@ impl PlotOverlay {
                                     Pos2::new(x_screen, plot_rect.min.y),
                                     Pos2::new(x_screen, plot_rect.max.y),
                                 ],
-                                Stroke::new(0.6, grid_color_minor),
+                                Stroke::new(0.6_f32, grid_color_minor),
                             );
                         }
                     }
@@ -1838,7 +1838,7 @@ impl PlotOverlay {
                                 Pos2::new(x_screen, plot_rect.min.y),
                                 Pos2::new(x_screen, plot_rect.max.y),
                             ],
-                            Stroke::new(0.8, grid_color_major),
+                            Stroke::new(0.8_f32, grid_color_major),
                         );
                     }
                 }
@@ -1875,7 +1875,7 @@ impl PlotOverlay {
                                 Pos2::new(plot_rect.max.x, y_screen),
                             ],
                             Stroke::new(
-                                if is_major { 0.8 } else { 0.6 },
+                                if is_major { 0.8_f32 } else { 0.6_f32 },
                                 if is_major {
                                     grid_color_major
                                 } else {
@@ -1910,7 +1910,7 @@ impl PlotOverlay {
                                     Pos2::new(plot_rect.min.x, y_screen),
                                     Pos2::new(plot_rect.max.x, y_screen),
                                 ],
-                                Stroke::new(0.6, grid_color_minor),
+                                Stroke::new(0.6_f32, grid_color_minor),
                             );
                         }
                     }
@@ -1944,7 +1944,7 @@ impl PlotOverlay {
                                 Pos2::new(plot_rect.min.x, y_screen),
                                 Pos2::new(plot_rect.max.x, y_screen),
                             ],
-                            Stroke::new(0.8, grid_color_major),
+                            Stroke::new(0.8_f32, grid_color_major),
                         );
                     }
                 }
@@ -2078,7 +2078,7 @@ impl PlotOverlay {
                                 Pos2::new(x_screen, border_bottom),
                                 Pos2::new(x_screen, border_bottom + tick_length),
                             ],
-                            Stroke::new(1.0, axis_color),
+                            Stroke::new(1.0_f32, axis_color),
                         );
                         let label = explicit_x_labels
                             .as_ref()
@@ -2122,7 +2122,7 @@ impl PlotOverlay {
                                 Pos2::new(x_screen, border_bottom),
                                 Pos2::new(x_screen, border_bottom + tick_length),
                             ],
-                            Stroke::new(1.0, axis_color),
+                            Stroke::new(1.0_f32, axis_color),
                         );
                         let text = truncate_label(label, 14);
                         Self::draw_tick_label(
@@ -2160,7 +2160,7 @@ impl PlotOverlay {
                             Pos2::new(y_tick_outer_x, y_screen),
                             Pos2::new(y_axis_x, y_screen),
                         ],
-                        Stroke::new(1.0, axis_color),
+                        Stroke::new(1.0_f32, axis_color),
                     );
                     let label = explicit_y_labels
                         .as_ref()
@@ -2203,7 +2203,7 @@ impl PlotOverlay {
                                 Pos2::new(y_tick_outer_x, y_screen),
                                 Pos2::new(y_axis_x, y_screen),
                             ],
-                            Stroke::new(1.0, axis_color),
+                            Stroke::new(1.0_f32, axis_color),
                         );
                         let text = truncate_label(label, 14);
                         Self::draw_tick_label(
@@ -2252,7 +2252,7 @@ impl PlotOverlay {
                                 Pos2::new(x_screen, border_bottom),
                                 Pos2::new(x_screen, border_bottom + tick_length),
                             ],
-                            Stroke::new(1.0, axis_color),
+                            Stroke::new(1.0_f32, axis_color),
                         );
                         // Label
                         let text = truncate_label(label, 14);
@@ -2290,7 +2290,7 @@ impl PlotOverlay {
                                 Pos2::new(y_tick_outer_x, y_screen),
                                 Pos2::new(y_axis_x, y_screen),
                             ],
-                            Stroke::new(1.0, axis_color),
+                            Stroke::new(1.0_f32, axis_color),
                         );
                         // Label
                         let text = truncate_label(label, 14);
@@ -2324,7 +2324,7 @@ impl PlotOverlay {
                             Pos2::new(x_screen, border_bottom),
                             Pos2::new(x_screen, border_bottom + tick_length),
                         ],
-                        Stroke::new(1.0, axis_color),
+                        Stroke::new(1.0_f32, axis_color),
                     );
                     // Label like 10^d
                     Self::draw_tick_label(
@@ -2347,7 +2347,7 @@ impl PlotOverlay {
                             Pos2::new(x_screen, border_bottom),
                             Pos2::new(x_screen, border_bottom + tick_length),
                         ],
-                        Stroke::new(1.0, axis_color),
+                        Stroke::new(1.0_f32, axis_color),
                     );
                     Self::draw_tick_label(
                         ui,
@@ -2377,7 +2377,7 @@ impl PlotOverlay {
                             Pos2::new(y_tick_outer_x, y_screen),
                             Pos2::new(y_axis_x, y_screen),
                         ],
-                        Stroke::new(1.0, axis_color),
+                        Stroke::new(1.0_f32, axis_color),
                     );
                     Self::draw_tick_label(
                         ui,
@@ -2399,7 +2399,7 @@ impl PlotOverlay {
                             Pos2::new(y_tick_outer_x, y_screen),
                             Pos2::new(y_axis_x, y_screen),
                         ],
-                        Stroke::new(1.0, axis_color),
+                        Stroke::new(1.0_f32, axis_color),
                     );
                     Self::draw_tick_label(
                         ui,
@@ -2875,7 +2875,7 @@ impl PlotOverlay {
                             Pos2::new(swatch_rect.min.x, ymid),
                             Pos2::new(swatch_rect.max.x, ymid),
                         ],
-                        Stroke::new(2.0, c),
+                        Stroke::new(2.0_f32, c),
                     );
                 }
                 crate::plots::figure::PlotType::Scatter
@@ -2883,7 +2883,7 @@ impl PlotOverlay {
                     let center = swatch_rect.center();
                     ui.painter().circle_filled(center, 3.5, c);
                     ui.painter()
-                        .circle_stroke(center, 3.5, Stroke::new(1.0, legend_stroke));
+                        .circle_stroke(center, 3.5, Stroke::new(1.0_f32, legend_stroke));
                 }
                 crate::plots::figure::PlotType::Bar
                 | crate::plots::figure::PlotType::Area
@@ -2897,12 +2897,12 @@ impl PlotOverlay {
                     ui.painter().rect_stroke(
                         swatch_rect,
                         2.0,
-                        Stroke::new(1.0, legend_stroke),
+                        Stroke::new(1.0_f32, legend_stroke),
                         egui::StrokeKind::Inside,
                     );
                     #[cfg(not(target_arch = "wasm32"))]
                     ui.painter()
-                        .rect_stroke(swatch_rect, 2.0, Stroke::new(1.0, legend_stroke));
+                        .rect_stroke(swatch_rect, 2.0, Stroke::new(1.0_f32, legend_stroke));
                 }
                 crate::plots::figure::PlotType::ErrorBar
                 | crate::plots::figure::PlotType::Stairs
@@ -2914,14 +2914,14 @@ impl PlotOverlay {
                             Pos2::new(swatch_rect.min.x, ymid),
                             Pos2::new(swatch_rect.max.x - 4.0, ymid),
                         ],
-                        Stroke::new(1.5, c),
+                        Stroke::new(1.5_f32, c),
                     );
                     ui.painter().line_segment(
                         [
                             Pos2::new(swatch_rect.max.x - 4.0, ymid - 3.0),
                             Pos2::new(swatch_rect.max.x, ymid),
                         ],
-                        Stroke::new(1.0, c),
+                        Stroke::new(1.0_f32, c),
                     );
                 }
             }

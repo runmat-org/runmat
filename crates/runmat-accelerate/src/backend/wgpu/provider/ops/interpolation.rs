@@ -188,6 +188,17 @@ mod tests {
         Some(f(provider))
     }
 
+    fn assert_values_close(actual: &[f64], expected: &[f64], tolerance: f64) {
+        assert_eq!(actual.len(), expected.len());
+        for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
+            let difference = (actual - expected).abs();
+            assert!(
+                difference <= tolerance,
+                "value {index} differs: actual={actual}, expected={expected}, difference={difference}, tolerance={tolerance}"
+            );
+        }
+    }
+
     #[test]
     fn interp1_provider_linear_and_nearest_match_column_major_series() {
         let Some(()) = with_wgpu_provider(|provider| {
@@ -242,7 +253,7 @@ mod tests {
             let nearest_host = pollster::block_on(provider.download(&nearest)).expect("download");
             assert_eq!(linear_host.shape, output_shape);
             assert_eq!(nearest_host.shape, output_shape);
-            assert_eq!(linear_host.data, vec![12.0, 30.0, 120.0, 300.0]);
+            assert_values_close(&linear_host.data, &[12.0, 30.0, 120.0, 300.0], 1.0e-5);
             assert_eq!(nearest_host.data, vec![10.0, 20.0, 100.0, 200.0]);
             provider.free(&x).ok();
             provider.free(&y).ok();

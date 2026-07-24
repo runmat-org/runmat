@@ -1,3 +1,4 @@
+use super::selectors::parse_variable_selector;
 use super::*;
 
 mod grpstats;

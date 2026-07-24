@@ -144,6 +144,10 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
+          $overlayPorts = Join-Path $pwd "infra\vcpkg-ports"
+          if (-not (Test-Path (Join-Path $overlayPorts "libaec\vcpkg.json"))) {
+            throw "RunMat vcpkg overlay ports were not found at $overlayPorts"
+          }
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
           Add-Content -Path $env:GITHUB_ENV -Value "INCLUDE=$prefix\include;$env:INCLUDE"
           Add-Content -Path $env:GITHUB_ENV -Value "LIB=$prefix\lib;$env:LIB"
@@ -366,7 +370,7 @@ jobs:
             )
 
             for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
-              & "$vcpkgRoot\vcpkg.exe" install "${Package}:$triplet" @ExtraArguments
+              & "$vcpkgRoot\vcpkg.exe" install "${Package}:$triplet" "--overlay-ports=$overlayPorts" @ExtraArguments
               if ($LASTEXITCODE -eq 0) {
                 return
               }
