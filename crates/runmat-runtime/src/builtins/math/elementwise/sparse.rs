@@ -87,6 +87,16 @@ fn checked_len(shape: &[usize], builtin: &'static str) -> BuiltinResult<usize> {
     Ok(len)
 }
 
+/// Validate a sparse operation which may need to visit or materialize every
+/// element of its result. Kept here so sparse-aware builtins share the same
+/// resource bound and error contract.
+pub(crate) fn checked_sparse_result_len(
+    shape: &[usize],
+    builtin: &'static str,
+) -> BuiltinResult<usize> {
+    checked_len(shape, builtin)
+}
+
 fn sparse_shape(sparse: &SparseTensor) -> [usize; 2] {
     [sparse.rows, sparse.cols]
 }

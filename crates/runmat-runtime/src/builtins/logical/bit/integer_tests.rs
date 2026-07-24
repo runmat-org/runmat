@@ -39,6 +39,113 @@ fn bitand_broadcasts_tensor_and_scalar() {
 }
 
 #[test]
+fn binary_bitwise_sparse_operands_preserve_or_materialize_by_zero_semantics() {
+    let left = runmat_builtins::SparseTensor::new(
+        2,
+        2,
+        vec![0, 1, 2],
+        vec![0, 1],
+        vec![0b0110 as f64, 0b1010 as f64],
+    )
+    .expect("left sparse");
+    let right = runmat_builtins::SparseTensor::new(
+        2,
+        2,
+        vec![0, 1, 2],
+        vec![0, 0],
+        vec![0b0011 as f64, 0b0101 as f64],
+    )
+    .expect("right sparse");
+
+    let Value::SparseTensor(and) = block_on(bitand_builtin(vec![
+        Value::SparseTensor(left.clone()),
+        Value::SparseTensor(right.clone()),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("sparse bitand") else {
+        panic!("bitand of sparse operands preserves CSC storage");
+    };
+    assert_eq!(and.get(0, 0), Some(2.0));
+    assert_eq!(and.nnz(), 1);
+
+    let Value::SparseTensor(or) = block_on(bitor_builtin(vec![
+        Value::SparseTensor(left.clone()),
+        Value::SparseTensor(right),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("sparse bitor") else {
+        panic!("bitor of sparse operands preserves CSC storage");
+    };
+    assert_eq!(or.get(0, 0), Some(7.0));
+    assert_eq!(or.get(1, 1), Some(10.0));
+    assert_eq!(or.nnz(), 3);
+
+    let Value::Tensor(xor) = block_on(bitxor_builtin(vec![
+        Value::SparseTensor(left),
+        Value::Num(1.0),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("sparse xor nonzero scalar") else {
+        panic!("xor with a nonzero scalar materializes implicit zeros");
+    };
+    assert_eq!(xor.data, vec![7.0, 1.0, 1.0, 11.0]);
+}
+
+#[test]
+fn binary_bitwise_sparse_dense_and_broadcast_forms_use_zero_aware_output_storage() {
+    let sparse = runmat_builtins::SparseTensor::new(
+        2,
+        2,
+        vec![0, 1, 2],
+        vec![0, 1],
+        vec![0b0110 as f64, 0b1010 as f64],
+    )
+    .expect("sparse");
+    let dense =
+        Tensor::new(vec![0b0011 as f64, 0.0, 0.0, 0b1111 as f64], vec![2, 2]).expect("dense");
+    let Value::SparseTensor(and) = block_on(bitand_builtin(vec![
+        Value::SparseTensor(sparse.clone()),
+        Value::Tensor(dense),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("sparse dense bitand") else {
+        panic!("bitand keeps sparse output because zero is annihilating");
+    };
+    assert_eq!(and.get(0, 0), Some(2.0));
+    assert_eq!(and.get(1, 1), Some(10.0));
+    assert_eq!(and.nnz(), 2);
+
+    let Value::Tensor(or) = block_on(bitor_builtin(vec![
+        Value::SparseTensor(sparse),
+        Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).expect("broadcast dense")),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("sparse dense bitor") else {
+        panic!("bitor materializes when broadcast dense values make implicit zeros nonzero");
+    };
+    assert_eq!(or.shape, vec![2, 2]);
+    assert_eq!(or.data, vec![6.0, 1.0, 0.0, 11.0]);
+}
+
+#[test]
+fn binary_bitwise_rejects_runmat_typed_sparse_integer_extension() {
+    let typed = runmat_builtins::SparseTensor::new_integer(
+        1,
+        1,
+        vec![0, 1],
+        vec![0],
+        IntegerStorage::U8(vec![1]),
+    )
+    .expect("typed sparse");
+    let error = block_on(bitand_builtin(vec![
+        Value::SparseTensor(typed),
+        Value::Num(1.0),
+    ]))
+    .expect_err("typed sparse is not a MATLAB sparse integer representation");
+    assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+}
+
+#[test]
 fn binary_bitwise_rejects_mixed_integer_classes() {
     let forward = block_on(bitor_builtin(vec![
         Value::Int(IntValue::U8(1)),
