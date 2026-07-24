@@ -220,11 +220,19 @@ const NAN_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
     message: "nan: multiple 'like' specifications are not supported",
 };
 
-const NAN_ERRORS: [BuiltinErrorDescriptor; 4] = [
+const NAN_ERROR_INTEGER_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NAN.INTEGER_LIKE_PROTOTYPE",
+    identifier: None,
+    when: "The 'like' prototype has an integer data type that cannot represent NaN.",
+    message: "nan: integer 'like' prototypes are not supported",
+};
+
+const NAN_ERRORS: [BuiltinErrorDescriptor; 5] = [
     NAN_ERROR_LIKE_EXPECTED_PROTOTYPE,
     NAN_ERROR_CLASS_CONFLICT,
     NAN_ERROR_UNRECOGNIZED_OPTION,
     NAN_ERROR_LIKE_DUPLICATE,
+    NAN_ERROR_INTEGER_LIKE_PROTOTYPE,
 ];
 
 pub const NAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -469,6 +477,9 @@ async fn nan_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value>
     match proto {
         Value::ComplexTensor(_) | Value::Complex(_, _) => nan_complex(shape),
         Value::GpuTensor(handle) => nan_like_gpu(handle, shape).await,
+        Value::Tensor(t) if t.integer_storage().is_some() => {
+            Err(nan_error(&NAN_ERROR_INTEGER_LIKE_PROTOTYPE))
+        }
         Value::Tensor(t) => match t.dtype {
             NumericDType::F32 => nan_single(shape),
             NumericDType::F64 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
@@ -476,7 +487,8 @@ async fn nan_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value>
             }
         },
         Value::SparseTensor(_) => nan_double(shape),
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) => nan_double(shape),
+        Value::Int(_) => Err(nan_error(&NAN_ERROR_INTEGER_LIKE_PROTOTYPE)),
+        Value::Num(_) | Value::Bool(_) => nan_double(shape),
         Value::LogicalArray(_) => nan_double(shape),
         Value::CharArray(_) | Value::Cell(_) => nan_double(shape),
         _ => nan_double(shape),
@@ -769,6 +781,33 @@ pub(crate) mod tests {
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 2]);
         assert!(tensor.data.iter().all(|value| value.is_nan()));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn nan_rejects_every_integer_like_prototype() {
+        let _guard = clear_accel_provider_state();
+        let prototypes = [
+            runmat_builtins::IntegerStorage::I8(vec![0]),
+            runmat_builtins::IntegerStorage::I16(vec![0]),
+            runmat_builtins::IntegerStorage::I32(vec![0]),
+            runmat_builtins::IntegerStorage::I64(vec![0]),
+            runmat_builtins::IntegerStorage::U8(vec![0]),
+            runmat_builtins::IntegerStorage::U16(vec![0]),
+            runmat_builtins::IntegerStorage::U32(vec![0]),
+            runmat_builtins::IntegerStorage::U64(vec![0]),
+        ];
+
+        for storage in prototypes {
+            let proto = Tensor::new_integer(storage, vec![1, 1]).expect("integer prototype");
+            let err = block_on(nan_builtin(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::Tensor(proto),
+            ]))
+            .unwrap_err();
+            assert!(err.message().contains("integer 'like' prototypes"));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

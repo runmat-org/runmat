@@ -220,11 +220,19 @@ const INF_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
     message: "inf: multiple 'like' specifications are not supported",
 };
 
-const INF_ERRORS: [BuiltinErrorDescriptor; 4] = [
+const INF_ERROR_INTEGER_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INF.INTEGER_LIKE_PROTOTYPE",
+    identifier: None,
+    when: "The 'like' prototype has an integer data type that cannot represent Inf.",
+    message: "inf: integer 'like' prototypes are not supported",
+};
+
+const INF_ERRORS: [BuiltinErrorDescriptor; 5] = [
     INF_ERROR_LIKE_EXPECTED_PROTOTYPE,
     INF_ERROR_CLASS_CONFLICT,
     INF_ERROR_UNRECOGNIZED_OPTION,
     INF_ERROR_LIKE_DUPLICATE,
+    INF_ERROR_INTEGER_LIKE_PROTOTYPE,
 ];
 
 pub const INF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -470,6 +478,9 @@ async fn inf_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value>
     match proto {
         Value::ComplexTensor(_) | Value::Complex(_, _) => inf_complex(shape),
         Value::GpuTensor(handle) => inf_like_gpu(handle, shape).await,
+        Value::Tensor(t) if t.integer_storage().is_some() => {
+            Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE))
+        }
         Value::Tensor(t) => match t.dtype {
             NumericDType::F32 => inf_single(shape),
             NumericDType::F64 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
@@ -477,7 +488,8 @@ async fn inf_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value>
             }
         },
         Value::SparseTensor(_) => inf_double(shape),
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) => inf_double(shape),
+        Value::Int(_) => Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE)),
+        Value::Num(_) | Value::Bool(_) => inf_double(shape),
         Value::LogicalArray(_) => inf_double(shape),
         Value::CharArray(_) | Value::Cell(_) => inf_double(shape),
         _ => inf_double(shape),
@@ -780,6 +792,33 @@ pub(crate) mod tests {
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 2]);
         assert_all_pos_inf(&tensor);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn inf_rejects_every_integer_like_prototype() {
+        let _guard = clear_accel_provider_state();
+        let prototypes = [
+            runmat_builtins::IntegerStorage::I8(vec![0]),
+            runmat_builtins::IntegerStorage::I16(vec![0]),
+            runmat_builtins::IntegerStorage::I32(vec![0]),
+            runmat_builtins::IntegerStorage::I64(vec![0]),
+            runmat_builtins::IntegerStorage::U8(vec![0]),
+            runmat_builtins::IntegerStorage::U16(vec![0]),
+            runmat_builtins::IntegerStorage::U32(vec![0]),
+            runmat_builtins::IntegerStorage::U64(vec![0]),
+        ];
+
+        for storage in prototypes {
+            let proto = Tensor::new_integer(storage, vec![1, 1]).expect("integer prototype");
+            let err = block_on(inf_builtin(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::Tensor(proto),
+            ]))
+            .unwrap_err();
+            assert!(err.message().contains("integer 'like' prototypes"));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
