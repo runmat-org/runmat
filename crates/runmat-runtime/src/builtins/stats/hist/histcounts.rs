@@ -1009,17 +1009,11 @@ fn classify_bin_argument(value: &Value) -> BuiltinResult<BinArgument> {
         }
         Value::Tensor(tensor) => {
             if tensor.data.len() == 1 {
-                let scalar_value = tensor.data[0];
-                if !scalar_value.is_finite() || scalar_value <= 0.0 {
-                    return Err(builtin_error(
-                        "histcounts: NumBins must be a positive finite scalar",
-                    ));
-                }
-                let rounded = scalar_value.round();
-                if (scalar_value - rounded).abs() > f64::EPSILON {
-                    return Err(builtin_error("histcounts: NumBins must be an integer"));
-                }
-                Ok(BinArgument::NumBins(rounded as usize))
+                Ok(BinArgument::NumBins(positive_usize_from_f64(
+                    tensor.data[0],
+                    "histcounts",
+                    "NumBins",
+                )?))
             } else {
                 let edges = tensor.data.clone();
                 Ok(BinArgument::Edges(edges))
@@ -1028,17 +1022,11 @@ fn classify_bin_argument(value: &Value) -> BuiltinResult<BinArgument> {
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(logical).map_err(builtin_error)?;
             if tensor.data.len() == 1 {
-                let n = tensor.data[0];
-                if n <= 0.0 || !n.is_finite() {
-                    return Err(builtin_error(
-                        "histcounts: NumBins must be a positive finite scalar",
-                    ));
-                }
-                let rounded = n.round();
-                if (n - rounded).abs() > f64::EPSILON {
-                    return Err(builtin_error("histcounts: NumBins must be an integer"));
-                }
-                Ok(BinArgument::NumBins(rounded as usize))
+                Ok(BinArgument::NumBins(positive_usize_from_f64(
+                    tensor.data[0],
+                    "histcounts",
+                    "NumBins",
+                )?))
             } else {
                 Ok(BinArgument::Edges(tensor.data))
             }
@@ -1072,7 +1060,19 @@ fn numeric_vector(value: &Value, name: &str, option: &str) -> BuiltinResult<Vec<
 }
 
 fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return value
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                builtin_error(format!("{name}: {option} must be a positive finite scalar"))
+            });
+    }
     let scalar = scalar_value(value, name, option)?;
+    positive_usize_from_f64(scalar, name, option)
+}
+
+fn positive_usize_from_f64(scalar: f64, name: &str, option: &str) -> BuiltinResult<usize> {
     if scalar <= 0.0 || !scalar.is_finite() {
         return Err(builtin_error(format!(
             "{name}: {option} must be a positive finite scalar"
@@ -1082,6 +1082,11 @@ fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usiz
     if (scalar - rounded).abs() > f64::EPSILON {
         return Err(builtin_error(format!(
             "{name}: {option} must be an integer"
+        )));
+    }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(builtin_error(format!(
+            "{name}: {option} is outside the supported range"
         )));
     }
     Ok(rounded as usize)
@@ -1230,6 +1235,21 @@ pub(crate) mod tests {
         let (counts_val, edges_val) = eval.into_pair();
         assert_eq!(values_from_tensor(counts_val), vec![3.0, 1.0, 2.0]);
         assert_eq!(values_from_tensor(edges_val), vec![1.0, 3.0, 5.0, 7.0]);
+    }
+
+    #[test]
+    fn histcounts_numbins_preserves_typed_integers_and_rejects_lossy_f64() {
+        assert_eq!(
+            positive_usize(&Value::Int(IntValue::U16(3)), "histcounts", "NumBins").unwrap(),
+            3
+        );
+        for value in [
+            Value::Int(IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(positive_usize(&value, "histcounts", "NumBins").is_err());
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

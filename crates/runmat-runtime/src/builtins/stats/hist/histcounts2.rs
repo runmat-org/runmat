@@ -1343,22 +1343,20 @@ fn numeric_vector(value: &Value, name: &str, option: &str) -> BuiltinResult<Vec<
 }
 
 fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return value
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                if name == NAME && option == "NumBins" {
+                    descriptor_error(&HISTCOUNTS2_ERROR_NUMBINS_INVALID)
+                } else {
+                    builtin_error(format!("{name}: {option} must be a positive finite scalar"))
+                }
+            });
+    }
     let scalar = scalar_value(value, name, option)?;
-    if scalar <= 0.0 || !scalar.is_finite() {
-        if name == NAME && option == "NumBins" {
-            return Err(descriptor_error(&HISTCOUNTS2_ERROR_NUMBINS_INVALID));
-        }
-        return Err(builtin_error(format!(
-            "{name}: {option} must be a positive finite scalar"
-        )));
-    }
-    let rounded = scalar.round();
-    if (scalar - rounded).abs() > f64::EPSILON {
-        return Err(builtin_error(format!(
-            "{name}: {option} must be an integer"
-        )));
-    }
-    Ok(rounded as usize)
+    positive_usize_from_f64(scalar, option)
 }
 
 fn positive_scalar(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
@@ -1410,6 +1408,11 @@ fn positive_usize_from_f64(value: f64, option: &str) -> BuiltinResult<usize> {
             "{NAME}: {option} must be an integer"
         )));
     }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(builtin_error(format!(
+            "{NAME}: {option} is outside the supported range"
+        )));
+    }
     Ok(rounded as usize)
 }
 
@@ -1455,7 +1458,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntValue, ResolveContext, Type};
 
     fn tensor_from_value(value: Value) -> Tensor {
         match value {
@@ -1513,6 +1516,21 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(3), Some(5)])
             }
         );
+    }
+
+    #[test]
+    fn histcounts2_numbins_preserves_typed_integers_and_rejects_lossy_f64() {
+        assert_eq!(
+            positive_usize(&Value::Int(IntValue::U16(3)), NAME, "NumBins").unwrap(),
+            3
+        );
+        for value in [
+            Value::Int(IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(positive_usize(&value, NAME, "NumBins").is_err());
+        }
     }
 
     #[test]
