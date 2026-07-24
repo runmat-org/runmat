@@ -212,6 +212,12 @@ impl RoundStrategy {
 )]
 async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let strategy = parse_arguments(&rest)?;
+    if !matches!(strategy, RoundStrategy::Integer) && has_exact_integer_storage(&value) {
+        return Err(builtin_error_with_detail(
+            &ROUND_ERROR_INVALID_INPUT,
+            "integer inputs support only the round(X) form",
+        ));
+    }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => round_gpu(handle, strategy).await,
@@ -231,6 +237,15 @@ async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             "expected numeric or logical input",
         )),
         other => round_numeric(other, strategy),
+    }
+}
+
+fn has_exact_integer_storage(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::SparseTensor(tensor) => tensor.integer_storage().is_some(),
+        _ => false,
     }
 }
 
@@ -521,6 +536,28 @@ pub(crate) mod tests {
             round_builtin(unsigned.clone(), Vec::new()).expect("round"),
             unsigned
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn round_integer_inputs_reject_digit_rounding_forms() {
+        let scalar = round_builtin(
+            Value::Int(IntValue::U64(u64::MAX)),
+            vec![Value::Int(IntValue::I32(-1))],
+        )
+        .expect_err("integer scalar digit round must fail");
+        assert_error_contains(&scalar, "integer inputs support only");
+        assert_eq!(scalar.identifier(), ROUND_ERROR_INVALID_INPUT.identifier);
+
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![1, i64::MAX]),
+            vec![1, 2],
+        )
+        .expect("integer tensor");
+        let array = round_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(1))])
+            .expect_err("integer array digit round must fail");
+        assert_error_contains(&array, "integer inputs support only");
+        assert_eq!(array.identifier(), ROUND_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
