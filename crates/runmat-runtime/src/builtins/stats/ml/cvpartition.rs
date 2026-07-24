@@ -389,7 +389,9 @@ impl PartitionInput {
                 labels: None,
             }),
             Value::Int(integer) => Ok(Self {
-                n: positive_integer_number(integer.to_f64(), "n")?,
+                n: integer.try_to_usize().filter(|n| *n > 0).ok_or_else(|| {
+                    invalid_argument("cvpartition: n must be a positive integer scalar")
+                })?,
                 labels: None,
             }),
             Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Self {
@@ -938,9 +940,19 @@ fn selected_indices(value: &Value, cols: usize) -> BuiltinResult<Vec<usize>> {
     if string_matches(value, "all") {
         return Ok((0..cols).collect());
     }
+    if let Value::Int(integer) = value {
+        return integer
+            .try_to_usize()
+            .filter(|index| *index >= 1 && *index <= cols)
+            .map(|index| vec![index - 1])
+            .ok_or_else(|| {
+                invalid_argument(format!(
+                    "cvpartition: index must be an integer between 1 and {cols}"
+                ))
+            });
+    }
     let raw = match value {
         Value::Num(number) => vec![*number],
-        Value::Int(integer) => vec![integer.to_f64()],
         Value::Tensor(tensor) => tensor.data.clone(),
         Value::LogicalArray(array) => array
             .data
@@ -1032,6 +1044,16 @@ fn materialized_mask_len(rows: usize, cols: usize, label: &str) -> BuiltinResult
 }
 
 fn holdout_count(value: &Value, n: usize) -> BuiltinResult<usize> {
+    if let Value::Int(integer) = value {
+        return integer
+            .try_to_usize()
+            .filter(|count| *count > 0 && *count < n)
+            .ok_or_else(|| {
+                invalid_argument(
+                    "cvpartition: Holdout must be a fraction in (0,1) or an integer in [1,n)",
+                )
+            });
+    }
     let raw = scalar_number(value, "Holdout")?;
     if raw > 0.0 && raw < 1.0 {
         let count = (raw * n as f64).round() as usize;
@@ -1046,11 +1068,26 @@ fn holdout_count(value: &Value, n: usize) -> BuiltinResult<usize> {
 }
 
 fn positive_integer(value: &Value, label: &str) -> BuiltinResult<usize> {
+    if let Value::Int(integer) = value {
+        return integer
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                invalid_argument(format!(
+                    "cvpartition: {label} must be a positive integer scalar"
+                ))
+            });
+    }
     positive_integer_number(scalar_number(value, label)?, label)
 }
 
 fn positive_integer_number(raw: f64, label: &str) -> BuiltinResult<usize> {
-    if !raw.is_finite() || raw.fract() != 0.0 || raw < 1.0 || raw > usize::MAX as f64 {
+    if !raw.is_finite()
+        || raw.fract() != 0.0
+        || raw < 1.0
+        || raw > usize::MAX as f64
+        || (usize::BITS == 64 && raw == usize::MAX as f64)
+    {
         return Err(invalid_argument(format!(
             "cvpartition: {label} must be a positive integer scalar"
         )));
@@ -1098,9 +1135,13 @@ fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
         Value::Num(number) if (*number - 0.0).abs() <= EPS || (*number - 1.0).abs() <= EPS => {
             Ok((*number - 1.0).abs() <= EPS)
         }
-        Value::Int(integer) if integer.to_f64() == 0.0 || integer.to_f64() == 1.0 => {
-            Ok(integer.to_f64() == 1.0)
-        }
+        Value::Int(integer) => match integer.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(invalid_argument(format!(
+                "cvpartition: {label} must be logical scalar"
+            ))),
+        },
         Value::String(text)
             if text.eq_ignore_ascii_case("true") || text.eq_ignore_ascii_case("false") =>
         {
@@ -1378,5 +1419,47 @@ mod tests {
         );
         assert_eq!(all_train.data[1], 0);
         assert_eq!(all_train.data[6], 0);
+    }
+
+    #[test]
+    fn typed_integer_partition_counts_and_indices_are_exact() {
+        let input =
+            PartitionInput::from_value(Value::Int(runmat_builtins::IntValue::U16(6))).unwrap();
+        assert_eq!(input.n, 6);
+        assert_eq!(
+            positive_integer(&Value::Int(runmat_builtins::IntValue::U8(3)), "KFold").unwrap(),
+            3
+        );
+        assert_eq!(
+            holdout_count(&Value::Int(runmat_builtins::IntValue::U8(2)), 6).unwrap(),
+            2
+        );
+        assert_eq!(
+            selected_indices(&Value::Int(runmat_builtins::IntValue::U8(3)), 3).unwrap(),
+            vec![2]
+        );
+
+        let partition = cv(
+            Value::Int(runmat_builtins::IntValue::U16(6)),
+            Value::from("KFold"),
+            vec![Value::Int(runmat_builtins::IntValue::U8(3))],
+        );
+        let selected = logical_output(
+            block_on(test_builtin(
+                partition,
+                vec![Value::Int(runmat_builtins::IntValue::U8(3))],
+            ))
+            .unwrap(),
+        );
+        assert_eq!(selected.shape, vec![6, 1]);
+
+        for value in [
+            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(positive_integer(&value, "KFold").is_err());
+        }
+        assert!(selected_indices(&Value::Int(runmat_builtins::IntValue::I8(-1)), 3).is_err());
     }
 }
