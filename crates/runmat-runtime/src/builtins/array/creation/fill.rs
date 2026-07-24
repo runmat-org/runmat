@@ -6,7 +6,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -595,7 +595,14 @@ fn fill_like(fill: &FillScalar, shape: &[usize], proto: &Value) -> Result<Value,
         Value::LogicalArray(_) | Value::Bool(_) => fill_logical(fill, shape),
         Value::ComplexTensor(_) | Value::Complex(_, _) => fill_complex(fill, shape),
         Value::GpuTensor(handle) => fill_like_gpu(fill, shape, handle),
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => fill_double(fill, shape),
+        Value::Tensor(tensor) => match tensor.integer_storage() {
+            Some(storage) => fill_integer_like(fill, shape, storage),
+            None => fill_double(fill, shape),
+        },
+        Value::Int(value) => {
+            fill_integer_like(fill, shape, &IntegerStorage::from_scalar(value.clone()))
+        }
+        Value::Num(_) => fill_double(fill, shape),
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) | Value::Cell(_) => {
             Err("fill: character, string, and cell prototypes are not supported yet".to_string())
         }
@@ -604,6 +611,20 @@ fn fill_like(fill: &FillScalar, shape: &[usize], proto: &Value) -> Result<Value,
             other
         )),
     }
+}
+
+fn fill_integer_like(
+    fill: &FillScalar,
+    shape: &[usize],
+    prototype: &IntegerStorage,
+) -> Result<Value, String> {
+    let value = fill.as_real()?;
+    let tensor = tensor::integer_tensor_from_f64_like(
+        prototype,
+        vec![value; tensor::element_count(shape)],
+        shape,
+    )?;
+    Ok(tensor::tensor_into_value(tensor))
 }
 
 fn fill_like_gpu(
@@ -788,6 +809,52 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fill_like_preserves_every_exact_integer_class() {
+        let prototypes = [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ];
+
+        for storage in prototypes {
+            let expected = storage
+                .from_same_class_values(vec![storage.cast_f64_assignment(2.5); 4])
+                .expect("expected integer storage");
+            let prototype = Tensor::new_integer(storage, vec![1, 1]).expect("integer prototype");
+            let result = block_on(fill_builtin(
+                Value::Num(2.5),
+                vec![
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::Tensor(prototype),
+                ],
+            ))
+            .expect("fill");
+            let output = test_support::gather(result).expect("gather");
+            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+
+        let scalar = Value::Int(runmat_builtins::IntValue::U64(u64::MAX));
+        let result = block_on(fill_builtin(
+            Value::Num(1.0),
+            vec![Value::Num(2.0), Value::from("like"), scalar],
+        ))
+        .expect("fill");
+        let output = test_support::gather(result).expect("gather");
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1, 1, 1, 1]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
