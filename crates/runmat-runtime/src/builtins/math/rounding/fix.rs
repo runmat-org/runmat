@@ -155,7 +155,9 @@ async fn fix_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 fn fix_numeric(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Num(n) => Ok(Value::Num(fix_scalar(n))),
-        Value::Int(i) => Ok(Value::Num(fix_scalar(i.to_f64()))),
+        // MATLAB integer values are already integral. Preserve their exact
+        // class and bits instead of routing 64-bit values through f64.
+        Value::Int(i) => Ok(Value::Int(i)),
         Value::Bool(b) => Ok(Value::Num(fix_scalar(if b { 1.0 } else { 0.0 }))),
         Value::Tensor(t) => fix_tensor(t).map(tensor::tensor_into_value),
         other => {
@@ -343,13 +345,12 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn fix_int_value_promotes() {
-        let value = Value::Int(IntValue::I32(-42));
-        let result = fix_builtin(value).expect("fix");
-        match result {
-            Value::Num(v) => assert_eq!(v, -42.0),
-            other => panic!("expected scalar result, got {other:?}"),
-        }
+    fn fix_integer_scalars_preserve_class_and_exact_64_bit_values() {
+        let signed = Value::Int(IntValue::I64(i64::MIN));
+        assert_eq!(fix_builtin(signed.clone()).expect("fix"), signed);
+
+        let unsigned = Value::Int(IntValue::U64(u64::MAX));
+        assert_eq!(fix_builtin(unsigned.clone()).expect("fix"), unsigned);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

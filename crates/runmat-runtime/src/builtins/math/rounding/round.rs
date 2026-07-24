@@ -256,7 +256,9 @@ async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinR
 fn round_numeric(value: Value, strategy: RoundStrategy) -> BuiltinResult<Value> {
     match value {
         Value::Num(n) => Ok(Value::Num(round_scalar(n, strategy))),
-        Value::Int(i) => Ok(Value::Num(round_scalar(i.to_f64(), strategy))),
+        // MATLAB integer values are already integral. Preserve their exact
+        // class and bits instead of routing 64-bit values through f64.
+        Value::Int(i) => Ok(Value::Int(i)),
         Value::Bool(b) => Ok(Value::Num(round_scalar(
             if b { 1.0 } else { 0.0 },
             strategy,
@@ -503,6 +505,22 @@ pub(crate) mod tests {
             Value::Num(v) => assert_eq!(v, -3.0),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn round_integer_scalars_preserve_class_and_exact_64_bit_values() {
+        let signed = Value::Int(IntValue::I64(i64::MIN));
+        assert_eq!(
+            round_builtin(signed.clone(), Vec::new()).expect("round"),
+            signed
+        );
+
+        let unsigned = Value::Int(IntValue::U64(u64::MAX));
+        assert_eq!(
+            round_builtin(unsigned.clone(), Vec::new()).expect("round"),
+            unsigned
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
