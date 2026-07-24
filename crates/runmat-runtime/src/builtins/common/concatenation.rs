@@ -201,7 +201,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 }
                 Value::Int(i) => {
                     let sa =
-                        runmat_builtins::StringArray::new(vec![i.to_i64().to_string()], vec![1, 1])
+                        runmat_builtins::StringArray::new(vec![i.decimal_string()], vec![1, 1])
                             .unwrap();
                     if rows.is_none() {
                         rows = Some(1);
@@ -469,7 +469,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 }
                 Value::Int(i) => {
                     let sa =
-                        runmat_builtins::StringArray::new(vec![i.to_i64().to_string()], vec![1, 1])
+                        runmat_builtins::StringArray::new(vec![i.decimal_string()], vec![1, 1])
                             .unwrap();
                     rows_total += 1;
                     if cols.is_none() {
@@ -741,5 +741,27 @@ mod tests {
         } else {
             panic!("Expected matrix result");
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_concatenation_preserves_exact_uint64_scalar_text() {
+        let maximum = Value::Int(runmat_builtins::IntValue::U64(u64::MAX));
+
+        let Value::StringArray(horizontal) =
+            hcat_values(&[Value::String("id".to_string()), maximum.clone()]).expect("hcat")
+        else {
+            panic!("expected string array");
+        };
+        assert_eq!(horizontal.shape, vec![1, 2]);
+        assert_eq!(horizontal.data, vec!["id", "18446744073709551615"]);
+
+        let Value::StringArray(vertical) =
+            vcat_values(&[Value::String("id".to_string()), maximum]).expect("vcat")
+        else {
+            panic!("expected string array");
+        };
+        assert_eq!(vertical.shape, vec![2, 1]);
+        assert_eq!(vertical.data, vec!["id", "18446744073709551615"]);
     }
 }

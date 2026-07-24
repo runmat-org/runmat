@@ -32,6 +32,7 @@ use crate::analysis::{
     AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendsQuery,
     FeaResolvedDocument,
 };
+use crate::builtins::common::json::int_value_to_json;
 use crate::builtins::geometry::{GEOMETRY_ASSET_CLASS, GEOMETRY_ASSET_JSON_PROPERTY};
 use crate::builtins::io::json::jsondecode::value_from_json;
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
@@ -2842,7 +2843,7 @@ fn canonical_field_name(text: &str) -> String {
 fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_json::Value> {
     match value {
         Value::Num(n) => json_number(builtin, *n),
-        Value::Int(i) => Ok(serde_json::Value::Number(i.to_i64().into())),
+        Value::Int(i) => Ok(int_value_to_json(i)),
         Value::Bool(b) => Ok(serde_json::Value::Bool(*b)),
         Value::String(s) => Ok(serde_json::Value::String(s.clone())),
         Value::CharArray(chars) if chars.rows == 1 => {
@@ -2859,14 +2860,24 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
                 .map(serde_json::Value::String)
                 .collect(),
         )),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => json_number(builtin, tensor.data[0]),
-        Value::Tensor(tensor) => Ok(serde_json::Value::Array(
-            tensor
+        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.integer_storage() {
+            Some(storage) => Ok(int_value_to_json(
+                &storage.value_at(0).expect("integer storage index is valid"),
+            )),
+            None => json_number(builtin, tensor.data[0]),
+        },
+        Value::Tensor(tensor) => Ok(serde_json::Value::Array(match tensor.integer_storage() {
+            Some(storage) => storage
+                .exact_values()
+                .iter()
+                .map(int_value_to_json)
+                .collect(),
+            None => tensor
                 .data
                 .iter()
                 .map(|value| json_number(builtin, *value))
                 .collect::<BuiltinResult<Vec<_>>>()?,
-        )),
+        })),
         Value::Cell(cell) => Ok(serde_json::Value::Array(
             cell.data
                 .iter()
@@ -3582,6 +3593,29 @@ mod tests {
 
     fn moment_vector() -> Value {
         Value::Tensor(Tensor::new_2d(vec![10.0, 20.0, 30.0], 1, 3).expect("tensor should build"))
+    }
+
+    #[test]
+    fn fea_json_preserves_native_integer_scalars_and_tensors() {
+        let maximum = runmat_builtins::IntValue::U64(u64::MAX);
+        assert_eq!(
+            value_to_json(INTERFACE_NAME, &Value::Int(maximum.clone()))
+                .expect("scalar json")
+                .to_string(),
+            maximum.decimal_string()
+        );
+
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![42, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("tensor");
+        assert_eq!(
+            value_to_json(INTERFACE_NAME, &Value::Tensor(tensor))
+                .expect("tensor json")
+                .to_string(),
+            "[42,18446744073709551615]"
+        );
     }
 
     #[test]

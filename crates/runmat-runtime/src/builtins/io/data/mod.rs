@@ -12,6 +12,7 @@ use runmat_builtins::{
 use runmat_filesystem::data_contract::{DataChunkDescriptor, DataChunkUploadRequest};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::json::int_value_to_json;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -3046,7 +3047,7 @@ fn value_to_json(value: &Value) -> serde_json::Value {
         Value::String(s) => serde_json::Value::String(s.clone()),
         Value::CharArray(ca) => serde_json::Value::String(ca.to_string()),
         Value::Num(n) => serde_json::json!(n),
-        Value::Int(i) => serde_json::json!(i.to_i64()),
+        Value::Int(i) => int_value_to_json(i),
         Value::Bool(b) => serde_json::json!(b),
         _ => serde_json::Value::String(format!("{value:?}")),
     }
@@ -3101,6 +3102,17 @@ mod tests {
 
     fn native_provider_guard() -> runmat_filesystem::ProviderGuard {
         runmat_filesystem::replace_provider(Arc::new(NativeFsProvider))
+    }
+
+    #[test]
+    fn attribute_json_preserves_native_integer_text() {
+        for value in [
+            runmat_builtins::IntValue::I64(i64::MIN),
+            runmat_builtins::IntValue::U64(u64::MAX),
+        ] {
+            let json = value_to_json(&Value::Int(value.clone()));
+            assert_eq!(json.to_string(), value.decimal_string());
+        }
     }
 
     #[test]
