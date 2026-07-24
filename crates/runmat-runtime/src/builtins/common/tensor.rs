@@ -40,6 +40,25 @@ pub fn ones_with_dtype(shape: &[usize], dtype: NumericDType) -> Result<Tensor, S
         .map_err(|e| format!("tensor ones: {e}"))
 }
 
+/// Converts floating-point values to an exact integer tensor using the
+/// prototype class's MATLAB assignment semantics.
+pub fn integer_tensor_from_f64_like(
+    prototype: &IntegerStorage,
+    values: Vec<f64>,
+    shape: &[usize],
+) -> Result<Tensor, String> {
+    let storage = prototype
+        .from_same_class_values(
+            values
+                .into_iter()
+                .map(|value| prototype.cast_f64_assignment(value))
+                .collect(),
+        )
+        .map_err(|e| format!("integer tensor conversion: {e}"))?;
+    Tensor::new_integer(storage, shape.to_vec())
+        .map_err(|e| format!("integer tensor conversion: {e}"))
+}
+
 /// Convert a logical array (0/1 bytes) into a numeric tensor.
 pub fn logical_to_tensor(logical: &LogicalArray) -> Result<Tensor, String> {
     let data: Vec<f64> = logical

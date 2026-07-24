@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Value,
+    ComplexTensor, IntegerStorage, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -404,19 +404,28 @@ async fn randn_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
     match proto {
         Value::GpuTensor(handle) => randn_like_gpu(handle, shape).await,
         Value::ComplexTensor(_) | Value::Complex(_, _) => randn_complex(shape),
-        Value::Tensor(t) => match t.dtype {
-            NumericDType::F32 => randn_single(shape),
-            NumericDType::F64 => randn_double(shape),
-            NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => randn_double(shape),
+        Value::Tensor(t) => match t.integer_storage() {
+            Some(storage) => randn_integer_like(storage, shape),
+            None => match t.dtype {
+                NumericDType::F32 => randn_single(shape),
+                NumericDType::F64 => randn_double(shape),
+                NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => randn_double(shape),
+            },
         },
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => {
-            randn_double(shape)
-        }
+        Value::Int(value) => randn_integer_like(&IntegerStorage::from_scalar(value.clone()), shape),
+        Value::Num(_) | Value::Bool(_) | Value::LogicalArray(_) => randn_double(shape),
         Value::CharArray(_) | Value::Cell(_) => randn_double(shape),
         other => Err(builtin_error(format!(
             "randn: unsupported prototype {other:?}"
         ))),
     }
+}
+
+fn randn_integer_like(storage: &IntegerStorage, shape: &[usize]) -> crate::BuiltinResult<Value> {
+    let data = random::generate_normal(tensor::element_count(shape), "randn")?;
+    let tensor = tensor::integer_tensor_from_f64_like(storage, data, shape)
+        .map_err(|e| builtin_error(format!("randn: {e}")))?;
+    Ok(tensor::tensor_into_value(tensor))
 }
 
 fn randn_complex(shape: &[usize]) -> crate::BuiltinResult<Value> {
@@ -464,6 +473,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
     use futures::executor::block_on;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     fn reset_rng_clean() {
         runmat_accelerate_api::clear_provider();
@@ -593,6 +603,60 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn randn_like_preserves_every_exact_integer_class() {
+        let _guard = random::test_lock().lock().unwrap();
+        let storages = vec![
+            IntegerStorage::I8(vec![i8::MIN]),
+            IntegerStorage::I16(vec![i16::MIN]),
+            IntegerStorage::I32(vec![i32::MIN]),
+            IntegerStorage::I64(vec![i64::MIN]),
+            IntegerStorage::U8(vec![u8::MAX]),
+            IntegerStorage::U16(vec![u16::MAX]),
+            IntegerStorage::U32(vec![u32::MAX]),
+            IntegerStorage::U64(vec![u64::MAX]),
+        ];
+
+        for storage in storages {
+            reset_rng_clean();
+            let expected = storage
+                .from_same_class_values(
+                    random::expected_normal_sequence(2)
+                        .into_iter()
+                        .map(|value| storage.cast_f64_assignment(value))
+                        .collect(),
+                )
+                .expect("expected storage");
+            let prototype = Tensor::new_integer(storage, vec![1, 1]).expect("prototype");
+            let result = block_on(randn_builtin(vec![
+                Value::Num(1.0),
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::Tensor(prototype),
+            ]))
+            .expect("randn like");
+            let Value::Tensor(output) = result else {
+                panic!("expected integer tensor");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+
+        reset_rng_clean();
+        let result = block_on(randn_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::Int(IntValue::I64(i64::MAX)),
+        ]))
+        .expect("integer scalar prototype");
+        let Value::Tensor(output) = result else {
+            panic!("expected int64 tensor");
+        };
+        assert!(matches!(
+            output.integer_storage(),
+            Some(IntegerStorage::I64(_))
+        ));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
