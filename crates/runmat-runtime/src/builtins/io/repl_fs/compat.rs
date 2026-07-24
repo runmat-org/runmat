@@ -1248,7 +1248,16 @@ impl MemmapFormat {
 fn shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Num(v) if *v > 0.0 && v.is_finite() => Ok(vec![*v as usize, 1]),
-        Value::Int(v) if v.to_i64() > 0 => Ok(vec![v.to_i64() as usize, 1]),
+        Value::Int(v) => v
+            .try_to_usize()
+            .filter(|size| *size > 0)
+            .map(|size| vec![size, 1])
+            .ok_or_else(|| {
+                compat_error(
+                    "memmapfile",
+                    "memmapfile: Format shape must be a positive numeric vector",
+                )
+            }),
         Value::Tensor(tensor) => {
             let mut shape = Vec::with_capacity(tensor.data.len());
             for value in &tensor.data {
@@ -1375,7 +1384,9 @@ fn read_typed_value(dtype: &str, bytes: &[u8]) -> BuiltinResult<f64> {
 fn numeric_usize(value: &Value, name: &str, arg: &str) -> BuiltinResult<usize> {
     match value {
         Value::Num(v) if *v >= 0.0 && v.is_finite() => Ok(*v as usize),
-        Value::Int(v) if v.to_i64() >= 0 => Ok(v.to_i64() as usize),
+        Value::Int(v) => v.try_to_usize().ok_or_else(|| {
+            compat_error(name, format!("{name}: {arg} must be a nonnegative integer"))
+        }),
         _ => Err(compat_error(
             name,
             format!("{name}: {arg} must be a nonnegative integer"),
@@ -1562,6 +1573,31 @@ mod tests {
             Some(&IntegerStorage::U16(vec![1, 2]))
         );
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn memmapfile_typed_shape_offset_and_repeat_parsers_are_exact() {
+        use runmat_builtins::IntValue;
+
+        assert_eq!(
+            shape_from_value(&Value::Int(IntValue::U16(7))).unwrap(),
+            vec![7, 1]
+        );
+        assert!(shape_from_value(&Value::Int(IntValue::I8(-1))).is_err());
+        assert!(shape_from_value(&Value::Int(IntValue::U8(0))).is_err());
+
+        assert_eq!(
+            numeric_usize(&Value::Int(IntValue::U16(64)), "memmapfile", "Offset").unwrap(),
+            64
+        );
+        assert!(numeric_usize(&Value::Int(IntValue::I8(-1)), "memmapfile", "Offset").is_err());
+
+        let maximum = numeric_usize(&Value::Int(IntValue::U64(u64::MAX)), "memmapfile", "Repeat");
+        if usize::BITS == 64 {
+            assert_eq!(maximum.unwrap(), usize::MAX);
+        } else {
+            assert!(maximum.is_err());
+        }
     }
 
     #[test]
