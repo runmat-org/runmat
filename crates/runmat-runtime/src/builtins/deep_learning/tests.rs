@@ -1148,6 +1148,26 @@ fn dlarray_preserves_data_and_format_labels() {
 }
 
 #[test]
+fn dlarray_rejects_every_exact_integer_storage_class() {
+    let storages = [
+        runmat_builtins::IntegerStorage::I8(vec![1]),
+        runmat_builtins::IntegerStorage::I16(vec![1]),
+        runmat_builtins::IntegerStorage::I32(vec![1]),
+        runmat_builtins::IntegerStorage::I64(vec![1]),
+        runmat_builtins::IntegerStorage::U8(vec![1]),
+        runmat_builtins::IntegerStorage::U16(vec![1]),
+        runmat_builtins::IntegerStorage::U32(vec![1]),
+        runmat_builtins::IntegerStorage::U64(vec![1]),
+    ];
+
+    for storage in storages {
+        let data = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+        let error = block_on(dlarray_builtin(data, vec![])).expect_err("integer dlarray error");
+        assert!(error.message().contains("integer data is not supported"));
+    }
+}
+
+#[test]
 fn dlarray_preserves_gpu_array_residency() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();

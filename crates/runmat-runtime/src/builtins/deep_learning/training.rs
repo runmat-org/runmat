@@ -96,6 +96,7 @@ fn canonical_training_option(name: &str) -> String {
 )]
 pub(super) async fn dlarray_builtin(data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_dlarray_class_registered();
+    validate_dlarray_data(&data)?;
     let gathered = gather_args(rest).await?;
     if gathered.len() > 1 {
         return Err(deep_learning_error(
@@ -112,6 +113,18 @@ pub(super) async fn dlarray_builtin(data: Value, rest: Vec<Value>) -> BuiltinRes
             ("Labels", Value::String(format)),
         ],
     ))
+}
+
+fn validate_dlarray_data(data: &Value) -> BuiltinResult<()> {
+    if matches!(data, Value::Int(_))
+        || matches!(data, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+    {
+        return Err(deep_learning_error(
+            "dlarray",
+            "dlarray: integer data is not supported; use double, single, logical, or gpuArray data",
+        ));
+    }
+    Ok(())
 }
 
 #[runtime_builtin(
