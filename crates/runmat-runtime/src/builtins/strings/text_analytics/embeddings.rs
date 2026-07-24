@@ -1152,17 +1152,19 @@ fn embedding_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResul
             ));
         }
     };
-    let dimension = match object.properties.get("Dimension") {
-        Some(Value::Num(value)) if value.is_finite() && *value >= 1.0 => *value as usize,
-        other => {
-            return Err(embedding_error(
+    let dimension = object
+        .properties
+        .get("Dimension")
+        .and_then(positive_dimension)
+        .ok_or_else(|| {
+            let value = object.properties.get("Dimension");
+            embedding_error(
                 fn_name,
                 format!(
-                    "{fn_name}: wordEmbedding object has invalid Dimension property: {other:?}"
+                    "{fn_name}: wordEmbedding object has invalid Dimension property: {value:?}"
                 ),
-            ));
-        }
-    };
+            )
+        })?;
     let vectors = match object.properties.get(VECTOR_PROPERTY) {
         Some(Value::Tensor(tensor))
             if tensor.rows == vocabulary.len() && tensor.cols == dimension =>
@@ -1181,6 +1183,24 @@ fn embedding_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResul
         vectors,
         dimension,
     })
+}
+
+fn positive_dimension(value: &Value) -> Option<usize> {
+    match value {
+        Value::Num(value) => positive_platform_usize(*value),
+        Value::Int(value) => value.try_to_usize().filter(|value| *value > 0),
+        _ => None,
+    }
+}
+
+fn positive_platform_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
 }
 
 pub(in crate::builtins::strings::text_analytics) fn word_embedding_vocabulary_from_object(
@@ -2629,6 +2649,33 @@ mod tests {
         };
         assert!(object.is_class(WORD_EMBEDDING_CLASS));
         assert_eq!(object.properties.get("Dimension"), Some(&Value::Num(2.0)));
+    }
+
+    #[test]
+    fn embedding_dimension_metadata_requires_exact_positive_platform_integers() {
+        let Value::Object(mut object) = embedding_object(EmbeddingModel {
+            vocabulary: vec!["alpha".into()],
+            vectors: vec![1.0, 2.0],
+            dimension: 2,
+        })
+        .expect("embedding object") else {
+            panic!("expected wordEmbedding object");
+        };
+
+        object.properties.insert(
+            "Dimension".to_string(),
+            Value::Int(runmat_builtins::IntValue::U16(2)),
+        );
+        assert_eq!(embedding_from_object(&object, "test").unwrap().dimension, 2);
+
+        for value in [
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+            Value::Int(runmat_builtins::IntValue::I8(-1)),
+        ] {
+            object.properties.insert("Dimension".to_string(), value);
+            assert!(embedding_from_object(&object, "test").is_err());
+        }
     }
 
     #[tokio::test]
