@@ -1223,4 +1223,47 @@ mod tests {
         .expect("integer path");
         assert_eq!(modulus, Value::Int(IntValue::I64(1)));
     }
+
+    #[test]
+    fn nonintegral_scalar_double_powers_round_and_preserve_integer_class() {
+        let square_root = try_integer_binary(
+            &Value::Int(IntValue::I8(2)),
+            &Value::Num(0.5),
+            IntegerBinaryOp::Power,
+            "power",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(square_root, Value::Int(IntValue::I8(1)));
+
+        let fractional = try_integer_binary(
+            &Value::Int(IntValue::I64(7)),
+            &Value::Num(2.5),
+            IntegerBinaryOp::Power,
+            "power",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(fractional, Value::Int(IntValue::I64(130)));
+
+        let complex_required = try_integer_binary(
+            &Value::Int(IntValue::I8(-1)),
+            &Value::Num(0.5),
+            IntegerBinaryOp::Power,
+            "power",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(complex_required, Value::Int(IntValue::I8(0)));
+
+        let inverse = try_integer_binary(
+            &Value::Int(IntValue::U64(7)),
+            &Value::Num(-1.0),
+            IntegerBinaryOp::Power,
+            "power",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(inverse, Value::Int(IntValue::U64(0)));
+    }
 }
