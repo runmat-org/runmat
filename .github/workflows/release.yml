@@ -273,10 +273,7 @@ jobs:
 
       - name: Install macOS native dependencies
         if: runner.os == 'macOS'
-        run: |
-          brew update
-          brew list cmake >/dev/null 2>&1 || brew install cmake
-          brew install hdf5 zeromq
+        run: bash scripts/ci-install-macos-cross-dependencies.sh "${{ matrix.platform.target }}"
 
       - name: Install Windows MSVC native dependencies
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'

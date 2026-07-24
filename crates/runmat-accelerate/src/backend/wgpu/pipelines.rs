@@ -1,6 +1,8 @@
 use crate::backend::wgpu::bindings::{storage_read_entry, storage_read_write_entry, uniform_entry};
 use crate::backend::wgpu::types::NumericPrecision;
 use std::borrow::Cow;
+use std::ops::Deref;
+use std::sync::{Arc, OnceLock};
 
 // Shader aliases
 const BINARY_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::BINARY_SHADER_F64;
@@ -218,9 +220,44 @@ const LINEAR_SCATTER_SHADER_F64: &str =
 const LINEAR_SCATTER_SHADER_F32: &str =
     crate::backend::wgpu::shaders::index_select::LINEAR_SCATTER_SHADER_F32;
 
-pub struct PipelineBundle {
+pub struct CompiledPipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
     pub layout: wgpu::BindGroupLayout,
+}
+
+/// A compute pipeline compiled on first use.
+///
+/// WGPU adapter creation is deliberately kept separate from shader compilation.
+/// Some drivers advertise a precision feature but fail while compiling a
+/// particular shader. Compiling every RunMat shader during provider startup
+/// therefore allowed an unused operation to prevent the entire provider from
+/// starting. Each operation now pays its compilation cost only when it is first
+/// invoked, and [`OnceLock`] coalesces concurrent first use.
+pub struct PipelineBundle {
+    compiled: OnceLock<CompiledPipelineBundle>,
+    device: Arc<wgpu::Device>,
+    layout_label: &'static str,
+    shader_label: &'static str,
+    pipeline_label: &'static str,
+    entries: Vec<wgpu::BindGroupLayoutEntry>,
+    shader_source: Cow<'static, str>,
+}
+
+impl Deref for PipelineBundle {
+    type Target = CompiledPipelineBundle;
+
+    fn deref(&self) -> &Self::Target {
+        self.compiled.get_or_init(|| {
+            compile_pipeline(
+                &self.device,
+                self.layout_label,
+                self.shader_label,
+                self.pipeline_label,
+                &self.entries,
+                &self.shader_source,
+            )
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -314,7 +351,7 @@ pub struct WgpuPipelines {
 
 impl WgpuPipelines {
     pub fn new(
-        device: &wgpu::Device,
+        device: &Arc<wgpu::Device>,
         precision: NumericPrecision,
         image_norm_bootstrap: ImageNormalizeBootstrap,
     ) -> Self {
@@ -1359,7 +1396,7 @@ impl WgpuPipelines {
                 storage_read_entry(3),
                 storage_read_write_entry(4),
             ],
-            &image_norm_source,
+            image_norm_source,
         );
 
         let polyval = create_pipeline(
@@ -1674,17 +1711,36 @@ fn substitute_tokens(src: &str, wg: u32, tile: u32) -> Cow<'_, str> {
     }
 }
 
-pub fn create_pipeline(
+fn create_pipeline(
+    device: &Arc<wgpu::Device>,
+    layout_label: &'static str,
+    shader_label: &'static str,
+    pipeline_label: &'static str,
+    entries: Vec<wgpu::BindGroupLayoutEntry>,
+    shader_source: impl Into<Cow<'static, str>>,
+) -> PipelineBundle {
+    PipelineBundle {
+        compiled: OnceLock::new(),
+        device: Arc::clone(device),
+        layout_label,
+        shader_label,
+        pipeline_label,
+        entries,
+        shader_source: shader_source.into(),
+    }
+}
+
+fn compile_pipeline(
     device: &wgpu::Device,
     layout_label: &str,
     shader_label: &str,
     pipeline_label: &str,
-    entries: Vec<wgpu::BindGroupLayoutEntry>,
+    entries: &[wgpu::BindGroupLayoutEntry],
     shader_source: &str,
-) -> PipelineBundle {
+) -> CompiledPipelineBundle {
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some(layout_label),
-        entries: &entries,
+        entries,
     });
     let wg = crate::backend::wgpu::config::effective_workgroup_size();
     let mt = crate::backend::wgpu::config::effective_matmul_tile();
@@ -1709,7 +1765,7 @@ pub fn create_pipeline(
         },
     );
 
-    PipelineBundle { pipeline, layout }
+    CompiledPipelineBundle { pipeline, layout }
 }
 
 pub fn create_shader_module(device: &wgpu::Device, label: &str, wgsl: &str) -> wgpu::ShaderModule {
