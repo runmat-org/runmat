@@ -350,15 +350,9 @@ fn parse_order(value: &Value) -> BuiltinResult<Option<usize>> {
         return Ok(None);
     }
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(diff_invalid_argument(
-                    "diff: order must be a non-negative integer scalar",
-                ));
-            }
-            Ok(Some(raw as usize))
-        }
+        Value::Int(i) => i.try_to_usize().map(Some).ok_or_else(|| {
+            diff_invalid_argument("diff: order must be a non-negative integer scalar")
+        }),
         Value::Num(n) => parse_numeric_order(*n).map(Some),
         Value::Tensor(t) if t.data.len() == 1 => parse_numeric_order(t.data[0]).map(Some),
         Value::Bool(b) => Ok(Some(if *b { 1 } else { 0 })),
@@ -630,6 +624,22 @@ pub(crate) mod tests {
 
     fn diff_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::diff_builtin(value, rest))
+    }
+
+    #[test]
+    fn diff_typed_order_parser_preserves_platform_uint64_range() {
+        assert_eq!(
+            parse_order(&Value::Int(IntValue::U64(3))).expect("order"),
+            Some(3)
+        );
+        match usize::try_from(u64::MAX) {
+            Ok(expected) => assert_eq!(
+                parse_order(&Value::Int(IntValue::U64(u64::MAX))).expect("uint64 order"),
+                Some(expected)
+            ),
+            Err(_) => assert!(parse_order(&Value::Int(IntValue::U64(u64::MAX))).is_err()),
+        }
+        assert!(parse_order(&Value::Int(IntValue::I64(-1))).is_err());
     }
 
     #[test]

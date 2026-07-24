@@ -448,9 +448,9 @@ fn parse_normalization(value: &Value) -> BuiltinResult<NormParse> {
         } else {
             VarNormalization::Sample
         })),
-        Value::Int(i) => match i.to_i64() {
-            0 => Ok(NormParse::Value(VarNormalization::Sample)),
-            1 => Ok(NormParse::Value(VarNormalization::Population)),
+        Value::Int(i) => match i.try_to_u64() {
+            Some(0) => Ok(NormParse::Value(VarNormalization::Sample)),
+            Some(1) => Ok(NormParse::Value(VarNormalization::Population)),
             _ => Err(var_invalid_argument(
                 "var: normalisation flag must be 0, 1, or []",
             )),
@@ -841,6 +841,20 @@ pub(crate) mod tests {
 
     fn var_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::var_builtin(value, rest))
+    }
+
+    #[test]
+    fn var_typed_normalization_requires_exact_zero_or_one() {
+        assert!(matches!(
+            parse_normalization(&Value::Int(IntValue::U64(0))),
+            Ok(NormParse::Value(VarNormalization::Sample))
+        ));
+        assert!(matches!(
+            parse_normalization(&Value::Int(IntValue::U64(1))),
+            Ok(NormParse::Value(VarNormalization::Population))
+        ));
+        assert!(parse_normalization(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+        assert!(parse_normalization(&Value::Int(IntValue::I64(-1))).is_err());
     }
 
     #[test]

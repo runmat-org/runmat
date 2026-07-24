@@ -386,7 +386,9 @@ fn parse_digits(value: &Value) -> BuiltinResult<i32> {
     let err =
         || builtin_error_with_detail(&ROUND_ERROR_INVALID_DIGITS, "N must be an integer scalar");
     let raw = match value {
-        Value::Int(i) => i.to_i64(),
+        Value::Int(i) => i.try_to_i64().ok_or_else(|| {
+            builtin_error_with_detail(&ROUND_ERROR_INVALID_DIGITS, "integer overflow in N")
+        })?,
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(err());
@@ -461,6 +463,15 @@ pub(crate) mod tests {
             "unexpected error: {}",
             err.message()
         );
+    }
+
+    #[test]
+    fn round_typed_digit_parser_rejects_unrepresentable_uint64() {
+        assert_eq!(
+            parse_digits(&Value::Int(IntValue::I32(-3))).expect("digits"),
+            -3
+        );
+        assert!(parse_digits(&Value::Int(IntValue::U64(u64::MAX))).is_err());
     }
 
     #[test]
