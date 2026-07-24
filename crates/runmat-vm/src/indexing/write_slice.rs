@@ -3,6 +3,7 @@ use crate::indexing::integer_assignment::{
 };
 use crate::indexing::plan::IndexPlan;
 use crate::interpreter::errors::mex;
+use runmat_accelerate_api::{HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView};
 use runmat_builtins::{
     ComplexTensor, IntegerComplexStorage, IntegerStorage, SparseTensor, StringArray, Tensor, Value,
 };
@@ -462,76 +463,13 @@ pub(crate) async fn materialize_integer_rhs_for_plan(
             plan.indices.len()
         ]),
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
-            let values = integer_assignment::values(
-                tensor
-                    .integer_storage()
-                    .expect("integer RHS must retain exact storage"),
-            );
-            if plan.dims == 1 {
-                if values.len() == plan.indices.len() {
-                    return Ok(values
-                        .into_iter()
-                        .map(IntegerAssignmentValue::Exact)
-                        .collect());
-                }
-                if values.len() == 1 {
-                    return Ok(vec![
-                        IntegerAssignmentValue::Exact(values[0].clone());
-                        plan.indices.len()
-                    ]);
-                }
-                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-            }
-
-            let dims = plan.selection_lengths.len();
-            let mut shape = tensor.shape.clone();
-            if shape.len() < dims {
-                shape.resize(dims, 1);
-            }
-            if shape.len() > dims {
-                if shape.iter().skip(dims).any(|&dimension| dimension != 1) {
-                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-                }
-                shape.truncate(dims);
-            }
-            for (&rhs_len, &selection_len) in shape.iter().zip(&plan.selection_lengths) {
-                if rhs_len != 1 && rhs_len != selection_len {
-                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-                }
-            }
-            let expected = shape
-                .iter()
-                .copied()
-                .fold(1usize, |acc, length| acc.saturating_mul(length.max(1)));
-            if values.len() != expected {
-                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-            }
-            let mut strides = vec![1usize; dims];
-            for dimension in 1..dims {
-                strides[dimension] = strides[dimension - 1] * shape[dimension - 1].max(1);
-            }
-            let mut output = Vec::with_capacity(plan.indices.len());
-            let mut coordinates = vec![0usize; dims];
-            for _ in 0..plan.indices.len() {
-                let mut rhs_index = 0usize;
-                for dimension in 0..dims {
-                    let coordinate = if shape[dimension] == 1 {
-                        0
-                    } else {
-                        coordinates[dimension]
-                    };
-                    rhs_index += coordinate * strides[dimension];
-                }
-                output.push(IntegerAssignmentValue::Exact(values[rhs_index].clone()));
-                for dimension in 0..dims {
-                    coordinates[dimension] += 1;
-                    if coordinates[dimension] < plan.selection_lengths[dimension].max(1) {
-                        break;
-                    }
-                    coordinates[dimension] = 0;
-                }
-            }
-            Ok(output)
+            materialize_integer_tensor_rhs_for_plan(tensor, plan)
+        }
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() =>
+        {
+            let tensor = download_integer_tensor(handle).await?;
+            materialize_integer_tensor_rhs_for_plan(&tensor, plan)
         }
         Value::OutputList(values) => {
             if values.len() == plan.indices.len() {
@@ -551,6 +489,27 @@ pub(crate) async fn materialize_integer_rhs_for_plan(
                     .collect()
             }),
     }
+}
+
+fn materialize_integer_tensor_rhs_for_plan(
+    tensor: &Tensor,
+    plan: &IndexPlan,
+) -> Result<Vec<IntegerAssignmentValue>, RuntimeError> {
+    let values = integer_assignment::values(
+        tensor
+            .integer_storage()
+            .expect("integer RHS must retain exact storage"),
+    );
+    integer_gpu_rhs_indices_for_plan(&tensor.shape, plan)?
+        .into_iter()
+        .map(|index| {
+            values
+                .get(index as usize)
+                .cloned()
+                .map(IntegerAssignmentValue::Exact)
+                .ok_or_else(|| mex("ShapeMismatch", "shape mismatch for slice assign"))
+        })
+        .collect()
 }
 
 async fn materialize_complex_integer_rhs_for_plan(
@@ -1019,6 +978,47 @@ pub async fn assign_gpu_slice_with_plan(
             "No acceleration provider registered",
         )
     })?;
+    if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+        if let Value::GpuTensor(rhs_handle) = rhs {
+            if runmat_accelerate_api::handle_integer_type(rhs_handle)
+                == runmat_accelerate_api::handle_integer_type(handle)
+            {
+                if let Ok(rhs_indices) = integer_gpu_rhs_indices_for_plan(&rhs_handle.shape, plan) {
+                    let reuses_rhs = rhs_indices
+                        .iter()
+                        .enumerate()
+                        .all(|(index, &rhs_index)| rhs_index as usize == index);
+                    let values = if reuses_rhs {
+                        rhs_handle.clone()
+                    } else {
+                        provider
+                            .gather_linear(rhs_handle, &rhs_indices, &plan.output_shape)
+                            .map_err(|e| {
+                                map_acceleration_error(
+                                    "expand exact integer gpuArray assignment rhs",
+                                    e,
+                                )
+                            })?
+                    };
+                    let result = provider
+                        .scatter_linear(handle, &plan.indices, &values)
+                        .map_err(|e| {
+                            map_acceleration_error("exact integer gpuArray slice assignment", e)
+                        });
+                    if !reuses_rhs {
+                        let _ = provider.free(&values);
+                    }
+                    result?;
+                    return Ok(Value::GpuTensor(handle.clone()));
+                }
+            }
+        }
+        let tensor = download_integer_tensor(handle).await?;
+        let Value::Tensor(updated) = assign_tensor_with_plan(tensor, plan, rhs).await? else {
+            unreachable!("real integer slice assignment must produce a real tensor")
+        };
+        return upload_tensor_to_gpu(&updated);
+    }
     if let Value::GpuTensor(vh) = rhs {
         let rows = plan.base_shape.first().copied().unwrap_or(1);
         let cols = plan.base_shape.get(1).copied().unwrap_or(1);
@@ -1077,6 +1077,99 @@ pub async fn assign_gpu_slice_with_plan(
         Tensor::new(host.data, host.shape).map_err(|e| map_slice_shape_error("slice assign", e))?;
     scatter_real_with_plan(&mut t, plan, &rhs_values)?;
     upload_tensor_to_gpu(&t)
+}
+
+fn integer_gpu_rhs_indices_for_plan(
+    rhs_shape: &[usize],
+    plan: &IndexPlan,
+) -> Result<Vec<u32>, RuntimeError> {
+    let rhs_len = rhs_shape.iter().try_fold(1usize, |len, dimension| {
+        len.checked_mul(*dimension)
+            .ok_or_else(|| mex("ShapeMismatch", "shape mismatch for slice assign"))
+    })?;
+    if plan.dims == 1 {
+        if rhs_len == plan.indices.len() {
+            return (0..rhs_len)
+                .map(|index| {
+                    u32::try_from(index).map_err(|_| {
+                        mex(
+                            "AccelerationOperationFailed",
+                            "GPU rhs exceeds indexing limits",
+                        )
+                    })
+                })
+                .collect();
+        }
+        if rhs_len == 1 {
+            return Ok(vec![0; plan.indices.len()]);
+        }
+        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+    }
+
+    let dims = plan.selection_lengths.len();
+    let mut shape = rhs_shape.to_vec();
+    if shape.len() < dims {
+        shape.resize(dims, 1);
+    }
+    if shape.len() > dims {
+        if shape.iter().skip(dims).any(|&dimension| dimension != 1) {
+            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+        }
+        shape.truncate(dims);
+    }
+    for (&rhs_len, &selection_len) in shape.iter().zip(&plan.selection_lengths) {
+        if rhs_len != 1 && rhs_len != selection_len {
+            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+        }
+    }
+    let expected = shape
+        .iter()
+        .try_fold(1usize, |len, dimension| {
+            len.checked_mul((*dimension).max(1))
+        })
+        .ok_or_else(|| mex("ShapeMismatch", "shape mismatch for slice assign"))?;
+    if rhs_len != expected {
+        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+    }
+    let mut strides = vec![1usize; dims];
+    for dimension in 1..dims {
+        strides[dimension] = strides[dimension - 1]
+            .checked_mul(shape[dimension - 1].max(1))
+            .ok_or_else(|| mex("ShapeMismatch", "shape mismatch for slice assign"))?;
+    }
+    let mut output = Vec::with_capacity(plan.indices.len());
+    let mut coordinates = vec![0usize; dims];
+    for _ in 0..plan.indices.len() {
+        let mut rhs_index = 0usize;
+        for dimension in 0..dims {
+            let coordinate = if shape[dimension] == 1 {
+                0
+            } else {
+                coordinates[dimension]
+            };
+            rhs_index = rhs_index
+                .checked_add(
+                    coordinate
+                        .checked_mul(strides[dimension])
+                        .ok_or_else(|| mex("ShapeMismatch", "shape mismatch for slice assign"))?,
+                )
+                .ok_or_else(|| mex("ShapeMismatch", "shape mismatch for slice assign"))?;
+        }
+        output.push(u32::try_from(rhs_index).map_err(|_| {
+            mex(
+                "AccelerationOperationFailed",
+                "GPU rhs exceeds indexing limits",
+            )
+        })?);
+        for dimension in 0..dims {
+            coordinates[dimension] += 1;
+            if coordinates[dimension] < plan.selection_lengths[dimension].max(1) {
+                break;
+            }
+            coordinates[dimension] = 0;
+        }
+    }
+    Ok(output)
 }
 
 pub async fn delete_gpu_slice_with_plan(
@@ -1345,14 +1438,65 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
             "No acceleration provider registered",
         )
     })?;
-    let view = runmat_accelerate_api::HostTensorView {
-        data: &t.data,
-        shape: &t.shape,
+    let new_h = if let Some(storage) = t.integer_storage() {
+        let view = integer_tensor_view(storage, &t.shape);
+        provider
+            .upload_integer(&view)
+            .map_err(|e| map_acceleration_error("exact integer reupload after slice assign", e))?
+    } else {
+        let view = runmat_accelerate_api::HostTensorView {
+            data: &t.data,
+            shape: &t.shape,
+        };
+        provider
+            .upload(&view)
+            .map_err(|e| map_acceleration_error("reupload after slice assign", e))?
     };
-    let new_h = provider
-        .upload(&view)
-        .map_err(|e| map_acceleration_error("reupload after slice assign", e))?;
     Ok(Value::GpuTensor(new_h))
+}
+
+pub(crate) async fn download_integer_tensor(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+) -> Result<Tensor, RuntimeError> {
+    let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
+        mex(
+            "AccelerationProviderUnavailable",
+            "No acceleration provider registered for integer gpuArray",
+        )
+    })?;
+    let integer = provider
+        .download_integer(handle)
+        .await
+        .map_err(|e| map_acceleration_error("exact integer gather for assignment", e))?;
+    let storage = match integer.data {
+        HostIntegerDataOwned::I8(values) => IntegerStorage::I8(values),
+        HostIntegerDataOwned::I16(values) => IntegerStorage::I16(values),
+        HostIntegerDataOwned::I32(values) => IntegerStorage::I32(values),
+        HostIntegerDataOwned::I64(values) => IntegerStorage::I64(values),
+        HostIntegerDataOwned::U8(values) => IntegerStorage::U8(values),
+        HostIntegerDataOwned::U16(values) => IntegerStorage::U16(values),
+        HostIntegerDataOwned::U32(values) => IntegerStorage::U32(values),
+        HostIntegerDataOwned::U64(values) => IntegerStorage::U64(values),
+    };
+    Tensor::new_integer(storage, integer.shape)
+        .map_err(|e| map_slice_shape_error("integer gpuArray assignment gather", e))
+}
+
+fn integer_tensor_view<'a>(
+    storage: &'a IntegerStorage,
+    shape: &'a [usize],
+) -> HostIntegerTensorView<'a> {
+    let data = match storage {
+        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+    };
+    HostIntegerTensorView { data, shape }
 }
 
 #[cfg(test)]
@@ -1360,7 +1504,7 @@ mod tests {
     use super::{
         assign_complex_with_plan, assign_sparse_with_plan, assign_tensor_with_plan,
         build_complex_rhs_view, build_string_rhs_view, delete_tensor_with_plan,
-        map_acceleration_error,
+        integer_gpu_rhs_indices_for_plan, map_acceleration_error,
     };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
@@ -1405,6 +1549,39 @@ mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::I8(vec![5, 5, 6, 6]))
         );
+    }
+
+    #[test]
+    fn integer_gpu_rhs_indices_cover_exact_scalar_and_nd_broadcast_forms() {
+        let linear = IndexPlan::new(vec![5, 1, 3], vec![1, 3], vec![3], 1, vec![2, 3]);
+        assert_eq!(
+            integer_gpu_rhs_indices_for_plan(&[1, 3], &linear).expect("linear indices"),
+            vec![0, 1, 2]
+        );
+        assert_eq!(
+            integer_gpu_rhs_indices_for_plan(&[1, 1], &linear).expect("scalar indices"),
+            vec![0, 0, 0]
+        );
+
+        let nd = IndexPlan::new(
+            vec![0, 1, 2, 3, 4, 5],
+            vec![2, 3],
+            vec![2, 3],
+            2,
+            vec![2, 3],
+        );
+        assert_eq!(
+            integer_gpu_rhs_indices_for_plan(&[1, 3], &nd).expect("nd broadcast indices"),
+            vec![0, 0, 1, 1, 2, 2]
+        );
+    }
+
+    #[test]
+    fn integer_gpu_rhs_indices_reject_incompatible_shape() {
+        let plan = IndexPlan::new(vec![0, 1, 2, 3], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+        let error = integer_gpu_rhs_indices_for_plan(&[3, 1], &plan)
+            .expect_err("incompatible GPU rhs shape must fail");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
     }
 
     #[test]

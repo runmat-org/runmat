@@ -2,7 +2,8 @@ use crate::indexing::integer_assignment::{
     self, ComplexIntegerAssignmentValue, IntegerAssignmentValue,
 };
 use crate::indexing::write_slice::{
-    delete_integer_complex_storage_positions, deleted_vector_shape,
+    delete_integer_complex_storage_positions, deleted_vector_shape, download_integer_tensor,
+    upload_tensor_to_gpu,
 };
 use crate::interpreter::errors::mex;
 use runmat_builtins::{ComplexTensor, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
@@ -57,6 +58,23 @@ async fn rhs_to_integer_assignment_scalar(
             } else {
                 1.0
             }))
+        }
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() =>
+        {
+            let tensor = download_integer_tensor(handle).await?;
+            let storage = tensor
+                .integer_storage()
+                .expect("exact integer GPU gather must retain integer storage");
+            if storage.len() != 1 {
+                return Err(mex(
+                    "InvalidAssignmentRhs",
+                    "integer gpuArray assignment rhs must be scalar",
+                ));
+            }
+            Ok(IntegerAssignmentValue::Exact(integer_storage_scalar(
+                storage,
+            )))
         }
         _ => rhs_to_real_scalar(rhs)
             .await
@@ -762,6 +780,14 @@ pub async fn assign_gpu_scalar(
             "No acceleration provider registered",
         )
     })?;
+    if runmat_accelerate_api::handle_integer_type(h).is_some() {
+        let tensor = download_integer_tensor(h).await?;
+        let Value::Tensor(updated) = assign_tensor_scalar(tensor, indices, rhs, delete).await?
+        else {
+            unreachable!("real integer scalar assignment must produce a real tensor")
+        };
+        return upload_tensor_to_gpu(&updated);
+    }
     let host = provider
         .download(h)
         .await
