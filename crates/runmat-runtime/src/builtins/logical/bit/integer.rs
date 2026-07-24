@@ -614,6 +614,9 @@ fn sparse_bitcmp(
 )]
 async fn bitget_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let (value, bit, assumed) = value_bit_args(BITGET_NAME, args)?;
+    if let Value::SparseTensor(sparse) = value {
+        return sparse_bitget(sparse, bit, assumed).await;
+    }
     let input = bit_buffer_from(BITGET_NAME, value, assumed).await?;
     let positions = shift_buffer_from(bit).await?;
     let plan = BroadcastPlan::new(&input.shape, &positions.shape)
@@ -638,6 +641,42 @@ async fn bitget_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         input.output_class,
         BITGET_NAME,
     )
+}
+
+async fn sparse_bitget(
+    sparse: runmat_builtins::SparseTensor,
+    bit: Value,
+    assumed: Option<IntegerClass>,
+) -> BuiltinResult<Value> {
+    if sparse.integer_storage().is_some() {
+        return Err(error_with_detail(
+            BITGET_NAME,
+            &ERROR_INVALID_INPUT,
+            "typed sparse integer storage is a RunMat extension and is not supported by bitget",
+        ));
+    }
+    let positions = shift_buffer_from(bit).await?;
+    if positions.data.len() != 1 {
+        return Err(error_with_detail(
+            BITGET_NAME,
+            &ERROR_INVALID_INPUT,
+            "sparse bitget currently requires a scalar bit position",
+        ));
+    }
+    let class = assumed;
+    let width = class.map_or(64, IntegerClass::bit_width);
+    let position = positions.data[0];
+    if !(1..=i128::from(width)).contains(&position) {
+        return Err(error_with_detail(
+            BITGET_NAME,
+            &ERROR_INVALID_INPUT,
+            format!("bit position {position} must be between 1 and {width}"),
+        ));
+    }
+    map_sparse_real_values(&sparse, BITGET_NAME, |value| {
+        let bits = double_to_bits(BITGET_NAME, value, class)?;
+        Ok(((bits >> (position as u32 - 1)) & 1) as f64)
+    })
 }
 
 #[runtime_builtin(

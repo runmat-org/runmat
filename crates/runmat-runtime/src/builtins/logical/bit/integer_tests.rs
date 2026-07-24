@@ -261,6 +261,24 @@ fn bitget_handles_signed_bits_double_output_and_invalid_positions() {
 }
 
 #[test]
+fn bitget_sparse_double_scalar_position_preserves_sparse_storage() {
+    let sparse =
+        runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![5.0, 2.0])
+            .expect("sparse");
+    let Value::SparseTensor(output) = block_on(bitget_builtin(vec![
+        Value::SparseTensor(sparse),
+        Value::Num(1.0),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("sparse bitget") else {
+        panic!("bitget must preserve sparse storage for zero-valued implicit entries");
+    };
+    assert_eq!(output.shape(), vec![2, 2]);
+    assert_eq!(output.get(0, 0), Some(1.0));
+    assert_eq!(output.nnz(), 1);
+}
+
+#[test]
 fn bitget_is_registered_and_dispatches() {
     assert!(runmat_builtins::builtin_function_by_name(BITGET_NAME).is_some());
     assert_eq!(
