@@ -181,6 +181,16 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<LhsOptions> {
 }
 
 fn positive_usize(value: &Value, label: &str) -> BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return value
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                invalid(format!(
+                    "lhsdesign: {label} must be a positive integer scalar"
+                ))
+            });
+    }
     let number = scalar_f64(value).ok_or_else(|| {
         invalid(format!(
             "lhsdesign: {label} must be a positive integer scalar"
@@ -191,7 +201,7 @@ fn positive_usize(value: &Value, label: &str) -> BuiltinResult<usize> {
             "lhsdesign: {label} must be a positive integer scalar"
         )));
     }
-    if number > usize::MAX as f64 {
+    if number > usize::MAX as f64 || (usize::BITS == 64 && number == usize::MAX as f64) {
         return Err(invalid(format!("lhsdesign: {label} is too large")));
     }
     Ok(number as usize)
@@ -505,5 +515,16 @@ mod tests {
         ]))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:lhsdesign:InvalidArgument"));
+    }
+
+    #[test]
+    fn typed_integer_counts_are_exact_and_lossy_f64_is_rejected() {
+        assert_eq!(
+            positive_usize(&Value::Int(runmat_builtins::IntValue::U16(3)), "n").unwrap(),
+            3
+        );
+        assert!(positive_usize(&Value::Int(runmat_builtins::IntValue::I8(-1)), "n").is_err());
+        assert!(positive_usize(&Value::Num(1.5), "n").is_err());
+        assert!(positive_usize(&Value::Num(usize::MAX as f64 + 1.0), "n").is_err());
     }
 }

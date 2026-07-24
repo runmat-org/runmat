@@ -325,12 +325,23 @@ fn diagonal_page(diagonal: &[f64], dimension: usize) -> DMatrix<f64> {
 }
 
 async fn parse_n(value: &Value) -> BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return value
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| invalid("mvnrnd: n must be a positive scalar integer"));
+    }
     let tensor = value_to_tensor(value).await?;
     if tensor.data.len() != 1 {
         return Err(invalid("mvnrnd: n must be a positive scalar integer"));
     }
     let value = tensor.data[0];
-    if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 {
+    if !value.is_finite()
+        || value <= 0.0
+        || value.fract() != 0.0
+        || value > usize::MAX as f64
+        || (usize::BITS == 64 && value == usize::MAX as f64)
+    {
         return Err(invalid("mvnrnd: n must be a positive scalar integer"));
     }
     Ok(value as usize)
@@ -563,5 +574,20 @@ mod tests {
         ]))
         .expect_err("zero n should fail");
         assert_eq!(err.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn mvnrnd_typed_count_is_exact_and_lossy_f64_is_rejected() {
+        assert_eq!(
+            block_on(parse_n(&Value::Int(runmat_builtins::IntValue::U16(3)))).unwrap(),
+            3
+        );
+        for value in [
+            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(block_on(parse_n(&value)).is_err());
+        }
     }
 }
