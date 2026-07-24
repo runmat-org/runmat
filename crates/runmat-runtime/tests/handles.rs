@@ -18,16 +18,16 @@ async fn handle_identity_and_delete_impl() {
     let e = runmat_runtime::call_builtin_async("eq", &[h1.clone(), h2.clone()])
         .await
         .unwrap();
-    if let Value::Num(n) = e {
-        assert_eq!(n, 0.0);
+    if let Value::Bool(equal) = e {
+        assert!(!equal);
     } else {
         panic!();
     }
     let e2 = runmat_runtime::call_builtin_async("eq", &[h1.clone(), h1.clone()])
         .await
         .unwrap();
-    if let Value::Num(n) = e2 {
-        assert_eq!(n, 1.0);
+    if let Value::Bool(equal) = e2 {
+        assert!(equal);
     } else {
         panic!();
     }

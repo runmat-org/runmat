@@ -88,6 +88,11 @@ wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["XmlHttpRequest", "XmlHttpRequestResponseType", "Window", "TextDecoder", "DomException", "CustomEvent", "CustomEventInit", "EventTarget"] }
 getrandom = { version = "0.2", features = ["js"] }
 
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+tokio = { version = "1.36", default-features = false, features = ["macros", "rt"] }
+wgpu = "24.0.0"
+runmat-accelerate = { workspace = true, features = ["wgpu"] }
+
 [features]
 default = ["plot-core"]
 
@@ -132,17 +137,17 @@ occt-wasm-host = ["runmat-geometry-io/occt-wasm-host"]
 [dev-dependencies]
 async-trait = "0.1"
 runmat-macros = { workspace = true } 
-runmat-accelerate = { workspace = true, features = ["wgpu"] }
 matfile = "0.5.0"
 tempfile = "3.10"
 serde = { version = "1.0", features = ["derive"] }
-pollster = "0.3"
-wgpu = "0.19"
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 axum = "0.7"
 tokio = { version = "1.36", features = ["macros", "rt-multi-thread"] }
+runmat-accelerate = { workspace = true, features = ["wgpu"] }
+pollster = "0.3"
+wgpu = "0.19"
 
 [dependencies.serde_json]
 version = "1.0"

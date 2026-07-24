@@ -285,17 +285,7 @@ async fn call_builtin_async_impl(
     {
         let f = builtin.implementation;
         match (f)(args).await {
-            Ok(mut result) => {
-                // Normalize certain logical scalar results to numeric 0/1 for
-                // compatibility with legacy expectations in dispatcher tests
-                // and VM shims.
-                if matches!(name, "eq" | "ne" | "gt" | "ge" | "lt" | "le") {
-                    if let Value::Bool(flag) = result {
-                        result = Value::Num(if flag { 1.0 } else { 0.0 });
-                    }
-                }
-                return Ok(result);
-            }
+            Ok(result) => return Ok(result),
             Err(err) => {
                 if should_retry_with_gpu_gather(&err, args) {
                     match gather_args_for_retry_async(args).await {
