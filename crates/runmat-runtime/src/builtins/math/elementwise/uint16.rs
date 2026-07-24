@@ -17,7 +17,7 @@ use crate::builtins::common::{
     tensor,
 };
 use crate::builtins::math::elementwise::integer_cast::{
-    cast_complex_value, CastError, IntegerTarget,
+    cast_complex_value, cast_sparse_value, CastError, IntegerTarget,
 };
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -159,7 +159,14 @@ async fn uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             uint16_tensor_to_host(tensor)
                 .map_err(|e| uint16_error_with_detail(&UINT16_ERROR_INTERNAL, e))?,
         )),
-        Value::SparseTensor(_) => Err(conversion_error("sparse")),
+        Value::SparseTensor(sparse) => {
+            cast_sparse_value(IntegerTarget::U16, sparse).map_err(|cause| match cause {
+                CastError::Unsupported(type_name) => conversion_error(&type_name),
+                CastError::Internal(detail) => {
+                    uint16_error_with_detail(&UINT16_ERROR_INTERNAL, detail)
+                }
+            })
+        }
         Value::LogicalArray(array) => {
             let tensor = tensor::logical_to_tensor(&array)
                 .map_err(|e| uint16_error_with_detail(&UINT16_ERROR_INTERNAL, e))?;

@@ -188,7 +188,7 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
             0.0
         }))),
         Value::Tensor(tensor) => cast_tensor_value(target, tensor),
-        Value::SparseTensor(_) => Err(CastError::Unsupported("sparse".to_string())),
+        Value::SparseTensor(sparse) => cast_sparse_value(target, sparse),
         Value::LogicalArray(array) => {
             let tensor = tensor::logical_to_tensor(&array).map_err(CastError::Internal)?;
             cast_tensor_value(target, tensor)
@@ -235,6 +235,34 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
         Value::MException(_) => Err(CastError::Unsupported("MException".to_string())),
         Value::OutputList(_) => Err(CastError::Unsupported("OutputList".to_string())),
     }
+}
+
+pub(crate) fn cast_sparse_value(
+    target: IntegerTarget,
+    sparse: runmat_builtins::SparseTensor,
+) -> Result<Value, CastError> {
+    let values = match sparse.integer_storage() {
+        Some(storage) => storage
+            .exact_values()
+            .iter()
+            .map(|value| target.cast_int(value))
+            .collect(),
+        None => sparse
+            .values
+            .iter()
+            .map(|&value| target.cast_scalar(value))
+            .collect(),
+    };
+    let storage = target.storage(values);
+    runmat_builtins::SparseTensor::new_integer(
+        sparse.rows,
+        sparse.cols,
+        sparse.col_ptrs,
+        sparse.row_indices,
+        storage,
+    )
+    .map(Value::SparseTensor)
+    .map_err(CastError::Internal)
 }
 
 pub(crate) fn cast_complex_value(value: Value, target: IntegerTarget) -> Result<Value, CastError> {
@@ -366,6 +394,84 @@ mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![0, i64::MAX as u64]))
         );
+    }
+
+    #[test]
+    fn sparse_casts_preserve_structure_and_convert_every_integer_class() {
+        let sparse =
+            runmat_builtins::SparseTensor::new(3, 2, vec![0, 1, 2], vec![0, 2], vec![1.5, -2.5])
+                .expect("sparse input");
+        let cases = [
+            (IntegerTarget::I8, "int8", vec![2.0, -3.0]),
+            (IntegerTarget::I16, "int16", vec![2.0, -3.0]),
+            (IntegerTarget::I32, "int32", vec![2.0, -3.0]),
+            (IntegerTarget::I64, "int64", vec![2.0, -3.0]),
+            (IntegerTarget::U8, "uint8", vec![2.0, 0.0]),
+            (IntegerTarget::U16, "uint16", vec![2.0, 0.0]),
+            (IntegerTarget::U32, "uint32", vec![2.0, 0.0]),
+            (IntegerTarget::U64, "uint64", vec![2.0, 0.0]),
+        ];
+        for (target, class, expected) in cases {
+            let Value::SparseTensor(output) =
+                cast_sparse_value(target, sparse.clone()).expect("sparse cast")
+            else {
+                panic!("integer cast must retain sparse storage");
+            };
+            assert_eq!(output.shape(), vec![3, 2]);
+            assert_eq!(output.col_ptrs, vec![0, 1, 2]);
+            assert_eq!(output.row_indices, vec![0, 2]);
+            assert_eq!(output.values, expected);
+            assert_eq!(
+                output.integer_storage().map(IntegerStorage::class_name),
+                Some(class)
+            );
+        }
+
+        let exact = runmat_builtins::SparseTensor::new_integer(
+            1,
+            1,
+            vec![0, 1],
+            vec![0],
+            IntegerStorage::U64(vec![u64::MAX]),
+        )
+        .expect("exact sparse input");
+        let Value::SparseTensor(output) =
+            cast_sparse_value(IntegerTarget::I64, exact).expect("exact sparse cast")
+        else {
+            panic!("integer cast must retain sparse storage");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I64(vec![i64::MAX]))
+        );
+    }
+
+    #[test]
+    fn every_integer_cast_builtin_dispatches_sparse_inputs() {
+        let sparse = runmat_builtins::SparseTensor::new(2, 1, vec![0, 1], vec![1], vec![1.5])
+            .expect("sparse input");
+        for (builtin, class) in [
+            ("int8", "int8"),
+            ("int16", "int16"),
+            ("int32", "int32"),
+            ("int64", "int64"),
+            ("uint8", "uint8"),
+            ("uint16", "uint16"),
+            ("uint32", "uint32"),
+            ("uint64", "uint64"),
+        ] {
+            let Value::SparseTensor(output) =
+                crate::dispatcher::call_builtin(builtin, &[Value::SparseTensor(sparse.clone())])
+                    .expect("integer cast dispatch")
+            else {
+                panic!("{builtin} must preserve sparse storage");
+            };
+            assert_eq!(
+                output.integer_storage().map(IntegerStorage::class_name),
+                Some(class)
+            );
+            assert_eq!(output.get(1, 0), Some(2.0));
+        }
     }
 
     #[test]
