@@ -20,9 +20,9 @@ pub(crate) enum IntegerRemainderOp {
     Mod,
 }
 
-/// Applies exact MATLAB integer `rem`/`mod` semantics when both operands have
-/// native integer storage. `Ok(None)` leaves scalar-double handling to the
-/// caller's numeric path.
+/// Applies MATLAB integer `rem`/`mod` semantics when either operand has native
+/// integer storage. Same-class integer operands stay exact; scalar doubles use
+/// the integer class's arithmetic rules.
 pub(crate) fn try_integer_remainder(
     lhs: &Value,
     rhs: &Value,
@@ -71,16 +71,29 @@ fn apply_integer_remainder_scalar(
             "{builtin}: integer arrays can only be combined with scalar double or logical values"
         ));
     };
-    let Some(scalar) = exact_integer_scalar(integer.target, scalar) else {
-        return Ok(None);
-    };
+    let exact_scalar = exact_integer_scalar(integer.target, scalar);
+    if exact_scalar.is_none() && integer.target.uses_extended_scalar_precision() {
+        return Err(format!(
+            "{builtin}: nonintegral scalar-double operands for int64 and uint64 require extended-precision arithmetic"
+        ));
+    }
     let mut values = Vec::with_capacity(integer.storage.len());
     for index in 0..integer.storage.len() {
         let value = integer.storage.value_at(index);
-        values.push(if integer_is_left {
-            exact_integer_remainder(value, scalar.clone(), operation)
+        values.push(if let Some(scalar) = exact_scalar.clone() {
+            if integer_is_left {
+                exact_integer_remainder(value, scalar, operation)
+            } else {
+                exact_integer_remainder(scalar, value, operation)
+            }
+        } else if integer_is_left {
+            integer
+                .target
+                .cast_scalar(float_remainder(value.to_f64(), scalar, operation))
         } else {
-            exact_integer_remainder(scalar.clone(), value, operation)
+            integer
+                .target
+                .cast_scalar(float_remainder(scalar, value.to_f64(), operation))
         });
     }
     integer_values_into_value(integer.target, values, integer.shape).map(Some)
@@ -273,6 +286,33 @@ fn exact_integer_scalar(target: IntegerTarget, value: f64) -> Option<IntValue> {
         IntegerTarget::U64 => value >= 0.0 && value < 18_446_744_073_709_551_616.0,
     };
     in_range.then(|| target.cast_scalar(value))
+}
+
+fn float_remainder(lhs: f64, rhs: f64, operation: IntegerRemainderOp) -> f64 {
+    if lhs.is_nan() || rhs.is_nan() {
+        return f64::NAN;
+    }
+    if rhs == 0.0 {
+        return match operation {
+            IntegerRemainderOp::Rem => f64::NAN,
+            IntegerRemainderOp::Mod => lhs,
+        };
+    }
+    if !lhs.is_finite() && rhs.is_finite() {
+        return f64::NAN;
+    }
+    if rhs.is_infinite() && lhs.is_finite() {
+        return match operation {
+            IntegerRemainderOp::Rem => lhs,
+            IntegerRemainderOp::Mod if lhs == 0.0 || lhs.signum() == rhs.signum() => lhs,
+            IntegerRemainderOp::Mod => rhs,
+        };
+    }
+    let quotient = match operation {
+        IntegerRemainderOp::Rem => (lhs / rhs).trunc(),
+        IntegerRemainderOp::Mod => (lhs / rhs).floor(),
+    };
+    lhs - rhs * quotient
 }
 
 fn apply_float(lhs: f64, rhs: f64, operation: IntegerBinaryOp) -> f64 {
@@ -945,5 +985,70 @@ mod tests {
         )
         .expect_err("integer with nonscalar double must fail");
         assert!(nonscalar.contains("scalar double"));
+    }
+
+    #[test]
+    fn nonintegral_scalar_double_remainders_keep_smaller_integer_classes() {
+        let rem = try_integer_remainder(
+            &Value::Int(IntValue::I8(-7)),
+            &Value::Num(2.5),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(rem, Value::Int(IntValue::I8(-2)));
+
+        let modulus = try_integer_remainder(
+            &Value::Int(IntValue::I8(-7)),
+            &Value::Num(2.5),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(modulus, Value::Int(IntValue::I8(1)));
+
+        let reverse = try_integer_remainder(
+            &Value::Num(2.5),
+            &Value::Int(IntValue::U16(2)),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(reverse, Value::Int(IntValue::U16(1)));
+
+        let rem_zero = try_integer_remainder(
+            &Value::Int(IntValue::I8(7)),
+            &Value::Num(0.0),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(rem_zero, Value::Int(IntValue::I8(0)));
+
+        let mod_zero = try_integer_remainder(
+            &Value::Int(IntValue::I8(7)),
+            &Value::Num(0.0),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(mod_zero, Value::Int(IntValue::I8(7)));
+    }
+
+    #[test]
+    fn nonintegral_scalar_double_remainders_reject_64_bit_integer_storage() {
+        let error = try_integer_remainder(
+            &Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+            &Value::Num(2.5),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect_err("64-bit scalar double must not use an f64 fallback");
+        assert!(error.contains("extended-precision"));
     }
 }

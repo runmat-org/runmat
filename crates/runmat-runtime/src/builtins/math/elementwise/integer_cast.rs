@@ -19,6 +19,10 @@ pub(crate) enum IntegerTarget {
 }
 
 impl IntegerTarget {
+    pub(crate) fn uses_extended_scalar_precision(self) -> bool {
+        matches!(self, Self::I64 | Self::U64)
+    }
+
     pub(crate) fn from_int_value(value: &IntValue) -> Self {
         match value {
             IntValue::I8(_) => Self::I8,
