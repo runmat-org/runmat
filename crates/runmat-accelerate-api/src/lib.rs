@@ -35,6 +35,8 @@ static HANDLE_CLASS_NAMES: Lazy<RwLock<HashMap<u64, String>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 static HANDLE_STORAGES: Lazy<RwLock<HashMap<u64, GpuTensorStorage>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static HANDLE_INTEGER_TYPES: Lazy<RwLock<HashMap<u64, IntegerElementType>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TransposeInfo {
@@ -233,6 +235,56 @@ pub fn handle_is_transposed(handle: &GpuTensorHandle) -> bool {
 pub enum GpuTensorStorage {
     Real,
     ComplexInterleaved,
+}
+
+/// Exact native integer element storage for host/device transfer contracts.
+///
+/// This intentionally lives in the acceleration API instead of depending on
+/// `runmat-builtins`, so providers can move integer buffers without first
+/// materializing RunMat's lossy floating compatibility view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IntegerElementType {
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+}
+
+impl IntegerElementType {
+    pub const fn element_size(self) -> usize {
+        match self {
+            Self::I8 | Self::U8 => 1,
+            Self::I16 | Self::U16 => 2,
+            Self::I32 | Self::U32 => 4,
+            Self::I64 | Self::U64 => 8,
+        }
+    }
+}
+
+/// Record the exact native integer class stored by a GPU tensor handle.
+pub fn set_handle_integer_type(handle: &GpuTensorHandle, element_type: IntegerElementType) {
+    if let Ok(mut guard) = HANDLE_INTEGER_TYPES.write() {
+        guard.insert(handle.buffer_id, element_type);
+    }
+}
+
+/// Look up the exact native integer class stored by a GPU tensor handle.
+pub fn handle_integer_type(handle: &GpuTensorHandle) -> Option<IntegerElementType> {
+    HANDLE_INTEGER_TYPES
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&handle.buffer_id).copied())
+}
+
+/// Clear the native integer class annotation for a released handle.
+pub fn clear_handle_integer_type(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = HANDLE_INTEGER_TYPES.write() {
+        guard.remove(&handle.buffer_id);
+    }
 }
 
 impl Default for GpuTensorStorage {
@@ -1361,6 +1413,7 @@ pub struct KernelLaunchTelemetry {
 
 pub type AccelProviderFuture<'a, T> = Pin<Box<dyn Future<Output = anyhow::Result<T>> + 'a>>;
 pub type AccelDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostTensorOwned>;
+pub type AccelIntegerDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostIntegerTensorOwned>;
 
 fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, T> {
     Box::pin(async move { Err(anyhow::anyhow!(message)) })
@@ -1370,6 +1423,28 @@ fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, 
 pub trait AccelProvider: Send + Sync {
     fn upload(&self, host: &crate::HostTensorView) -> anyhow::Result<GpuTensorHandle>;
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a>;
+
+    /// Upload exact native integer storage without converting through f64.
+    /// Providers that do not expose native integer buffers must reject this
+    /// operation rather than silently changing the value class or precision.
+    fn upload_integer(
+        &self,
+        _host: &crate::HostIntegerTensorView,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "provider does not support exact native integer buffers"
+        ))
+    }
+
+    /// Download exact native integer storage without converting through f64.
+    fn download_integer<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelIntegerDownloadFuture<'a> {
+        Box::pin(async {
+            Err(anyhow::anyhow!(
+                "provider does not support exact native integer buffers"
+            ))
+        })
+    }
+
     fn free(&self, h: &GpuTensorHandle) -> anyhow::Result<()>;
     fn device_info(&self) -> String;
     fn device_id(&self) -> u32 {
@@ -3360,6 +3435,93 @@ pub struct HostTensorOwned {
 pub struct HostTensorView<'a> {
     pub data: &'a [f64],
     pub shape: &'a [usize],
+}
+
+/// Borrowed exact native-integer buffer used for provider transfers.
+#[derive(Debug, Clone, Copy)]
+pub enum HostIntegerDataView<'a> {
+    I8(&'a [i8]),
+    I16(&'a [i16]),
+    I32(&'a [i32]),
+    I64(&'a [i64]),
+    U8(&'a [u8]),
+    U16(&'a [u16]),
+    U32(&'a [u32]),
+    U64(&'a [u64]),
+}
+
+impl HostIntegerDataView<'_> {
+    pub fn element_type(self) -> IntegerElementType {
+        match self {
+            Self::I8(_) => IntegerElementType::I8,
+            Self::I16(_) => IntegerElementType::I16,
+            Self::I32(_) => IntegerElementType::I32,
+            Self::I64(_) => IntegerElementType::I64,
+            Self::U8(_) => IntegerElementType::U8,
+            Self::U16(_) => IntegerElementType::U16,
+            Self::U32(_) => IntegerElementType::U32,
+            Self::U64(_) => IntegerElementType::U64,
+        }
+    }
+
+    pub fn len(self) -> usize {
+        match self {
+            Self::I8(data) => data.len(),
+            Self::I16(data) => data.len(),
+            Self::I32(data) => data.len(),
+            Self::I64(data) => data.len(),
+            Self::U8(data) => data.len(),
+            Self::U16(data) => data.len(),
+            Self::U32(data) => data.len(),
+            Self::U64(data) => data.len(),
+        }
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Borrowed exact integer tensor transfer payload.
+#[derive(Debug, Clone, Copy)]
+pub struct HostIntegerTensorView<'a> {
+    pub data: HostIntegerDataView<'a>,
+    pub shape: &'a [usize],
+}
+
+/// Owned exact native-integer buffer returned by a provider download.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostIntegerDataOwned {
+    I8(Vec<i8>),
+    I16(Vec<i16>),
+    I32(Vec<i32>),
+    I64(Vec<i64>),
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+    U64(Vec<u64>),
+}
+
+impl HostIntegerDataOwned {
+    pub fn element_type(&self) -> IntegerElementType {
+        match self {
+            Self::I8(_) => IntegerElementType::I8,
+            Self::I16(_) => IntegerElementType::I16,
+            Self::I32(_) => IntegerElementType::I32,
+            Self::I64(_) => IntegerElementType::I64,
+            Self::U8(_) => IntegerElementType::U8,
+            Self::U16(_) => IntegerElementType::U16,
+            Self::U32(_) => IntegerElementType::U32,
+            Self::U64(_) => IntegerElementType::U64,
+        }
+    }
+}
+
+/// Exact integer tensor returned by a provider download.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostIntegerTensorOwned {
+    pub data: HostIntegerDataOwned,
+    pub shape: Vec<usize>,
 }
 
 /// Lightweight 1-D axis view used by provider meshgrid hooks.

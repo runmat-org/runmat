@@ -1,4 +1,85 @@
 use super::*;
+use runmat_accelerate_api::{
+    HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorOwned, HostIntegerTensorView,
+    IntegerElementType,
+};
+
+fn integer_words(data: HostIntegerDataView<'_>) -> Vec<u32> {
+    match data {
+        HostIntegerDataView::I8(values) => {
+            values.iter().map(|&value| value as i32 as u32).collect()
+        }
+        HostIntegerDataView::I16(values) => {
+            values.iter().map(|&value| value as i32 as u32).collect()
+        }
+        HostIntegerDataView::I32(values) => values.iter().map(|&value| value as u32).collect(),
+        HostIntegerDataView::U8(values) => values.iter().map(|&value| value as u32).collect(),
+        HostIntegerDataView::U16(values) => values.iter().map(|&value| value as u32).collect(),
+        HostIntegerDataView::U32(values) => values.to_vec(),
+        HostIntegerDataView::I64(values) => values
+            .iter()
+            .flat_map(|&value| {
+                let bits = value as u64;
+                [bits as u32, (bits >> 32) as u32]
+            })
+            .collect(),
+        HostIntegerDataView::U64(values) => values
+            .iter()
+            .flat_map(|&value| [value as u32, (value >> 32) as u32])
+            .collect(),
+    }
+}
+
+fn integer_data_from_words(
+    element_type: IntegerElementType,
+    words: &[u32],
+    len: usize,
+) -> Result<HostIntegerDataOwned> {
+    if matches!(
+        element_type,
+        IntegerElementType::I64 | IntegerElementType::U64
+    ) && words.len() != len.saturating_mul(2)
+    {
+        return Err(anyhow!("integer download: 64-bit word count mismatch"));
+    }
+    if !matches!(
+        element_type,
+        IntegerElementType::I64 | IntegerElementType::U64
+    ) && words.len() != len
+    {
+        return Err(anyhow!("integer download: word count mismatch"));
+    }
+    Ok(match element_type {
+        IntegerElementType::I8 => {
+            HostIntegerDataOwned::I8(words.iter().map(|&v| v as i8).collect())
+        }
+        IntegerElementType::I16 => {
+            HostIntegerDataOwned::I16(words.iter().map(|&v| v as i16).collect())
+        }
+        IntegerElementType::I32 => {
+            HostIntegerDataOwned::I32(words.iter().map(|&v| v as i32).collect())
+        }
+        IntegerElementType::U8 => {
+            HostIntegerDataOwned::U8(words.iter().map(|&v| v as u8).collect())
+        }
+        IntegerElementType::U16 => {
+            HostIntegerDataOwned::U16(words.iter().map(|&v| v as u16).collect())
+        }
+        IntegerElementType::U32 => HostIntegerDataOwned::U32(words.to_vec()),
+        IntegerElementType::I64 => HostIntegerDataOwned::I64(
+            words
+                .chunks_exact(2)
+                .map(|pair| ((pair[0] as u64) | ((pair[1] as u64) << 32)) as i64)
+                .collect(),
+        ),
+        IntegerElementType::U64 => HostIntegerDataOwned::U64(
+            words
+                .chunks_exact(2)
+                .map(|pair| (pair[0] as u64) | ((pair[1] as u64) << 32))
+                .collect(),
+        ),
+    })
+}
 
 impl WgpuProvider {
     pub(crate) fn read_scalar_exec(
@@ -99,6 +180,94 @@ impl WgpuProvider {
             };
         self.telemetry.record_upload_bytes(bytes);
         Ok(self.register_existing_buffer(buffer, shape, len))
+    }
+
+    pub(crate) fn upload_integer_exec(
+        &self,
+        host: &HostIntegerTensorView,
+    ) -> Result<GpuTensorHandle> {
+        let len = host.data.len();
+        let words = integer_words(host.data);
+        let bytes = (words.len() as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
+        if bytes > self.adapter_limits.max_buffer_size {
+            return Err(gpu_per_buffer_limit_error(
+                "integer upload",
+                bytes,
+                self.adapter_limits.max_buffer_size,
+            ));
+        }
+        let buffer = if words.is_empty() {
+            self.create_storage_buffer(0, "runmat-integer-upload-empty")
+        } else {
+            Arc::new(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-integer-upload-buffer"),
+                        contents: cast_slice(&words),
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_DST
+                            | wgpu::BufferUsages::COPY_SRC,
+                    }),
+            )
+        };
+        self.telemetry.record_upload_bytes(bytes);
+        Ok(self.register_integer_buffer(
+            buffer,
+            host.shape.to_vec(),
+            len,
+            host.data.element_type(),
+            bytes,
+        ))
+    }
+
+    pub(crate) async fn download_integer_exec(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> Result<HostIntegerTensorOwned> {
+        let entry = self.get_entry_raw(handle)?;
+        let element_type = entry
+            .integer_type
+            .ok_or_else(|| anyhow!("integer download requested for non-integer gpuArray buffer"))?;
+        if entry.len == 0 {
+            return Ok(HostIntegerTensorOwned {
+                data: integer_data_from_words(element_type, &[], 0)?,
+                shape: handle.shape.clone(),
+            });
+        }
+        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("runmat-integer-download-staging"),
+            size: entry.allocated_bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("runmat-integer-download-encoder"),
+            });
+        encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, &staging, 0, entry.allocated_bytes);
+        self.submit(encoder);
+        let slice = staging.slice(..);
+        let (tx, rx) = oneshot::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
+        #[cfg(not(target_arch = "wasm32"))]
+        self.device.poll(wgpu::Maintain::Wait);
+        let map_result = rx
+            .await
+            .map_err(|_| anyhow!("integer download map_async callback dropped"))?;
+        map_result.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
+        let bytes = slice.get_mapped_range();
+        let words: &[u32] = cast_slice(&bytes);
+        let data = integer_data_from_words(element_type, words, entry.len)?;
+        drop(bytes);
+        staging.unmap();
+        self.telemetry.record_download_bytes(entry.allocated_bytes);
+        Ok(HostIntegerTensorOwned {
+            data,
+            shape: handle.shape.clone(),
+        })
     }
 
     pub(crate) async fn download_exec(&self, handle: &GpuTensorHandle) -> Result<HostTensorOwned> {
@@ -274,7 +443,7 @@ impl WgpuProvider {
             .remove(&handle.buffer_id);
         if let Some(entry) = entry {
             if entry.len > 0 {
-                let size_bytes = (entry.len as u64).saturating_mul(self.element_size as u64);
+                let size_bytes = entry.allocated_bytes;
                 let poolable_by_size = self.buffer_residency_max_poolable_bytes > 0
                     && size_bytes <= self.buffer_residency_max_poolable_bytes;
                 let buffer_ptr = entry.buffer.as_ref() as *const wgpu::Buffer as usize;
@@ -297,6 +466,7 @@ impl WgpuProvider {
         }
         self.kernel_resources.clear_matmul_source(handle.buffer_id);
         runmat_accelerate_api::clear_handle_logical(handle);
+        runmat_accelerate_api::clear_handle_integer_type(handle);
         runmat_accelerate_api::clear_handle_class_name(handle);
         runmat_accelerate_api::clear_handle_storage(handle);
         runmat_accelerate_api::clear_handle_transpose(handle);

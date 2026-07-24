@@ -4,7 +4,7 @@ use bytemuck::{bytes_of, Pod};
 use futures::channel::oneshot;
 #[cfg(not(target_arch = "wasm32"))]
 use pollster::block_on;
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, IntegerElementType};
 #[cfg(target_arch = "wasm32")]
 use runmat_time::Instant;
 use std::sync::atomic::Ordering as AtomicOrdering;
@@ -136,6 +136,8 @@ impl WgpuProvider {
             shape: shape.clone(),
             storage,
             precision: self.precision,
+            integer_type: None,
+            allocated_bytes: (len as u64).saturating_mul(self.element_size as u64),
             usage,
             last_submission_id: None,
         };
@@ -151,6 +153,44 @@ impl WgpuProvider {
         };
         runmat_accelerate_api::set_handle_logical(&handle, false);
         runmat_accelerate_api::set_handle_storage(&handle, storage);
+        runmat_accelerate_api::clear_handle_transpose(&handle);
+        handle
+    }
+
+    pub(super) fn register_integer_buffer(
+        &self,
+        buffer: Arc<wgpu::Buffer>,
+        shape: Vec<usize>,
+        len: usize,
+        element_type: IntegerElementType,
+        allocated_bytes: u64,
+    ) -> GpuTensorHandle {
+        let id = self
+            .next_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let entry = BufferEntry {
+            buffer,
+            len,
+            shape: shape.clone(),
+            storage: GpuTensorStorage::Real,
+            precision: self.precision,
+            integer_type: Some(element_type),
+            allocated_bytes,
+            usage: BufferUsageClass::Generic,
+            last_submission_id: None,
+        };
+        self.buffers
+            .lock()
+            .expect("buffer mutex poisoned")
+            .insert(id, entry);
+        let handle = GpuTensorHandle {
+            shape,
+            device_id: self.runtime_device_id,
+            buffer_id: id,
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, false);
+        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
+        runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
         runmat_accelerate_api::clear_handle_transpose(&handle);
         handle
     }
@@ -315,6 +355,17 @@ impl WgpuProvider {
         submission_id
     }
     pub(super) fn get_entry(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
+        let entry = self.get_entry_raw(handle)?;
+        if let Some(element_type) = entry.integer_type {
+            return Err(anyhow!(
+                "native {:?} gpuArray buffers require an integer provider kernel; floating-point dispatch is not permitted",
+                element_type
+            ));
+        }
+        Ok(entry)
+    }
+
+    pub(super) fn get_entry_raw(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
         if handle.device_id != self.runtime_device_id {
             return Err(anyhow!(
                 "handle device mismatch: expected {}, got {}",
@@ -331,6 +382,8 @@ impl WgpuProvider {
                 shape: entry.shape.clone(),
                 storage: entry.storage,
                 precision: entry.precision,
+                integer_type: entry.integer_type,
+                allocated_bytes: entry.allocated_bytes,
                 usage: entry.usage,
                 last_submission_id: entry.last_submission_id,
             })

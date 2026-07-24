@@ -1,7 +1,9 @@
 use crate::{build_runtime_error, create_class_object, make_cell_with_shape, RuntimeError};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostTensorOwned,
+};
 use runmat_builtins::{
-    builtin_functions, ComplexTensor, LogicalArray, NumericDType, Tensor, Value,
+    builtin_functions, ComplexTensor, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
 };
 use std::cell::RefCell;
 
@@ -97,6 +99,30 @@ fn gather_if_needed_async_impl<'a>(
                             .build()
                     })?;
                 let is_logical = runmat_accelerate_api::handle_is_logical(handle);
+                if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                    let integer = provider.download_integer(handle).await.map_err(|err| {
+                        build_runtime_error(format!("gather: {err}"))
+                            .with_identifier("RunMat:gather:DownloadFailed")
+                            .build()
+                    })?;
+                    runmat_accelerate_api::clear_residency(handle);
+                    let storage = match integer.data {
+                        HostIntegerDataOwned::I8(data) => IntegerStorage::I8(data),
+                        HostIntegerDataOwned::I16(data) => IntegerStorage::I16(data),
+                        HostIntegerDataOwned::I32(data) => IntegerStorage::I32(data),
+                        HostIntegerDataOwned::I64(data) => IntegerStorage::I64(data),
+                        HostIntegerDataOwned::U8(data) => IntegerStorage::U8(data),
+                        HostIntegerDataOwned::U16(data) => IntegerStorage::U16(data),
+                        HostIntegerDataOwned::U32(data) => IntegerStorage::U32(data),
+                        HostIntegerDataOwned::U64(data) => IntegerStorage::U64(data),
+                    };
+                    let tensor = Tensor::new_integer(storage, integer.shape).map_err(|err| {
+                        build_runtime_error(format!("gather: {err}"))
+                            .with_identifier("RunMat:gather:TensorShapeError")
+                            .build()
+                    })?;
+                    return Ok(Value::Tensor(tensor));
+                }
                 let host = download_handle_async(provider, handle)
                     .await
                     .map_err(|err| {

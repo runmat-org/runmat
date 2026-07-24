@@ -4,23 +4,24 @@ use crate::telemetry::AccelTelemetry;
 use anyhow::{anyhow, ensure, Result};
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, AccelProviderFuture, CorrcoefOptions, CovarianceOptions,
-    FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage, HostTensorOwned,
-    HostTensorView, ImfilterOptions, PagefunRequest, ProviderAdamUpdateRequest,
-    ProviderAdamUpdateResult, ProviderBandwidth, ProviderBitModulationRequest,
-    ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult, ProviderCholResult,
-    ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
-    ProviderCovarianceToCorrelationResult, ProviderCrossentropyMode, ProviderCrossentropyRequest,
-    ProviderCrossentropyResult, ProviderEigResult, ProviderFindResult, ProviderHermitianKind,
-    ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInterp1Extrapolation,
-    ProviderInterp1Method, ProviderInterp1Request, ProviderInvOptions, ProviderLinsolveOptions,
-    ProviderLinsolveResult, ProviderLuResult, ProviderModulationRequest,
-    ProviderMovingWindowEndpoints, ProviderMovingWindowOp, ProviderMovingWindowRequest,
-    ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder,
-    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions,
-    ProviderQrPivot, ProviderQrResult, ProviderScanDirection, ProviderStdNormalization,
-    ProviderSymmetryKind, ProviderTrapezoidSpacing, SetdiffOptions, SetdiffResult, SortComparison,
-    SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    AccelDownloadFuture, AccelIntegerDownloadFuture, AccelProvider, AccelProviderFuture,
+    CorrcoefOptions, CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle,
+    GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorOwned,
+    HostIntegerTensorView, HostTensorOwned, HostTensorView, ImfilterOptions, PagefunRequest,
+    ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBandwidth,
+    ProviderBitModulationRequest, ProviderBlackScholesPriceRequest,
+    ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
+    ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
+    ProviderCrossentropyMode, ProviderCrossentropyRequest, ProviderCrossentropyResult,
+    ProviderEigResult, ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions,
+    ProviderIirFilterResult, ProviderInterp1Extrapolation, ProviderInterp1Method,
+    ProviderInterp1Request, ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult,
+    ProviderLuResult, ProviderModulationRequest, ProviderMovingWindowEndpoints,
+    ProviderMovingWindowOp, ProviderMovingWindowRequest, ProviderNanMode, ProviderNdgridRequest,
+    ProviderNdgridResult, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
+    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrResult, ProviderScanDirection,
+    ProviderStdNormalization, ProviderSymmetryKind, ProviderTrapezoidSpacing, SetdiffOptions,
+    SetdiffResult, SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -63,11 +64,42 @@ const PROVIDER_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
 const PROVIDER_ID_BLOCK_SIZE: u64 = 1_000_000_000;
 
 static REGISTRY: OnceCell<Mutex<HashMap<u64, Vec<f64>>>> = OnceCell::new();
+static INTEGER_REGISTRY: OnceCell<Mutex<HashMap<u64, HostIntegerDataOwned>>> = OnceCell::new();
 static NEXT_PROVIDER_ID_BASE: AtomicU64 = AtomicU64::new(PROVIDER_ID_BLOCK_SIZE);
 static NEXT_INPROCESS_DEVICE_ID: AtomicU64 = AtomicU64::new(1);
 
 fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn integer_registry() -> &'static Mutex<HashMap<u64, HostIntegerDataOwned>> {
+    INTEGER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn owned_integer_data(data: HostIntegerDataView<'_>) -> HostIntegerDataOwned {
+    match data {
+        HostIntegerDataView::I8(values) => HostIntegerDataOwned::I8(values.to_vec()),
+        HostIntegerDataView::I16(values) => HostIntegerDataOwned::I16(values.to_vec()),
+        HostIntegerDataView::I32(values) => HostIntegerDataOwned::I32(values.to_vec()),
+        HostIntegerDataView::I64(values) => HostIntegerDataOwned::I64(values.to_vec()),
+        HostIntegerDataView::U8(values) => HostIntegerDataOwned::U8(values.to_vec()),
+        HostIntegerDataView::U16(values) => HostIntegerDataOwned::U16(values.to_vec()),
+        HostIntegerDataView::U32(values) => HostIntegerDataOwned::U32(values.to_vec()),
+        HostIntegerDataView::U64(values) => HostIntegerDataOwned::U64(values.to_vec()),
+    }
+}
+
+fn integer_data_bytes(data: &HostIntegerDataOwned) -> u64 {
+    match data {
+        HostIntegerDataOwned::I8(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::I16(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::I32(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::I64(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::U8(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::U16(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::U32(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::U64(values) => std::mem::size_of_val(values.as_slice()) as u64,
+    }
 }
 
 const POLYDER_EPS: f64 = 1.0e-12;
@@ -2756,12 +2788,54 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn upload_integer(&self, host: &HostIntegerTensorView) -> Result<GpuTensorHandle> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let data = owned_integer_data(host.data);
+        let bytes = integer_data_bytes(&data);
+        integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, data);
+        self.telemetry.record_upload_bytes(bytes);
+        let handle = GpuTensorHandle {
+            shape: host.shape.to_vec(),
+            device_id: self.device_id,
+            buffer_id: id,
+        };
+        runmat_accelerate_api::set_handle_integer_type(&handle, host.data.element_type());
+        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
+        runmat_accelerate_api::set_handle_logical(&handle, false);
+        Ok(handle)
+    }
+
+    fn download_integer<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelIntegerDownloadFuture<'a> {
+        Box::pin(async move {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&h.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("integer buffer not found: {}", h.buffer_id))?;
+            self.telemetry
+                .record_download_bytes(integer_data_bytes(&data));
+            Ok(HostIntegerTensorOwned {
+                data,
+                shape: h.shape.clone(),
+            })
+        })
+    }
+
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
         let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         guard.remove(&h.buffer_id);
+        integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&h.buffer_id);
         runmat_accelerate_api::clear_handle_precision(h);
         runmat_accelerate_api::clear_handle_class_name(h);
         runmat_accelerate_api::clear_handle_logical(h);
+        runmat_accelerate_api::clear_handle_integer_type(h);
         runmat_accelerate_api::clear_handle_storage(h);
         Ok(())
     }

@@ -1,4 +1,5 @@
 use super::*;
+use runmat_accelerate_api::{AccelIntegerDownloadFuture, HostIntegerTensorView};
 use runmat_accelerate_api::{
     ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBitModulationRequest,
     ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult,
@@ -1643,6 +1644,12 @@ impl AccelProvider for WgpuProvider {
     }
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move { self.download_exec(h).await })
+    }
+    fn upload_integer(&self, host: &HostIntegerTensorView) -> Result<GpuTensorHandle> {
+        self.upload_integer_exec(host)
+    }
+    fn download_integer<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelIntegerDownloadFuture<'a> {
+        Box::pin(async move { self.download_integer_exec(h).await })
     }
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
         self.free_exec(h)

@@ -11,11 +11,13 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::{
+    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, HostTensorView, ProviderPrecision,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -352,19 +354,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let options = parse_options(&rest)?;
-    if matches!(&value, Value::Int(_))
-        || matches!(&value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
-    {
-        return Err(gpu_array_error(&GPUARRAY_ERROR_TYPED_INTEGER));
-    }
     let incoming_precision = match &value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_precision(handle),
         _ => None,
     };
     let dtype = resolve_dtype(&value, &options)?;
-    if dtype.is_integer() {
-        return Err(gpu_array_error(&GPUARRAY_ERROR_TYPED_INTEGER));
-    }
     let dims = options.dims.clone();
 
     let prepared = match value {
@@ -457,6 +451,22 @@ impl DataClass {
             Self::UInt16 => "uint16",
             Self::UInt32 => "uint32",
             Self::UInt64 => "uint64",
+        }
+    }
+
+    fn numeric_dtype(self) -> NumericDType {
+        match self {
+            Self::Double => NumericDType::F64,
+            Self::Single => NumericDType::F32,
+            Self::Logical => NumericDType::F64,
+            Self::Int8 => NumericDType::I8,
+            Self::Int16 => NumericDType::I16,
+            Self::Int32 => NumericDType::I32,
+            Self::Int64 => NumericDType::I64,
+            Self::UInt8 => NumericDType::U8,
+            Self::UInt16 => NumericDType::U16,
+            Self::UInt32 => NumericDType::U32,
+            Self::UInt64 => NumericDType::U64,
         }
     }
 }
@@ -617,10 +627,58 @@ fn resolve_dtype(value: &Value, options: &ParsedOptions) -> BuiltinResult<DataCl
     if let Value::GpuTensor(handle) = value {
         return dtype_from_gpu_handle(handle);
     }
+    if let Value::Int(value) = value {
+        return Ok(data_class_from_int_value(value));
+    }
+    if let Value::Tensor(tensor) = value {
+        if let Some(storage) = tensor.integer_storage() {
+            return Ok(data_class_from_integer_storage(storage));
+        }
+    }
     if value_defaults_to_logical(value) {
         return Ok(DataClass::Logical);
     }
     Ok(DataClass::Double)
+}
+
+fn data_class_from_int_value(value: &IntValue) -> DataClass {
+    match value {
+        IntValue::I8(_) => DataClass::Int8,
+        IntValue::I16(_) => DataClass::Int16,
+        IntValue::I32(_) => DataClass::Int32,
+        IntValue::I64(_) => DataClass::Int64,
+        IntValue::U8(_) => DataClass::UInt8,
+        IntValue::U16(_) => DataClass::UInt16,
+        IntValue::U32(_) => DataClass::UInt32,
+        IntValue::U64(_) => DataClass::UInt64,
+    }
+}
+
+fn data_class_from_integer_storage(storage: &IntegerStorage) -> DataClass {
+    match storage {
+        IntegerStorage::I8(_) => DataClass::Int8,
+        IntegerStorage::I16(_) => DataClass::Int16,
+        IntegerStorage::I32(_) => DataClass::Int32,
+        IntegerStorage::I64(_) => DataClass::Int64,
+        IntegerStorage::U8(_) => DataClass::UInt8,
+        IntegerStorage::U16(_) => DataClass::UInt16,
+        IntegerStorage::U32(_) => DataClass::UInt32,
+        IntegerStorage::U64(_) => DataClass::UInt64,
+    }
+}
+
+fn integer_prototype(dtype: DataClass) -> Option<IntegerStorage> {
+    Some(match dtype {
+        DataClass::Int8 => IntegerStorage::I8(Vec::new()),
+        DataClass::Int16 => IntegerStorage::I16(Vec::new()),
+        DataClass::Int32 => IntegerStorage::I32(Vec::new()),
+        DataClass::Int64 => IntegerStorage::I64(Vec::new()),
+        DataClass::UInt8 => IntegerStorage::U8(Vec::new()),
+        DataClass::UInt16 => IntegerStorage::U16(Vec::new()),
+        DataClass::UInt32 => IntegerStorage::U32(Vec::new()),
+        DataClass::UInt64 => IntegerStorage::U64(Vec::new()),
+        _ => return None,
+    })
 }
 
 fn infer_dtype_from_prototype(proto: &Value) -> BuiltinResult<DataClass> {
@@ -721,6 +779,56 @@ fn upload_real_host_value(
     value: Value,
     dtype: DataClass,
 ) -> BuiltinResult<PreparedHandle> {
+    if dtype.is_integer() {
+        let (storage, shape) = match value {
+            Value::Int(value) => {
+                let source = IntegerStorage::from_scalar(value);
+                (cast_integer_storage(&source, dtype)?, vec![1, 1])
+            }
+            Value::Tensor(tensor) => {
+                let shape = tensor.shape.clone();
+                let storage = if let Some(storage) = tensor.integer_storage() {
+                    cast_integer_storage(storage, dtype)?
+                } else {
+                    Tensor::new_with_dtype(tensor.data, shape.clone(), dtype.numeric_dtype())
+                        .map_err(|err| {
+                            gpu_array_error_with_message(
+                                format!("gpuArray: {err}"),
+                                &GPUARRAY_ERROR_CONVERSION,
+                            )
+                        })?
+                        .integer_storage()
+                        .expect("integer dtype constructs integer storage")
+                        .clone()
+                };
+                (storage, shape)
+            }
+            other => {
+                let tensor = coerce_host_value(other)?;
+                let shape = tensor.shape.clone();
+                let storage =
+                    Tensor::new_with_dtype(tensor.data, shape.clone(), dtype.numeric_dtype())
+                        .map_err(|err| {
+                            gpu_array_error_with_message(
+                                format!("gpuArray: {err}"),
+                                &GPUARRAY_ERROR_CONVERSION,
+                            )
+                        })?
+                        .integer_storage()
+                        .expect("integer dtype constructs integer storage")
+                        .clone();
+                (storage, shape)
+            }
+        };
+        let view = integer_tensor_view(&storage, &shape);
+        let handle = provider.upload_integer(&view).map_err(|err| {
+            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
+        })?;
+        return Ok(PreparedHandle {
+            handle,
+            logical: false,
+        });
+    }
     let tensor = coerce_host_value(value)?;
     let (mut tensor, logical) = cast_tensor(tensor, dtype)?;
 
@@ -738,6 +846,40 @@ fn upload_real_host_value(
         handle: new_handle,
         logical,
     })
+}
+
+fn cast_integer_storage(
+    source: &IntegerStorage,
+    dtype: DataClass,
+) -> BuiltinResult<IntegerStorage> {
+    let Some(prototype) = integer_prototype(dtype) else {
+        return Err(gpu_array_error(&GPUARRAY_ERROR_TYPED_INTEGER));
+    };
+    let values = source
+        .exact_values()
+        .into_iter()
+        .map(|value| prototype.cast_exact_assignment(&value))
+        .collect();
+    prototype.from_same_class_values(values).map_err(|err| {
+        gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
+    })
+}
+
+fn integer_tensor_view<'a>(
+    storage: &'a IntegerStorage,
+    shape: &'a [usize],
+) -> HostIntegerTensorView<'a> {
+    let data = match storage {
+        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+    };
+    HostIntegerTensorView { data, shape }
 }
 
 fn upload_complex_host_value(
@@ -1480,27 +1622,42 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
-    fn gpu_array_wgpu_roundtrip() {
+    fn gpu_array_wgpu_native_integer_roundtrip() {
         use runmat_accelerate_api::AccelProvider;
 
         match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) {
             Ok(provider) => {
-                let tensor = Tensor::new(vec![1.0, 2.5, 3.5], vec![3, 1]).unwrap();
-                let result = call(Value::Tensor(tensor.clone()), vec![Value::from("int32")])
-                    .expect("wgpu upload");
-                let Value::GpuTensor(handle) = result else {
-                    panic!("expected gpu tensor");
-                };
-                let gathered =
-                    test_support::gather(Value::GpuTensor(handle.clone())).expect("wgpu gather");
-                assert_eq!(gathered.shape, vec![3, 1]);
-                assert_eq!(gathered.data, vec![1.0, 3.0, 4.0]);
-                provider.free(&handle).ok();
+                for storage in [
+                    IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+                    IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+                    IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+                    IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                    IntegerStorage::U8(vec![0, u8::MAX]),
+                    IntegerStorage::U16(vec![0, u16::MAX]),
+                    IntegerStorage::U32(vec![0, u32::MAX]),
+                    IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                ] {
+                    let expected = storage.clone();
+                    let result = call(
+                        Value::Tensor(Tensor::new_integer(storage, vec![2, 1]).unwrap()),
+                        Vec::new(),
+                    )
+                    .expect("wgpu integer upload");
+                    let Value::GpuTensor(handle) = result else {
+                        panic!("expected gpu tensor");
+                    };
+                    assert!(runmat_accelerate_api::handle_integer_type(&handle).is_some());
+                    let gathered = test_support::gather(Value::GpuTensor(handle.clone()))
+                        .expect("wgpu integer gather");
+                    assert_eq!(gathered.shape, vec![2, 1]);
+                    assert_eq!(gathered.integer_storage(), Some(&expected));
+                    provider.free(&handle).expect("free integer gpu buffer");
+                }
             }
             Err(err) => {
-                tracing::warn!("Skipping gpu_array_wgpu_roundtrip: {err}");
+                tracing::warn!("Skipping gpu_array_wgpu_native_integer_roundtrip: {err}");
             }
         }
         runmat_accelerate::simple_provider::register_inprocess_provider();
@@ -1541,7 +1698,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn gpu_array_rejects_native_integer_inputs_and_class_requests() {
+    fn gpu_array_roundtrips_native_integer_inputs_and_class_requests() {
         test_support::with_test_provider(|_| {
             for storage in [
                 IntegerStorage::I8(vec![1]),
@@ -1553,19 +1710,27 @@ pub(crate) mod tests {
                 IntegerStorage::U32(vec![1]),
                 IntegerStorage::U64(vec![u64::MAX]),
             ] {
+                let expected = storage.clone();
                 let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
-                let error = call(value, Vec::new()).expect_err("integer gpuArray input must fail");
-                assert_eq!(
-                    error.identifier.as_deref(),
-                    Some("RunMat:gpuArray:TypedIntegerUnsupported")
-                );
+                let handle = match call(value, Vec::new()).expect("integer gpuArray upload") {
+                    Value::GpuTensor(handle) => handle,
+                    other => panic!("expected gpu tensor, got {other:?}"),
+                };
+                assert!(runmat_accelerate_api::handle_integer_type(&handle).is_some());
+                let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+                assert_eq!(gathered.integer_storage(), Some(&expected));
             }
 
-            let error = call(Value::Num(1.0), vec![Value::from("uint64")])
-                .expect_err("integer gpuArray class request must fail");
+            let handle = match call(Value::Num(1.0), vec![Value::from("uint64")])
+                .expect("uint64 gpuArray conversion")
+            {
+                Value::GpuTensor(handle) => handle,
+                other => panic!("expected gpu tensor, got {other:?}"),
+            };
+            let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
             assert_eq!(
-                error.identifier.as_deref(),
-                Some("RunMat:gpuArray:TypedIntegerUnsupported")
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![1]))
             );
         });
     }
