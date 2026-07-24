@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, Tensor, Value,
+    IntValue, IntegerStorage, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -258,9 +258,18 @@ async fn bitshift_builtin(value: Value, shift: Value) -> BuiltinResult<Value> {
         .map_err(|err| error_with_detail(BITSHIFT_NAME, &ERROR_SIZE_MISMATCH, err))?;
     let mut data = Vec::with_capacity(plan.len());
     for (_, idx_a, idx_b) in plan.iter() {
-        data.push(apply_shift(left.data[idx_a], shifts.data[idx_b]));
+        data.push(apply_shift(
+            left.data[idx_a],
+            shifts.data[idx_b],
+            left.class,
+        ));
     }
-    value_from_bits(data, plan.output_shape().to_vec(), left.kind, BITSHIFT_NAME)
+    value_from_bits(
+        data,
+        plan.output_shape().to_vec(),
+        left.class,
+        BITSHIFT_NAME,
+    )
 }
 
 #[runtime_builtin(
@@ -340,74 +349,60 @@ async fn binary_bitwise(
     name: &'static str,
     lhs: Value,
     rhs: Value,
-    op: impl Fn(u32, u32) -> u32,
+    op: impl Fn(u64, u64) -> u64,
 ) -> BuiltinResult<Value> {
     let left = bit_buffer_from(name, lhs).await?;
     let right = bit_buffer_from(name, rhs).await?;
+    let class = binary_output_class(name, &left, &right)?;
     let plan = BroadcastPlan::new(&left.shape, &right.shape)
         .map_err(|err| error_with_detail(name, &ERROR_SIZE_MISMATCH, err))?;
     let mut data = Vec::with_capacity(plan.len());
     for (_, idx_a, idx_b) in plan.iter() {
         data.push(op(left.data[idx_a], right.data[idx_b]));
     }
-    value_from_bits(
-        data,
-        plan.output_shape().to_vec(),
-        combine_binary_output_kind(left.kind, right.kind),
-        name,
-    )
-}
-
-fn apply_shift(value: u32, shift: i32) -> u32 {
-    let amount = shift.unsigned_abs().min(32);
-    if shift >= 0 {
-        value.checked_shl(amount).unwrap_or(0)
-    } else {
-        value.checked_shr(amount).unwrap_or(0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OutputKind {
-    Double,
-    UInt8,
-    UInt16,
-    UInt32,
+    value_from_bits(data, plan.output_shape().to_vec(), class, name)
 }
 
 struct BitBuffer {
-    data: Vec<u32>,
+    data: Vec<u64>,
     shape: Vec<usize>,
-    kind: OutputKind,
+    /// `None` represents MATLAB double/logical bit operands, which use the
+    /// documented unsigned-64 interpretation and return a double result.
+    class: Option<IntegerClass>,
+    is_scalar: bool,
 }
 
 struct ShiftBuffer {
-    data: Vec<i32>,
+    data: Vec<i128>,
     shape: Vec<usize>,
 }
 
 async fn bit_buffer_from(name: &'static str, value: Value) -> BuiltinResult<BitBuffer> {
     match value {
         Value::Num(value) => Ok(BitBuffer {
-            data: vec![double_to_u32(name, value)?],
+            data: vec![double_to_u64(name, value)?],
             shape: vec![1, 1],
-            kind: OutputKind::Double,
+            class: None,
+            is_scalar: true,
         }),
         Value::Bool(value) => Ok(BitBuffer {
             data: vec![if value { 1 } else { 0 }],
             shape: vec![1, 1],
-            kind: OutputKind::Double,
+            class: None,
+            is_scalar: true,
         }),
         Value::Int(value) => Ok(BitBuffer {
-            data: vec![int_to_u32(&value)],
+            data: vec![int_to_bits(&value)],
             shape: vec![1, 1],
-            kind: int_output_kind(&value),
+            class: Some(IntegerClass::from_int(&value)),
+            is_scalar: true,
         }),
         Value::Tensor(tensor) => tensor_to_bit_buffer(name, tensor),
         Value::LogicalArray(array) => Ok(BitBuffer {
-            data: array.data.into_iter().map(|v| u32::from(v != 0)).collect(),
+            data: array.data.into_iter().map(|v| u64::from(v != 0)).collect(),
             shape: array.shape,
-            kind: OutputKind::Double,
+            class: None,
+            is_scalar: false,
         }),
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
@@ -426,16 +421,16 @@ async fn bit_buffer_from(name: &'static str, value: Value) -> BuiltinResult<BitB
 async fn shift_buffer_from(value: Value) -> BuiltinResult<ShiftBuffer> {
     match value {
         Value::Num(value) => Ok(ShiftBuffer {
-            data: vec![double_to_i32_shift(value)?],
+            data: vec![double_to_shift(value)?],
             shape: vec![1, 1],
         }),
         Value::Int(value) => Ok(ShiftBuffer {
-            data: vec![value.to_i64().clamp(i32::MIN as i64, i32::MAX as i64) as i32],
+            data: vec![int_value_to_i128(&value)],
             shape: vec![1, 1],
         }),
         Value::Tensor(tensor) => tensor_to_shift_buffer(tensor),
         Value::LogicalArray(array) => Ok(ShiftBuffer {
-            data: array.data.into_iter().map(|v| i32::from(v != 0)).collect(),
+            data: array.data.into_iter().map(|v| i128::from(v != 0)).collect(),
             shape: array.shape,
         }),
         Value::GpuTensor(handle) => {
@@ -453,11 +448,18 @@ async fn shift_buffer_from(value: Value) -> BuiltinResult<ShiftBuffer> {
 }
 
 fn tensor_to_shift_buffer(tensor: Tensor) -> BuiltinResult<ShiftBuffer> {
-    let data = tensor
-        .data
-        .into_iter()
-        .map(double_to_i32_shift)
-        .collect::<BuiltinResult<Vec<_>>>()?;
+    let data = match tensor.integer_storage() {
+        Some(storage) => storage
+            .exact_values()
+            .iter()
+            .map(int_value_to_i128)
+            .collect(),
+        None => tensor
+            .data
+            .into_iter()
+            .map(double_to_shift)
+            .collect::<BuiltinResult<Vec<_>>>()?,
+    };
     Ok(ShiftBuffer {
         data,
         shape: tensor.shape,
@@ -465,87 +467,127 @@ fn tensor_to_shift_buffer(tensor: Tensor) -> BuiltinResult<ShiftBuffer> {
 }
 
 fn tensor_to_bit_buffer(name: &'static str, tensor: Tensor) -> BuiltinResult<BitBuffer> {
-    let kind = match tensor.dtype {
-        NumericDType::U8 => OutputKind::UInt8,
-        NumericDType::U16 => OutputKind::UInt16,
-        NumericDType::U32 => OutputKind::UInt32,
-        NumericDType::F32 | NumericDType::F64 => OutputKind::Double,
+    let is_scalar = tensor::element_count(&tensor.shape) == 1;
+    let (data, class) = match tensor.integer_storage() {
+        Some(storage) => (
+            storage.exact_values().iter().map(int_to_bits).collect(),
+            Some(IntegerClass::from_storage(storage)),
+        ),
+        None => {
+            let class = match tensor.dtype {
+                NumericDType::U8 => Some(IntegerClass::U8),
+                NumericDType::U16 => Some(IntegerClass::U16),
+                NumericDType::U32 => Some(IntegerClass::U32),
+                NumericDType::F32 | NumericDType::F64 => None,
+            };
+            let data = tensor
+                .data
+                .into_iter()
+                .map(|value| double_to_u64(name, value))
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            (data, class)
+        }
     };
-    let data = tensor
-        .data
-        .into_iter()
-        .map(|value| double_to_u32(name, value))
-        .collect::<BuiltinResult<Vec<_>>>()?;
     Ok(BitBuffer {
         data,
         shape: tensor.shape,
-        kind,
+        class,
+        is_scalar,
     })
 }
 
 fn value_from_bits(
-    data: Vec<u32>,
+    data: Vec<u64>,
     shape: Vec<usize>,
-    kind: OutputKind,
+    class: Option<IntegerClass>,
     name: &'static str,
 ) -> BuiltinResult<Value> {
-    let data = data
-        .into_iter()
-        .map(|value| normalize_output_bits(value, kind))
-        .collect::<Vec<_>>();
-    if data.len() == 1 && tensor::element_count(&shape) == 1 {
-        return Ok(match kind {
-            OutputKind::UInt8 => Value::Int(IntValue::U8(data[0] as u8)),
-            OutputKind::UInt16 => Value::Int(IntValue::U16(data[0] as u16)),
-            OutputKind::UInt32 => Value::Int(IntValue::U32(data[0])),
-            OutputKind::Double => Value::Num(data[0] as f64),
-        });
-    }
-
-    let dtype = match kind {
-        OutputKind::UInt8 => NumericDType::U8,
-        OutputKind::UInt16 => NumericDType::U16,
-        OutputKind::UInt32 => NumericDType::U32,
-        OutputKind::Double => NumericDType::F64,
-    };
-    Tensor::new_with_dtype(
-        data.into_iter().map(|value| value as f64).collect(),
-        shape,
-        dtype,
-    )
-    .map(Value::Tensor)
-    .map_err(|err| error_with_detail(name, &ERROR_INVALID_INPUT, err))
-}
-
-fn normalize_output_bits(value: u32, kind: OutputKind) -> u32 {
-    match kind {
-        OutputKind::UInt8 => u32::from(value as u8),
-        OutputKind::UInt16 => u32::from(value as u16),
-        OutputKind::UInt32 | OutputKind::Double => value,
+    match class {
+        Some(class) => {
+            let values = data
+                .into_iter()
+                .map(|bits| class.value_from_bits(bits))
+                .collect::<Vec<_>>();
+            value_from_integer_values(values, shape, class, name)
+        }
+        None => {
+            if data.len() == 1 && tensor::element_count(&shape) == 1 {
+                Ok(Value::Num(data[0] as f64))
+            } else {
+                Tensor::new(data.into_iter().map(|value| value as f64).collect(), shape)
+                    .map(Value::Tensor)
+                    .map_err(|err| error_with_detail(name, &ERROR_INVALID_INPUT, err))
+            }
+        }
     }
 }
 
-fn combine_binary_output_kind(left: OutputKind, right: OutputKind) -> OutputKind {
-    match (left, right) {
-        (OutputKind::Double, _) | (_, OutputKind::Double) => OutputKind::Double,
-        (OutputKind::UInt32, _) | (_, OutputKind::UInt32) => OutputKind::UInt32,
-        (OutputKind::UInt16, _) | (_, OutputKind::UInt16) => OutputKind::UInt16,
-        (OutputKind::UInt8, OutputKind::UInt8) => OutputKind::UInt8,
+fn binary_output_class(
+    name: &'static str,
+    left: &BitBuffer,
+    right: &BitBuffer,
+) -> BuiltinResult<Option<IntegerClass>> {
+    match (left.class, right.class) {
+        (Some(lhs), Some(rhs)) if lhs == rhs => Ok(Some(lhs)),
+        (Some(_), Some(_)) => Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            "integer operands must have the same class unless the other operand is a scalar double",
+        )),
+        (Some(class), None) if right.is_scalar => Ok(Some(class)),
+        (None, Some(class)) if left.is_scalar => Ok(Some(class)),
+        (Some(_), None) | (None, Some(_)) => Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            "an integer array can only be combined with a scalar double",
+        )),
+        (None, None) => Ok(None),
     }
 }
 
-fn double_to_u32(name: &'static str, value: f64) -> BuiltinResult<u32> {
-    if !value.is_finite() || value.fract() != 0.0 || !(0.0..=u32::MAX as f64).contains(&value) {
+fn apply_shift(value: u64, shift: i128, class: Option<IntegerClass>) -> u64 {
+    let width = class.map_or(64, IntegerClass::bit_width);
+    let mask = class.map_or(u64::MAX, IntegerClass::bit_mask);
+    let value = value & mask;
+    if shift >= width as i128 {
+        return 0;
+    }
+    if shift <= -(width as i128) {
+        return if class.is_some_and(IntegerClass::is_signed) && value & (1_u64 << (width - 1)) != 0
+        {
+            mask
+        } else {
+            0
+        };
+    }
+    if shift >= 0 {
+        return (value << shift as u32) & mask;
+    }
+
+    let amount = (-shift) as u32;
+    let shifted = value >> amount;
+    if class.is_some_and(IntegerClass::is_signed) && value & (1_u64 << (width - 1)) != 0 {
+        (shifted | (mask << (width - amount))) & mask
+    } else {
+        shifted
+    }
+}
+
+fn double_to_u64(name: &'static str, value: f64) -> BuiltinResult<u64> {
+    if !value.is_finite()
+        || value.fract() != 0.0
+        || !(0.0..18_446_744_073_709_551_616.0).contains(&value)
+    {
         return Err(error_with_detail(
             name,
             &ERROR_INVALID_INPUT,
-            format!("{name}: input values must be finite nonnegative integers no larger than uint32 max"),
+            format!("{name}: input values must be finite nonnegative integers smaller than 2^64"),
         ));
     }
-    Ok(value as u32)
+    Ok(value as u64)
 }
 
-fn double_to_i32_shift(value: f64) -> BuiltinResult<i32> {
+fn double_to_shift(value: f64) -> BuiltinResult<i128> {
     if !value.is_finite() || value.fract() != 0.0 {
         return Err(error_with_detail(
             BITSHIFT_NAME,
@@ -553,30 +595,19 @@ fn double_to_i32_shift(value: f64) -> BuiltinResult<i32> {
             "bitshift: shift counts must be finite integers",
         ));
     }
-    Ok(value.clamp(i32::MIN as f64, i32::MAX as f64) as i32)
+    Ok(value.clamp(-128.0, 128.0) as i128)
 }
 
-fn int_to_u32(value: &IntValue) -> u32 {
+fn int_to_bits(value: &IntValue) -> u64 {
     match value {
-        IntValue::I8(value) => *value as i32 as u32,
-        IntValue::I16(value) => *value as i32 as u32,
-        IntValue::I32(value) => *value as u32,
-        IntValue::I64(value) => *value as u32,
-        IntValue::U8(value) => *value as u32,
-        IntValue::U16(value) => *value as u32,
-        IntValue::U32(value) => *value,
-        IntValue::U64(value) => *value as u32,
-    }
-}
-
-fn int_output_kind(value: &IntValue) -> OutputKind {
-    match value {
-        IntValue::U8(_) => OutputKind::UInt8,
-        IntValue::U16(_) => OutputKind::UInt16,
-        IntValue::U32(_) | IntValue::U64(_) => OutputKind::UInt32,
-        IntValue::I8(_) | IntValue::I16(_) | IntValue::I32(_) | IntValue::I64(_) => {
-            OutputKind::Double
-        }
+        IntValue::I8(value) => *value as u8 as u64,
+        IntValue::I16(value) => *value as u16 as u64,
+        IntValue::I32(value) => *value as u32 as u64,
+        IntValue::I64(value) => *value as u64,
+        IntValue::U8(value) => *value as u64,
+        IntValue::U16(value) => *value as u64,
+        IntValue::U32(value) => *value as u64,
+        IntValue::U64(value) => *value,
     }
 }
 
@@ -619,6 +650,39 @@ impl IntegerClass {
         }
     }
 
+    fn from_storage(storage: &IntegerStorage) -> Self {
+        match storage {
+            IntegerStorage::I8(_) => Self::I8,
+            IntegerStorage::I16(_) => Self::I16,
+            IntegerStorage::I32(_) => Self::I32,
+            IntegerStorage::I64(_) => Self::I64,
+            IntegerStorage::U8(_) => Self::U8,
+            IntegerStorage::U16(_) => Self::U16,
+            IntegerStorage::U32(_) => Self::U32,
+            IntegerStorage::U64(_) => Self::U64,
+        }
+    }
+
+    fn bit_width(self) -> u32 {
+        match self {
+            Self::I8 | Self::U8 => 8,
+            Self::I16 | Self::U16 => 16,
+            Self::I32 | Self::U32 => 32,
+            Self::I64 | Self::U64 => 64,
+        }
+    }
+
+    fn bit_mask(self) -> u64 {
+        match self.bit_width() {
+            64 => u64::MAX,
+            width => (1_u64 << width) - 1,
+        }
+    }
+
+    fn is_signed(self) -> bool {
+        matches!(self, Self::I8 | Self::I16 | Self::I32 | Self::I64)
+    }
+
     fn range(self) -> (i128, i128) {
         match self {
             Self::I8 => (i8::MIN as i128, i8::MAX as i128),
@@ -632,18 +696,8 @@ impl IntegerClass {
         }
     }
 
-    fn dtype(self) -> Option<NumericDType> {
+    fn int_from_i128(self, value: i128) -> IntValue {
         match self {
-            Self::U8 => Some(NumericDType::U8),
-            Self::U16 => Some(NumericDType::U16),
-            Self::U32 => Some(NumericDType::U32),
-            Self::I8 | Self::I16 | Self::I32 | Self::I64 | Self::U64 => None,
-        }
-    }
-
-    fn scalar_value(self, value: i128, name: &'static str) -> BuiltinResult<Value> {
-        self.validate(value, name)?;
-        Ok(Value::Int(match self {
             Self::I8 => IntValue::I8(value as i8),
             Self::I16 => IntValue::I16(value as i16),
             Self::I32 => IntValue::I32(value as i32),
@@ -652,7 +706,7 @@ impl IntegerClass {
             Self::U16 => IntValue::U16(value as u16),
             Self::U32 => IntValue::U32(value as u32),
             Self::U64 => IntValue::U64(value as u64),
-        }))
+        }
     }
 
     fn validate(self, value: i128, name: &'static str) -> BuiltinResult<()> {
@@ -665,6 +719,19 @@ impl IntegerClass {
                 &ERROR_OVERFLOW,
                 format!("value {value} is outside output class range"),
             ))
+        }
+    }
+
+    fn value_from_bits(self, bits: u64) -> IntValue {
+        match self {
+            Self::I8 => IntValue::I8(bits as u8 as i8),
+            Self::I16 => IntValue::I16(bits as u16 as i16),
+            Self::I32 => IntValue::I32(bits as u32 as i32),
+            Self::I64 => IntValue::I64(bits as i64),
+            Self::U8 => IntValue::U8(bits as u8),
+            Self::U16 => IntValue::U16(bits as u16),
+            Self::U32 => IntValue::U32(bits as u32),
+            Self::U64 => IntValue::U64(bits),
         }
     }
 }
@@ -704,6 +771,18 @@ async fn integer_buffer_from(name: &'static str, value: Value) -> BuiltinResult<
 }
 
 fn tensor_to_integer_buffer(name: &'static str, tensor: Tensor) -> BuiltinResult<IntegerBuffer> {
+    let shape = tensor.shape.clone();
+    if let Some(storage) = tensor.integer_storage() {
+        return Ok(IntegerBuffer {
+            data: storage
+                .exact_values()
+                .iter()
+                .map(int_value_to_i128)
+                .collect(),
+            shape,
+            class: IntegerClass::from_storage(storage),
+        });
+    }
     let class = IntegerClass::from_dtype(tensor.dtype)?;
     let (min, max) = class.range();
     let data = tensor
@@ -803,26 +882,32 @@ fn value_from_integer_data(
     class: IntegerClass,
     name: &'static str,
 ) -> BuiltinResult<Value> {
-    for &value in &data {
-        class.validate(value, name)?;
+    let values = data
+        .into_iter()
+        .map(|value| {
+            class.validate(value, name)?;
+            Ok(class.int_from_i128(value))
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    value_from_integer_values(values, shape, class, name)
+}
+
+fn value_from_integer_values(
+    values: Vec<IntValue>,
+    shape: Vec<usize>,
+    class: IntegerClass,
+    name: &'static str,
+) -> BuiltinResult<Value> {
+    if values.len() == 1 && tensor::element_count(&shape) == 1 {
+        return Ok(Value::Int(values[0].clone()));
     }
-    if data.len() == 1 && tensor::element_count(&shape) == 1 {
-        return class.scalar_value(data[0], name);
-    }
-    let dtype = class.dtype().ok_or_else(|| {
-        error_with_detail(
-            name,
-            &ERROR_INVALID_INPUT,
-            "dense signed integer output is not representable by the current tensor value model",
-        )
-    })?;
-    Tensor::new_with_dtype(
-        data.into_iter().map(|value| value as f64).collect(),
-        shape,
-        dtype,
-    )
-    .map(Value::Tensor)
-    .map_err(|err| error_with_detail(name, &ERROR_INVALID_INPUT, err))
+    let prototype = IntegerStorage::from_scalar(class.value_from_bits(0));
+    let storage = prototype
+        .from_exact_values_like(values)
+        .map_err(|err| error_with_detail(name, &ERROR_INVALID_INPUT, err))?;
+    Tensor::new_integer(storage, shape)
+        .map(Value::Tensor)
+        .map_err(|err| error_with_detail(name, &ERROR_INVALID_INPUT, err))
 }
 
 fn int_value_to_i128(value: &IntValue) -> i128 {
@@ -925,6 +1010,12 @@ fn swap_int_value(value: IntValue) -> IntValue {
 }
 
 fn swap_tensor_bytes(tensor: Tensor) -> BuiltinResult<Value> {
+    if let Some(storage) = tensor.integer_storage() {
+        let swapped = swap_integer_storage(storage);
+        return Tensor::new_integer(swapped, tensor.shape)
+            .map(Value::Tensor)
+            .map_err(|err| error_with_detail(SWAPBYTES_NAME, &ERROR_INVALID_INPUT, err));
+    }
     let dtype = tensor.dtype;
     let data = tensor
         .data
@@ -934,6 +1025,31 @@ fn swap_tensor_bytes(tensor: Tensor) -> BuiltinResult<Value> {
     Tensor::new_with_dtype(data, tensor.shape, dtype)
         .map(Value::Tensor)
         .map_err(|err| error_with_detail(SWAPBYTES_NAME, &ERROR_INVALID_INPUT, err))
+}
+
+fn swap_integer_storage(storage: &IntegerStorage) -> IntegerStorage {
+    match storage {
+        IntegerStorage::I8(values) => IntegerStorage::I8(values.clone()),
+        IntegerStorage::I16(values) => {
+            IntegerStorage::I16(values.iter().map(|value| value.swap_bytes()).collect())
+        }
+        IntegerStorage::I32(values) => {
+            IntegerStorage::I32(values.iter().map(|value| value.swap_bytes()).collect())
+        }
+        IntegerStorage::I64(values) => {
+            IntegerStorage::I64(values.iter().map(|value| value.swap_bytes()).collect())
+        }
+        IntegerStorage::U8(values) => IntegerStorage::U8(values.clone()),
+        IntegerStorage::U16(values) => {
+            IntegerStorage::U16(values.iter().map(|value| value.swap_bytes()).collect())
+        }
+        IntegerStorage::U32(values) => {
+            IntegerStorage::U32(values.iter().map(|value| value.swap_bytes()).collect())
+        }
+        IntegerStorage::U64(values) => {
+            IntegerStorage::U64(values.iter().map(|value| value.swap_bytes()).collect())
+        }
+    }
 }
 
 fn swap_tensor_scalar(value: f64, dtype: NumericDType) -> BuiltinResult<f64> {
@@ -1014,28 +1130,94 @@ mod tests {
         match out {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.dtype, NumericDType::U32);
-                assert_eq!(t.data, vec![1.0, 0.0, 1.0, 0.0]);
+                assert_eq!(
+                    t.integer_storage(),
+                    Some(&IntegerStorage::U32(vec![1, 0, 1, 0]))
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
     }
 
     #[test]
-    fn binary_bitwise_mixed_unsigned_width_is_commutative() {
+    fn binary_bitwise_rejects_mixed_integer_classes() {
         let forward = block_on(bitor_builtin(
             Value::Int(IntValue::U8(1)),
             Value::Int(IntValue::U32(256)),
         ))
-        .expect("bitor");
+        .expect_err("mixed integer classes must fail");
         let reverse = block_on(bitor_builtin(
             Value::Int(IntValue::U32(256)),
             Value::Int(IntValue::U8(1)),
         ))
-        .expect("bitor");
+        .expect_err("mixed integer classes must fail");
 
-        assert_eq!(forward, Value::Int(IntValue::U32(257)));
-        assert_eq!(reverse, Value::Int(IntValue::U32(257)));
+        assert_eq!(forward.identifier(), ERROR_INVALID_INPUT.identifier);
+        assert_eq!(reverse.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn bitwise_preserves_all_native_integer_scalar_classes() {
+        let cases = [
+            (IntValue::I8(-5), IntValue::I8(6), IntValue::I8(2)),
+            (IntValue::I16(-5), IntValue::I16(6), IntValue::I16(2)),
+            (IntValue::I32(-5), IntValue::I32(6), IntValue::I32(2)),
+            (IntValue::I64(-5), IntValue::I64(6), IntValue::I64(2)),
+            (
+                IntValue::U8(0b1010),
+                IntValue::U8(0b0110),
+                IntValue::U8(0b0010),
+            ),
+            (
+                IntValue::U16(0b1010),
+                IntValue::U16(0b0110),
+                IntValue::U16(0b0010),
+            ),
+            (
+                IntValue::U32(0b1010),
+                IntValue::U32(0b0110),
+                IntValue::U32(0b0010),
+            ),
+            (
+                IntValue::U64(0b1010),
+                IntValue::U64(0b0110),
+                IntValue::U64(0b0010),
+            ),
+        ];
+        for (left, right, expected) in cases {
+            let actual =
+                block_on(bitand_builtin(Value::Int(left), Value::Int(right))).expect("bitand");
+            assert_eq!(actual, Value::Int(expected));
+        }
+
+        let high = block_on(bitor_builtin(
+            Value::Int(IntValue::U64(1_u64 << 63)),
+            Value::Int(IntValue::U64(1_u64 << 60)),
+        ))
+        .expect("uint64 high-bit bitor");
+        assert_eq!(
+            high,
+            Value::Int(IntValue::U64((1_u64 << 63) | (1_u64 << 60)))
+        );
+    }
+
+    #[test]
+    fn bitwise_native_integer_arrays_preserve_exact_64_bit_storage() {
+        let left =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
+                .expect("left");
+        let right =
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 60, u64::MAX]), vec![1, 2])
+                .expect("right");
+        let Value::Tensor(output) =
+            block_on(bitand_builtin(Value::Tensor(left), Value::Tensor(right))).expect("bitand")
+        else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1_u64 << 60, 1_u64 << 63]))
+        );
     }
 
     #[test]
@@ -1075,11 +1257,30 @@ mod tests {
             .expect("tensor shift");
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.dtype, NumericDType::U8);
-                assert_eq!(t.data, vec![254.0, 0.0]);
+                assert_eq!(t.integer_storage(), Some(&IntegerStorage::U8(vec![254, 0])));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn bitshift_preserves_signed_arithmetic_and_64_bit_results() {
+        assert_eq!(
+            block_on(bitshift_builtin(
+                Value::Int(IntValue::I64(-4)),
+                Value::Int(IntValue::I64(-1)),
+            ))
+            .expect("signed arithmetic right shift"),
+            Value::Int(IntValue::I64(-2))
+        );
+        assert_eq!(
+            block_on(bitshift_builtin(
+                Value::Int(IntValue::U64(1_u64 << 63)),
+                Value::Int(IntValue::I64(-63)),
+            ))
+            .expect("uint64 right shift"),
+            Value::Int(IntValue::U64(1))
+        );
     }
 
     #[test]
@@ -1141,8 +1342,47 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![1, 3]);
-        assert_eq!(tensor.dtype, NumericDType::U16);
-        assert_eq!(tensor.data, vec![3.0, 3.0, 3.0]);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U16(vec![3, 3, 3]))
+        );
+    }
+
+    #[test]
+    fn idivide_native_signed_and_unsigned_64_bit_arrays_stay_exact() {
+        let signed = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, -7, 7]), vec![1, 3])
+            .expect("signed input");
+        let signed_out = block_on(idivide_builtin(vec![
+            Value::Tensor(signed),
+            Value::Int(IntValue::I64(2)),
+            Value::from("floor"),
+        ]))
+        .expect("signed idivide");
+        let Value::Tensor(signed_out) = signed_out else {
+            panic!("expected signed tensor");
+        };
+        assert_eq!(
+            signed_out.integer_storage(),
+            Some(&IntegerStorage::I64(vec![i64::MIN / 2, -4, 3]))
+        );
+
+        let unsigned = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, (1_u64 << 63) + 1]),
+            vec![1, 2],
+        )
+        .expect("unsigned input");
+        let unsigned_out = block_on(idivide_builtin(vec![
+            Value::Tensor(unsigned),
+            Value::Int(IntValue::U64(2)),
+        ]))
+        .expect("unsigned idivide");
+        let Value::Tensor(unsigned_out) = unsigned_out else {
+            panic!("expected unsigned tensor");
+        };
+        assert_eq!(
+            unsigned_out.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX / 2, (1_u64 << 62)]))
+        );
     }
 
     #[test]
@@ -1220,6 +1460,45 @@ mod tests {
         };
         assert_eq!(tensor.dtype, NumericDType::U16);
         assert_eq!(tensor.data, vec![0x3412_u16 as f64, 0xff00_u16 as f64]);
+    }
+
+    #[test]
+    fn swapbytes_preserves_native_integer_storage_for_all_widths() {
+        let input = Tensor::new_integer(
+            IntegerStorage::I64(vec![0x0102_0304_0506_0708_i64, -2]),
+            vec![1, 2],
+        )
+        .expect("input");
+        let Value::Tensor(output) =
+            block_on(swapbytes_builtin(Value::Tensor(input))).expect("swapbytes")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I64(vec![
+                0x0807_0605_0403_0201_i64,
+                (-2_i64).swap_bytes(),
+            ]))
+        );
+
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![0x0102_0304_0506_0708_u64, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("input");
+        let Value::Tensor(output) =
+            block_on(swapbytes_builtin(Value::Tensor(input))).expect("swapbytes")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                0x0807_0605_0403_0201_u64,
+                u64::MAX
+            ]))
+        );
     }
 
     #[test]
