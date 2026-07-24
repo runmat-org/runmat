@@ -1274,6 +1274,12 @@ impl WgpuProvider {
             || self.get_entry_raw(b)?.integer_type.is_some()
         {
             return match op {
+                crate::backend::wgpu::types::BinaryOpCode::Add => {
+                    self.integer_add_sub_exec(false, "elem_add", a, b)
+                }
+                crate::backend::wgpu::types::BinaryOpCode::Sub => {
+                    self.integer_add_sub_exec(true, "elem_sub", a, b)
+                }
                 crate::backend::wgpu::types::BinaryOpCode::Min => {
                     self.integer_minmax_exec(true, "elem_min", a, b)
                 }
@@ -2583,6 +2589,137 @@ mod tests {
                 provider.free(handle).expect("free minmax handle");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_add_subtract_preserve_all_classes_and_saturate() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [3, 1];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[i8::MAX, i8::MIN, 12]),
+                HostIntegerDataView::I8(&[1, 1, -120]),
+                HostIntegerDataOwned::I8(vec![i8::MAX, i8::MIN + 1, -108]),
+                HostIntegerDataOwned::I8(vec![i8::MAX - 1, i8::MIN, i8::MAX]),
+            ),
+            (
+                HostIntegerDataView::I16(&[i16::MAX, i16::MIN, 12]),
+                HostIntegerDataView::I16(&[1, 1, -32_760]),
+                HostIntegerDataOwned::I16(vec![i16::MAX, i16::MIN + 1, -32_748]),
+                HostIntegerDataOwned::I16(vec![i16::MAX - 1, i16::MIN, i16::MAX]),
+            ),
+            (
+                HostIntegerDataView::I32(&[i32::MAX, i32::MIN, 12]),
+                HostIntegerDataView::I32(&[1, 1, -2_147_483_640]),
+                HostIntegerDataOwned::I32(vec![i32::MAX, i32::MIN + 1, i32::MIN + 20]),
+                HostIntegerDataOwned::I32(vec![i32::MAX - 1, i32::MIN, i32::MAX]),
+            ),
+            (
+                HostIntegerDataView::I64(&[i64::MAX, i64::MIN, 12]),
+                HostIntegerDataView::I64(&[1, 1, i64::MIN + 8]),
+                HostIntegerDataOwned::I64(vec![i64::MAX, i64::MIN + 1, i64::MIN + 20]),
+                HostIntegerDataOwned::I64(vec![i64::MAX - 1, i64::MIN, i64::MAX]),
+            ),
+            (
+                HostIntegerDataView::U8(&[u8::MAX, 0, 10]),
+                HostIntegerDataView::U8(&[1, 1, 250]),
+                HostIntegerDataOwned::U8(vec![u8::MAX, 1, u8::MAX]),
+                HostIntegerDataOwned::U8(vec![u8::MAX - 1, 0, 0]),
+            ),
+            (
+                HostIntegerDataView::U16(&[u16::MAX, 0, 10]),
+                HostIntegerDataView::U16(&[1, 1, u16::MAX - 5]),
+                HostIntegerDataOwned::U16(vec![u16::MAX, 1, u16::MAX]),
+                HostIntegerDataOwned::U16(vec![u16::MAX - 1, 0, 0]),
+            ),
+            (
+                HostIntegerDataView::U32(&[u32::MAX, 0, 10]),
+                HostIntegerDataView::U32(&[1, 1, u32::MAX - 5]),
+                HostIntegerDataOwned::U32(vec![u32::MAX, 1, u32::MAX]),
+                HostIntegerDataOwned::U32(vec![u32::MAX - 1, 0, 0]),
+            ),
+            (
+                HostIntegerDataView::U64(&[u64::MAX, 0, 10]),
+                HostIntegerDataView::U64(&[1, 1, u64::MAX - 5]),
+                HostIntegerDataOwned::U64(vec![u64::MAX, 1, u64::MAX]),
+                HostIntegerDataOwned::U64(vec![u64::MAX - 1, 0, 0]),
+            ),
+        ];
+
+        for (left, right, expected_add, expected_subtract) in cases {
+            let integer_type = left.element_type();
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &shape,
+                })
+                .expect("upload integer lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &shape,
+                })
+                .expect("upload integer rhs");
+            let add = provider.elem_add(&lhs, &rhs).await.expect("integer add");
+            let subtract = provider
+                .elem_sub(&lhs, &rhs)
+                .await
+                .expect("integer subtract");
+            for handle in [&add, &subtract] {
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(handle),
+                    Some(integer_type)
+                );
+            }
+            assert_eq!(
+                provider
+                    .download_integer(&add)
+                    .await
+                    .expect("download add")
+                    .data,
+                expected_add
+            );
+            assert_eq!(
+                provider
+                    .download_integer(&subtract)
+                    .await
+                    .expect("download subtract")
+                    .data,
+                expected_subtract
+            );
+            for handle in [&lhs, &rhs, &add, &subtract] {
+                provider.free(handle).expect("free arithmetic handle");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_add_rejects_mixed_classes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [1, 1];
+        let signed = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&[1]),
+                shape: &shape,
+            })
+            .expect("upload signed integer");
+        let unsigned = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U8(&[1]),
+                shape: &shape,
+            })
+            .expect("upload unsigned integer");
+        let error = provider
+            .elem_add(&signed, &unsigned)
+            .await
+            .expect_err("mixed native integer classes must not use an implicit promotion");
+        assert!(error.to_string().contains("same class"));
+        provider.free(&signed).expect("free signed handle");
+        provider.free(&unsigned).expect("free unsigned handle");
     }
 
     #[tokio::test]
