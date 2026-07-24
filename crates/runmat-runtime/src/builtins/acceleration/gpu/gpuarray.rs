@@ -1666,6 +1666,66 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
+    fn gpu_array_wgpu_u64_linear_gather_and_scatter_remain_exact() {
+        use runmat_accelerate_api::AccelProvider;
+
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let source = match call(
+            Value::Tensor(
+                Tensor::new_integer(
+                    IntegerStorage::U64(vec![0, 1_u64 << 63, u64::MAX]),
+                    vec![1, 3],
+                )
+                .unwrap(),
+            ),
+            Vec::new(),
+        )
+        .expect("upload source")
+        {
+            Value::GpuTensor(handle) => handle,
+            other => panic!("expected gpu tensor, got {other:?}"),
+        };
+        let selected = provider
+            .gather_linear(&source, &[2, 1], &[1, 2])
+            .expect("exact u64 gather");
+        let gathered = test_support::gather(Value::GpuTensor(selected.clone())).expect("gather");
+        assert_eq!(
+            gathered.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))
+        );
+
+        let target = match call(
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![0, 0, 0]), vec![1, 3]).unwrap(),
+            ),
+            Vec::new(),
+        )
+        .expect("upload target")
+        {
+            Value::GpuTensor(handle) => handle,
+            other => panic!("expected gpu tensor, got {other:?}"),
+        };
+        provider
+            .scatter_linear(&target, &[0, 2], &selected)
+            .expect("exact u64 scatter");
+        let gathered = test_support::gather(Value::GpuTensor(target.clone())).expect("gather");
+        assert_eq!(
+            gathered.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 0, 1_u64 << 63]))
+        );
+        for handle in [&source, &selected, &target] {
+            provider.free(handle).expect("free gpu buffer");
+        }
+        runmat_accelerate::simple_provider::register_inprocess_provider();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
     fn gpu_array_wgpu_complex_roundtrip() {
         use runmat_accelerate_api::AccelProvider;
 

@@ -624,20 +624,34 @@ impl WgpuProvider {
         indices: &[u32],
         output_shape: &[usize],
     ) -> Result<GpuTensorHandle> {
-        let entry = self.get_entry(source)?;
+        let entry = self.get_entry_raw(source)?;
+        let integer_type = entry.integer_type;
         let expected = product_checked(output_shape)
             .ok_or_else(|| anyhow!("gather_linear: output shape product overflow"))?;
-        let lane_factor = match entry.storage {
-            GpuTensorStorage::Real => 1usize,
-            GpuTensorStorage::ComplexInterleaved => 2usize,
+        let lane_factor = match integer_type {
+            Some(
+                runmat_accelerate_api::IntegerElementType::I64
+                | runmat_accelerate_api::IntegerElementType::U64,
+            ) => 2usize,
+            Some(_) => 1usize,
+            None => match entry.storage {
+                GpuTensorStorage::Real => 1usize,
+                GpuTensorStorage::ComplexInterleaved => 2usize,
+            },
         };
-        ensure!(
-            entry.len % lane_factor == 0,
-            "gather_linear: source raw length {} is not aligned to storage lane factor {}",
-            entry.len,
-            lane_factor
-        );
-        let source_logical_len = entry.len / lane_factor;
+        if integer_type.is_none() {
+            ensure!(
+                entry.len % lane_factor == 0,
+                "gather_linear: source raw length {} is not aligned to storage lane factor {}",
+                entry.len,
+                lane_factor
+            );
+        }
+        let source_logical_len = if integer_type.is_some() {
+            entry.len
+        } else {
+            entry.len / lane_factor
+        };
         let _span = info_span!(
             "gpu.gather_linear",
             source_len = entry.len,
@@ -654,12 +668,16 @@ impl WgpuProvider {
         );
         if expected == 0 {
             let out = self.create_storage_buffer(0, "runmat-gather-linear-empty");
-            let handle = self.register_existing_buffer_with_storage(
-                out,
-                output_shape.to_vec(),
-                0,
-                entry.storage,
-            );
+            let handle = if let Some(element_type) = integer_type {
+                self.register_integer_buffer(out, output_shape.to_vec(), 0, element_type, 0)
+            } else {
+                self.register_existing_buffer_with_storage(
+                    out,
+                    output_shape.to_vec(),
+                    0,
+                    entry.storage,
+                )
+            };
             if runmat_accelerate_api::handle_is_logical(source) {
                 runmat_accelerate_api::set_handle_logical(&handle, true);
             }
@@ -751,12 +769,22 @@ impl WgpuProvider {
             indices.len()
         );
 
-        let handle = self.register_existing_buffer_with_storage(
-            out_buffer,
-            output_shape.to_vec(),
-            raw_output_len,
-            entry.storage,
-        );
+        let handle = if let Some(element_type) = integer_type {
+            self.register_integer_buffer(
+                out_buffer,
+                output_shape.to_vec(),
+                expected,
+                element_type,
+                (raw_output_len * std::mem::size_of::<u32>()) as u64,
+            )
+        } else {
+            self.register_existing_buffer_with_storage(
+                out_buffer,
+                output_shape.to_vec(),
+                raw_output_len,
+                entry.storage,
+            )
+        };
         if runmat_accelerate_api::handle_is_logical(source) {
             runmat_accelerate_api::set_handle_logical(&handle, true);
         }
@@ -776,25 +804,45 @@ impl WgpuProvider {
             indices.len() <= u32::MAX as usize,
             "scatter_linear: index count exceeds GPU limits"
         );
-        let target_entry = self.get_entry(target)?;
-        let values_entry = self.get_entry(values)?;
+        let target_entry = self.get_entry_raw(target)?;
+        let values_entry = self.get_entry_raw(values)?;
+        let integer_type = target_entry.integer_type;
+        ensure!(
+            integer_type == values_entry.integer_type,
+            "scatter_linear: integer storage mismatch target={:?} values={:?}",
+            integer_type,
+            values_entry.integer_type
+        );
         ensure!(
             target_entry.storage == values_entry.storage,
             "scatter_linear: storage mismatch target={:?} values={:?}",
             target_entry.storage,
             values_entry.storage
         );
-        let lane_factor = match target_entry.storage {
-            GpuTensorStorage::Real => 1usize,
-            GpuTensorStorage::ComplexInterleaved => 2usize,
+        let lane_factor = match integer_type {
+            Some(
+                runmat_accelerate_api::IntegerElementType::I64
+                | runmat_accelerate_api::IntegerElementType::U64,
+            ) => 2usize,
+            Some(_) => 1usize,
+            None => match target_entry.storage {
+                GpuTensorStorage::Real => 1usize,
+                GpuTensorStorage::ComplexInterleaved => 2usize,
+            },
         };
-        ensure!(
-            target_entry.len % lane_factor == 0,
-            "scatter_linear: target raw length {} is not aligned to storage lane factor {}",
-            target_entry.len,
-            lane_factor
-        );
-        let target_logical_len = target_entry.len / lane_factor;
+        if integer_type.is_none() {
+            ensure!(
+                target_entry.len % lane_factor == 0,
+                "scatter_linear: target raw length {} is not aligned to storage lane factor {}",
+                target_entry.len,
+                lane_factor
+            );
+        }
+        let target_logical_len = if integer_type.is_some() {
+            target_entry.len
+        } else {
+            target_entry.len / lane_factor
+        };
         let _span = info_span!(
             "gpu.scatter_linear",
             target_len = target_entry.len,
@@ -1060,6 +1108,7 @@ mod tests {
     use super::*;
     use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use futures::executor::block_on;
+    use runmat_accelerate_api::{HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView};
 
     #[test]
     fn wgpu_linear_gather_and_scatter_copy_complex_logical_elements() {
@@ -1097,5 +1146,46 @@ mod tests {
         assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
         assert_eq!(host.shape, vec![1, 4]);
         assert_eq!(host.data, vec![2.0, 20.0, 0.0, 0.0, 4.0, 40.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn wgpu_linear_gather_and_scatter_preserve_u64_words() {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let values = [0_u64, 1_u64 << 63, u64::MAX];
+        let source = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&values),
+                shape: &[1, 3],
+            })
+            .expect("upload exact u64");
+        let gathered = provider
+            .gather_linear_exec(&source, &[2, 1], &[1, 2])
+            .expect("gather exact u64");
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&gathered),
+            Some(runmat_accelerate_api::IntegerElementType::U64)
+        );
+        let host = block_on(provider.download_integer_exec(&gathered)).expect("download gathered");
+        assert_eq!(
+            host.data,
+            HostIntegerDataOwned::U64(vec![u64::MAX, 1_u64 << 63])
+        );
+
+        let target = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[0, 0, 0]),
+                shape: &[1, 3],
+            })
+            .expect("upload target");
+        provider
+            .scatter_linear_exec(&target, &[0, 2], &gathered)
+            .expect("scatter exact u64");
+        let host = block_on(provider.download_integer_exec(&target)).expect("download target");
+        assert_eq!(
+            host.data,
+            HostIntegerDataOwned::U64(vec![u64::MAX, 0, 1_u64 << 63])
+        );
     }
 }
