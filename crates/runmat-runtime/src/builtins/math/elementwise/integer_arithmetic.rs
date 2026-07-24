@@ -345,6 +345,19 @@ fn apply_integer_scalar(
             values.push(exact_integer_power(integer_value, scalar as u64));
             continue;
         }
+        if integer.target.uses_extended_scalar_precision()
+            && scalar.is_finite()
+            && scalar != 0.0
+            && !matches!(operation, IntegerBinaryOp::Power)
+        {
+            values.push(extended_integer_binary(
+                integer_value,
+                scalar,
+                integer_is_left,
+                operation,
+            )?);
+            continue;
+        }
         let integer_value = integer_value.to_f64();
         let result = if integer_is_left {
             apply_float(integer_value, scalar, operation)
@@ -354,6 +367,31 @@ fn apply_integer_scalar(
         values.push(integer.target.cast_scalar(result));
     }
     integer_values_into_value(integer.target, values, integer.shape.clone())
+}
+
+fn extended_integer_binary(
+    integer: IntValue,
+    scalar: f64,
+    integer_is_left: bool,
+    operation: IntegerBinaryOp,
+) -> Result<IntValue, String> {
+    let scalar = Extended::from_f64(scalar).expect("finite scalar is checked by caller");
+    let integer_extended = extended_from_int_value(&integer);
+    let (lhs, rhs) = if integer_is_left {
+        (integer_extended, scalar)
+    } else {
+        (scalar, integer_extended)
+    };
+    let result = match operation {
+        IntegerBinaryOp::Add => lhs.add(&rhs),
+        IntegerBinaryOp::Subtract => lhs.subtract(&rhs),
+        IntegerBinaryOp::Multiply => lhs.multiply(&rhs),
+        IntegerBinaryOp::Divide => lhs
+            .divide(&rhs)
+            .expect("nonzero scalar is checked by caller"),
+        IntegerBinaryOp::Power => unreachable!("power retains its dedicated scalar path"),
+    };
+    extended_to_integer_like(result, &integer)
 }
 
 fn exact_integer_scalar(target: IntegerTarget, value: f64) -> Option<IntValue> {
@@ -957,6 +995,50 @@ mod tests {
         .expect("integer operation")
         .expect("integer path");
         assert_eq!(int64_reverse_subtract, Value::Int(IntValue::I64(i64::MAX)));
+    }
+
+    #[test]
+    fn nonintegral_scalar_double_arithmetic_uses_extended_precision_for_64_bit_storage() {
+        let base = (1_u64 << 53) + 1;
+        let sum = try_integer_binary(
+            &Value::Int(IntValue::U64(base)),
+            &Value::Num(0.5),
+            IntegerBinaryOp::Add,
+            "plus",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(sum, Value::Int(IntValue::U64(base + 1)));
+
+        let product = try_integer_binary(
+            &Value::Int(IntValue::U64(u64::MAX)),
+            &Value::Num(0.5),
+            IntegerBinaryOp::Multiply,
+            "times",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(product, Value::Int(IntValue::U64(1_u64 << 63)));
+
+        let quotient = try_integer_binary(
+            &Value::Int(IntValue::I64(7)),
+            &Value::Num(2.5),
+            IntegerBinaryOp::Divide,
+            "rdivide",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(quotient, Value::Int(IntValue::I64(3)));
+
+        let reverse_subtract = try_integer_binary(
+            &Value::Num(0.5),
+            &Value::Int(IntValue::U64(base)),
+            IntegerBinaryOp::Subtract,
+            "minus",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(reverse_subtract, Value::Int(IntValue::U64(0)));
     }
 
     #[test]
