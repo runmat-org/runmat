@@ -585,7 +585,9 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{HandleRef, Listener};
+    use runmat_builtins::{
+        ComplexTensor, HandleRef, IntegerComplexStorage, IntegerStorage, Listener,
+    };
 
     fn run_ne(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         block_on(super::ne_builtin(lhs, rhs))
@@ -736,6 +738,23 @@ pub(crate) mod tests {
         let err = run_ne(Value::Num(1.0), Value::String("a".into())).unwrap_err();
         assert!(err.message().contains("mixing numeric and string inputs"));
         assert_eq!(err.identifier(), NE_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn ne_rejects_typed_complex_integer_before_floating_comparison() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1_u64 << 63]),
+            )
+            .expect("matching components"),
+            vec![1, 1],
+        )
+        .expect("typed complex");
+
+        let err = run_ne(Value::ComplexTensor(tensor), Value::Num(0.0))
+            .expect_err("typed complex integer inequality must reject");
+        assert!(err.message().contains("complex numbers with integer types"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

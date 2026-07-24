@@ -335,7 +335,7 @@ fn equality_error_with_detail(
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::CellArray;
+    use runmat_builtins::{CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
     fn run_isequal(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(isequal_builtin(args))
@@ -343,6 +343,18 @@ pub(crate) mod tests {
 
     fn run_isequaln(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(isequaln_builtin(args))
+    }
+
+    fn typed_complex_u64(real: u64, imag: u64) -> ComplexTensor {
+        ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![real]),
+                IntegerStorage::U64(vec![imag]),
+            )
+            .expect("matching components"),
+            vec![1, 1],
+        )
+        .expect("typed complex")
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -519,5 +531,26 @@ pub(crate) mod tests {
         let result =
             run_isequal(vec![Value::Complex(1.0, 2.0), Value::Complex(1.0, 2.0)]).expect("isequal");
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn isequal_typed_complex_integer_compares_exact_components() {
+        let left = typed_complex_u64(u64::MAX, 1_u64 << 63);
+        let same = left.clone();
+        let different = typed_complex_u64(u64::MAX - 1, 1_u64 << 63);
+
+        assert_eq!(
+            run_isequal(vec![Value::ComplexTensor(left), Value::ComplexTensor(same)])
+                .expect("isequal"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            run_isequal(vec![
+                Value::ComplexTensor(different),
+                Value::ComplexTensor(typed_complex_u64(u64::MAX, 1_u64 << 63)),
+            ])
+            .expect("isequal"),
+            Value::Bool(false)
+        );
     }
 }

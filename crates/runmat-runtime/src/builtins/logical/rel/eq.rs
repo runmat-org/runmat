@@ -598,7 +598,9 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{HandleRef, Listener, SymbolicExpr};
+    use runmat_builtins::{
+        ComplexTensor, HandleRef, IntegerComplexStorage, IntegerStorage, Listener, SymbolicExpr,
+    };
 
     fn run_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         block_on(super::eq_builtin(lhs, rhs))
@@ -774,6 +776,23 @@ pub(crate) mod tests {
         let complex = Value::Complex(2.0, 0.0);
         let numeric = Value::Num(2.0);
         assert_eq!(run_eq(complex, numeric).unwrap(), Value::Bool(true));
+    }
+
+    #[test]
+    fn eq_rejects_typed_complex_integer_before_floating_comparison() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1_u64 << 63]),
+            )
+            .expect("matching components"),
+            vec![1, 1],
+        )
+        .expect("typed complex");
+
+        let err = run_eq(Value::ComplexTensor(tensor), Value::Num(0.0))
+            .expect_err("typed complex integer equality must reject");
+        assert!(err.message().contains("complex numbers with integer types"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

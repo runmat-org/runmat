@@ -178,8 +178,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CellArray, CharArray, Closure, ComplexTensor, HandleRef, Listener, LogicalArray,
-        MException, ObjectInstance, ResolveContext, StructValue, SymbolicExpr, Tensor, Type,
+        CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntegerComplexStorage,
+        IntegerStorage, Listener, LogicalArray, MException, ObjectInstance, ResolveContext,
+        StructValue, SymbolicExpr, Tensor, Type,
     };
 
     fn run_isreal(value: Value) -> BuiltinResult<Value> {
@@ -221,6 +222,21 @@ pub(crate) mod tests {
         assert_eq!(complex, Value::Bool(false));
         assert_eq!(complex_zero_imag, Value::Bool(false));
         assert_eq!(tensor_flag, Value::Bool(false));
+    }
+
+    #[test]
+    fn isreal_rejects_typed_complex_integer_storage_with_zero_imaginary_part() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX]),
+            IntegerStorage::U64(vec![0]),
+        )
+        .expect("matching components");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
+
+        assert_eq!(
+            run_isreal(Value::ComplexTensor(tensor)).expect("isreal"),
+            Value::Bool(false)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -399,7 +399,8 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CellArray, IntValue, MException, ObjectInstance, SparseTensor, StructValue, SymbolicExpr,
+        CellArray, IntValue, IntegerComplexStorage, IntegerStorage, MException, ObjectInstance,
+        SparseTensor, StructValue, SymbolicExpr,
     };
 
     fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -503,6 +504,22 @@ pub(crate) mod tests {
                 assert_eq!(array.data, vec![0, 1, 1]);
             }
             other => panic!("expected logical array, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn logical_typed_complex_integer_uses_exact_components() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![0, u64::MAX, 0]),
+            IntegerStorage::U64(vec![0, 0, 1_u64 << 63]),
+        )
+        .expect("matching components");
+        let tensor = ComplexTensor::new_integer(storage, vec![3, 1]).expect("typed complex");
+
+        let result = logical_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("logical");
+        match result {
+            Value::LogicalArray(array) => assert_eq!(array.data, vec![0, 1, 1]),
+            other => panic!("expected logical array, got {other:?}"),
         }
     }
 
