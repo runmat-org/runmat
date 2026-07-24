@@ -15,6 +15,8 @@ pub fn arithmetic_shader(workgroup_size: u32) -> String {
 const INTEGER_COMPARISON_SHADER: &str = r#"
 struct Words { data: array<u32> };
 struct Output { data: array<$SCALAR> };
+struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
+alias PackedArray = array<PackedValue, 128>;
 
 struct Params {
     len: u32,
@@ -22,9 +24,14 @@ struct Params {
     offset: u32,
     total: u32,
     integer_type: u32,
+    rank: u32,
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
+    out_shape: PackedArray,
+    a_shape: PackedArray,
+    b_shape: PackedArray,
+    a_strides: PackedArray,
+    b_strides: PackedArray,
 };
 
 @group(0) @binding(0) var<storage, read> A: Words;
@@ -40,11 +47,32 @@ fn signed16(word: u32) -> i32 {
     return bitcast<i32>(word << 16u) >> 16;
 }
 
+fn source_indices(index: u32) -> vec2<u32> {
+    if (params.rank == 0u) { return vec2<u32>(index, index); }
+    var tmp = index;
+    var a_index = 0u;
+    var b_index = 0u;
+    var d = 0u;
+    loop {
+        if (d >= params.rank) { break; }
+        let coordinate = tmp % params.out_shape[d].value;
+        tmp = tmp / params.out_shape[d].value;
+        let a_coordinate = select(coordinate, 0u, params.a_shape[d].value == 1u);
+        let b_coordinate = select(coordinate, 0u, params.b_shape[d].value == 1u);
+        a_index = a_index + a_coordinate * params.a_strides[d].value;
+        b_index = b_index + b_coordinate * params.b_strides[d].value;
+        d = d + 1u;
+    }
+    return vec2<u32>(a_index, b_index);
+}
+
 fn compare_words(index: u32) -> i32 {
     let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
-    let lane = index * lanes;
-    let a_low = A.data[lane];
-    let b_low = B.data[lane];
+    let sources = source_indices(index);
+    let a_lane = sources.x * lanes;
+    let b_lane = sources.y * lanes;
+    let a_low = A.data[a_lane];
+    let b_low = B.data[b_lane];
 
     switch params.integer_type {
         case 0u: {
@@ -66,8 +94,8 @@ fn compare_words(index: u32) -> i32 {
             if (a > b) { return 1; }
         }
         case 3u: {
-            let a_high = bitcast<i32>(A.data[lane + 1u]);
-            let b_high = bitcast<i32>(B.data[lane + 1u]);
+            let a_high = bitcast<i32>(A.data[a_lane + 1u]);
+            let b_high = bitcast<i32>(B.data[b_lane + 1u]);
             if (a_high < b_high) { return -1; }
             if (a_high > b_high) { return 1; }
             if (a_low < b_low) { return -1; }
@@ -90,8 +118,8 @@ fn compare_words(index: u32) -> i32 {
             if (a_low > b_low) { return 1; }
         }
         case 7u: {
-            let a_high = A.data[lane + 1u];
-            let b_high = B.data[lane + 1u];
+            let a_high = A.data[a_lane + 1u];
+            let b_high = B.data[b_lane + 1u];
             if (a_high < b_high) { return -1; }
             if (a_high > b_high) { return 1; }
             if (a_low < b_low) { return -1; }
@@ -126,6 +154,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 const INTEGER_MINMAX_SHADER: &str = r#"
 struct Words { data: array<u32> };
+struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
+alias PackedArray = array<PackedValue, 128>;
 
 struct Params {
     len: u32,
@@ -133,9 +163,14 @@ struct Params {
     offset: u32,
     total: u32,
     integer_type: u32,
+    rank: u32,
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
+    out_shape: PackedArray,
+    a_shape: PackedArray,
+    b_shape: PackedArray,
+    a_strides: PackedArray,
+    b_strides: PackedArray,
 };
 
 @group(0) @binding(0) var<storage, read> A: Words;
@@ -151,11 +186,32 @@ fn signed16_minmax(word: u32) -> i32 {
     return bitcast<i32>(word << 16u) >> 16;
 }
 
+fn source_indices_minmax(index: u32) -> vec2<u32> {
+    if (params.rank == 0u) { return vec2<u32>(index, index); }
+    var tmp = index;
+    var a_index = 0u;
+    var b_index = 0u;
+    var d = 0u;
+    loop {
+        if (d >= params.rank) { break; }
+        let coordinate = tmp % params.out_shape[d].value;
+        tmp = tmp / params.out_shape[d].value;
+        let a_coordinate = select(coordinate, 0u, params.a_shape[d].value == 1u);
+        let b_coordinate = select(coordinate, 0u, params.b_shape[d].value == 1u);
+        a_index = a_index + a_coordinate * params.a_strides[d].value;
+        b_index = b_index + b_coordinate * params.b_strides[d].value;
+        d = d + 1u;
+    }
+    return vec2<u32>(a_index, b_index);
+}
+
 fn compare_words_minmax(index: u32) -> i32 {
     let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
-    let lane = index * lanes;
-    let a_low = A.data[lane];
-    let b_low = B.data[lane];
+    let sources = source_indices_minmax(index);
+    let a_lane = sources.x * lanes;
+    let b_lane = sources.y * lanes;
+    let a_low = A.data[a_lane];
+    let b_low = B.data[b_lane];
 
     switch params.integer_type {
         case 0u: {
@@ -177,8 +233,8 @@ fn compare_words_minmax(index: u32) -> i32 {
             if (a > b) { return 1; }
         }
         case 3u: {
-            let a_high = bitcast<i32>(A.data[lane + 1u]);
-            let b_high = bitcast<i32>(B.data[lane + 1u]);
+            let a_high = bitcast<i32>(A.data[a_lane + 1u]);
+            let b_high = bitcast<i32>(B.data[b_lane + 1u]);
             if (a_high < b_high) { return -1; }
             if (a_high > b_high) { return 1; }
             if (a_low < b_low) { return -1; }
@@ -201,8 +257,8 @@ fn compare_words_minmax(index: u32) -> i32 {
             if (a_low > b_low) { return 1; }
         }
         case 7u: {
-            let a_high = A.data[lane + 1u];
-            let b_high = B.data[lane + 1u];
+            let a_high = A.data[a_lane + 1u];
+            let b_high = B.data[b_lane + 1u];
             if (a_high < b_high) { return -1; }
             if (a_high > b_high) { return 1; }
             if (a_low < b_low) { return -1; }
@@ -220,12 +276,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let index = params.offset + local;
     if (index >= params.total) { return; }
     let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
+    let sources = source_indices_minmax(index);
     let lane = index * lanes;
+    let a_lane = sources.x * lanes;
+    let b_lane = sources.y * lanes;
     let ordering = compare_words_minmax(index);
     let choose_a = select(ordering >= 0, ordering <= 0, params.select_min != 0u);
-    Out.data[lane] = select(B.data[lane], A.data[lane], choose_a);
+    Out.data[lane] = select(B.data[b_lane], A.data[a_lane], choose_a);
     if (lanes == 2u) {
-        Out.data[lane + 1u] = select(B.data[lane + 1u], A.data[lane + 1u], choose_a);
+        Out.data[lane + 1u] = select(B.data[b_lane + 1u], A.data[a_lane + 1u], choose_a);
     }
 }
 "#;

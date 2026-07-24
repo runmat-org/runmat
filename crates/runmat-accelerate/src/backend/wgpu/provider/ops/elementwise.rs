@@ -49,18 +49,17 @@ impl WgpuProvider {
                 && entry_b.storage == runmat_accelerate_api::GpuTensorStorage::Real,
             "{operation_name}: complex integer gpuArray comparison is not supported"
         );
-        ensure!(
-            entry_a.shape == entry_b.shape,
-            "{operation_name}: shape mismatch between inputs"
-        );
-        ensure!(
-            entry_a.len == entry_b.len,
-            "{operation_name}: logical element count mismatch between inputs"
-        );
-        let len = entry_a.len;
+        let broadcast = super::integer::integer_broadcast_plan(
+            operation_name,
+            &entry_a.shape,
+            entry_a.len,
+            &entry_b.shape,
+            entry_b.len,
+        )?;
+        let len = broadcast.len;
         if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-integer-compare-empty");
-            let handle = self.register_existing_buffer(out, entry_a.shape, 0);
+            let handle = self.register_existing_buffer(out, broadcast.output_shape, 0);
             runmat_accelerate_api::set_handle_logical(&handle, true);
             return Ok(handle);
         }
@@ -76,9 +75,19 @@ impl WgpuProvider {
             offset: u32,
             total: u32,
             integer_type: u32,
+            rank: u32,
             _pad0: u32,
             _pad1: u32,
-            _pad2: u32,
+            out_shape: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            a_shape: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            b_shape: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            a_strides: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            b_strides: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
         }
 
         let scalar_type = match self.precision {
@@ -135,9 +144,14 @@ impl WgpuProvider {
                 offset: offset as u32,
                 total: len as u32,
                 integer_type: super::integer::integer_type_code(integer_type),
+                rank: broadcast.rank,
                 _pad0: 0,
                 _pad1: 0,
-                _pad2: 0,
+                out_shape: broadcast.out_shape,
+                a_shape: broadcast.a_shape,
+                b_shape: broadcast.b_shape,
+                a_strides: broadcast.a_strides,
+                b_strides: broadcast.b_strides,
             };
             let params_buffer = self.uniform_buffer(&params, "runmat-integer-compare-params");
             let bind_group = self
@@ -177,7 +191,7 @@ impl WgpuProvider {
             );
             offset += chunk_len;
         }
-        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len);
+        let handle = self.register_existing_buffer(out_buffer, broadcast.output_shape, len);
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
     }
@@ -2864,6 +2878,138 @@ mod tests {
                 assert_eq!(downloaded.data, expected);
             }
             for handle in [&lhs, &rhs, &add, &subtract, &multiply] {
+                provider.free(handle).expect("free broadcast handle");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_comparison_and_minmax_broadcast_all_classes_column_major() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let lhs_shape = [2, 1];
+        let rhs_shape = [1, 3];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[2, -2]),
+                HostIntegerDataView::I8(&[1, 2, 3]),
+                HostIntegerDataOwned::I8(vec![1, -2, 2, -2, 2, -2]),
+                HostIntegerDataOwned::I8(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::I16(&[2, -2]),
+                HostIntegerDataView::I16(&[1, 2, 3]),
+                HostIntegerDataOwned::I16(vec![1, -2, 2, -2, 2, -2]),
+                HostIntegerDataOwned::I16(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::I32(&[2, -2]),
+                HostIntegerDataView::I32(&[1, 2, 3]),
+                HostIntegerDataOwned::I32(vec![1, -2, 2, -2, 2, -2]),
+                HostIntegerDataOwned::I32(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::I64(&[2, -2]),
+                HostIntegerDataView::I64(&[1, 2, 3]),
+                HostIntegerDataOwned::I64(vec![1, -2, 2, -2, 2, -2]),
+                HostIntegerDataOwned::I64(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::U8(&[2, 0]),
+                HostIntegerDataView::U8(&[1, 2, 3]),
+                HostIntegerDataOwned::U8(vec![1, 0, 2, 0, 2, 0]),
+                HostIntegerDataOwned::U8(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::U16(&[2, 0]),
+                HostIntegerDataView::U16(&[1, 2, 3]),
+                HostIntegerDataOwned::U16(vec![1, 0, 2, 0, 2, 0]),
+                HostIntegerDataOwned::U16(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::U32(&[2, 0]),
+                HostIntegerDataView::U32(&[1, 2, 3]),
+                HostIntegerDataOwned::U32(vec![1, 0, 2, 0, 2, 0]),
+                HostIntegerDataOwned::U32(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::U64(&[2, 0]),
+                HostIntegerDataView::U64(&[1, 2, 3]),
+                HostIntegerDataOwned::U64(vec![1, 0, 2, 0, 2, 0]),
+                HostIntegerDataOwned::U64(vec![2, 1, 2, 2, 3, 3]),
+            ),
+        ];
+
+        for (left, right, expected_minimum, expected_maximum) in cases {
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &lhs_shape,
+                })
+                .expect("upload lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &rhs_shape,
+                })
+                .expect("upload rhs");
+            let equal = provider.elem_eq(&lhs, &rhs).await.expect("broadcast eq");
+            let not_equal = provider.elem_ne(&lhs, &rhs).await.expect("broadcast ne");
+            let less = provider.elem_lt(&lhs, &rhs).await.expect("broadcast lt");
+            let greater_equal = provider.elem_ge(&lhs, &rhs).await.expect("broadcast ge");
+            let minimum = provider.elem_min(&lhs, &rhs).await.expect("broadcast min");
+            let maximum = provider.elem_max(&lhs, &rhs).await.expect("broadcast max");
+            for handle in [&equal, &not_equal, &less, &greater_equal] {
+                assert!(runmat_accelerate_api::handle_is_logical(handle));
+                let downloaded = provider
+                    .download(handle)
+                    .await
+                    .expect("download comparison");
+                assert_eq!(downloaded.shape, vec![2, 3]);
+            }
+            assert_eq!(
+                provider.download(&equal).await.expect("download eq").data,
+                vec![0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+            );
+            assert_eq!(
+                provider
+                    .download(&not_equal)
+                    .await
+                    .expect("download ne")
+                    .data,
+                vec![1.0, 1.0, 0.0, 1.0, 1.0, 1.0]
+            );
+            assert_eq!(
+                provider.download(&less).await.expect("download lt").data,
+                vec![0.0, 1.0, 0.0, 1.0, 1.0, 1.0]
+            );
+            assert_eq!(
+                provider
+                    .download(&greater_equal)
+                    .await
+                    .expect("download ge")
+                    .data,
+                vec![1.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+            );
+            for (handle, expected) in [(&minimum, expected_minimum), (&maximum, expected_maximum)] {
+                let downloaded = provider
+                    .download_integer(handle)
+                    .await
+                    .expect("download minmax");
+                assert_eq!(downloaded.shape, vec![2, 3]);
+                assert_eq!(downloaded.data, expected);
+            }
+            for handle in [
+                &lhs,
+                &rhs,
+                &equal,
+                &not_equal,
+                &less,
+                &greater_equal,
+                &minimum,
+                &maximum,
+            ] {
                 provider.free(handle).expect("free broadcast handle");
             }
         }
