@@ -733,6 +733,14 @@ impl AccelProvider for WgpuProvider {
         )
     }
 
+    fn activation_elu<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        alpha: f64,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elu_exec(a, alpha) })
+    }
+
     fn unary_log<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(
             async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Log, a) },

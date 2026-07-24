@@ -229,6 +229,12 @@ fn dense_feature_network_layers() -> Value {
         ],
     ))
     .unwrap();
+    let elu = block_on(elu_layer_builtin(vec![
+        Value::Num(1.25),
+        Value::String("Name".into()),
+        Value::String("elu".into()),
+    ]))
+    .unwrap();
     let relu = block_on(relu_layer_builtin(vec![
         Value::String("Name".into()),
         Value::String("relu".into()),
@@ -246,7 +252,13 @@ fn dense_feature_network_layers() -> Value {
         ],
     ))
     .unwrap();
-    Value::Cell(CellArray::new(vec![input, first, relu, second], 4, 1).unwrap())
+    Value::Cell(CellArray::new(vec![input, first, elu, relu, second], 5, 1).unwrap())
+}
+
+fn elu_feature_network_layers() -> Value {
+    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let elu = block_on(elu_layer_builtin(vec![Value::Num(1.25)])).unwrap();
+    Value::Cell(CellArray::new(vec![input, elu], 2, 1).unwrap())
 }
 
 #[test]
@@ -391,6 +403,47 @@ fn forward_runs_fully_connected_gpu_dlarray_without_host_gather() {
                 .expect("gather GPU output for parity assertion");
         assert_eq!(actual.shape, expected.shape);
         assert_eq!(actual.data, expected.data);
+    });
+}
+
+#[test]
+fn forward_runs_arbitrary_alpha_elu_gpu_dlarray_with_cpu_parity() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let net = block_on(dlnetwork_builtin(vec![elu_feature_network_layers()])).unwrap();
+        let values = vec![-2.0, 0.0, 3.0, f64::NAN];
+        let cpu = block_on(forward_builtin(
+            net.clone(),
+            Value::Tensor(Tensor::new(values.clone(), vec![2, 2]).unwrap()),
+            vec![],
+        ))
+        .unwrap();
+        let Value::Tensor(expected) = cpu else {
+            panic!("expected CPU tensor output");
+        };
+        let shape = [2usize, 2usize];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &shape,
+            })
+            .expect("upload");
+        provider.reset_telemetry();
+        let dl = block_on(dlarray_builtin(Value::GpuTensor(handle), vec![])).unwrap();
+        let output = block_on(forward_builtin(net, dl, vec![])).expect("GPU ELU forward");
+        let Value::Object(output) = output else {
+            panic!("expected GPU dlarray output");
+        };
+        let Some(Value::GpuTensor(handle)) = output.properties.get("Data") else {
+            panic!("expected resident GPU output data");
+        };
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let actual =
+            crate::builtins::common::test_support::gather(Value::GpuTensor(handle.clone()))
+                .expect("gather GPU output for parity assertion");
+        assert_eq!(actual.shape, expected.shape);
+        for (actual, expected) in actual.data.iter().zip(&expected.data) {
+            assert!(actual == expected || (actual.is_nan() && expected.is_nan()));
+        }
     });
 }
 

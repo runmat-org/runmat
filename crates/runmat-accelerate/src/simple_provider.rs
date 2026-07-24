@@ -5679,6 +5679,35 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn activation_elu<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        alpha: f64,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(a) == GpuTensorStorage::Real,
+                "activation_elu: complex inputs are not supported"
+            );
+            let guard = registry().lock().unwrap();
+            let input = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out = input
+                .iter()
+                .map(|&value| {
+                    if value > 0.0 {
+                        value
+                    } else {
+                        alpha * (value.exp() - 1.0)
+                    }
+                })
+                .collect();
+            drop(guard);
+            Ok(self.allocate_tensor(out, a.shape.clone()))
+        })
+    }
+
     fn unary_log<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let guard = registry().lock().unwrap();

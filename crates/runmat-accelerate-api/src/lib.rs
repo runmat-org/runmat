@@ -2246,6 +2246,14 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("unary_exp not supported by provider")
     }
+    /// Apply an exponential linear unit activation with the supplied alpha.
+    fn activation_elu<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _alpha: f64,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("activation_elu not supported by provider")
+    }
     fn unary_expm1<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,

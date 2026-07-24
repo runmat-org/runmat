@@ -43,6 +43,29 @@ struct CrossentropyParams {
 }
 
 impl WgpuProvider {
+    pub(crate) fn elu_exec(&self, input: &GpuTensorHandle, alpha: f64) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(input)?;
+        ensure!(
+            entry.storage != GpuTensorStorage::ComplexInterleaved
+                && runmat_accelerate_api::handle_storage(input)
+                    != GpuTensorStorage::ComplexInterleaved,
+            "activation_elu: complex inputs are not supported"
+        );
+        let alpha_tensor = self.fill_exec(&entry.shape, alpha)?;
+        let shader = match self.precision {
+            NumericPrecision::F64 => ELU_SHADER_F64,
+            NumericPrecision::F32 => ELU_SHADER_F32,
+        };
+        let result = self.fused_elementwise_with_telemetry_exec(
+            shader,
+            &[input.clone(), alpha_tensor.clone()],
+            &entry.shape,
+            entry.len,
+        );
+        let _ = self.free_exec(&alpha_tensor);
+        result
+    }
+
     pub(crate) fn crossentropy_terms_exec(
         &self,
         request: &ProviderCrossentropyRequest<'_>,
@@ -591,6 +614,36 @@ fn crossentropy_terms_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 7] {
     })
 }
 
+const ELU_SHADER_F64: &str = r#"
+struct Tensor { data: array<f64> };
+struct Params { len: u32, _p0: u32, _p1: u32, _p2: u32 };
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> alpha: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x; if (idx >= params.len) { return; }
+  let value = input0.data[idx];
+  output.data[idx] = select(alpha.data[idx] * (exp(value) - f64(1.0)), value, value > f64(0.0));
+}
+"#;
+
+const ELU_SHADER_F32: &str = r#"
+struct Tensor { data: array<f32> };
+struct Params { len: u32, _p0: u32, _p1: u32, _p2: u32 };
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> alpha: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x; if (idx >= params.len) { return; }
+  let value = input0.data[idx];
+  output.data[idx] = select(alpha.data[idx] * (exp(value) - 1.0), value, value > 0.0);
+}
+"#;
+
 fn crossentropy_terms_shader(precision: NumericPrecision) -> String {
     let ty = precision.as_str();
     let (max_finite, eps, one_minus_eps) = match precision {
@@ -902,6 +955,37 @@ mod tests {
         ] {
             provider.free(handle).ok();
         }
+    }
+
+    #[test]
+    fn elu_wgpu_matches_cpu_branch_semantics() {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let shape = [2usize, 2usize];
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[-2.0, 0.0, 3.0, f64::NAN],
+                shape: &shape,
+            })
+            .expect("upload input");
+        let output =
+            pollster::block_on(provider.activation_elu(&input, 1.25)).expect("resident ELU");
+        let actual = pollster::block_on(provider.download(&output)).expect("download output");
+        let expected = [1.25 * ((-2.0_f64).exp() - 1.0), 0.0, 3.0, f64::NAN];
+        let tolerance = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-10,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1.0e-5,
+        };
+        assert_eq!(actual.shape, shape);
+        for (actual, expected) in actual.data.iter().zip(expected) {
+            assert!(
+                (actual - expected).abs() < tolerance || (actual.is_nan() && expected.is_nan()),
+                "got {actual}, expected {expected}"
+            );
+        }
+        provider.free(&input).ok();
+        provider.free(&output).ok();
     }
 
     #[test]

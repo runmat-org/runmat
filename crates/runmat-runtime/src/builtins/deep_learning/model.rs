@@ -599,6 +599,26 @@ async fn evaluate_network_gpu(
                 current = output;
                 current_is_temporary = true;
             }
+            "nnet.cnn.layer.ELULayer" => {
+                let alpha = elu_alpha(&layer, function)?;
+                let output = match provider.activation_elu(&current, alpha).await {
+                    Ok(handle) => handle,
+                    Err(err) => {
+                        if current_is_temporary {
+                            let _ = provider.free(&current);
+                        }
+                        return Err(deep_learning_error(
+                            function,
+                            format!("{function}: provider-resident ELU failed: {err}"),
+                        ));
+                    }
+                };
+                if current_is_temporary {
+                    let _ = provider.free(&current);
+                }
+                current = output;
+                current_is_temporary = true;
+            }
             _ => {}
         }
     }
@@ -672,6 +692,10 @@ fn validate_gpu_forward_layers(
                 saw_transform = true;
             }
             "nnet.cnn.layer.ReLULayer" if saw_input => saw_transform = true,
+            "nnet.cnn.layer.ELULayer" if saw_input => {
+                let _ = elu_alpha(layer, function)?;
+                saw_transform = true;
+            }
             "nnet.cnn.layer.ClassificationOutputLayer" | "nnet.cnn.layer.RegressionOutputLayer"
                 if saw_input && saw_transform => {}
             other => {
@@ -823,13 +847,7 @@ fn elu_forward(
     layer: &ObjectInstance,
     function: &'static str,
 ) -> BuiltinResult<Tensor> {
-    let alpha = layer
-        .properties
-        .get("Alpha")
-        .map(|value| numeric_values(value, function, "Alpha"))
-        .transpose()?
-        .and_then(|values| values.first().copied())
-        .unwrap_or(1.0);
+    let alpha = elu_alpha(layer, function)?;
     map_tensor(
         input,
         |value| {
@@ -841,6 +859,16 @@ fn elu_forward(
         },
         function,
     )
+}
+
+fn elu_alpha(layer: &ObjectInstance, function: &'static str) -> BuiltinResult<f64> {
+    Ok(layer
+        .properties
+        .get("Alpha")
+        .map(|value| numeric_values(value, function, "Alpha"))
+        .transpose()?
+        .and_then(|values| values.first().copied())
+        .unwrap_or(1.0))
 }
 
 fn softmax_rows(input: Tensor, function: &'static str) -> BuiltinResult<Tensor> {
