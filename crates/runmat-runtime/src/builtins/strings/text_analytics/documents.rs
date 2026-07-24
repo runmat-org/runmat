@@ -528,7 +528,7 @@ async fn remove_short_words_builtin(value: Value, len: Value) -> BuiltinResult<V
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
-            let shape = shape_from_object(&object);
+            let shape = shape_from_object(&object, "removeShortWords")?;
             let options = options_from_document_object(&object);
             tokenized_document_value(documents, shape, options, None)
         }
@@ -2032,7 +2032,12 @@ pub(in crate::builtins::strings::text_analytics) fn transform_tokenized_document
                 .collect::<BuiltinResult<Vec<_>>>()
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    tokenized_document_value(documents, shape_from_object(object), options, None)
+    tokenized_document_value(
+        documents,
+        shape_from_object(object, fn_name)?,
+        options,
+        None,
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2348,13 +2353,10 @@ pub(in crate::builtins::strings::text_analytics) fn document_shape_from_object(
             object
                 .properties
                 .get("NumDocuments")
-                .and_then(|value| match value {
-                    Value::Num(n) if n.is_finite() && *n >= 0.0 => Some(*n as usize),
-                    _ => None,
-                })
+                .and_then(nonnegative_dimension)
         })
         .unwrap_or(1);
-    let shape = shape_from_object(object);
+    let shape = shape_from_object(object, fn_name)?;
     let cells = shape.iter().try_fold(1usize, |acc, dim| {
         acc.checked_mul(*dim).ok_or_else(|| {
             text_analytics_error(
@@ -2374,22 +2376,54 @@ pub(in crate::builtins::strings::text_analytics) fn document_shape_from_object(
     Ok(shape)
 }
 
-fn shape_from_object(object: &ObjectInstance) -> Vec<usize> {
+fn shape_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Vec<usize>> {
     if let Some(Value::Tensor(tensor)) = object.properties.get("Shape") {
-        tensor.data.iter().map(|value| *value as usize).collect()
-    } else {
-        vec![
-            object
-                .properties
-                .get("NumDocuments")
-                .and_then(|value| match value {
-                    Value::Num(n) => Some(*n as usize),
-                    _ => None,
+        tensor
+            .data
+            .iter()
+            .map(|value| {
+                nonnegative_platform_usize(*value).ok_or_else(|| {
+                    text_analytics_error(
+                        fn_name,
+                        format!(
+                            "{fn_name}: tokenizedDocument Shape property has invalid dimension {value}"
+                        ),
+                    )
                 })
-                .unwrap_or(1),
-            1,
-        ]
+            })
+            .collect()
+    } else {
+        let num_documents = match object.properties.get("NumDocuments") {
+            Some(value) => nonnegative_dimension(value).ok_or_else(|| {
+                text_analytics_error(
+                    fn_name,
+                    format!(
+                        "{fn_name}: tokenizedDocument NumDocuments property is invalid: {value:?}"
+                    ),
+                )
+            })?,
+            None => 1,
+        };
+        Ok(vec![num_documents, 1])
     }
+}
+
+fn nonnegative_dimension(value: &Value) -> Option<usize> {
+    match value {
+        Value::Num(value) => nonnegative_platform_usize(*value),
+        Value::Int(value) => value.try_to_usize(),
+        _ => None,
+    }
+}
+
+fn nonnegative_platform_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
 }
 
 pub(in crate::builtins::strings::text_analytics) fn options_from_document_object(
@@ -2891,6 +2925,43 @@ mod tests {
         let counts = tensor_property(&bag, "Counts");
         assert_eq!(counts.shape, vec![1, 0]);
         assert!(counts.data.is_empty());
+    }
+
+    #[test]
+    fn tokenized_document_shape_metadata_requires_exact_platform_dimensions() {
+        let mut document = object(
+            run_tokenized(vec![Value::StringArray(
+                StringArray::new(vec!["first".into(), "second".into()], vec![2, 1]).unwrap(),
+            )])
+            .expect("tokenized"),
+        );
+
+        document.properties.remove("Shape");
+        document.properties.insert(
+            "NumDocuments".to_string(),
+            Value::Int(runmat_builtins::IntValue::U16(2)),
+        );
+        assert_eq!(
+            document_shape_from_object(&document, "test").unwrap(),
+            vec![2, 1]
+        );
+
+        document
+            .properties
+            .insert("NumDocuments".to_string(), Value::Num(1.5));
+        assert!(document_shape_from_object(&document, "test").is_err());
+
+        document.properties.insert(
+            "Shape".to_string(),
+            Value::Tensor(Tensor::new(vec![1.5, 1.0], vec![1, 2]).unwrap()),
+        );
+        assert!(document_shape_from_object(&document, "test").is_err());
+
+        document.properties.insert(
+            "Shape".to_string(),
+            Value::Tensor(Tensor::new(vec![usize::MAX as f64 + 1.0, 1.0], vec![1, 2]).unwrap()),
+        );
+        assert!(document_shape_from_object(&document, "test").is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
