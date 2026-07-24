@@ -55,7 +55,7 @@ if [[ ! -f "$hdf5_header" || ! -f "$hdf5_library" ]]; then
     exit 1
 fi
 
-if ! lipo -verify_arch x86_64 "$hdf5_library"; then
+if ! lipo "$hdf5_library" -verify_arch x86_64; then
     echo "the installed HDF5 library does not contain x86_64 code" >&2
     exit 1
 fi
