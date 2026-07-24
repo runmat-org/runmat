@@ -174,6 +174,22 @@ fn bitcmp_preserves_exact_integer_arrays_and_default_double_behavior() {
 }
 
 #[test]
+fn bitcmp_sparse_double_materializes_when_complementing_implicit_zeros() {
+    let sparse =
+        runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![5.0, 1.0])
+            .expect("sparse");
+    let Value::Tensor(output) = block_on(bitcmp_builtin(vec![
+        Value::SparseTensor(sparse),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("sparse bitcmp") else {
+        panic!("bitcmp must materialize a complement of sparse implicit zeros");
+    };
+    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(output.data, vec![250.0, 255.0, 255.0, 254.0]);
+}
+
+#[test]
 fn bitcmp_is_registered_and_dispatches() {
     assert!(runmat_builtins::builtin_function_by_name(BITCMP_NAME).is_some());
     assert_eq!(

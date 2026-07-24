@@ -10,6 +10,7 @@ use runmat_macros::runtime_builtin;
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::elementwise::sparse::map_sparse_real_values;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BITAND_NAME: &str = "bitand";
@@ -565,6 +566,9 @@ async fn bitand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 )]
 async fn bitcmp_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let (value, assumed) = unary_args(BITCMP_NAME, args)?;
+    if let Value::SparseTensor(sparse) = value {
+        return sparse_bitcmp(sparse, assumed);
+    }
     let input = bit_buffer_from(BITCMP_NAME, value, assumed).await?;
     let mask = input.compute_class.map_or(u64::MAX, IntegerClass::bit_mask);
     value_from_bits_with_classes(
@@ -574,6 +578,29 @@ async fn bitcmp_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         input.output_class,
         BITCMP_NAME,
     )
+}
+
+fn sparse_bitcmp(
+    sparse: runmat_builtins::SparseTensor,
+    assumed: Option<IntegerClass>,
+) -> BuiltinResult<Value> {
+    if sparse.integer_storage().is_some() {
+        return Err(error_with_detail(
+            BITCMP_NAME,
+            &ERROR_INVALID_INPUT,
+            "typed sparse integer storage is a RunMat extension and is not supported by bitcmp",
+        ));
+    }
+    let class = assumed;
+    let mask = class.map_or(u64::MAX, IntegerClass::bit_mask);
+    map_sparse_real_values(&sparse, BITCMP_NAME, |value| {
+        let bits = double_to_bits(BITCMP_NAME, value, class)?;
+        let result = !bits & mask;
+        Ok(match class {
+            Some(class) => int_value_to_i128(&class.value_from_bits(result)) as f64,
+            None => result as f64,
+        })
+    })
 }
 
 #[runtime_builtin(

@@ -768,6 +768,46 @@ fn apply_complex_real_op(lhs: (f64, f64), rhs: f64, op: SparseBinaryOp) -> (f64,
     }
 }
 
+/// Apply a real scalar operation to a sparse matrix while preserving sparse
+/// storage exactly when the implicit zero remains zero. Operations such as a
+/// bit complement, whose zero maps to a nonzero value, intentionally return a
+/// full tensor and are bounded by the standard sparse materialization limit.
+pub(crate) fn map_sparse_real_values(
+    sparse: &SparseTensor,
+    builtin: &'static str,
+    map: impl Fn(f64) -> BuiltinResult<f64>,
+) -> BuiltinResult<Value> {
+    let implicit_zero = map(0.0)?;
+    if implicit_zero != 0.0 {
+        checked_len(&sparse.shape(), builtin)?;
+        let mut dense = sparse
+            .to_dense()
+            .map_err(|err| map_internal_error(builtin, err))?;
+        for value in &mut dense.data {
+            *value = map(*value)?;
+        }
+        return Ok(Value::Tensor(dense));
+    }
+
+    let mut col_ptrs = Vec::with_capacity(sparse.cols.saturating_add(1));
+    let mut row_indices = Vec::with_capacity(sparse.row_indices.len());
+    let mut values = Vec::with_capacity(sparse.values.len());
+    col_ptrs.push(0);
+    for col in 0..sparse.cols {
+        for entry in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
+            let value = map(sparse.values[entry])?;
+            if value != 0.0 {
+                row_indices.push(sparse.row_indices[entry]);
+                values.push(value);
+            }
+        }
+        col_ptrs.push(values.len());
+    }
+    SparseTensor::new(sparse.rows, sparse.cols, col_ptrs, row_indices, values)
+        .map(Value::SparseTensor)
+        .map_err(|err| map_internal_error(builtin, err))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -905,6 +945,24 @@ mod tests {
         assert!(result.data[1].is_nan());
         assert_eq!(result.data[2], 90.0);
         assert_eq!(result.data[4], 100.0);
+    }
+
+    #[test]
+    fn map_sparse_real_values_preserves_or_materializes_from_zero_semantics() {
+        let sparse = sparse_a();
+        let scaled = expect_sparse(
+            map_sparse_real_values(&sparse, "test", |value| Ok(value * 2.0))
+                .expect("zero-preserving map"),
+        );
+        assert_eq!(scaled.shape(), vec![3, 2]);
+        assert_eq!(scaled.values, vec![20.0, 60.0, 40.0]);
+
+        let complemented = expect_tensor(
+            map_sparse_real_values(&sparse, "test", |value| Ok(1.0 - value))
+                .expect("zero-changing map"),
+        );
+        assert_eq!(complemented.shape, vec![3, 2]);
+        assert_eq!(complemented.data, vec![-9.0, 1.0, -29.0, 1.0, -19.0, 1.0]);
     }
 
     #[test]
