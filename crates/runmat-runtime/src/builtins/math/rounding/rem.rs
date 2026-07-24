@@ -15,6 +15,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::elementwise::integer_arithmetic::{
+    try_integer_remainder, IntegerRemainderOp,
+};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -214,6 +217,11 @@ async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
 }
 
 fn rem_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let Some(result) = try_integer_remainder(&lhs, &rhs, IntegerRemainderOp::Rem, BUILTIN_NAME)
+        .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error))?
+    {
+        return Ok(result);
+    }
     if let Some(result) = scalar_rem_value(&lhs, &rhs) {
         return Ok(result);
     }
@@ -678,12 +686,12 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn rem_int_inputs_promote() {
+    fn rem_int_inputs_preserve_exact_class() {
         let result =
             rem_builtin(Value::Int(IntValue::I32(-7)), Value::Int(IntValue::I32(4))).expect("rem");
         match result {
-            Value::Num(v) => assert!((v + 3.0).abs() < 1e-12),
-            other => panic!("expected scalar result, got {other:?}"),
+            Value::Int(IntValue::I32(v)) => assert_eq!(v, -3),
+            other => panic!("expected int32 scalar result, got {other:?}"),
         }
     }
 

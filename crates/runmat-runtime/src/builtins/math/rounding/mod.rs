@@ -21,6 +21,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::elementwise::integer_arithmetic::{
+    try_integer_remainder, IntegerRemainderOp,
+};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -220,6 +223,11 @@ async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
 }
 
 fn mod_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let Some(result) = try_integer_remainder(&lhs, &rhs, IntegerRemainderOp::Mod, BUILTIN_NAME)
+        .map_err(|error| mod_error_with_detail(&MOD_ERROR_INVALID_INPUT, error))?
+    {
+        return Ok(result);
+    }
     if let Some(result) = scalar_mod_value(&lhs, &rhs) {
         return Ok(result);
     }
@@ -695,12 +703,12 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn mod_int_scalar_promotes() {
+    fn mod_int_scalar_preserves_exact_class() {
         let result =
             mod_builtin(Value::Int(IntValue::I32(-7)), Value::Int(IntValue::I32(4))).expect("mod");
         match result {
-            Value::Num(v) => assert!((v - 1.0).abs() < 1e-12),
-            other => panic!("expected scalar result, got {other:?}"),
+            Value::Int(IntValue::I32(v)) => assert_eq!(v, 1),
+            other => panic!("expected int32 scalar result, got {other:?}"),
         }
     }
 

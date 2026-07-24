@@ -14,6 +14,46 @@ pub(crate) enum IntegerBinaryOp {
     Power,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum IntegerRemainderOp {
+    Rem,
+    Mod,
+}
+
+/// Applies exact MATLAB integer `rem`/`mod` semantics when both operands have
+/// native integer storage. `Ok(None)` leaves scalar-double handling to the
+/// caller's numeric path.
+pub(crate) fn try_integer_remainder(
+    lhs: &Value,
+    rhs: &Value,
+    operation: IntegerRemainderOp,
+    builtin: &str,
+) -> Result<Option<Value>, String> {
+    let left = integer_operand(lhs);
+    let right = integer_operand(rhs);
+    match (left, right) {
+        (None, None) => Ok(None),
+        (Some(_), None) | (None, Some(_)) => Ok(None),
+        (Some(left), Some(right)) => {
+            if left.target != right.target {
+                return Err(format!(
+                    "{builtin}: integer operands must have the same integer class"
+                ));
+            }
+            let plan = BroadcastPlan::new(&left.shape, &right.shape)?;
+            let mut values = Vec::with_capacity(plan.len());
+            for (_, left_index, right_index) in plan.iter() {
+                values.push(exact_integer_remainder(
+                    left.storage.value_at(left_index),
+                    right.storage.value_at(right_index),
+                    operation,
+                ));
+            }
+            integer_values_into_value(left.target, values, plan.output_shape().to_vec()).map(Some)
+        }
+    }
+}
+
 /// Applies a MATLAB integer binary operation when either operand is integer
 /// storage. `Ok(None)` means neither operand is an integer and the caller
 /// should retain its normal floating/complex path.
@@ -408,6 +448,63 @@ fn exact_integer_divide(lhs: IntValue, rhs: IntValue) -> IntValue {
     }
 }
 
+fn exact_integer_remainder(
+    lhs: IntValue,
+    rhs: IntValue,
+    operation: IntegerRemainderOp,
+) -> IntValue {
+    macro_rules! signed {
+        ($lhs:expr, $rhs:expr, $variant:ident) => {
+            IntValue::$variant(signed_integer_remainder($lhs as i128, $rhs as i128, operation) as _)
+        };
+    }
+    macro_rules! unsigned {
+        ($lhs:expr, $rhs:expr, $variant:ident) => {
+            IntValue::$variant(
+                unsigned_integer_remainder($lhs as u128, $rhs as u128, operation) as _,
+            )
+        };
+    }
+    match (lhs, rhs) {
+        (IntValue::I8(lhs), IntValue::I8(rhs)) => signed!(lhs, rhs, I8),
+        (IntValue::I16(lhs), IntValue::I16(rhs)) => signed!(lhs, rhs, I16),
+        (IntValue::I32(lhs), IntValue::I32(rhs)) => signed!(lhs, rhs, I32),
+        (IntValue::I64(lhs), IntValue::I64(rhs)) => signed!(lhs, rhs, I64),
+        (IntValue::U8(lhs), IntValue::U8(rhs)) => unsigned!(lhs, rhs, U8),
+        (IntValue::U16(lhs), IntValue::U16(rhs)) => unsigned!(lhs, rhs, U16),
+        (IntValue::U32(lhs), IntValue::U32(rhs)) => unsigned!(lhs, rhs, U32),
+        (IntValue::U64(lhs), IntValue::U64(rhs)) => unsigned!(lhs, rhs, U64),
+        _ => unreachable!("integer class compatibility was checked before applying"),
+    }
+}
+
+fn signed_integer_remainder(lhs: i128, rhs: i128, operation: IntegerRemainderOp) -> i128 {
+    if rhs == 0 {
+        return match operation {
+            IntegerRemainderOp::Rem => 0,
+            IntegerRemainderOp::Mod => lhs,
+        };
+    }
+    let remainder = lhs % rhs;
+    match operation {
+        IntegerRemainderOp::Rem => remainder,
+        IntegerRemainderOp::Mod if remainder != 0 && remainder.signum() != rhs.signum() => {
+            remainder + rhs
+        }
+        IntegerRemainderOp::Mod => remainder,
+    }
+}
+
+fn unsigned_integer_remainder(lhs: u128, rhs: u128, operation: IntegerRemainderOp) -> u128 {
+    if rhs == 0 {
+        return match operation {
+            IntegerRemainderOp::Rem => 0,
+            IntegerRemainderOp::Mod => lhs,
+        };
+    }
+    lhs % rhs
+}
+
 fn rounded_signed_divide(lhs: i128, rhs: i128, min: i128, max: i128) -> i128 {
     if rhs == 0 {
         return if lhs < 0 {
@@ -703,5 +800,83 @@ mod tests {
         .expect("integer operation")
         .expect("integer path");
         assert_eq!(int64_reverse_subtract, Value::Int(IntValue::I64(i64::MAX)));
+    }
+
+    #[test]
+    fn exact_remainder_preserves_integer_classes_and_matlab_sign_rules() {
+        let rem = try_integer_remainder(
+            &Value::Int(IntValue::I64(-7)),
+            &Value::Int(IntValue::I64(4)),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(rem, Value::Int(IntValue::I64(-3)));
+
+        let modulus = try_integer_remainder(
+            &Value::Int(IntValue::I64(-7)),
+            &Value::Int(IntValue::I64(4)),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(modulus, Value::Int(IntValue::I64(1)));
+
+        let uint64 = try_integer_remainder(
+            &Value::Int(IntValue::U64(u64::MAX)),
+            &Value::Int(IntValue::U64(3)),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(uint64, Value::Int(IntValue::U64(0)));
+    }
+
+    #[test]
+    fn exact_remainder_handles_zero_divisors_broadcasting_and_class_errors() {
+        let rem_zero = try_integer_remainder(
+            &Value::Int(IntValue::I8(-7)),
+            &Value::Int(IntValue::I8(0)),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(rem_zero, Value::Int(IntValue::I8(0)));
+
+        let mod_zero = try_integer_remainder(
+            &Value::Int(IntValue::I8(-7)),
+            &Value::Int(IntValue::I8(0)),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(mod_zero, Value::Int(IntValue::I8(-7)));
+
+        let broadcast = try_integer_remainder(
+            &integer(IntegerStorage::U64(vec![u64::MAX, 8]), vec![1, 2]),
+            &Value::Int(IntValue::U64(3)),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(
+            broadcast,
+            integer(IntegerStorage::U64(vec![0, 2]), vec![1, 2])
+        );
+
+        let error = try_integer_remainder(
+            &Value::Int(IntValue::I8(1)),
+            &Value::Int(IntValue::U8(1)),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect_err("mixed classes must fail");
+        assert!(error.contains("same integer class"));
     }
 }
