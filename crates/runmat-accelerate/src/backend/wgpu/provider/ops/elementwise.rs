@@ -1,6 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
-use bytemuck::bytes_of;
-use runmat_accelerate_api::GpuTensorHandle;
+use bytemuck::{bytes_of, Pod, Zeroable};
+use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
 use runmat_time::Instant;
 use std::sync::Arc;
 
@@ -28,6 +28,173 @@ use crate::backend::wgpu::shaders::logical::{
 use crate::backend::wgpu::types::NumericPrecision;
 
 impl WgpuProvider {
+    fn integer_type_code(element_type: IntegerElementType) -> u32 {
+        match element_type {
+            IntegerElementType::I8 => 0,
+            IntegerElementType::I16 => 1,
+            IntegerElementType::I32 => 2,
+            IntegerElementType::I64 => 3,
+            IntegerElementType::U8 => 4,
+            IntegerElementType::U16 => 5,
+            IntegerElementType::U32 => 6,
+            IntegerElementType::U64 => 7,
+        }
+    }
+
+    fn integer_comparison_exec(
+        &self,
+        operation: u32,
+        operation_name: &str,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry_a = self.get_entry_raw(a)?;
+        let entry_b = self.get_entry_raw(b)?;
+        let integer_type = entry_a
+            .integer_type
+            .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
+        ensure!(
+            entry_b.integer_type == Some(integer_type),
+            "{operation_name}: integer operands must have the same class"
+        );
+        ensure!(
+            entry_a.storage == runmat_accelerate_api::GpuTensorStorage::Real
+                && entry_b.storage == runmat_accelerate_api::GpuTensorStorage::Real,
+            "{operation_name}: complex integer gpuArray comparison is not supported"
+        );
+        ensure!(
+            entry_a.shape == entry_b.shape,
+            "{operation_name}: shape mismatch between inputs"
+        );
+        ensure!(
+            entry_a.len == entry_b.len,
+            "{operation_name}: logical element count mismatch between inputs"
+        );
+        let len = entry_a.len;
+        if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-integer-compare-empty");
+            let handle = self.register_existing_buffer(out, entry_a.shape, 0);
+            runmat_accelerate_api::set_handle_logical(&handle, true);
+            return Ok(handle);
+        }
+        if len > u32::MAX as usize {
+            return Err(gpu_dispatch_length_limit_error(operation_name, len));
+        }
+
+        #[repr(C)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
+        struct Params {
+            len: u32,
+            op: u32,
+            offset: u32,
+            total: u32,
+            integer_type: u32,
+            _pad0: u32,
+            _pad1: u32,
+            _pad2: u32,
+        }
+
+        let scalar_type = match self.precision {
+            NumericPrecision::F64 => "f64",
+            NumericPrecision::F32 => "f32",
+        };
+        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+        let shader =
+            crate::backend::wgpu::shaders::integer::comparison_shader(scalar_type, workgroup_size);
+        let bind_group_layout =
+            self.device_ref()
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("runmat-integer-compare-bgl"),
+                    entries: &[
+                        crate::backend::wgpu::bindings::storage_read_entry(0),
+                        crate::backend::wgpu::bindings::storage_read_entry(1),
+                        crate::backend::wgpu::bindings::storage_read_write_entry(2),
+                        crate::backend::wgpu::bindings::uniform_entry(3),
+                    ],
+                });
+        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+            self.device_ref(),
+            "runmat-integer-compare-pl",
+            &bind_group_layout,
+        );
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-integer-compare-module",
+            &shader,
+        );
+        let key = self.compute_pipeline_hash_bytes(
+            shader.as_bytes(),
+            "runmat-integer-compare-bgl",
+            Some(workgroup_size),
+        );
+        let pipeline = self.get_or_create_pipeline(
+            key,
+            &pipeline_layout,
+            &module,
+            "runmat-integer-compare",
+            Some(shader.as_bytes()),
+            Some("runmat-integer-compare-bgl"),
+            Some(workgroup_size),
+        );
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-integer-compare-out")?;
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * workgroup_size as usize;
+        let mut offset = 0usize;
+        while offset < len {
+            let chunk_len = (len - offset).min(chunk_capacity);
+            let params = Params {
+                len: chunk_len as u32,
+                op: operation,
+                offset: offset as u32,
+                total: len as u32,
+                integer_type: Self::integer_type_code(integer_type),
+                _pad0: 0,
+                _pad1: 0,
+                _pad2: 0,
+            };
+            let params_buffer = self.uniform_buffer(&params, "runmat-integer-compare-params");
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-integer-compare-bg"),
+                    layout: &bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry_a.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: entry_b.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                chunk_len as u32,
+                workgroup_size,
+            );
+            crate::backend::wgpu::dispatch::elementwise::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline,
+                &bind_group,
+                groups,
+            );
+            offset += chunk_len;
+        }
+        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len);
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
     fn effective_storage_for_entry(
         &self,
         handle: &GpuTensorHandle,
@@ -477,6 +644,11 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry_raw(a)?.integer_type.is_some()
+            || self.get_entry_raw(b)?.integer_type.is_some()
+        {
+            return self.integer_comparison_exec(0, "elem_eq", a, b);
+        }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
@@ -507,6 +679,11 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry_raw(a)?.integer_type.is_some()
+            || self.get_entry_raw(b)?.integer_type.is_some()
+        {
+            return self.integer_comparison_exec(1, "elem_ne", a, b);
+        }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
@@ -536,6 +713,11 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry_raw(a)?.integer_type.is_some()
+            || self.get_entry_raw(b)?.integer_type.is_some()
+        {
+            return self.integer_comparison_exec(2, "elem_lt", a, b);
+        }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
@@ -566,6 +748,11 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry_raw(a)?.integer_type.is_some()
+            || self.get_entry_raw(b)?.integer_type.is_some()
+        {
+            return self.integer_comparison_exec(3, "elem_le", a, b);
+        }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
@@ -596,6 +783,11 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry_raw(a)?.integer_type.is_some()
+            || self.get_entry_raw(b)?.integer_type.is_some()
+        {
+            return self.integer_comparison_exec(4, "elem_gt", a, b);
+        }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
@@ -626,6 +818,11 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry_raw(a)?.integer_type.is_some()
+            || self.get_entry_raw(b)?.integer_type.is_some()
+        {
+            return self.integer_comparison_exec(5, "elem_ge", a, b);
+        }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
@@ -2070,7 +2267,9 @@ impl WgpuProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_accelerate_api::{AccelProvider, GpuTensorStorage, HostTensorView};
+    use runmat_accelerate_api::{
+        AccelProvider, GpuTensorStorage, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+    };
 
     async fn complex_pair(
         provider: &'static dyn AccelProvider,
@@ -2130,6 +2329,154 @@ mod tests {
             Err(err) if err.to_string() == "wgpu: no compatible adapter found" => None,
             Err(err) => panic!("register wgpu provider failed: {err:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_comparisons_preserve_all_classes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [3, 1];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[i8::MIN, 0, i8::MAX]),
+                HostIntegerDataView::I8(&[i8::MIN + 1, 0, i8::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::I16(&[i16::MIN, 0, i16::MAX]),
+                HostIntegerDataView::I16(&[i16::MIN + 1, 0, i16::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::I32(&[i32::MIN, 0, i32::MAX]),
+                HostIntegerDataView::I32(&[i32::MIN + 1, 0, i32::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::I64(&[i64::MIN, 0, i64::MAX]),
+                HostIntegerDataView::I64(&[i64::MIN + 1, 0, i64::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::U8(&[0, 1, u8::MAX]),
+                HostIntegerDataView::U8(&[1, 1, u8::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::U16(&[0, 1, u16::MAX]),
+                HostIntegerDataView::U16(&[1, 1, u16::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::U32(&[0, 1, u32::MAX]),
+                HostIntegerDataView::U32(&[1, 1, u32::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::U64(&[0, 1, u64::MAX]),
+                HostIntegerDataView::U64(&[1, 1, u64::MAX - 1]),
+            ),
+        ];
+
+        for (left, right) in cases {
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &shape,
+                })
+                .expect("upload integer lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &shape,
+                })
+                .expect("upload integer rhs");
+            let equal = provider.elem_eq(&lhs, &rhs).await.expect("integer eq");
+            let not_equal = provider.elem_ne(&lhs, &rhs).await.expect("integer ne");
+            let less = provider.elem_lt(&lhs, &rhs).await.expect("integer lt");
+            let less_equal = provider.elem_le(&lhs, &rhs).await.expect("integer le");
+            let greater = provider.elem_gt(&lhs, &rhs).await.expect("integer gt");
+            let greater_equal = provider.elem_ge(&lhs, &rhs).await.expect("integer ge");
+            for handle in [
+                &equal,
+                &not_equal,
+                &less,
+                &less_equal,
+                &greater,
+                &greater_equal,
+            ] {
+                assert!(runmat_accelerate_api::handle_is_logical(handle));
+            }
+            assert_eq!(
+                provider.download(&equal).await.expect("download eq").data,
+                vec![0.0, 1.0, 0.0]
+            );
+            assert_eq!(
+                provider
+                    .download(&not_equal)
+                    .await
+                    .expect("download ne")
+                    .data,
+                vec![1.0, 0.0, 1.0]
+            );
+            assert_eq!(
+                provider.download(&less).await.expect("download lt").data,
+                vec![1.0, 0.0, 0.0]
+            );
+            assert_eq!(
+                provider
+                    .download(&less_equal)
+                    .await
+                    .expect("download le")
+                    .data,
+                vec![1.0, 1.0, 0.0]
+            );
+            assert_eq!(
+                provider.download(&greater).await.expect("download gt").data,
+                vec![0.0, 0.0, 1.0]
+            );
+            assert_eq!(
+                provider
+                    .download(&greater_equal)
+                    .await
+                    .expect("download ge")
+                    .data,
+                vec![0.0, 1.0, 1.0]
+            );
+            for handle in [
+                &lhs,
+                &rhs,
+                &equal,
+                &not_equal,
+                &less,
+                &less_equal,
+                &greater,
+                &greater_equal,
+            ] {
+                provider.free(handle).expect("free comparison handle");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_comparisons_reject_mixed_classes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [1, 1];
+        let signed = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&[1]),
+                shape: &shape,
+            })
+            .expect("upload signed integer");
+        let unsigned = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U8(&[1]),
+                shape: &shape,
+            })
+            .expect("upload unsigned integer");
+        let error = provider
+            .elem_eq(&signed, &unsigned)
+            .await
+            .expect_err("mixed native integer classes must not use an implicit promotion");
+        assert!(error.to_string().contains("same class"));
+        provider.free(&signed).expect("free signed handle");
+        provider.free(&unsigned).expect("free unsigned handle");
     }
 
     #[tokio::test]
