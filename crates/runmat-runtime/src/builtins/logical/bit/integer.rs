@@ -13,6 +13,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BITAND_NAME: &str = "bitand";
+const BITCMP_NAME: &str = "bitcmp";
 const BITOR_NAME: &str = "bitor";
 const BITXOR_NAME: &str = "bitxor";
 const BITSHIFT_NAME: &str = "bitshift";
@@ -110,6 +111,14 @@ const SWAPBYTES_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Numeric scalar or array whose element byte order is reversed.",
 }];
 
+const BITCMP_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Integer-valued input whose bits are complemented.",
+}];
+
 const BITAND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "C = bitand(A, B)",
     inputs: &BINARY_INPUTS,
@@ -119,6 +128,12 @@ const BITAND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDesc
 const BITOR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "C = bitor(A, B)",
     inputs: &BINARY_INPUTS,
+    outputs: &OUTPUT,
+}];
+
+const BITCMP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "C = bitcmp(A)",
+    inputs: &BITCMP_INPUTS,
     outputs: &OUTPUT,
 }];
 
@@ -202,6 +217,13 @@ pub const BITOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+pub const BITCMP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &BITCMP_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
 pub const BITXOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &BITXOR_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -241,6 +263,26 @@ pub const SWAPBYTES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 )]
 async fn bitand_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     binary_bitwise(BITAND_NAME, lhs, rhs, |a, b| a & b).await
+}
+
+#[runtime_builtin(
+    name = "bitcmp",
+    category = "logical/bit",
+    summary = "Compute the bitwise complement of integer-valued scalars and arrays.",
+    keywords = "bitcmp,bitwise,complement,integer,uint32",
+    accel = "gather",
+    descriptor(crate::builtins::logical::bit::integer::BITCMP_DESCRIPTOR),
+    builtin_path = "crate::builtins::logical::bit::integer"
+)]
+async fn bitcmp_builtin(value: Value) -> BuiltinResult<Value> {
+    let input = bit_buffer_from(BITCMP_NAME, value).await?;
+    let mask = input.class.map_or(u64::MAX, IntegerClass::bit_mask);
+    value_from_bits(
+        input.data.into_iter().map(|bits| !bits & mask).collect(),
+        input.shape,
+        input.class,
+        BITCMP_NAME,
+    )
 }
 
 #[runtime_builtin(
@@ -1261,6 +1303,53 @@ mod tests {
                 block_on(bitxor_builtin(Value::Int(left), Value::Int(right))).expect("bitxor");
             assert_eq!(actual, Value::Int(expected));
         }
+    }
+
+    #[test]
+    fn bitcmp_preserves_all_native_integer_scalar_classes() {
+        let cases = [
+            (IntValue::I8(-11), IntValue::I8(10)),
+            (IntValue::I16(-11), IntValue::I16(10)),
+            (IntValue::I32(-11), IntValue::I32(10)),
+            (IntValue::I64(-11), IntValue::I64(10)),
+            (IntValue::U8(0b0101), IntValue::U8(0b1111_1010)),
+            (IntValue::U16(0b0101), IntValue::U16(0xfffa)),
+            (IntValue::U32(0b0101), IntValue::U32(0xffff_fffa)),
+            (IntValue::U64(0b0101), IntValue::U64(u64::MAX - 5)),
+        ];
+        for (input, expected) in cases {
+            let actual = block_on(bitcmp_builtin(Value::Int(input))).expect("bitcmp");
+            assert_eq!(actual, Value::Int(expected));
+        }
+    }
+
+    #[test]
+    fn bitcmp_preserves_exact_integer_arrays_and_default_double_behavior() {
+        let input = Tensor::new_integer(IntegerStorage::U64(vec![0, 1_u64 << 63]), vec![1, 2])
+            .expect("input");
+        let Value::Tensor(output) = block_on(bitcmp_builtin(Value::Tensor(input))).expect("bitcmp")
+        else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, !(1_u64 << 63)]))
+        );
+
+        assert_eq!(
+            block_on(bitcmp_builtin(Value::Num(0.0))).expect("double bitcmp"),
+            Value::Num(u64::MAX as f64)
+        );
+    }
+
+    #[test]
+    fn bitcmp_is_registered_and_dispatches() {
+        assert!(runmat_builtins::builtin_function_by_name(BITCMP_NAME).is_some());
+        assert_eq!(
+            crate::dispatcher::call_builtin(BITCMP_NAME, &[Value::Int(IntValue::U8(0b0101))])
+                .expect("runtime dispatch"),
+            Value::Int(IntValue::U8(0b1111_1010))
+        );
     }
 
     #[test]
