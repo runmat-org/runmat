@@ -249,18 +249,15 @@ fn metadata_bool(value: &Value, field: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(flag) => Ok(*flag),
         Value::Num(number) if *number == 0.0 || *number == 1.0 => Ok(*number != 0.0),
-        Value::Int(int) => {
-            let value = int.to_i64();
-            if value == 0 || value == 1 {
-                Ok(value != 0)
-            } else {
-                Err(dynamic_error(
-                    DYNAMIC_PROPERTY_CLASS,
-                    &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
-                    format!("dynamic property metadata field '{field}' requires logical scalar"),
-                ))
-            }
-        }
+        Value::Int(int) => match int.try_to_u64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(dynamic_error(
+                DYNAMIC_PROPERTY_CLASS,
+                &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
+                format!("dynamic property metadata field '{field}' requires logical scalar"),
+            )),
+        },
         _ => Err(dynamic_error(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
@@ -828,6 +825,21 @@ pub fn dynamic_property_metadata_struct(def: &DynamicPropertyDef) -> Value {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntValue;
+
+    #[test]
+    fn metadata_bool_accepts_only_exact_typed_logical_values() {
+        assert_eq!(
+            metadata_bool(&Value::Int(IntValue::U64(1)), "Hidden").expect("logical one"),
+            true
+        );
+        assert_eq!(
+            metadata_bool(&Value::Int(IntValue::U64(0)), "Hidden").expect("logical zero"),
+            false
+        );
+        assert!(metadata_bool(&Value::Int(IntValue::U64(u64::MAX)), "Hidden").is_err());
+        assert!(metadata_bool(&Value::Int(IntValue::I64(-1)), "Hidden").is_err());
+    }
 
     fn target_handle(class_name: &str) -> Value {
         let obj = ObjectInstance::new(class_name.to_string());

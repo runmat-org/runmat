@@ -422,8 +422,14 @@ fn single_subscript_count(
             Ok(1)
         }
         Value::Int(value) => {
-            validate_positive_integer_subscript(value.to_i64() as f64)?;
-            Ok(1)
+            if value.try_to_u64().is_some_and(|value| value >= 1) {
+                Ok(1)
+            } else {
+                Err(num_args_error(
+                    &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
+                    "numeric subscripts must be finite positive integers",
+                ))
+            }
         }
         Value::Tensor(tensor) => {
             validate_numeric_subscript_values(&tensor.data)?;
@@ -789,7 +795,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::{
-        Access, CellArray, ClassDef, MethodDef, ObjectInstance, StructValue, Tensor,
+        Access, CellArray, ClassDef, IntValue, MethodDef, ObjectInstance, StructValue, Tensor,
     };
     use std::collections::HashMap;
 
@@ -817,6 +823,24 @@ mod tests {
             target, subscript, context,
         ))
         .expect_err("numArgumentsFromSubscript should fail")
+    }
+
+    #[test]
+    fn typed_scalar_subscripts_do_not_round_or_saturate() {
+        assert_eq!(
+            single_subscript_count(
+                &Value::Num(0.0),
+                &Value::Int(IntValue::U64(u64::MAX)),
+                0,
+                true
+            )
+            .expect("positive uint64 subscript"),
+            1
+        );
+        assert!(
+            single_subscript_count(&Value::Num(0.0), &Value::Int(IntValue::I64(-1)), 0, true)
+                .is_err()
+        );
     }
 
     #[test]

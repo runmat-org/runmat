@@ -858,7 +858,7 @@ fn object_counter(object: &ObjectInstance, name: &str) -> usize {
 fn numeric_counter(value: Option<&Value>) -> Option<usize> {
     match value {
         Some(Value::Num(value)) if value.is_finite() && *value >= 0.0 => Some(*value as usize),
-        Some(Value::Int(value)) if value.to_i64() >= 0 => Some(value.to_i64() as usize),
+        Some(Value::Int(value)) => value.try_to_usize(),
         _ => None,
     }
 }
@@ -1072,6 +1072,7 @@ pub(crate) fn reset_memoize_registry_for_test() {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntValue;
     use std::sync::{Arc, Mutex};
 
     fn counting_invoker(counter: Arc<Mutex<usize>>) -> Arc<crate::user_functions::FunctionInvoker> {
@@ -1110,6 +1111,19 @@ mod tests {
             function: 42,
         }))
         .expect("memoized function")
+    }
+
+    #[test]
+    fn typed_cache_counters_preserve_platform_representable_uint64() {
+        assert_eq!(
+            numeric_counter(Some(&Value::Int(IntValue::U64(3)))),
+            Some(3)
+        );
+        assert_eq!(
+            numeric_counter(Some(&Value::Int(IntValue::U64(u64::MAX)))),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert_eq!(numeric_counter(Some(&Value::Int(IntValue::I64(-1)))), None);
     }
 
     fn set_handle_property(handle: &HandleRef, name: &str, value: Value) {

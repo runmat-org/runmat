@@ -354,7 +354,7 @@ fn text_value(value: &Value) -> Option<String> {
 fn integer_value(value: &Value) -> Option<usize> {
     match value {
         Value::Num(n) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 => Some(*n as usize),
-        Value::Int(int) => usize::try_from(int.to_i64()).ok(),
+        Value::Int(int) => int.try_to_usize(),
         _ => None,
     }
 }
@@ -776,6 +776,7 @@ fn getcallinfo_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::IntValue;
     use runmat_hir::SourceId;
 
     fn cell_len(value: &Value) -> usize {
@@ -783,6 +784,16 @@ mod tests {
             panic!("expected cell row, got {value:?}");
         };
         cell.data.len()
+    }
+
+    #[test]
+    fn typed_debug_offsets_preserve_platform_representable_uint64() {
+        assert_eq!(integer_value(&Value::Int(IntValue::U64(3))), Some(3));
+        assert_eq!(
+            integer_value(&Value::Int(IntValue::U64(u64::MAX))),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert_eq!(integer_value(&Value::Int(IntValue::I64(-1))), None);
     }
 
     #[test]
