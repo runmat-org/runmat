@@ -923,10 +923,14 @@ fn missing_to_none(text: String) -> Option<String> {
 }
 
 fn parse_nonnegative_usize(value: &Value, fn_name: &str) -> BuiltinResult<usize> {
-    let number = match value {
-        Value::Num(n) => *n,
-        Value::Int(i) => i.to_i64() as f64,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+    let index = match value {
+        Value::Num(n) => nonnegative_platform_usize(*n),
+        Value::Int(i) => i.try_to_usize(),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+            .and_then(|value| value.try_to_usize())
+            .or_else(|| nonnegative_platform_usize(tensor.data[0])),
         _ => {
             return Err(compat_error(
                 fn_name,
@@ -934,13 +938,22 @@ fn parse_nonnegative_usize(value: &Value, fn_name: &str) -> BuiltinResult<usize>
             ))
         }
     };
-    if !number.is_finite() || number < 0.0 || number.fract() != 0.0 || number > usize::MAX as f64 {
-        return Err(compat_error(
+    index.ok_or_else(|| {
+        compat_error(
             fn_name,
             format!("{fn_name}: expected a nonnegative integer scalar"),
-        ));
+        )
+    })
+}
+
+fn nonnegative_platform_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return None;
     }
-    Ok(number as usize)
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
 }
 
 fn convert_strings_to_chars(value: Value, contained_only: bool) -> BuiltinResult<Value> {
@@ -1587,13 +1600,14 @@ fn byte_index_after_n_chars(text: &str, count: usize) -> Option<usize> {
 
 fn scan_size_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Num(n) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 => Ok(vec![*n as usize, 1]),
+        Value::Num(n) => Ok(vec![scan_size_dim(*n)?, 1]),
+        Value::Int(value) => Ok(vec![value.try_to_usize().ok_or_else(scan_size_error)?, 1]),
         Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(vec![scan_size_dim(tensor.data[0])?, 1])
+            Ok(vec![scan_tensor_size_dim(tensor, 0)?, 1])
         }
         Value::Tensor(tensor) if tensor.data.len() == 2 => Ok(vec![
-            scan_size_dim(tensor.data[0])?,
-            scan_size_dim(tensor.data[1])?,
+            scan_tensor_size_dim(tensor, 0)?,
+            scan_tensor_size_dim(tensor, 1)?,
         ]),
         other => Err(compat_error(
             "sscanf",
@@ -1602,17 +1616,28 @@ fn scan_size_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     }
 }
 
+fn scan_tensor_size_dim(tensor: &Tensor, index: usize) -> BuiltinResult<usize> {
+    if let Some(value) = tensor
+        .integer_storage()
+        .and_then(|storage| storage.value_at(index))
+    {
+        return value.try_to_usize().ok_or_else(scan_size_error);
+    }
+    scan_size_dim(tensor.data[index])
+}
+
+fn scan_size_error() -> crate::RuntimeError {
+    compat_error(
+        "sscanf",
+        "sscanf: size dimensions must be nonnegative integers",
+    )
+}
+
 fn scan_size_dim(value: f64) -> BuiltinResult<usize> {
     if value.is_infinite() && value.is_sign_positive() {
         return Ok(usize::MAX / 2);
     }
-    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
-        return Err(compat_error(
-            "sscanf",
-            "sscanf: size dimensions must be nonnegative integers",
-        ));
-    }
-    Ok(value as usize)
+    nonnegative_platform_usize(value).ok_or_else(scan_size_error)
 }
 
 async fn bounded_pattern(
@@ -1635,7 +1660,7 @@ async fn bounded_pattern(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::NumericDType;
+    use runmat_builtins::{IntValue, IntegerStorage, NumericDType};
 
     #[test]
     fn mat2str_preserves_exact_uint64_scalar_text() {
@@ -1643,6 +1668,57 @@ mod tests {
             mat2str_value(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX)), None),
             "18446744073709551615"
         );
+    }
+
+    #[test]
+    fn bounded_count_parsers_preserve_typed_integer_values() {
+        assert_eq!(
+            parse_nonnegative_usize(&Value::Int(IntValue::U64(7)), "digitsPattern").unwrap(),
+            7
+        );
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![9]), vec![1, 1])
+            .expect("typed scalar tensor");
+        assert_eq!(
+            parse_nonnegative_usize(&Value::Tensor(tensor), "digitsPattern").unwrap(),
+            9
+        );
+        let pattern =
+            block(digits_pattern_builtin(vec![Value::Int(IntValue::U8(3))])).expect("typed count");
+        assert_eq!(pattern_regex(&pattern, "test").unwrap(), r"\d{3}");
+
+        for value in [
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+            Value::Int(IntValue::I8(-1)),
+        ] {
+            assert!(parse_nonnegative_usize(&value, "digitsPattern").is_err());
+        }
+    }
+
+    #[test]
+    fn sscanf_size_parsing_preserves_typed_integer_dimensions() {
+        assert_eq!(
+            scan_size_from_value(&Value::Int(IntValue::U16(4))).unwrap(),
+            vec![4, 1]
+        );
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
+            .expect("typed size vector");
+        assert_eq!(
+            scan_size_from_value(&Value::Tensor(tensor)).unwrap(),
+            vec![2, 3]
+        );
+        assert_eq!(
+            scan_size_from_value(&Value::Num(f64::INFINITY)).unwrap(),
+            vec![usize::MAX / 2, 1]
+        );
+
+        for value in [
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+            Value::Int(IntValue::I16(-1)),
+        ] {
+            assert!(scan_size_from_value(&value).is_err());
+        }
     }
 
     fn block(
