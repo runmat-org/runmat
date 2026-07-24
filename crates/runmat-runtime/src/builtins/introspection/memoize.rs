@@ -857,10 +857,20 @@ fn object_counter(object: &ObjectInstance, name: &str) -> usize {
 
 fn numeric_counter(value: Option<&Value>) -> Option<usize> {
     match value {
-        Some(Value::Num(value)) if value.is_finite() && *value >= 0.0 => Some(*value as usize),
+        Some(Value::Num(value)) => nonnegative_platform_usize(*value),
         Some(Value::Int(value)) => value.try_to_usize(),
         _ => None,
     }
+}
+
+fn nonnegative_platform_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
 }
 
 fn output_value_to_cell(value: &Value, requested_outputs: usize) -> BuiltinResult<CellArray> {
@@ -1124,6 +1134,11 @@ mod tests {
             usize::try_from(u64::MAX).ok()
         );
         assert_eq!(numeric_counter(Some(&Value::Int(IntValue::I64(-1)))), None);
+        assert_eq!(numeric_counter(Some(&Value::Num(1.5))), None);
+        assert_eq!(
+            numeric_counter(Some(&Value::Num(usize::MAX as f64 + 1.0))),
+            None
+        );
     }
 
     fn set_handle_property(handle: &HandleRef, name: &str, value: Value) {

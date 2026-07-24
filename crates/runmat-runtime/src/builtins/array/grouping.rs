@@ -1817,8 +1817,8 @@ fn function_name(value: &Value) -> Option<&str> {
 }
 
 fn positive_integer(value: f64, context: &str) -> BuiltinResult<usize> {
-    if is_positive_integer_f64(value) {
-        Ok(value as usize)
+    if let Some(value) = positive_platform_usize(value) {
+        Ok(value)
     } else {
         Err(grouping_error(format!(
             "{context}: expected positive integer"
@@ -1827,8 +1827,8 @@ fn positive_integer(value: f64, context: &str) -> BuiltinResult<usize> {
 }
 
 fn nonnegative_integer(value: f64, context: &str) -> BuiltinResult<usize> {
-    if value.is_finite() && value >= 0.0 && value.fract() == 0.0 {
-        Ok(value as usize)
+    if let Some(value) = nonnegative_platform_usize(value) {
+        Ok(value)
     } else {
         Err(grouping_error(format!(
             "{context}: expected nonnegative integer"
@@ -1837,7 +1837,21 @@ fn nonnegative_integer(value: f64, context: &str) -> BuiltinResult<usize> {
 }
 
 fn is_positive_integer_f64(value: f64) -> bool {
-    value.is_finite() && value > 0.0 && value.fract() == 0.0
+    positive_platform_usize(value).is_some()
+}
+
+fn positive_platform_usize(value: f64) -> Option<usize> {
+    nonnegative_platform_usize(value).filter(|value| *value > 0)
+}
+
+fn nonnegative_platform_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
 }
 
 fn format_key_number(value: f64) -> String {
@@ -1875,6 +1889,14 @@ mod tests {
         let (edges, _, _) =
             parse_discretize_args(&values, Value::Int(IntValue::U8(1)), Vec::new()).unwrap();
         assert_eq!(edges, vec![0.0, 1.0]);
+    }
+
+    #[test]
+    fn grouping_dimension_parsers_reject_fractional_and_out_of_range_doubles() {
+        assert!(positive_integer(1.5, "test").is_err());
+        assert!(nonnegative_integer(1.5, "test").is_err());
+        assert!(positive_integer(usize::MAX as f64 + 1.0, "test").is_err());
+        assert!(nonnegative_integer(usize::MAX as f64 + 1.0, "test").is_err());
     }
 
     #[test]
