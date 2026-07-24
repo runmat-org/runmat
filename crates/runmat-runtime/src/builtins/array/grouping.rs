@@ -1330,7 +1330,10 @@ fn parse_discretize_args(
     }
     let edges = match edges_or_n {
         Value::Num(n) if is_positive_integer_f64(n) => equal_width_edges(values, n as usize)?,
-        Value::Int(n) if n.to_i64() > 0 => equal_width_edges(values, n.to_i64() as usize)?,
+        Value::Int(n) => match n.try_to_usize().filter(|bins| *bins > 0) {
+            Some(bins) => equal_width_edges(values, bins)?,
+            None => numeric_values(&Value::Int(n), "discretize edges")?,
+        },
         other => numeric_values(&other, "discretize edges")?,
     };
     if let Some(labels) = &labels {
@@ -1860,6 +1863,19 @@ fn is_missing_text(text: &str) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntValue;
+
+    #[test]
+    fn discretize_typed_bin_count_preserves_exact_unsigned_values() {
+        let values = [0.0, 1.0];
+        let (edges, _, _) =
+            parse_discretize_args(&values, Value::Int(IntValue::U16(2)), Vec::new()).unwrap();
+        assert_eq!(edges, vec![0.0, 0.5, 1.0]);
+
+        let (edges, _, _) =
+            parse_discretize_args(&values, Value::Int(IntValue::U8(1)), Vec::new()).unwrap();
+        assert_eq!(edges, vec![0.0, 1.0]);
+    }
 
     #[test]
     fn accumarray_sums_vector_and_matrix_subscripts() {

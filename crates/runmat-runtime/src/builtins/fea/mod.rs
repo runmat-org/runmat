@@ -3087,8 +3087,23 @@ fn bool_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<bool> 
 
 fn usize_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(int) => Ok(int.to_i64().max(0) as usize),
-        Value::Num(n) if *n >= 0.0 => Ok(*n as usize),
+        Value::Int(int) => int.try_to_usize().ok_or_else(|| {
+            builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                "expected non-negative integer value outside the platform range",
+            )
+        }),
+        Value::Num(n) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 => {
+            if *n > usize::MAX as f64 {
+                return Err(builtin_error(
+                    builtin,
+                    &ERROR_INPUT,
+                    "expected non-negative integer value outside the platform range",
+                ));
+            }
+            Ok(*n as usize)
+        }
         other => Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -3118,9 +3133,10 @@ fn string_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<
 
 fn usize_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(Tensor { data, .. }) => {
-            Ok(data.iter().map(|value| *value as usize).collect())
-        }
+        Value::Tensor(Tensor { data, .. }) => data
+            .iter()
+            .map(|value| usize_from_value(builtin, &Value::Num(*value)))
+            .collect(),
         Value::Cell(cell) => cell
             .data
             .iter()
@@ -3593,6 +3609,30 @@ mod tests {
 
     fn moment_vector() -> Value {
         Value::Tensor(Tensor::new_2d(vec![10.0, 20.0, 30.0], 1, 3).expect("tensor should build"))
+    }
+
+    #[test]
+    fn fea_usize_parsers_preserve_typed_bounds_and_reject_invalid_values() {
+        use runmat_builtins::IntValue;
+
+        assert_eq!(
+            usize_from_value(INTERFACE_NAME, &Value::Int(IntValue::U16(7))).unwrap(),
+            7
+        );
+        assert!(usize_from_value(INTERFACE_NAME, &Value::Int(IntValue::I8(-1))).is_err());
+        assert!(usize_from_value(INTERFACE_NAME, &Value::Num(1.5)).is_err());
+        assert!(usize_vec_from_value(
+            INTERFACE_NAME,
+            &Value::Tensor(Tensor::new_2d(vec![1.0, -1.0], 1, 2).unwrap())
+        )
+        .is_err());
+
+        let maximum = usize_from_value(INTERFACE_NAME, &Value::Int(IntValue::U64(u64::MAX)));
+        if usize::BITS == 64 {
+            assert_eq!(maximum.unwrap(), usize::MAX);
+        } else {
+            assert!(maximum.is_err());
+        }
     }
 
     #[test]
