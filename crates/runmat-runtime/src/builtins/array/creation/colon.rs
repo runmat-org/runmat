@@ -4,7 +4,7 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LiteralValue, LogicalArray, Tensor, Type, Value,
+    CharArray, ComplexTensor, IntValue, LiteralValue, LogicalArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 use runmat_builtins::shape_rules::infer_range_shape;
 use runmat_builtins::ResolveContext;
 
@@ -275,6 +276,14 @@ async fn colon_builtin(
         return Err(colon_error(&COLON_ERROR_ARG_COUNT));
     }
 
+    let (integer_step, integer_stop) = match rest.first() {
+        Some(stop) => (Some(&step_or_end), stop),
+        None => (None, &step_or_end),
+    };
+    if let Some(result) = try_integer_sequence(&start, integer_step, integer_stop)? {
+        return Ok(result);
+    }
+
     let start_scalar = parse_real_scalar("colon", start).await?;
 
     if rest.is_empty() {
@@ -315,6 +324,210 @@ async fn colon_builtin(
             char_mode,
         )
     }
+}
+
+/// Integer colon expressions must retain their exact class and cannot use the
+/// floating compatibility view of a typed tensor. In particular, range checks
+/// happen before materialization so `int8(1):256` fails rather than producing
+/// a double vector or a saturated final element.
+fn try_integer_sequence(
+    start: &Value,
+    step: Option<&Value>,
+    stop: &Value,
+) -> crate::BuiltinResult<Option<Value>> {
+    let target = integer_target_from_values([start, stop].into_iter().chain(step))?;
+    let Some(target) = target else {
+        return Ok(None);
+    };
+
+    let start = integer_colon_value(start, target, true)?;
+    let stop = integer_colon_value(stop, target, true)?;
+    let step = match step {
+        Some(step) => integer_colon_value(step, target, false)?,
+        None => 1,
+    };
+    if step == 0 {
+        return Err(colon_error(&COLON_ERROR_ZERO_INCREMENT));
+    }
+
+    let count = integer_progression_count(start, step, stop)?;
+    let count = usize::try_from(count).map_err(|_| colon_error(&COLON_ERROR_SEQUENCE_LIMIT))?;
+    let mut values = Vec::with_capacity(count);
+    let mut value = start;
+    for index in 0..count {
+        values.push(integer_value_from_i128(target, value));
+        if index + 1 < count {
+            value = value
+                .checked_add(step)
+                .ok_or_else(|| colon_error(&COLON_ERROR_SEQUENCE_RANGE))?;
+        }
+    }
+    let tensor = Tensor::new_integer(target.storage(values), vec![1, count]).map_err(|error| {
+        colon_error_with_message(format!("colon: {error}"), &COLON_ERROR_INTERNAL)
+    })?;
+    Ok(Some(tensor::tensor_into_value(tensor)))
+}
+
+fn integer_target_from_values<'a>(
+    values: impl IntoIterator<Item = &'a Value>,
+) -> crate::BuiltinResult<Option<IntegerTarget>> {
+    let mut target = None;
+    for value in values {
+        let Some(candidate) = typed_integer_target(value)? else {
+            continue;
+        };
+        if let Some(target) = target {
+            if target != candidate {
+                return Err(colon_error_with_message(
+                    "colon: integer operands must have the same integer class",
+                    &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
+                ));
+            }
+        } else {
+            target = Some(candidate);
+        }
+    }
+    Ok(target)
+}
+
+fn typed_integer_target(value: &Value) -> crate::BuiltinResult<Option<IntegerTarget>> {
+    match value {
+        Value::Int(value) => Ok(Some(IntegerTarget::from_int_value(value))),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            if !tensor::is_scalar_tensor(tensor) {
+                return Err(colon_error_with_message(
+                    "colon: expected scalar input",
+                    &COLON_ERROR_NON_SCALAR_INPUT,
+                ));
+            }
+            Ok(tensor.integer_storage().map(IntegerTarget::from_storage))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn integer_colon_value(
+    value: &Value,
+    target: IntegerTarget,
+    require_target_range: bool,
+) -> crate::BuiltinResult<i128> {
+    let integer = match value {
+        Value::Int(value) => {
+            if IntegerTarget::from_int_value(value) != target {
+                return Err(colon_error_with_message(
+                    "colon: integer operands must have the same integer class",
+                    &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
+                ));
+            }
+            int_value_to_i128(value)
+        }
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            if !tensor::is_scalar_tensor(tensor) {
+                return Err(colon_error_with_message(
+                    "colon: expected scalar input",
+                    &COLON_ERROR_NON_SCALAR_INPUT,
+                ));
+            }
+            let storage = tensor
+                .integer_storage()
+                .expect("typed tensor storage is present");
+            if IntegerTarget::from_storage(storage) != target {
+                return Err(colon_error_with_message(
+                    "colon: integer operands must have the same integer class",
+                    &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
+                ));
+            }
+            int_value_to_i128(&storage.value_at(0).expect("scalar typed tensor value"))
+        }
+        Value::Num(value) => float_to_integral_i128(*value)?,
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            float_to_integral_i128(tensor.data[0])?
+        }
+        Value::Bool(value) => i128::from(u8::from(*value)),
+        Value::LogicalArray(array) if array.len() == 1 => i128::from(u8::from(array.data[0] != 0)),
+        _ => {
+            return Err(colon_error_with_message(
+                "colon: integer sequences require real scalar operands",
+                &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
+            ))
+        }
+    };
+    if require_target_range && !integer_target_contains(target, integer) {
+        return Err(colon_error_with_message(
+            "colon: integer range values must be representable in the output class",
+            &COLON_ERROR_SEQUENCE_RANGE,
+        ));
+    }
+    Ok(integer)
+}
+
+fn float_to_integral_i128(value: f64) -> crate::BuiltinResult<i128> {
+    if !value.is_finite() {
+        return Err(colon_error(&COLON_ERROR_NON_FINITE_INPUT));
+    }
+    if value.fract() != 0.0 || value < i64::MIN as f64 || value >= 18_446_744_073_709_551_616.0 {
+        return Err(colon_error_with_message(
+            "colon: integer sequences require integer-valued scalar operands",
+            &COLON_ERROR_SEQUENCE_RANGE,
+        ));
+    }
+    Ok(value as i128)
+}
+
+fn int_value_to_i128(value: &IntValue) -> i128 {
+    match value {
+        IntValue::I8(value) => i128::from(*value),
+        IntValue::I16(value) => i128::from(*value),
+        IntValue::I32(value) => i128::from(*value),
+        IntValue::I64(value) => i128::from(*value),
+        IntValue::U8(value) => i128::from(*value),
+        IntValue::U16(value) => i128::from(*value),
+        IntValue::U32(value) => i128::from(*value),
+        IntValue::U64(value) => i128::from(*value),
+    }
+}
+
+fn integer_target_contains(target: IntegerTarget, value: i128) -> bool {
+    match target {
+        IntegerTarget::I8 => value >= i128::from(i8::MIN) && value <= i128::from(i8::MAX),
+        IntegerTarget::I16 => value >= i128::from(i16::MIN) && value <= i128::from(i16::MAX),
+        IntegerTarget::I32 => value >= i128::from(i32::MIN) && value <= i128::from(i32::MAX),
+        IntegerTarget::I64 => value >= i128::from(i64::MIN) && value <= i128::from(i64::MAX),
+        IntegerTarget::U8 => value >= 0 && value <= i128::from(u8::MAX),
+        IntegerTarget::U16 => value >= 0 && value <= i128::from(u16::MAX),
+        IntegerTarget::U32 => value >= 0 && value <= i128::from(u32::MAX),
+        IntegerTarget::U64 => value >= 0 && value <= i128::from(u64::MAX),
+    }
+}
+
+fn integer_value_from_i128(target: IntegerTarget, value: i128) -> IntValue {
+    debug_assert!(integer_target_contains(target, value));
+    match target {
+        IntegerTarget::I8 => IntValue::I8(value as i8),
+        IntegerTarget::I16 => IntValue::I16(value as i16),
+        IntegerTarget::I32 => IntValue::I32(value as i32),
+        IntegerTarget::I64 => IntValue::I64(value as i64),
+        IntegerTarget::U8 => IntValue::U8(value as u8),
+        IntegerTarget::U16 => IntValue::U16(value as u16),
+        IntegerTarget::U32 => IntValue::U32(value as u32),
+        IntegerTarget::U64 => IntValue::U64(value as u64),
+    }
+}
+
+fn integer_progression_count(start: i128, step: i128, stop: i128) -> crate::BuiltinResult<u128> {
+    if (step > 0 && start > stop) || (step < 0 && start < stop) {
+        return Ok(0);
+    }
+    let distance = if step > 0 { stop - start } else { start - stop };
+    let step = step.unsigned_abs();
+    let count = (distance as u128)
+        .checked_div(step)
+        .and_then(|count| count.checked_add(1))
+        .ok_or_else(|| colon_error(&COLON_ERROR_SEQUENCE_LIMIT))?;
+    if count > usize::MAX as u128 {
+        return Err(colon_error(&COLON_ERROR_SEQUENCE_LIMIT));
+    }
+    Ok(count)
 }
 
 fn build_sequence(
@@ -648,7 +861,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, Tensor};
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, Tensor};
 
     fn colon_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::colon_builtin(start, stop, rest))
@@ -665,6 +878,104 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn colon_preserves_exact_integer_storage_for_all_classes() {
+        let cases = [
+            (
+                IntValue::I8(-2),
+                IntValue::I8(2),
+                IntegerStorage::I8(vec![-2, -1, 0, 1, 2]),
+            ),
+            (
+                IntValue::I16(-2),
+                IntValue::I16(2),
+                IntegerStorage::I16(vec![-2, -1, 0, 1, 2]),
+            ),
+            (
+                IntValue::I32(-2),
+                IntValue::I32(2),
+                IntegerStorage::I32(vec![-2, -1, 0, 1, 2]),
+            ),
+            (
+                IntValue::I64(-2),
+                IntValue::I64(2),
+                IntegerStorage::I64(vec![-2, -1, 0, 1, 2]),
+            ),
+            (
+                IntValue::U8(0),
+                IntValue::U8(4),
+                IntegerStorage::U8(vec![0, 1, 2, 3, 4]),
+            ),
+            (
+                IntValue::U16(0),
+                IntValue::U16(4),
+                IntegerStorage::U16(vec![0, 1, 2, 3, 4]),
+            ),
+            (
+                IntValue::U32(0),
+                IntValue::U32(4),
+                IntegerStorage::U32(vec![0, 1, 2, 3, 4]),
+            ),
+            (
+                IntValue::U64(9_007_199_254_740_992),
+                IntValue::U64(9_007_199_254_740_994),
+                IntegerStorage::U64(vec![
+                    9_007_199_254_740_992,
+                    9_007_199_254_740_993,
+                    9_007_199_254_740_994,
+                ]),
+            ),
+        ];
+
+        for (start, stop, expected) in cases {
+            let value = colon_builtin(Value::Int(start), Value::Int(stop), Vec::new())
+                .expect("integer colon");
+            let Value::Tensor(tensor) = value else {
+                panic!("integer sequence should be an array");
+            };
+            assert_eq!(tensor.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn colon_integer_sequences_support_signed_steps_and_reject_unrepresentable_ranges() {
+        let value = colon_builtin(
+            Value::Int(IntValue::U64(5)),
+            Value::Num(-2.0),
+            vec![Value::Int(IntValue::U64(1))],
+        )
+        .expect("unsigned endpoint with signed step");
+        let Value::Tensor(tensor) = value else {
+            panic!("integer sequence should be an array");
+        };
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![5, 3, 1]))
+        );
+
+        let err = colon_builtin(Value::Int(IntValue::I8(1)), Value::Num(256.0), Vec::new())
+            .expect_err("out-of-range integer endpoint must fail");
+        assert!(err.message().contains("representable"));
+
+        let err = colon_builtin(
+            Value::Int(IntValue::I16(1)),
+            Value::Int(IntValue::I8(2)),
+            Vec::new(),
+        )
+        .expect_err("mixed integer classes must fail");
+        assert!(err.message().contains("same integer class"));
+
+        assert_eq!(
+            colon_builtin(
+                Value::Int(IntValue::U64(u64::MAX)),
+                Value::Int(IntValue::U64(u64::MAX)),
+                Vec::new(),
+            )
+            .expect("singleton uint64 range"),
+            Value::Int(IntValue::U64(u64::MAX))
+        );
     }
 
     #[test]
