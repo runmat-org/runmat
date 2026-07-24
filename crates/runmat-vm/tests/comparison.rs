@@ -46,3 +46,21 @@ fn uint64_comparisons_do_not_round_through_double() {
         "inequality and ordering must be true"
     );
 }
+
+#[test]
+fn direct_relational_builtins_keep_uint64_comparisons_exact() {
+    let vars = execute_source(
+        r#"
+        a = uint64(9007199254740992) + uint64(1);
+        equal_rounded = eq(a, 9007199254740992);
+        greater_than_rounded = gt(a, 9007199254740992);
+        "#,
+    )
+    .expect("direct relational builtins should execute");
+
+    assert!(
+        vars.contains(&Value::Num(0.0)),
+        "eq must be false: {vars:?}"
+    );
+    assert!(vars.contains(&Value::Num(1.0)), "gt must be true: {vars:?}");
+}

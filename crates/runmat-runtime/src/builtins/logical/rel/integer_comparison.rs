@@ -22,19 +22,40 @@ pub(crate) enum IntegerComparisonError {
     Internal,
 }
 
-/// Performs a comparison only when both operands carry exact integer storage.
-/// Other numeric domains deliberately stay on the established builtin paths.
+/// Performs a comparison when native integer storage is compared against other
+/// native integer storage or a scalar numeric value. Other numeric domains
+/// deliberately stay on the established builtin paths.
 pub(crate) fn try_integer_comparison(
     lhs: &Value,
     rhs: &Value,
     operation: IntegerComparisonOp,
 ) -> Result<Option<Value>, IntegerComparisonError> {
-    let Some(lhs) = integer_operand(lhs) else {
-        return Ok(None);
+    let lhs_integer = integer_operand(lhs);
+    let rhs_integer = integer_operand(rhs);
+    let result = match (lhs_integer, rhs_integer) {
+        (None, None) => return Ok(None),
+        (Some(lhs), Some(rhs)) => compare_integer_operands(&lhs, &rhs, operation)?,
+        (Some(lhs), None) => {
+            let Some(rhs) = numeric_scalar(rhs) else {
+                return Ok(None);
+            };
+            compare_integer_scalar(&lhs, rhs, true, operation)?
+        }
+        (None, Some(rhs)) => {
+            let Some(lhs) = numeric_scalar(lhs) else {
+                return Ok(None);
+            };
+            compare_integer_scalar(&rhs, lhs, false, operation)?
+        }
     };
-    let Some(rhs) = integer_operand(rhs) else {
-        return Ok(None);
-    };
+    Ok(Some(result))
+}
+
+fn compare_integer_operands(
+    lhs: &IntegerOperand<'_>,
+    rhs: &IntegerOperand<'_>,
+    operation: IntegerComparisonOp,
+) -> Result<Value, IntegerComparisonError> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|_| IntegerComparisonError::SizeMismatch)?;
     let mut data = Vec::with_capacity(plan.len());
@@ -42,13 +63,35 @@ pub(crate) fn try_integer_comparison(
         let ordering = compare(lhs.value_at(lhs_index), rhs.value_at(rhs_index));
         data.push(matches_relation(ordering, operation) as u8);
     }
-    if data.len() == 1 {
-        return Ok(Some(Value::Bool(data[0] != 0)));
+    logical_result(data, plan.output_shape().to_vec())
+}
+
+fn compare_integer_scalar(
+    integer: &IntegerOperand<'_>,
+    scalar: f64,
+    integer_is_left: bool,
+    operation: IntegerComparisonOp,
+) -> Result<Value, IntegerComparisonError> {
+    let mut data = Vec::with_capacity(integer.shape.iter().product());
+    for index in 0..integer.shape.iter().product() {
+        let ordering = integer_f64_order(integer.value_at(index), scalar);
+        let ordering = if integer_is_left {
+            ordering
+        } else {
+            ordering.map(Ordering::reverse)
+        };
+        data.push(matches_optional_relation(ordering, operation) as u8);
     }
-    Ok(Some(Value::LogicalArray(
-        LogicalArray::new(data, plan.output_shape().to_vec())
-            .map_err(|_| IntegerComparisonError::Internal)?,
-    )))
+    logical_result(data, integer.shape.clone())
+}
+
+fn logical_result(data: Vec<u8>, shape: Vec<usize>) -> Result<Value, IntegerComparisonError> {
+    if data.len() == 1 {
+        return Ok(Value::Bool(data[0] != 0));
+    }
+    Ok(Value::LogicalArray(
+        LogicalArray::new(data, shape).map_err(|_| IntegerComparisonError::Internal)?,
+    ))
 }
 
 struct IntegerOperand<'a> {
@@ -111,6 +154,72 @@ fn compare(lhs: IntValue, rhs: IntValue) -> Ordering {
     }
 }
 
+fn integer_f64_order(integer: IntValue, float: f64) -> Option<Ordering> {
+    if float.is_nan() {
+        return None;
+    }
+    if float == f64::INFINITY {
+        return Some(Ordering::Less);
+    }
+    if float == f64::NEG_INFINITY {
+        return Some(Ordering::Greater);
+    }
+
+    const MIN_I64: f64 = -9_223_372_036_854_775_808.0;
+    const U64_EXCLUSIVE_UPPER: f64 = 18_446_744_073_709_551_616.0;
+    if float < MIN_I64 {
+        return Some(Ordering::Greater);
+    }
+    if float >= U64_EXCLUSIVE_UPPER {
+        return Some(Ordering::Less);
+    }
+
+    let integer = integer_as_i128(&integer);
+    let truncated = float as i128;
+    let ordering = integer.cmp(&truncated);
+    if float.fract() == 0.0 {
+        return Some(ordering);
+    }
+    Some(if float.is_sign_positive() {
+        if ordering == Ordering::Greater {
+            Ordering::Greater
+        } else {
+            Ordering::Less
+        }
+    } else if ordering == Ordering::Less {
+        Ordering::Less
+    } else {
+        Ordering::Greater
+    })
+}
+
+fn integer_as_i128(value: &IntValue) -> i128 {
+    match value {
+        IntValue::I8(value) => i128::from(*value),
+        IntValue::I16(value) => i128::from(*value),
+        IntValue::I32(value) => i128::from(*value),
+        IntValue::I64(value) => i128::from(*value),
+        IntValue::U8(value) => i128::from(*value),
+        IntValue::U16(value) => i128::from(*value),
+        IntValue::U32(value) => i128::from(*value),
+        IntValue::U64(value) => i128::from(*value),
+    }
+}
+
+fn numeric_scalar(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(value) => Some(*value),
+        Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
+        Value::Tensor(tensor) if tensor.integer_storage().is_none() && tensor.data.len() == 1 => {
+            tensor.data.first().copied()
+        }
+        Value::LogicalArray(array) if array.data.len() == 1 => {
+            Some(if array.data[0] == 0 { 0.0 } else { 1.0 })
+        }
+        _ => None,
+    }
+}
+
 fn signed_value(value: &IntValue) -> Option<i64> {
     match value {
         IntValue::I8(value) => Some(*value as i64),
@@ -157,6 +266,13 @@ fn matches_relation(ordering: Ordering, operation: IntegerComparisonOp) -> bool 
     }
 }
 
+fn matches_optional_relation(ordering: Option<Ordering>, operation: IntegerComparisonOp) -> bool {
+    match ordering {
+        Some(ordering) => matches_relation(ordering, operation),
+        None => matches!(operation, IntegerComparisonOp::Ne),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,6 +312,28 @@ mod tests {
             Value::LogicalArray(
                 LogicalArray::new(vec![1, 1, 0, 1, 0, 1], vec![2, 3]).expect("logical result")
             )
+        );
+    }
+
+    #[test]
+    fn compares_integer_storage_to_scalar_double_without_64_bit_loss() {
+        let exact = Value::Int(IntValue::U64((1_u64 << 53) + 1));
+        let rounded = Value::Num((1_u64 << 53) as f64);
+        assert_eq!(
+            try_integer_comparison(&exact, &rounded, IntegerComparisonOp::Eq).expect("comparison"),
+            Some(Value::Bool(false))
+        );
+        assert_eq!(
+            try_integer_comparison(&exact, &rounded, IntegerComparisonOp::Gt).expect("comparison"),
+            Some(Value::Bool(true))
+        );
+
+        let tensor = array(IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]), vec![1, 2]);
+        assert_eq!(
+            try_integer_comparison(&tensor, &rounded, IntegerComparisonOp::Ne).expect("comparison"),
+            Some(Value::LogicalArray(
+                LogicalArray::new(vec![1, 1], vec![1, 2]).expect("logical result")
+            ))
         );
     }
 }
