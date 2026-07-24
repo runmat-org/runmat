@@ -17,23 +17,33 @@ fn indexing_error_with_identifier(message: impl Into<String>, identifier: &str) 
 }
 
 fn positive_integer_cell_index(value: f64, identifier: &str) -> Result<usize, RuntimeError> {
-    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
+    let Some(index) = positive_platform_index(value) else {
         return Err(indexing_error_with_identifier(
             format!("Cell index {value} must be a positive integer"),
             identifier,
         ));
-    }
-    Ok(value as usize)
+    };
+    Ok(index)
 }
 
 fn positive_integer_index(value: f64, identifier: &str) -> Result<usize, RuntimeError> {
-    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 || value > usize::MAX as f64 {
+    let Some(index) = positive_platform_index(value) else {
         return Err(indexing_error_with_identifier(
             format!("Index {value} must be a positive integer"),
             identifier,
         ));
+    };
+    Ok(index)
+}
+
+fn positive_platform_index(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
+        return None;
     }
-    Ok(value as usize)
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
 }
 
 fn tensor_scalar_value(tensor: &Tensor, index: usize) -> Result<Value, RuntimeError> {
@@ -314,7 +324,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
             }
             // Support scalar indexing cases mirroring Tensor branch
             if indices.len() == 1 {
-                let idx = indices[0] as usize;
+                let idx = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
                 let total = h.shape.iter().product();
                 if idx < 1 || idx > total {
                     return Err(indexing_error_with_identifier(
@@ -326,8 +336,8 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 let val = gpu_index_scalar(provider, h, lin0).await?;
                 return Ok(Value::Num(val));
             } else if indices.len() == 2 {
-                let row = indices[0] as usize;
-                let col = indices[1] as usize;
+                let row = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
+                let col = positive_integer_index(indices[1], "RunMat:IndexOutOfBounds")?;
                 let rows = h.shape.first().copied().unwrap_or(1);
                 let cols = h.shape.get(1).copied().unwrap_or(1);
                 if row < 1 || row > rows || col < 1 || col > cols {
@@ -352,7 +362,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
 
             if indices.len() == 1 {
                 // Linear indexing (1-based)
-                let idx = indices[0] as usize;
+                let idx = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
                 if idx < 1 || idx > tensor.data.len() {
                     return Err(indexing_error_with_identifier(
                         format!("Index {} out of bounds (1 to {})", idx, tensor.data.len()),
@@ -362,8 +372,8 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 tensor_scalar_value(tensor, idx - 1)
             } else if indices.len() == 2 {
                 // Row-column indexing (1-based)
-                let row = indices[0] as usize;
-                let col = indices[1] as usize;
+                let row = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
+                let col = positive_integer_index(indices[1], "RunMat:IndexOutOfBounds")?;
                 let shape = normalize_scalar_shape(&tensor.shape);
                 let rows = shape.first().copied().unwrap_or(1);
                 let cols = shape.get(1).copied().unwrap_or(1);
@@ -396,7 +406,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
             }
 
             if indices.len() == 1 {
-                let idx = indices[0] as usize;
+                let idx = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
                 if idx < 1 || idx > array.data.len() {
                     return Err(indexing_error_with_identifier(
                         format!("Index {} out of bounds (1 to {})", idx, array.data.len()),
@@ -405,8 +415,8 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 }
                 Ok(Value::Bool(array.data[idx - 1] != 0))
             } else if indices.len() == 2 {
-                let row = indices[0] as usize;
-                let col = indices[1] as usize;
+                let row = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
+                let col = positive_integer_index(indices[1], "RunMat:IndexOutOfBounds")?;
                 let shape = normalize_scalar_shape(&array.shape);
                 let rows = shape.first().copied().unwrap_or(1);
                 let cols = shape.get(1).copied().unwrap_or(1);
@@ -439,7 +449,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
             }
 
             if indices.len() == 1 {
-                let idx = indices[0] as usize;
+                let idx = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
                 if idx < 1 || idx > tensor.data.len() {
                     return Err(indexing_error_with_identifier(
                         format!("Index {} out of bounds (1 to {})", idx, tensor.data.len()),
@@ -448,8 +458,8 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 }
                 complex_tensor_scalar_value(tensor, idx - 1)
             } else if indices.len() == 2 {
-                let row = indices[0] as usize;
-                let col = indices[1] as usize;
+                let row = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
+                let col = positive_integer_index(indices[1], "RunMat:IndexOutOfBounds")?;
                 let shape = normalize_scalar_shape(&tensor.shape);
                 let rows = shape.first().copied().unwrap_or(1);
                 let cols = shape.get(1).copied().unwrap_or(1);
@@ -482,7 +492,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 return Err(indexing_error("At least one index is required"));
             }
             if indices.len() == 1 {
-                let idx = indices[0] as usize;
+                let idx = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
                 let total = sa.data.len();
                 if idx < 1 || idx > total {
                     return Err(indexing_error_with_identifier(
@@ -492,8 +502,8 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 }
                 Ok(Value::String(sa.data[idx - 1].clone()))
             } else if indices.len() == 2 {
-                let row = indices[0] as usize;
-                let col = indices[1] as usize;
+                let row = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
+                let col = positive_integer_index(indices[1], "RunMat:IndexOutOfBounds")?;
                 let shape = normalize_scalar_shape(&sa.shape);
                 let rows = shape.first().copied().unwrap_or(1);
                 let cols = shape.get(1).copied().unwrap_or(1);
@@ -607,7 +617,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{
         CellArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
-        SparseTensor, Tensor, Value,
+        SparseTensor, StringArray, Tensor, Value,
     };
 
     fn sparse_scalar_value(value: Value) -> f64 {
@@ -634,6 +644,35 @@ mod tests {
         .expect("cell");
         let err = block_on(perform_indexing(&Value::Cell(cell), &[3.7]))
             .expect_err("fractional cell index should fail");
+        assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
+    }
+
+    #[test]
+    fn host_indexing_rejects_fractional_and_out_of_range_selectors_before_cast() {
+        let values = [
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor")),
+            Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical")),
+            Value::ComplexTensor(
+                ComplexTensor::new(vec![(1.0, 0.0), (2.0, 0.0)], vec![1, 2])
+                    .expect("complex tensor"),
+            ),
+            Value::StringArray(
+                StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).expect("string array"),
+            ),
+        ];
+
+        let out_of_range = usize::MAX as f64 + 1.0;
+        for value in values {
+            for selector in [1.5, out_of_range] {
+                let err = block_on(perform_indexing(&value, &[selector]))
+                    .expect_err("invalid selector must fail before cast");
+                assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+            }
+        }
+
+        let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell");
+        let err = block_on(perform_indexing(&Value::Cell(cell), &[out_of_range]))
+            .expect_err("out-of-range cell selector must fail before cast");
         assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
     }
 
