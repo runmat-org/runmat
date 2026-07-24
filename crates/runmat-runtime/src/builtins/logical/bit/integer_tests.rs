@@ -3,16 +3,16 @@ use futures::executor::block_on;
 
 #[test]
 fn bitand_double_scalars_return_double() {
-    let out = block_on(bitand_builtin(Value::Num(6.0), Value::Num(3.0))).expect("bitand");
+    let out = block_on(bitand_builtin(vec![Value::Num(6.0), Value::Num(3.0)])).expect("bitand");
     assert_eq!(out, Value::Num(2.0));
 }
 
 #[test]
 fn bitwise_uint32_scalars_preserve_uint32() {
-    let out = block_on(bitor_builtin(
+    let out = block_on(bitor_builtin(vec![
         Value::Int(IntValue::U32(0b0101)),
         Value::Int(IntValue::U32(0b0011)),
-    ))
+    ]))
     .expect("bitor");
     assert_eq!(out, Value::Int(IntValue::U32(0b0111)));
 }
@@ -21,10 +21,10 @@ fn bitwise_uint32_scalars_preserve_uint32() {
 fn bitand_broadcasts_tensor_and_scalar() {
     let tensor =
         Tensor::new_with_dtype(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], NumericDType::U32).unwrap();
-    let out = block_on(bitand_builtin(
+    let out = block_on(bitand_builtin(vec![
         Value::Tensor(tensor),
         Value::Int(IntValue::U32(1)),
-    ))
+    ]))
     .expect("bitand");
     match out {
         Value::Tensor(t) => {
@@ -40,15 +40,15 @@ fn bitand_broadcasts_tensor_and_scalar() {
 
 #[test]
 fn binary_bitwise_rejects_mixed_integer_classes() {
-    let forward = block_on(bitor_builtin(
+    let forward = block_on(bitor_builtin(vec![
         Value::Int(IntValue::U8(1)),
         Value::Int(IntValue::U32(256)),
-    ))
+    ]))
     .expect_err("mixed integer classes must fail");
-    let reverse = block_on(bitor_builtin(
+    let reverse = block_on(bitor_builtin(vec![
         Value::Int(IntValue::U32(256)),
         Value::Int(IntValue::U8(1)),
-    ))
+    ]))
     .expect_err("mixed integer classes must fail");
 
     assert_eq!(forward.identifier(), ERROR_INVALID_INPUT.identifier);
@@ -84,14 +84,15 @@ fn bitwise_preserves_all_native_integer_scalar_classes() {
         ),
     ];
     for (left, right, expected) in cases {
-        let actual = block_on(bitand_builtin(Value::Int(left), Value::Int(right))).expect("bitand");
+        let actual =
+            block_on(bitand_builtin(vec![Value::Int(left), Value::Int(right)])).expect("bitand");
         assert_eq!(actual, Value::Int(expected));
     }
 
-    let high = block_on(bitor_builtin(
+    let high = block_on(bitor_builtin(vec![
         Value::Int(IntValue::U64(1_u64 << 63)),
         Value::Int(IntValue::U64(1_u64 << 60)),
-    ))
+    ]))
     .expect("uint64 high-bit bitor");
     assert_eq!(
         high,
@@ -128,7 +129,8 @@ fn bitxor_preserves_all_native_integer_scalar_classes() {
         ),
     ];
     for (left, right, expected) in cases {
-        let actual = block_on(bitxor_builtin(Value::Int(left), Value::Int(right))).expect("bitxor");
+        let actual =
+            block_on(bitxor_builtin(vec![Value::Int(left), Value::Int(right)])).expect("bitxor");
         assert_eq!(actual, Value::Int(expected));
     }
 }
@@ -146,7 +148,7 @@ fn bitcmp_preserves_all_native_integer_scalar_classes() {
         (IntValue::U64(0b0101), IntValue::U64(u64::MAX - 5)),
     ];
     for (input, expected) in cases {
-        let actual = block_on(bitcmp_builtin(Value::Int(input))).expect("bitcmp");
+        let actual = block_on(bitcmp_builtin(vec![Value::Int(input)])).expect("bitcmp");
         assert_eq!(actual, Value::Int(expected));
     }
 }
@@ -155,7 +157,8 @@ fn bitcmp_preserves_all_native_integer_scalar_classes() {
 fn bitcmp_preserves_exact_integer_arrays_and_default_double_behavior() {
     let input =
         Tensor::new_integer(IntegerStorage::U64(vec![0, 1_u64 << 63]), vec![1, 2]).expect("input");
-    let Value::Tensor(output) = block_on(bitcmp_builtin(Value::Tensor(input))).expect("bitcmp")
+    let Value::Tensor(output) =
+        block_on(bitcmp_builtin(vec![Value::Tensor(input)])).expect("bitcmp")
     else {
         panic!("expected tensor result");
     };
@@ -165,7 +168,7 @@ fn bitcmp_preserves_exact_integer_arrays_and_default_double_behavior() {
     );
 
     assert_eq!(
-        block_on(bitcmp_builtin(Value::Num(0.0))).expect("double bitcmp"),
+        block_on(bitcmp_builtin(vec![Value::Num(0.0)])).expect("double bitcmp"),
         Value::Num(u64::MAX as f64)
     );
 }
@@ -193,7 +196,8 @@ fn bitget_preserves_all_native_integer_scalar_classes() {
         (IntValue::U64(0b1010), IntValue::U64(0)),
     ];
     for (input, expected) in cases {
-        let actual = block_on(bitget_builtin(Value::Int(input), Value::Num(1.0))).expect("bitget");
+        let actual =
+            block_on(bitget_builtin(vec![Value::Int(input), Value::Num(1.0)])).expect("bitget");
         assert_eq!(actual, Value::Int(expected));
     }
 }
@@ -203,10 +207,10 @@ fn bitget_broadcasts_positions_and_preserves_uint64_storage() {
     let input =
         Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63]), vec![1, 1]).expect("input");
     let positions = Tensor::new(vec![1.0, 63.0, 64.0], vec![1, 3]).expect("positions");
-    let Value::Tensor(output) = block_on(bitget_builtin(
+    let Value::Tensor(output) = block_on(bitget_builtin(vec![
         Value::Tensor(input),
         Value::Tensor(positions),
-    ))
+    ]))
     .expect("bitget") else {
         panic!("expected tensor result");
     };
@@ -219,22 +223,22 @@ fn bitget_broadcasts_positions_and_preserves_uint64_storage() {
 #[test]
 fn bitget_handles_signed_bits_double_output_and_invalid_positions() {
     assert_eq!(
-        block_on(bitget_builtin(
+        block_on(bitget_builtin(vec![
             Value::Int(IntValue::I8(-29)),
             Value::Num(8.0)
-        ))
+        ]))
         .expect("signed bit"),
         Value::Int(IntValue::I8(1))
     );
     assert_eq!(
-        block_on(bitget_builtin(Value::Num(8.0), Value::Num(4.0))).expect("double bit"),
+        block_on(bitget_builtin(vec![Value::Num(8.0), Value::Num(4.0)])).expect("double bit"),
         Value::Num(1.0)
     );
     for position in [0.0, -1.0, 9.0] {
-        let error = block_on(bitget_builtin(
+        let error = block_on(bitget_builtin(vec![
             Value::Int(IntValue::U8(1)),
             Value::Num(position),
-        ))
+        ]))
         .expect_err("invalid bit position");
         assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
     }
@@ -356,10 +360,10 @@ fn bitset_rejects_invalid_positions_nonfinite_values_and_dispatches() {
 fn bitxor_broadcasts_exact_uint64_storage_without_losing_high_bits() {
     let left = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
         .expect("left");
-    let Value::Tensor(output) = block_on(bitxor_builtin(
+    let Value::Tensor(output) = block_on(bitxor_builtin(vec![
         Value::Tensor(left),
         Value::Int(IntValue::U64(1_u64 << 60)),
-    ))
+    ]))
     .expect("bitxor") else {
         panic!("expected tensor result");
     };
@@ -387,17 +391,17 @@ fn bitxor_follows_binary_integer_class_rules_and_is_registered() {
         Value::Int(IntValue::U8(0b1100))
     );
     assert_eq!(
-        block_on(bitxor_builtin(
+        block_on(bitxor_builtin(vec![
             Value::Int(IntValue::U16(0b1010)),
             Value::Num(6.0),
-        ))
+        ]))
         .expect("scalar double bitxor"),
         Value::Int(IntValue::U16(0b1100))
     );
-    let error = block_on(bitxor_builtin(
+    let error = block_on(bitxor_builtin(vec![
         Value::Int(IntValue::U8(1)),
         Value::Int(IntValue::U16(1)),
-    ))
+    ]))
     .expect_err("mixed integer classes must fail");
     assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
 }
@@ -408,9 +412,11 @@ fn bitwise_native_integer_arrays_preserve_exact_64_bit_storage() {
         .expect("left");
     let right = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 60, u64::MAX]), vec![1, 2])
         .expect("right");
-    let Value::Tensor(output) =
-        block_on(bitand_builtin(Value::Tensor(left), Value::Tensor(right))).expect("bitand")
-    else {
+    let Value::Tensor(output) = block_on(bitand_builtin(vec![
+        Value::Tensor(left),
+        Value::Tensor(right),
+    ]))
+    .expect("bitand") else {
         panic!("expected tensor result");
     };
     assert_eq!(
@@ -422,18 +428,18 @@ fn bitwise_native_integer_arrays_preserve_exact_64_bit_storage() {
 #[test]
 fn bitshift_supports_positive_and_negative_counts() {
     assert_eq!(
-        block_on(bitshift_builtin(
+        block_on(bitshift_builtin(vec![
             Value::Int(IntValue::U32(3)),
             Value::Num(2.0)
-        ))
+        ]))
         .expect("left shift"),
         Value::Int(IntValue::U32(12))
     );
     assert_eq!(
-        block_on(bitshift_builtin(
+        block_on(bitshift_builtin(vec![
             Value::Int(IntValue::U32(8)),
             Value::Num(-1.0)
-        ))
+        ]))
         .expect("right shift"),
         Value::Int(IntValue::U32(4))
     );
@@ -442,17 +448,20 @@ fn bitshift_supports_positive_and_negative_counts() {
 #[test]
 fn bitshift_preserves_integer_width() {
     assert_eq!(
-        block_on(bitshift_builtin(
+        block_on(bitshift_builtin(vec![
             Value::Int(IntValue::U8(255)),
             Value::Num(1.0)
-        ))
+        ]))
         .expect("left shift"),
         Value::Int(IntValue::U8(254))
     );
 
     let tensor = Tensor::new_with_dtype(vec![255.0, 128.0], vec![1, 2], NumericDType::U8).unwrap();
-    let out =
-        block_on(bitshift_builtin(Value::Tensor(tensor), Value::Num(1.0))).expect("tensor shift");
+    let out = block_on(bitshift_builtin(vec![
+        Value::Tensor(tensor),
+        Value::Num(1.0),
+    ]))
+    .expect("tensor shift");
     match out {
         Value::Tensor(t) => {
             assert_eq!(t.integer_storage(), Some(&IntegerStorage::U8(vec![254, 0])));
@@ -464,18 +473,18 @@ fn bitshift_preserves_integer_width() {
 #[test]
 fn bitshift_preserves_signed_arithmetic_and_64_bit_results() {
     assert_eq!(
-        block_on(bitshift_builtin(
+        block_on(bitshift_builtin(vec![
             Value::Int(IntValue::I64(-4)),
             Value::Int(IntValue::I64(-1)),
-        ))
+        ]))
         .expect("signed arithmetic right shift"),
         Value::Int(IntValue::I64(-2))
     );
     assert_eq!(
-        block_on(bitshift_builtin(
+        block_on(bitshift_builtin(vec![
             Value::Int(IntValue::U64(1_u64 << 63)),
             Value::Int(IntValue::I64(-63)),
-        ))
+        ]))
         .expect("uint64 right shift"),
         Value::Int(IntValue::U64(1))
     );
@@ -483,9 +492,125 @@ fn bitshift_preserves_signed_arithmetic_and_64_bit_results() {
 
 #[test]
 fn bitwise_rejects_fractional_double() {
-    let err = block_on(bitand_builtin(Value::Num(1.5), Value::Num(1.0)))
+    let err = block_on(bitand_builtin(vec![Value::Num(1.5), Value::Num(1.0)]))
         .expect_err("fractional inputs should fail");
     assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+}
+
+#[test]
+fn assumedtype_interprets_double_inputs_with_signed_bits_and_keeps_double_output() {
+    let int8 = Value::String("int8".to_string());
+    assert_eq!(
+        block_on(bitand_builtin(vec![
+            Value::Num(-5.0),
+            Value::Num(6.0),
+            int8.clone()
+        ]))
+        .expect("bitand assumedtype"),
+        Value::Num(2.0)
+    );
+    assert_eq!(
+        block_on(bitor_builtin(vec![
+            Value::Num(-5.0),
+            Value::Num(6.0),
+            int8.clone()
+        ]))
+        .expect("bitor assumedtype"),
+        Value::Num(-1.0)
+    );
+    assert_eq!(
+        block_on(bitxor_builtin(vec![
+            Value::Num(-5.0),
+            Value::Num(6.0),
+            int8.clone()
+        ]))
+        .expect("bitxor assumedtype"),
+        Value::Num(-3.0)
+    );
+    assert_eq!(
+        block_on(bitcmp_builtin(vec![Value::Num(-29.0), int8.clone()]))
+            .expect("bitcmp assumedtype"),
+        Value::Num(28.0)
+    );
+    assert_eq!(
+        block_on(bitshift_builtin(vec![
+            Value::Num(-4.0),
+            Value::Num(-1.0),
+            int8.clone()
+        ]))
+        .expect("bitshift assumedtype"),
+        Value::Num(-2.0)
+    );
+    assert_eq!(
+        block_on(bitget_builtin(vec![
+            Value::Num(-29.0),
+            Value::Num(8.0),
+            int8.clone()
+        ]))
+        .expect("bitget assumedtype"),
+        Value::Num(1.0)
+    );
+    assert_eq!(
+        block_on(bitset_builtin(vec![
+            Value::Num(0.0),
+            Value::Num(8.0),
+            Value::Num(1.0),
+            int8,
+        ]))
+        .expect("bitset assumedtype"),
+        Value::Num(-128.0)
+    );
+}
+
+#[test]
+fn assumedtype_enforces_integer_classes_and_numeric_ranges() {
+    let mismatch = block_on(bitxor_builtin(vec![
+        Value::Int(IntValue::I8(1)),
+        Value::Int(IntValue::I8(2)),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect_err("mismatched assumedtype");
+    assert_eq!(mismatch.identifier(), ERROR_INVALID_INPUT.identifier);
+
+    let out_of_range = block_on(bitset_builtin(vec![
+        Value::Num(128.0),
+        Value::Num(1.0),
+        Value::String("int8".to_string()),
+    ]))
+    .expect_err("out of range assumedtype value");
+    assert_eq!(out_of_range.identifier(), ERROR_INVALID_INPUT.identifier);
+
+    let uint64_limit = block_on(bitcmp_builtin(vec![
+        Value::Num(2_f64.powi(64)),
+        Value::String("uint64".to_string()),
+    ]))
+    .expect_err("uint64 assumedtype excludes 2^64");
+    assert_eq!(uint64_limit.identifier(), ERROR_INVALID_INPUT.identifier);
+}
+
+#[test]
+fn assumedtype_preserves_typed_integer_output_and_dispatches_all_arities() {
+    assert_eq!(
+        block_on(bitand_builtin(vec![
+            Value::Int(IntValue::I8(-5)),
+            Value::Int(IntValue::I8(6)),
+            Value::String("int8".to_string()),
+        ]))
+        .expect("typed bitand assumedtype"),
+        Value::Int(IntValue::I8(2))
+    );
+    assert_eq!(
+        crate::dispatcher::call_builtin(
+            BITSET_NAME,
+            &[
+                Value::Num(0.0),
+                Value::Num(8.0),
+                Value::String("int8".to_string()),
+            ],
+        )
+        .expect("bitset third assumedtype dispatch"),
+        Value::Num(-128.0)
+    );
 }
 
 #[test]

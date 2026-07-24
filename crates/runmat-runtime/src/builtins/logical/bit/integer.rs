@@ -47,6 +47,30 @@ const BINARY_INPUTS: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
+const BINARY_INPUTS_ASSUMED_TYPE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left integer-valued input.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right integer-valued input.",
+    },
+    BuiltinParamDescriptor {
+        name: "assumedtype",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Integer class used to interpret double inputs.",
+    },
+];
+
 const BITSHIFT_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "A",
@@ -64,6 +88,30 @@ const BITSHIFT_INPUTS: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
+const BITSHIFT_INPUTS_ASSUMED_TYPE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer-valued input.",
+    },
+    BuiltinParamDescriptor {
+        name: "K",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Shift count; positive shifts left and negative shifts right.",
+    },
+    BuiltinParamDescriptor {
+        name: "assumedtype",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Integer class used to interpret double input A.",
+    },
+];
+
 const BITGET_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "A",
@@ -78,6 +126,30 @@ const BITGET_INPUTS: [BuiltinParamDescriptor; 2] = [
         arity: BuiltinParamArity::Required,
         default: None,
         description: "One-based bit position.",
+    },
+];
+
+const BITGET_INPUTS_ASSUMED_TYPE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer-valued input.",
+    },
+    BuiltinParamDescriptor {
+        name: "bit",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based bit position.",
+    },
+    BuiltinParamDescriptor {
+        name: "assumedtype",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Integer class used to interpret double input A.",
     },
 ];
 
@@ -119,6 +191,61 @@ const BITSET_INPUTS_VALUE: [BuiltinParamDescriptor; 3] = [
         arity: BuiltinParamArity::Optional,
         default: Some("1"),
         description: "Zero clears the bit; any finite nonzero value sets it.",
+    },
+];
+
+const BITSET_INPUTS_ASSUMED_TYPE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer-valued input.",
+    },
+    BuiltinParamDescriptor {
+        name: "bit",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based bit position.",
+    },
+    BuiltinParamDescriptor {
+        name: "assumedtype",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Integer class used to interpret double input A.",
+    },
+];
+
+const BITSET_INPUTS_VALUE_ASSUMED_TYPE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer-valued input.",
+    },
+    BuiltinParamDescriptor {
+        name: "bit",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based bit position.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: Some("1"),
+        description: "Zero clears the bit; any finite nonzero value sets it.",
+    },
+    BuiltinParamDescriptor {
+        name: "assumedtype",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Integer class used to interpret double input A.",
     },
 ];
 
@@ -179,43 +306,102 @@ const BITCMP_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Integer-valued input whose bits are complemented.",
 }];
 
-const BITAND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "C = bitand(A, B)",
-    inputs: &BINARY_INPUTS,
-    outputs: &OUTPUT,
-}];
+const BITCMP_INPUTS_ASSUMED_TYPE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer-valued input whose bits are complemented.",
+    },
+    BuiltinParamDescriptor {
+        name: "assumedtype",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Integer class used to interpret double input A.",
+    },
+];
 
-const BITOR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "C = bitor(A, B)",
-    inputs: &BINARY_INPUTS,
-    outputs: &OUTPUT,
-}];
+const BITAND_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = bitand(A, B)",
+        inputs: &BINARY_INPUTS,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = bitand(A, B, assumedtype)",
+        inputs: &BINARY_INPUTS_ASSUMED_TYPE,
+        outputs: &OUTPUT,
+    },
+];
 
-const BITCMP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "C = bitcmp(A)",
-    inputs: &BITCMP_INPUTS,
-    outputs: &OUTPUT,
-}];
+const BITOR_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = bitor(A, B)",
+        inputs: &BINARY_INPUTS,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = bitor(A, B, assumedtype)",
+        inputs: &BINARY_INPUTS_ASSUMED_TYPE,
+        outputs: &OUTPUT,
+    },
+];
 
-const BITXOR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "C = bitxor(A, B)",
-    inputs: &BINARY_INPUTS,
-    outputs: &OUTPUT,
-}];
+const BITCMP_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = bitcmp(A)",
+        inputs: &BITCMP_INPUTS,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = bitcmp(A, assumedtype)",
+        inputs: &BITCMP_INPUTS_ASSUMED_TYPE,
+        outputs: &OUTPUT,
+    },
+];
 
-const BITSHIFT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "C = bitshift(A, K)",
-    inputs: &BITSHIFT_INPUTS,
-    outputs: &OUTPUT,
-}];
+const BITXOR_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = bitxor(A, B)",
+        inputs: &BINARY_INPUTS,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = bitxor(A, B, assumedtype)",
+        inputs: &BINARY_INPUTS_ASSUMED_TYPE,
+        outputs: &OUTPUT,
+    },
+];
 
-const BITGET_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "B = bitget(A, bit)",
-    inputs: &BITGET_INPUTS,
-    outputs: &OUTPUT,
-}];
+const BITSHIFT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = bitshift(A, K)",
+        inputs: &BITSHIFT_INPUTS,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = bitshift(A, K, assumedtype)",
+        inputs: &BITSHIFT_INPUTS_ASSUMED_TYPE,
+        outputs: &OUTPUT,
+    },
+];
 
-const BITSET_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const BITGET_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "B = bitget(A, bit)",
+        inputs: &BITGET_INPUTS,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = bitget(A, bit, assumedtype)",
+        inputs: &BITGET_INPUTS_ASSUMED_TYPE,
+        outputs: &OUTPUT,
+    },
+];
+
+const BITSET_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
         label: "C = bitset(A, bit)",
         inputs: &BITSET_INPUTS,
@@ -224,6 +410,16 @@ const BITSET_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "C = bitset(A, bit, V)",
         inputs: &BITSET_INPUTS_VALUE,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = bitset(A, bit, assumedtype)",
+        inputs: &BITSET_INPUTS_ASSUMED_TYPE,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = bitset(A, bit, V, assumedtype)",
+        inputs: &BITSET_INPUTS_VALUE_ASSUMED_TYPE,
         outputs: &OUTPUT,
     },
 ];
@@ -354,8 +550,8 @@ pub const SWAPBYTES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     descriptor(crate::builtins::logical::bit::integer::BITAND_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
-async fn bitand_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    binary_bitwise(BITAND_NAME, lhs, rhs, |a, b| a & b).await
+async fn bitand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    binary_bitwise_from_args(BITAND_NAME, args, |a, b| a & b).await
 }
 
 #[runtime_builtin(
@@ -367,13 +563,15 @@ async fn bitand_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     descriptor(crate::builtins::logical::bit::integer::BITCMP_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
-async fn bitcmp_builtin(value: Value) -> BuiltinResult<Value> {
-    let input = bit_buffer_from(BITCMP_NAME, value).await?;
-    let mask = input.class.map_or(u64::MAX, IntegerClass::bit_mask);
-    value_from_bits(
+async fn bitcmp_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let (value, assumed) = unary_args(BITCMP_NAME, args)?;
+    let input = bit_buffer_from(BITCMP_NAME, value, assumed).await?;
+    let mask = input.compute_class.map_or(u64::MAX, IntegerClass::bit_mask);
+    value_from_bits_with_classes(
         input.data.into_iter().map(|bits| !bits & mask).collect(),
         input.shape,
-        input.class,
+        input.compute_class,
+        input.output_class,
         BITCMP_NAME,
     )
 }
@@ -387,12 +585,13 @@ async fn bitcmp_builtin(value: Value) -> BuiltinResult<Value> {
     descriptor(crate::builtins::logical::bit::integer::BITGET_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
-async fn bitget_builtin(value: Value, bit: Value) -> BuiltinResult<Value> {
-    let input = bit_buffer_from(BITGET_NAME, value).await?;
+async fn bitget_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let (value, bit, assumed) = value_bit_args(BITGET_NAME, args)?;
+    let input = bit_buffer_from(BITGET_NAME, value, assumed).await?;
     let positions = shift_buffer_from(bit).await?;
     let plan = BroadcastPlan::new(&input.shape, &positions.shape)
         .map_err(|err| error_with_detail(BITGET_NAME, &ERROR_SIZE_MISMATCH, err))?;
-    let width = input.class.map_or(64, IntegerClass::bit_width);
+    let width = input.compute_class.map_or(64, IntegerClass::bit_width);
     let mut data = Vec::with_capacity(plan.len());
     for (_, input_index, bit_index) in plan.iter() {
         let position = positions.data[bit_index];
@@ -405,7 +604,13 @@ async fn bitget_builtin(value: Value, bit: Value) -> BuiltinResult<Value> {
         }
         data.push((input.data[input_index] >> (position as u32 - 1)) & 1);
     }
-    value_from_bits(data, plan.output_shape().to_vec(), input.class, BITGET_NAME)
+    value_from_bits_with_classes(
+        data,
+        plan.output_shape().to_vec(),
+        input.compute_class,
+        input.output_class,
+        BITGET_NAME,
+    )
 }
 
 #[runtime_builtin(
@@ -418,17 +623,10 @@ async fn bitget_builtin(value: Value, bit: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
 async fn bitset_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if !(2..=3).contains(&args.len()) {
-        return Err(error_with_detail(
-            BITSET_NAME,
-            &ERROR_INVALID_INPUT,
-            "expected A, bit, and an optional V input",
-        ));
-    }
-    let mut args = args.into_iter();
-    let input = bit_buffer_from(BITSET_NAME, args.next().expect("A")).await?;
-    let positions = shift_buffer_from(args.next().expect("bit")).await?;
-    let values = match args.next() {
+    let (value, bit, value_to_set, assumed) = bitset_args(args)?;
+    let input = bit_buffer_from(BITSET_NAME, value, assumed).await?;
+    let positions = shift_buffer_from(bit).await?;
+    let values = match value_to_set {
         Some(value) => bit_value_buffer_from(value).await?,
         None => BitValueBuffer {
             data: vec![true],
@@ -443,7 +641,7 @@ async fn bitset_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         .collect::<Vec<_>>();
     let plan = BroadcastPlan::new(input_positions.output_shape(), &values.shape)
         .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_SIZE_MISMATCH, err))?;
-    let width = input.class.map_or(64, IntegerClass::bit_width);
+    let width = input.compute_class.map_or(64, IntegerClass::bit_width);
     let mut data = Vec::with_capacity(plan.len());
     for (_, input_position_index, value_index) in plan.iter() {
         let (input_index, position_index) = input_position_indices[input_position_index];
@@ -463,7 +661,13 @@ async fn bitset_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             current & !mask
         });
     }
-    value_from_bits(data, plan.output_shape().to_vec(), input.class, BITSET_NAME)
+    value_from_bits_with_classes(
+        data,
+        plan.output_shape().to_vec(),
+        input.compute_class,
+        input.output_class,
+        BITSET_NAME,
+    )
 }
 
 #[runtime_builtin(
@@ -475,8 +679,8 @@ async fn bitset_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     descriptor(crate::builtins::logical::bit::integer::BITOR_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
-async fn bitor_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    binary_bitwise(BITOR_NAME, lhs, rhs, |a, b| a | b).await
+async fn bitor_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    binary_bitwise_from_args(BITOR_NAME, args, |a, b| a | b).await
 }
 
 #[runtime_builtin(
@@ -488,8 +692,8 @@ async fn bitor_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     descriptor(crate::builtins::logical::bit::integer::BITXOR_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
-async fn bitxor_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    binary_bitwise(BITXOR_NAME, lhs, rhs, |a, b| a ^ b).await
+async fn bitxor_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    binary_bitwise_from_args(BITXOR_NAME, args, |a, b| a ^ b).await
 }
 
 #[runtime_builtin(
@@ -501,8 +705,9 @@ async fn bitxor_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     descriptor(crate::builtins::logical::bit::integer::BITSHIFT_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
-async fn bitshift_builtin(value: Value, shift: Value) -> BuiltinResult<Value> {
-    let left = bit_buffer_from(BITSHIFT_NAME, value).await?;
+async fn bitshift_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let (value, shift, assumed) = value_bit_args(BITSHIFT_NAME, args)?;
+    let left = bit_buffer_from(BITSHIFT_NAME, value, assumed).await?;
     let shifts = shift_buffer_from(shift).await?;
     let plan = BroadcastPlan::new(&left.shape, &shifts.shape)
         .map_err(|err| error_with_detail(BITSHIFT_NAME, &ERROR_SIZE_MISMATCH, err))?;
@@ -511,13 +716,14 @@ async fn bitshift_builtin(value: Value, shift: Value) -> BuiltinResult<Value> {
         data.push(apply_shift(
             left.data[idx_a],
             shifts.data[idx_b],
-            left.class,
+            left.compute_class,
         ));
     }
-    value_from_bits(
+    value_from_bits_with_classes(
         data,
         plan.output_shape().to_vec(),
-        left.class,
+        left.compute_class,
+        left.output_class,
         BITSHIFT_NAME,
     )
 }
@@ -599,18 +805,147 @@ async fn binary_bitwise(
     name: &'static str,
     lhs: Value,
     rhs: Value,
+    assumed: Option<IntegerClass>,
     op: impl Fn(u64, u64) -> u64,
 ) -> BuiltinResult<Value> {
-    let left = bit_buffer_from(name, lhs).await?;
-    let right = bit_buffer_from(name, rhs).await?;
-    let class = binary_output_class(name, &left, &right)?;
+    let left = bit_buffer_from(name, lhs, assumed).await?;
+    let right = bit_buffer_from(name, rhs, assumed).await?;
+    let output_class = binary_output_class(name, &left, &right)?;
+    let compute_class = assumed.or(output_class);
     let plan = BroadcastPlan::new(&left.shape, &right.shape)
         .map_err(|err| error_with_detail(name, &ERROR_SIZE_MISMATCH, err))?;
     let mut data = Vec::with_capacity(plan.len());
     for (_, idx_a, idx_b) in plan.iter() {
         data.push(op(left.data[idx_a], right.data[idx_b]));
     }
-    value_from_bits(data, plan.output_shape().to_vec(), class, name)
+    value_from_bits_with_classes(
+        data,
+        plan.output_shape().to_vec(),
+        compute_class,
+        output_class,
+        name,
+    )
+}
+
+async fn binary_bitwise_from_args(
+    name: &'static str,
+    args: Vec<Value>,
+    op: impl Fn(u64, u64) -> u64,
+) -> BuiltinResult<Value> {
+    if !(2..=3).contains(&args.len()) {
+        return Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            "expected A, B, and an optional assumedtype",
+        ));
+    }
+    let mut args = args.into_iter();
+    let lhs = args.next().expect("A");
+    let rhs = args.next().expect("B");
+    let assumed = args
+        .next()
+        .map(|value| parse_assumed_type(name, value))
+        .transpose()?;
+    binary_bitwise(name, lhs, rhs, assumed, op).await
+}
+
+fn unary_args(
+    name: &'static str,
+    args: Vec<Value>,
+) -> BuiltinResult<(Value, Option<IntegerClass>)> {
+    if !(1..=2).contains(&args.len()) {
+        return Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            "expected A and an optional assumedtype",
+        ));
+    }
+    let mut args = args.into_iter();
+    let value = args.next().expect("A");
+    let assumed = args
+        .next()
+        .map(|value| parse_assumed_type(name, value))
+        .transpose()?;
+    Ok((value, assumed))
+}
+
+fn value_bit_args(
+    name: &'static str,
+    args: Vec<Value>,
+) -> BuiltinResult<(Value, Value, Option<IntegerClass>)> {
+    if !(2..=3).contains(&args.len()) {
+        return Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            "expected A, bit, and an optional assumedtype",
+        ));
+    }
+    let mut args = args.into_iter();
+    let value = args.next().expect("A");
+    let bit = args.next().expect("bit");
+    let assumed = args
+        .next()
+        .map(|value| parse_assumed_type(name, value))
+        .transpose()?;
+    Ok((value, bit, assumed))
+}
+
+fn bitset_args(
+    args: Vec<Value>,
+) -> BuiltinResult<(Value, Value, Option<Value>, Option<IntegerClass>)> {
+    if !(2..=4).contains(&args.len()) {
+        return Err(error_with_detail(
+            BITSET_NAME,
+            &ERROR_INVALID_INPUT,
+            "expected A, bit, optional V, and optional assumedtype",
+        ));
+    }
+    let mut args = args.into_iter();
+    let value = args.next().expect("A");
+    let bit = args.next().expect("bit");
+    let third = args.next();
+    let fourth = args.next();
+    match (third, fourth) {
+        (None, None) => Ok((value, bit, None, None)),
+        (Some(third), None) if is_text_value(&third) => Ok((
+            value,
+            bit,
+            None,
+            Some(parse_assumed_type(BITSET_NAME, third)?),
+        )),
+        (Some(third), None) => Ok((value, bit, Some(third), None)),
+        (Some(third), Some(fourth)) => Ok((
+            value,
+            bit,
+            Some(third),
+            Some(parse_assumed_type(BITSET_NAME, fourth)?),
+        )),
+        (None, Some(_)) => unreachable!("fourth argument requires third argument"),
+    }
+}
+
+fn is_text_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    )
+}
+
+fn parse_assumed_type(name: &'static str, value: Value) -> BuiltinResult<IntegerClass> {
+    let Some(keyword) = keyword_of(&value) else {
+        return Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            "assumedtype must be an integer class name",
+        ));
+    };
+    IntegerClass::parse_name(&keyword).ok_or_else(|| {
+        error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            format!("unsupported assumedtype {keyword:?}"),
+        )
+    })
 }
 
 struct BitBuffer {
@@ -618,7 +953,8 @@ struct BitBuffer {
     shape: Vec<usize>,
     /// `None` represents MATLAB double/logical bit operands, which use the
     /// documented unsigned-64 interpretation and return a double result.
-    class: Option<IntegerClass>,
+    compute_class: Option<IntegerClass>,
+    output_class: Option<IntegerClass>,
     is_scalar: bool,
 }
 
@@ -632,38 +968,46 @@ struct BitValueBuffer {
     shape: Vec<usize>,
 }
 
-async fn bit_buffer_from(name: &'static str, value: Value) -> BuiltinResult<BitBuffer> {
+async fn bit_buffer_from(
+    name: &'static str,
+    value: Value,
+    assumed: Option<IntegerClass>,
+) -> BuiltinResult<BitBuffer> {
     match value {
         Value::Num(value) => Ok(BitBuffer {
-            data: vec![double_to_u64(name, value)?],
+            data: vec![double_to_bits(name, value, assumed)?],
             shape: vec![1, 1],
-            class: None,
+            compute_class: assumed,
+            output_class: None,
             is_scalar: true,
         }),
         Value::Bool(value) => Ok(BitBuffer {
-            data: vec![if value { 1 } else { 0 }],
+            data: vec![double_to_bits(name, f64::from(value), assumed)?],
             shape: vec![1, 1],
-            class: None,
+            compute_class: assumed,
+            output_class: None,
             is_scalar: true,
         }),
         Value::Int(value) => Ok(BitBuffer {
             data: vec![int_to_bits(&value)],
             shape: vec![1, 1],
-            class: Some(IntegerClass::from_int(&value)),
+            compute_class: require_assumed_class(name, IntegerClass::from_int(&value), assumed)?,
+            output_class: Some(IntegerClass::from_int(&value)),
             is_scalar: true,
         }),
-        Value::Tensor(tensor) => tensor_to_bit_buffer(name, tensor),
+        Value::Tensor(tensor) => tensor_to_bit_buffer(name, tensor, assumed),
         Value::LogicalArray(array) => Ok(BitBuffer {
             data: array.data.into_iter().map(|v| u64::from(v != 0)).collect(),
             shape: array.shape,
-            class: None,
+            compute_class: assumed,
+            output_class: None,
             is_scalar: false,
         }),
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(|err| error_with_detail(name, &ERROR_INVALID_INPUT, err))?;
-            tensor_to_bit_buffer(name, tensor)
+            tensor_to_bit_buffer(name, tensor, assumed)
         }
         other => Err(error_with_detail(
             name,
@@ -789,11 +1133,16 @@ fn tensor_to_shift_buffer(tensor: Tensor) -> BuiltinResult<ShiftBuffer> {
     })
 }
 
-fn tensor_to_bit_buffer(name: &'static str, tensor: Tensor) -> BuiltinResult<BitBuffer> {
+fn tensor_to_bit_buffer(
+    name: &'static str,
+    tensor: Tensor,
+    assumed: Option<IntegerClass>,
+) -> BuiltinResult<BitBuffer> {
     let is_scalar = tensor::element_count(&tensor.shape) == 1;
-    let (data, class) = match tensor.integer_storage() {
+    let (data, native_class, output_class) = match tensor.integer_storage() {
         Some(storage) => (
             storage.exact_values().iter().map(int_to_bits).collect(),
+            Some(IntegerClass::from_storage(storage)),
             Some(IntegerClass::from_storage(storage)),
         ),
         None => {
@@ -806,26 +1155,32 @@ fn tensor_to_bit_buffer(name: &'static str, tensor: Tensor) -> BuiltinResult<Bit
             let data = tensor
                 .data
                 .into_iter()
-                .map(|value| double_to_u64(name, value))
+                .map(|value| double_to_bits(name, value, assumed))
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            (data, class)
+            (data, class, class)
         }
+    };
+    let compute_class = match native_class {
+        Some(class) => require_assumed_class(name, class, assumed)?,
+        None => assumed,
     };
     Ok(BitBuffer {
         data,
         shape: tensor.shape,
-        class,
+        compute_class,
+        output_class,
         is_scalar,
     })
 }
 
-fn value_from_bits(
+fn value_from_bits_with_classes(
     data: Vec<u64>,
     shape: Vec<usize>,
-    class: Option<IntegerClass>,
+    compute_class: Option<IntegerClass>,
+    output_class: Option<IntegerClass>,
     name: &'static str,
 ) -> BuiltinResult<Value> {
-    match class {
+    match output_class {
         Some(class) => {
             let values = data
                 .into_iter()
@@ -834,10 +1189,14 @@ fn value_from_bits(
             value_from_integer_values(values, shape, class, name)
         }
         None => {
+            let double_value = |bits| match compute_class {
+                Some(class) => int_value_to_i128(&class.value_from_bits(bits)) as f64,
+                None => bits as f64,
+            };
             if data.len() == 1 && tensor::element_count(&shape) == 1 {
-                Ok(Value::Num(data[0] as f64))
+                Ok(Value::Num(double_value(data[0])))
             } else {
-                Tensor::new(data.into_iter().map(|value| value as f64).collect(), shape)
+                Tensor::new(data.into_iter().map(double_value).collect(), shape)
                     .map(Value::Tensor)
                     .map_err(|err| error_with_detail(name, &ERROR_INVALID_INPUT, err))
             }
@@ -850,7 +1209,7 @@ fn binary_output_class(
     left: &BitBuffer,
     right: &BitBuffer,
 ) -> BuiltinResult<Option<IntegerClass>> {
-    match (left.class, right.class) {
+    match (left.output_class, right.output_class) {
         (Some(lhs), Some(rhs)) if lhs == rhs => Ok(Some(lhs)),
         (Some(_), Some(_)) => Err(error_with_detail(
             name,
@@ -910,6 +1269,54 @@ fn double_to_u64(name: &'static str, value: f64) -> BuiltinResult<u64> {
     Ok(value as u64)
 }
 
+fn double_to_bits(
+    name: &'static str,
+    value: f64,
+    assumed: Option<IntegerClass>,
+) -> BuiltinResult<u64> {
+    let Some(class) = assumed else {
+        return double_to_u64(name, value);
+    };
+    if !value.is_finite() || value.fract() != 0.0 {
+        return Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            "input values must be finite integers",
+        ));
+    }
+    let (min, max) = class.range();
+    let fits = match class {
+        IntegerClass::I64 => (-(2_f64.powi(63))..2_f64.powi(63)).contains(&value),
+        IntegerClass::U64 => (0.0..2_f64.powi(64)).contains(&value),
+        _ => (min as f64..=max as f64).contains(&value),
+    };
+    if !fits {
+        return Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            format!("input value {value} is outside assumedtype range"),
+        ));
+    }
+    Ok(int_to_bits(&class.int_from_i128(value as i128)))
+}
+
+fn require_assumed_class(
+    name: &'static str,
+    native_class: IntegerClass,
+    assumed: Option<IntegerClass>,
+) -> BuiltinResult<Option<IntegerClass>> {
+    if let Some(assumed) = assumed {
+        if assumed != native_class {
+            return Err(error_with_detail(
+                name,
+                &ERROR_INVALID_INPUT,
+                "assumedtype must match the class of integer inputs",
+            ));
+        }
+    }
+    Ok(Some(native_class))
+}
+
 fn double_to_shift(value: f64) -> BuiltinResult<i128> {
     if !value.is_finite() || value.fract() != 0.0 {
         return Err(error_with_detail(
@@ -947,6 +1354,20 @@ enum IntegerClass {
 }
 
 impl IntegerClass {
+    fn parse_name(name: &str) -> Option<Self> {
+        match name {
+            "int8" => Some(Self::I8),
+            "int16" => Some(Self::I16),
+            "int32" => Some(Self::I32),
+            "int64" => Some(Self::I64),
+            "uint8" => Some(Self::U8),
+            "uint16" => Some(Self::U16),
+            "uint32" => Some(Self::U32),
+            "uint64" => Some(Self::U64),
+            _ => None,
+        }
+    }
+
     fn from_int(value: &IntValue) -> Self {
         match value {
             IntValue::I8(_) => Self::I8,
