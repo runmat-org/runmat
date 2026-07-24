@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use runmat_builtins::{IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
+use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
 
 use crate::dispatcher::gather_if_needed_async;
 
@@ -200,6 +200,9 @@ pub async fn dimension_from_value_async(
     name: &str,
     allow_zero: bool,
 ) -> Result<Option<usize>, String> {
+    if let Value::Int(value) = value {
+        return parse_integer_dimension(value, name, allow_zero).map(Some);
+    }
     let Some(raw) = scalar_f64_from_value_async(value).await? else {
         return Ok(None);
     };
@@ -216,6 +219,26 @@ pub async fn dimension_from_value_async(
         return Err(format!("{name}: dimension must be >= {bound}"));
     }
     Ok(Some(rounded as usize))
+}
+
+fn parse_integer_dimension(
+    value: &IntValue,
+    name: &str,
+    allow_zero: bool,
+) -> Result<usize, String> {
+    let dim = value
+        .try_to_usize()
+        .ok_or_else(|| format!("{name}: dimension is outside the supported range"))?;
+    if !allow_zero && dim == 0 {
+        return Err(format!("{name}: dimension must be >= 1"));
+    }
+    Ok(dim)
+}
+
+fn parse_integer_shape_dimension(value: &IntValue) -> Result<usize, String> {
+    value
+        .try_to_usize()
+        .ok_or_else(|| "dimensions must be non-negative platform integers".to_string())
 }
 
 fn parse_numeric_dimension(value: f64) -> Result<usize, String> {
@@ -254,7 +277,7 @@ fn dims_from_tensor_values(values: &[f64], shape: &[usize]) -> Result<Option<Vec
 pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, String> {
     match value {
         Value::Num(n) => parse_numeric_dimension(*n).map(|dim| Some(vec![dim])),
-        Value::Int(i) => parse_numeric_dimension(i.to_f64()).map(|dim| Some(vec![dim])),
+        Value::Int(i) => parse_integer_shape_dimension(i).map(|dim| Some(vec![dim])),
         Value::Tensor(t) => dims_from_tensor_values(&t.data, &t.shape),
         Value::LogicalArray(la) => {
             let values: Vec<f64> = la
@@ -309,7 +332,7 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
                     Ok(dims)
                 }
                 Value::Num(n) => parse_numeric_dimension(n).map(|dim| Some(vec![dim])),
-                Value::Int(i) => parse_numeric_dimension(i.to_f64()).map(|dim| Some(vec![dim])),
+                Value::Int(i) => parse_integer_shape_dimension(&i).map(|dim| Some(vec![dim])),
                 _ => Ok(None),
             }
         }
@@ -320,13 +343,7 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
 /// Convert an argument into a dimension index (1-based) if possible.
 pub fn parse_dimension(value: &Value, name: &str) -> Result<usize, String> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 1 {
-                return Err(format!("{name}: dimension must be >= 1"));
-            }
-            Ok(raw as usize)
-        }
+        Value::Int(i) => parse_integer_dimension(i, name, false),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(format!("{name}: dimension must be finite"));
@@ -460,6 +477,43 @@ mod dtype_tests {
         let float = coerce_tensor_dtype(typed, NumericDType::F64);
         assert_eq!(float.dtype, NumericDType::F64);
         assert!(float.integer_storage().is_none());
+    }
+}
+
+#[cfg(test)]
+mod dimension_tests {
+    use super::{dimension_from_value_async, dims_from_value_async, parse_dimension};
+    use futures::executor::block_on;
+    use runmat_builtins::{IntValue, Value};
+
+    #[test]
+    fn typed_dimension_parsers_preserve_representable_uint64_values() {
+        assert_eq!(
+            parse_dimension(&Value::Int(IntValue::U64(3)), "size"),
+            Ok(3)
+        );
+        match usize::try_from(u64::MAX) {
+            Ok(value) => assert_eq!(
+                parse_dimension(&Value::Int(IntValue::U64(u64::MAX)), "size"),
+                Ok(value)
+            ),
+            Err(_) => {
+                assert!(parse_dimension(&Value::Int(IntValue::U64(u64::MAX)), "size").is_err())
+            }
+        }
+        assert_eq!(
+            block_on(dims_from_value_async(&Value::Int(IntValue::U64(3)))),
+            Ok(Some(vec![3]))
+        );
+        assert_eq!(
+            block_on(dimension_from_value_async(
+                &Value::Int(IntValue::U64(3)),
+                "size",
+                false
+            )),
+            Ok(Some(3))
+        );
+        assert!(block_on(dims_from_value_async(&Value::Int(IntValue::I64(-1)))).is_err());
     }
 }
 

@@ -388,11 +388,13 @@ fn is_all_flag(value: &Value) -> crate::BuiltinResult<bool> {
 fn parse_dim_spec(value: &Value) -> crate::BuiltinResult<DimSelection> {
     match value {
         Value::Int(i) => {
-            let dim = i.to_i64();
-            if dim < 1 {
+            let dim = i
+                .try_to_usize()
+                .ok_or_else(|| builtin_error("range: dimension is outside the supported range"))?;
+            if dim == 0 {
                 return Err(builtin_error("range: dimension must be >= 1"));
             }
-            Ok(DimSelection::Dim(dim as usize))
+            Ok(DimSelection::Dim(dim))
         }
         Value::Num(n) => {
             if !n.is_finite() {
@@ -1009,6 +1011,24 @@ pub(crate) mod tests {
         let err = range_builtin(Value::Tensor(tensor), vec![Value::Num(1.5)])
             .expect_err("expected dimension error");
         assert!(err.message().contains("integer"));
+    }
+
+    #[test]
+    fn range_typed_dimension_parser_preserves_uint64_range() {
+        assert!(matches!(
+            parse_dim_spec(&Value::Int(IntValue::U64(3))),
+            Ok(DimSelection::Dim(3))
+        ));
+        match usize::try_from(u64::MAX) {
+            Ok(value) => match parse_dim_spec(&Value::Int(IntValue::U64(u64::MAX))) {
+                Ok(DimSelection::Dim(actual)) => assert_eq!(actual, value),
+                _ => panic!("representable uint64 dimension must parse"),
+            },
+            Err(_) => match parse_dim_spec(&Value::Int(IntValue::U64(u64::MAX))) {
+                Err(err) => assert!(err.message().contains("outside the supported range")),
+                _ => panic!("unrepresentable uint64 dimension must reject"),
+            },
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
