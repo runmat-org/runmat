@@ -15,7 +15,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::tensor::scalar_f64_from_value_async;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "opentoline";
@@ -246,15 +245,30 @@ async fn positive_integer_arg(value: &Value, label: &str) -> BuiltinResult<usize
     if let Some(text) = text_without_gather(value) {
         return parse_positive_integer_text(&text, label);
     }
-    let raw = scalar_f64_from_value_async(value)
+    let gathered = gather_if_needed_async(value)
         .await
-        .map_err(|err| opentoline_error(&ERROR_POSITION, format!("opentoline: {err}")))?
-        .ok_or_else(|| {
-            opentoline_error(
+        .map_err(|err| opentoline_flow_error("opentoline", err))?;
+    if let Value::Int(integer) = &gathered {
+        return integer
+            .try_to_usize()
+            .filter(|position| *position > 0)
+            .ok_or_else(|| {
+                opentoline_error(
+                    &ERROR_POSITION,
+                    format!("opentoline: {label} must be a positive integer scalar"),
+                )
+            });
+    }
+    let raw = match gathered {
+        Value::Num(value) => value,
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        _ => {
+            return Err(opentoline_error(
                 &ERROR_POSITION,
                 format!("opentoline: {label} must be a numeric scalar"),
-            )
-        })?;
+            ))
+        }
+    };
     if !raw.is_finite() || raw < 1.0 || raw.fract().abs() > f64::EPSILON {
         return Err(opentoline_error(
             &ERROR_POSITION,
@@ -351,6 +365,7 @@ fn opentoline_flow_error(context: &str, err: RuntimeError) -> RuntimeError {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntValue;
     use tempfile::tempdir;
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -370,6 +385,27 @@ mod tests {
         .expect("opentoline");
 
         assert_eq!(result, empty_array());
+    }
+
+    #[test]
+    fn opentoline_typed_positions_preserve_integer_bounds() {
+        assert_eq!(
+            block_on(positive_integer_arg(&Value::Int(IntValue::U16(7)), "line")).unwrap(),
+            7
+        );
+        assert!(block_on(positive_integer_arg(&Value::Int(IntValue::I8(-1)), "line")).is_err());
+        assert!(block_on(positive_integer_arg(&Value::Int(IntValue::U8(0)), "column")).is_err());
+
+        let large = 9_007_199_254_740_993_u64;
+        let parsed = block_on(positive_integer_arg(
+            &Value::Int(IntValue::U64(large)),
+            "line",
+        ));
+        if usize::BITS == 64 {
+            assert_eq!(parsed.unwrap(), large as usize);
+        } else {
+            assert!(parsed.is_err());
+        }
     }
 
     #[test]
