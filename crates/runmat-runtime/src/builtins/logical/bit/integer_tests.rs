@@ -487,6 +487,25 @@ fn bitshift_preserves_integer_width() {
 }
 
 #[test]
+fn bitshift_sparse_double_preserves_sparse_implicit_zeros() {
+    let sparse =
+        runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 5.0])
+            .expect("sparse");
+    let Value::SparseTensor(output) = block_on(bitshift_builtin(vec![
+        Value::SparseTensor(sparse),
+        Value::Num(1.0),
+        Value::String("uint8".to_string()),
+    ]))
+    .expect("sparse bitshift") else {
+        panic!("bitshift must preserve sparse storage when zero shifts to zero");
+    };
+    assert_eq!(output.shape(), vec![2, 2]);
+    assert_eq!(output.get(0, 0), Some(6.0));
+    assert_eq!(output.get(1, 1), Some(10.0));
+    assert_eq!(output.nnz(), 2);
+}
+
+#[test]
 fn bitshift_preserves_signed_arithmetic_and_64_bit_results() {
     assert_eq!(
         block_on(bitshift_builtin(vec![

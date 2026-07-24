@@ -734,6 +734,9 @@ async fn bitxor_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 )]
 async fn bitshift_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let (value, shift, assumed) = value_bit_args(BITSHIFT_NAME, args)?;
+    if let Value::SparseTensor(sparse) = value {
+        return sparse_bitshift(sparse, shift, assumed).await;
+    }
     let left = bit_buffer_from(BITSHIFT_NAME, value, assumed).await?;
     let shifts = shift_buffer_from(shift).await?;
     let plan = BroadcastPlan::new(&left.shape, &shifts.shape)
@@ -753,6 +756,37 @@ async fn bitshift_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         left.output_class,
         BITSHIFT_NAME,
     )
+}
+
+async fn sparse_bitshift(
+    sparse: runmat_builtins::SparseTensor,
+    shift: Value,
+    assumed: Option<IntegerClass>,
+) -> BuiltinResult<Value> {
+    if sparse.integer_storage().is_some() {
+        return Err(error_with_detail(
+            BITSHIFT_NAME,
+            &ERROR_INVALID_INPUT,
+            "typed sparse integer storage is a RunMat extension and is not supported by bitshift",
+        ));
+    }
+    let shifts = shift_buffer_from(shift).await?;
+    if shifts.data.len() != 1 {
+        return Err(error_with_detail(
+            BITSHIFT_NAME,
+            &ERROR_INVALID_INPUT,
+            "sparse bitshift currently requires a scalar shift count",
+        ));
+    }
+    let class = assumed;
+    map_sparse_real_values(&sparse, BITSHIFT_NAME, |value| {
+        let bits = double_to_bits(BITSHIFT_NAME, value, class)?;
+        let shifted = apply_shift(bits, shifts.data[0], class);
+        Ok(match class {
+            Some(class) => int_value_to_i128(&class.value_from_bits(shifted)) as f64,
+            None => shifted as f64,
+        })
+    })
 }
 
 #[runtime_builtin(
