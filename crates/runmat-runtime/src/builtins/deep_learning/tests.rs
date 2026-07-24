@@ -10,7 +10,8 @@ use super::training::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::{handle_precision, handle_storage, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
-    CellArray, LogicalArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor, Value,
+    CellArray, IntValue, LogicalArray, NumericDType, ObjectInstance, StringArray, StructValue,
+    Tensor, Value,
 };
 
 #[runmat_macros::runtime_builtin(
@@ -43,6 +44,27 @@ async fn deep_learning_network_grad_helper(net: Value, x: Value) -> crate::Built
     let y = forward_builtin(net.clone(), x, vec![]).await?;
     let loss = super::autodiff::dlarray_sum_builtin(y, vec![Value::String("all".into())])?;
     super::autodiff::dlgradient_builtin(loss, vec![net]).await
+}
+
+#[test]
+fn dlarray_node_ids_preserve_typed_integer_bounds() {
+    let node_id = |value| {
+        let mut object = ObjectInstance::new("dlarray".to_string());
+        object
+            .properties
+            .insert("__runmat_ad_node".to_string(), value);
+        super::autodiff::dlarray_node_id(&Value::Object(object))
+    };
+
+    assert_eq!(node_id(Value::Int(IntValue::U16(7))), Some(7));
+    assert_eq!(node_id(Value::Num(7.0)), Some(7));
+    assert_eq!(node_id(Value::Int(IntValue::I8(-1))), None);
+    assert_eq!(
+        node_id(Value::Int(IntValue::U64(u64::MAX))),
+        Some(usize::MAX)
+    );
+    assert_eq!(node_id(Value::Num(7.5)), None);
+    assert_eq!(node_id(Value::Num(f64::INFINITY)), None);
 }
 
 fn layer_name(value: &Value) -> String {

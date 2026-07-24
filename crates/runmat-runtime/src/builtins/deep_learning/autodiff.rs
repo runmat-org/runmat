@@ -250,8 +250,12 @@ pub(super) fn dlarray_node_id(value: &Value) -> Option<usize> {
         .properties
         .get(AD_NODE_PROPERTY)
         .and_then(|value| match value {
-            Value::Num(n) if n.is_finite() && *n >= 0.0 => Some(*n as usize),
-            Value::Int(i) => Some(i.to_f64() as usize),
+            Value::Num(n)
+                if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 && *n < usize::MAX as f64 =>
+            {
+                Some(*n as usize)
+            }
+            Value::Int(i) => i.try_to_usize(),
             _ => None,
         })
 }
