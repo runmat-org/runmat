@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, Tensor, Value,
+    CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -149,6 +149,7 @@ async fn cell2mat_builtin(value: Value) -> crate::BuiltinResult<Value> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ElementKind {
     Numeric,
+    TypedInteger,
     Complex,
     TypedComplexInteger,
     Logical,
@@ -165,6 +166,7 @@ struct CellEntry {
 #[derive(Clone)]
 enum EntryData {
     Numeric(Vec<f64>),
+    TypedInteger(IntegerStorage),
     Complex(Vec<(f64, f64)>),
     TypedComplexInteger(IntegerComplexStorage),
     Logical(Vec<u8>),
@@ -175,6 +177,7 @@ impl EntryData {
     fn len(&self) -> usize {
         match self {
             EntryData::Numeric(data) => data.len(),
+            EntryData::TypedInteger(storage) => storage.len(),
             EntryData::Complex(data) => data.len(),
             EntryData::TypedComplexInteger(storage) => storage.len(),
             EntryData::Logical(data) => data.len(),
@@ -328,6 +331,22 @@ async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<
             })?;
             Ok(Value::Tensor(tensor))
         }
+        ElementKind::TypedInteger => {
+            let prototype = typed_integer_prototype(&entries)?;
+            let mut storage = prototype.zeros_like(total_elems);
+            copy_typed_integer(
+                &entries,
+                &multi_indices,
+                &result_shape,
+                &prefix_offsets,
+                rank,
+                &mut storage,
+            )?;
+            let tensor = Tensor::new_integer(storage, result_shape).map_err(|e| {
+                cell2mat_error_with_message(format!("cell2mat: {e}"), &CELL2MAT_ERROR_INTERNAL)
+            })?;
+            Ok(Value::Tensor(tensor))
+        }
         ElementKind::Complex => {
             let mut data = vec![(0.0f64, 0.0f64); total_elems];
             copy_complex(
@@ -433,6 +452,32 @@ fn typed_complex_integer_prototype(entries: &[CellEntry]) -> BuiltinResult<&Inte
     Ok(prototype)
 }
 
+fn typed_integer_prototype(entries: &[CellEntry]) -> BuiltinResult<&IntegerStorage> {
+    let Some(prototype) = entries.iter().find_map(|entry| match &entry.data {
+        EntryData::TypedInteger(storage) => Some(storage),
+        _ => None,
+    }) else {
+        return Err(cell2mat_error_with_message(
+            "cell2mat: typed integer cell contents are missing storage",
+            &CELL2MAT_ERROR_INTERNAL,
+        ));
+    };
+
+    if entries.iter().any(|entry| {
+        matches!(
+            &entry.data,
+            EntryData::TypedInteger(storage) if storage.class_name() != prototype.class_name()
+        )
+    }) {
+        return Err(cell2mat_error_with_message(
+            "cell2mat: typed integer cell contents must share the same integer class",
+            &CELL2MAT_ERROR_INVALID_CONTENTS,
+        ));
+    }
+
+    Ok(prototype)
+}
+
 fn copy_numeric(
     entries: &[CellEntry],
     indices: &[Vec<usize>],
@@ -465,6 +510,45 @@ fn copy_numeric(
                     &CELL2MAT_ERROR_SIZE_EXCEEDED,
                 ));
             }
+        }
+    }
+    Ok(())
+}
+
+fn copy_typed_integer(
+    entries: &[CellEntry],
+    indices: &[Vec<usize>],
+    result_shape: &[usize],
+    prefix_offsets: &[Vec<usize>],
+    rank: usize,
+    output: &mut IntegerStorage,
+) -> BuiltinResult<()> {
+    let total_rank = result_shape.len();
+    let dest_strides = column_major_strides(result_shape);
+
+    for (entry, multi) in entries.iter().zip(indices.iter()) {
+        if entry.len() == 0 {
+            continue;
+        }
+        let EntryData::TypedInteger(storage) = &entry.data else {
+            continue;
+        };
+        let padded_shape = extend_shape(&entry.shape, total_rank);
+        let base_offsets = compute_base_offsets(multi, prefix_offsets, total_rank, rank)?;
+
+        for index in 0..storage.len() {
+            let local_index = linear_to_multi_column_major(index, &padded_shape);
+            let dest_linear = accumulate_linear(&base_offsets, &local_index, &dest_strides);
+            output
+                .set_value(
+                    dest_linear,
+                    storage
+                        .value_at(index)
+                        .expect("typed integer storage is in bounds"),
+                )
+                .map_err(|e| {
+                    cell2mat_error_with_message(format!("cell2mat: {e}"), &CELL2MAT_ERROR_INTERNAL)
+                })?;
         }
     }
     Ok(())
@@ -649,20 +733,31 @@ fn compute_base_offsets(
 
 fn parse_cell_entry(value: Value) -> BuiltinResult<CellEntry> {
     match value {
-        Value::Tensor(t) => Ok(CellEntry {
-            kind: ElementKind::Numeric,
-            shape: normalize_shape(t.shape.clone()),
-            data: EntryData::Numeric(t.data.clone()),
-        }),
+        Value::Tensor(t) => {
+            let shape = normalize_shape(t.shape.clone());
+            if let Some(storage) = t.integer_storage() {
+                Ok(CellEntry {
+                    kind: ElementKind::TypedInteger,
+                    shape,
+                    data: EntryData::TypedInteger(storage.clone()),
+                })
+            } else {
+                Ok(CellEntry {
+                    kind: ElementKind::Numeric,
+                    shape,
+                    data: EntryData::Numeric(t.data.clone()),
+                })
+            }
+        }
         Value::Num(n) => Ok(CellEntry {
             kind: ElementKind::Numeric,
             shape: vec![1, 1],
             data: EntryData::Numeric(vec![n]),
         }),
         Value::Int(i) => Ok(CellEntry {
-            kind: ElementKind::Numeric,
+            kind: ElementKind::TypedInteger,
             shape: vec![1, 1],
-            data: EntryData::Numeric(vec![i.to_f64()]),
+            data: EntryData::TypedInteger(IntegerStorage::from_scalar(i)),
         }),
         Value::Bool(b) => Ok(CellEntry {
             kind: ElementKind::Logical,
@@ -808,7 +903,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     fn cell2mat_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::cell2mat_builtin(value))
@@ -828,6 +923,28 @@ pub(crate) mod tests {
     fn scalar_cell(values: &[f64], rows: usize, cols: usize) -> Value {
         let cells: Vec<Value> = values.iter().map(|&v| Value::Num(v)).collect();
         crate::make_cell(cells, rows, cols).expect("cell")
+    }
+
+    fn append_same_class(left: &IntegerStorage, right: &IntegerStorage) -> IntegerStorage {
+        macro_rules! append {
+            ($left:expr, $right:expr, $variant:ident) => {{
+                let mut values = $left.clone();
+                values.extend_from_slice($right);
+                IntegerStorage::$variant(values)
+            }};
+        }
+
+        match (left, right) {
+            (IntegerStorage::I8(left), IntegerStorage::I8(right)) => append!(left, right, I8),
+            (IntegerStorage::I16(left), IntegerStorage::I16(right)) => append!(left, right, I16),
+            (IntegerStorage::I32(left), IntegerStorage::I32(right)) => append!(left, right, I32),
+            (IntegerStorage::I64(left), IntegerStorage::I64(right)) => append!(left, right, I64),
+            (IntegerStorage::U8(left), IntegerStorage::U8(right)) => append!(left, right, U8),
+            (IntegerStorage::U16(left), IntegerStorage::U16(right)) => append!(left, right, U16),
+            (IntegerStorage::U32(left), IntegerStorage::U32(right)) => append!(left, right, U32),
+            (IntegerStorage::U64(left), IntegerStorage::U64(right)) => append!(left, right, U64),
+            _ => panic!("test inputs must have matching integer classes"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -966,6 +1083,115 @@ pub(crate) mod tests {
         .expect("cell");
 
         let err = cell2mat_builtin(cell).expect_err("mixed integer classes must reject");
+        assert!(err
+            .to_string()
+            .contains("must share the same integer class"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn typed_integer_cells_preserve_every_native_class_exactly() {
+        let cases = [
+            (IntegerStorage::I8(vec![-7]), IntegerStorage::I8(vec![4])),
+            (
+                IntegerStorage::I16(vec![-700]),
+                IntegerStorage::I16(vec![4]),
+            ),
+            (
+                IntegerStorage::I32(vec![-70_000]),
+                IntegerStorage::I32(vec![4]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MIN + 1]),
+                IntegerStorage::I64(vec![4]),
+            ),
+            (IntegerStorage::U8(vec![7]), IntegerStorage::U8(vec![4])),
+            (IntegerStorage::U16(vec![700]), IntegerStorage::U16(vec![4])),
+            (
+                IntegerStorage::U32(vec![70_000]),
+                IntegerStorage::U32(vec![4]),
+            ),
+            (
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1_u64 << 63]),
+            ),
+        ];
+
+        for (left, right) in cases {
+            let cell = crate::make_cell(
+                vec![
+                    Value::Tensor(Tensor::new_integer(left.clone(), vec![1, 1]).expect("left")),
+                    Value::Tensor(Tensor::new_integer(right.clone(), vec![1, 1]).expect("right")),
+                ],
+                1,
+                2,
+            )
+            .expect("cell");
+            let result = cell2mat_builtin(cell).expect("cell2mat");
+            let Value::Tensor(output) = result else {
+                panic!("expected typed integer tensor");
+            };
+            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(
+                output.integer_storage(),
+                Some(&append_same_class(&left, &right))
+            );
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn typed_integer_cells_preserve_block_shape_and_reject_mixed_classes() {
+        let first =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 7]), vec![2, 1]).expect("first");
+        let second = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, 3]), vec![2, 1])
+            .expect("second");
+        let cell = crate::make_cell(vec![Value::Tensor(first), Value::Tensor(second)], 1, 2)
+            .expect("cell");
+        let result = cell2mat_builtin(cell).expect("cell2mat");
+        assert!(matches!(
+            result,
+            Value::Tensor(output)
+                if output.shape == vec![2, 2]
+                    && output.integer_storage()
+                        == Some(&IntegerStorage::U64(vec![u64::MAX, 7, 1_u64 << 63, 3]))
+        ));
+
+        let scalar_cell = crate::make_cell(
+            vec![
+                Value::Int(IntValue::U64(u64::MAX)),
+                Value::Int(IntValue::U64(1_u64 << 63)),
+            ],
+            1,
+            2,
+        )
+        .expect("scalar cell");
+        let scalar_result = cell2mat_builtin(scalar_cell).expect("cell2mat");
+        assert!(matches!(
+            scalar_result,
+            Value::Tensor(output)
+                if output.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))
+        ));
+
+        let empty = Tensor::new_integer(IntegerStorage::U64(Vec::new()), vec![0, 0])
+            .expect("empty typed tensor");
+        let empty_cell = crate::make_cell(vec![Value::Tensor(empty)], 1, 1).expect("empty cell");
+        let empty_result = cell2mat_builtin(empty_cell).expect("cell2mat");
+        assert!(matches!(
+            empty_result,
+            Value::Tensor(output)
+                if output.shape == vec![0, 0]
+                    && output.integer_storage() == Some(&IntegerStorage::U64(Vec::new()))
+        ));
+
+        let mixed = crate::make_cell(
+            vec![Value::Int(IntValue::I8(1)), Value::Int(IntValue::U64(1))],
+            1,
+            2,
+        )
+        .expect("cell");
+        let err = cell2mat_builtin(mixed).expect_err("mixed integer classes must reject");
         assert!(err
             .to_string()
             .contains("must share the same integer class"));
