@@ -4,7 +4,7 @@
 //! These operations work element-by-element on matrices and support scalar broadcasting.
 
 use crate::builtins::common::matrix::matrix_power;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
 fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (f64, f64) {
     if base_re == 0.0 && base_im == 0.0 && exp_re == 0.0 && exp_im == 0.0 {
@@ -91,20 +91,51 @@ pub fn elementwise_neg(a: &Value) -> Result<Value, String> {
     match a {
         Value::Num(x) => Ok(Value::Num(-x)),
         Value::Complex(re, im) => Ok(Value::Complex(-*re, -*im)),
-        Value::Int(x) => {
-            let v = x.to_i64();
-            if v >= i32::MIN as i64 && v <= i32::MAX as i64 {
-                Ok(Value::Int(runmat_builtins::IntValue::I32(-(v as i32))))
-            } else {
-                Ok(Value::Int(runmat_builtins::IntValue::I64(-v)))
-            }
-        }
+        Value::Int(value) => Ok(Value::Int(negate_integer_scalar(value.clone()))),
         Value::Bool(b) => Ok(Value::Bool(!b)), // Boolean negation
         Value::Tensor(m) => {
+            if let Some(storage) = m.integer_storage() {
+                return Tensor::new_integer(negate_integer_storage(storage), m.shape.clone())
+                    .map(Value::Tensor);
+            }
             let data: Vec<f64> = m.data.iter().map(|x| -x).collect();
             Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
         _ => Err(format!("Negation not supported for type: -{a:?}")),
+    }
+}
+
+fn negate_integer_scalar(value: IntValue) -> IntValue {
+    match value {
+        IntValue::I8(value) => IntValue::I8(value.saturating_neg()),
+        IntValue::I16(value) => IntValue::I16(value.saturating_neg()),
+        IntValue::I32(value) => IntValue::I32(value.saturating_neg()),
+        IntValue::I64(value) => IntValue::I64(value.saturating_neg()),
+        IntValue::U8(_) => IntValue::U8(0),
+        IntValue::U16(_) => IntValue::U16(0),
+        IntValue::U32(_) => IntValue::U32(0),
+        IntValue::U64(_) => IntValue::U64(0),
+    }
+}
+
+fn negate_integer_storage(storage: &IntegerStorage) -> IntegerStorage {
+    match storage {
+        IntegerStorage::I8(values) => {
+            IntegerStorage::I8(values.iter().map(|value| value.saturating_neg()).collect())
+        }
+        IntegerStorage::I16(values) => {
+            IntegerStorage::I16(values.iter().map(|value| value.saturating_neg()).collect())
+        }
+        IntegerStorage::I32(values) => {
+            IntegerStorage::I32(values.iter().map(|value| value.saturating_neg()).collect())
+        }
+        IntegerStorage::I64(values) => {
+            IntegerStorage::I64(values.iter().map(|value| value.saturating_neg()).collect())
+        }
+        IntegerStorage::U8(values) => IntegerStorage::U8(vec![0; values.len()]),
+        IntegerStorage::U16(values) => IntegerStorage::U16(vec![0; values.len()]),
+        IntegerStorage::U32(values) => IntegerStorage::U32(vec![0; values.len()]),
+        IntegerStorage::U64(values) => IntegerStorage::U64(vec![0; values.len()]),
     }
 }
 
@@ -783,6 +814,66 @@ mod tests {
         } else {
             panic!("Expected matrix result");
         }
+    }
+
+    #[test]
+    fn elementwise_neg_preserves_all_typed_integer_classes_and_shape() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![i8::MIN, -2, 0, i8::MAX]),
+                IntegerStorage::I8(vec![i8::MAX, 2, 0, -i8::MAX]),
+            ),
+            (
+                IntegerStorage::I16(vec![i16::MIN, -2, 0, i16::MAX]),
+                IntegerStorage::I16(vec![i16::MAX, 2, 0, -i16::MAX]),
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MIN, -2, 0, i32::MAX]),
+                IntegerStorage::I32(vec![i32::MAX, 2, 0, -i32::MAX]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MIN, -2, 0, i64::MAX]),
+                IntegerStorage::I64(vec![i64::MAX, 2, 0, -i64::MAX]),
+            ),
+            (
+                IntegerStorage::U8(vec![0, 2, u8::MAX]),
+                IntegerStorage::U8(vec![0, 0, 0]),
+            ),
+            (
+                IntegerStorage::U16(vec![0, 2, u16::MAX]),
+                IntegerStorage::U16(vec![0, 0, 0]),
+            ),
+            (
+                IntegerStorage::U32(vec![0, 2, u32::MAX]),
+                IntegerStorage::U32(vec![0, 0, 0]),
+            ),
+            (
+                IntegerStorage::U64(vec![0, 2, u64::MAX]),
+                IntegerStorage::U64(vec![0, 0, 0]),
+            ),
+        ];
+        for (input, expected) in cases {
+            let shape = vec![1, expected.len(), 1];
+            let tensor = Tensor::new_integer(input, shape.clone()).expect("integer tensor");
+            let Value::Tensor(result) = elementwise_neg(&Value::Tensor(tensor)).expect("neg")
+            else {
+                panic!("expected tensor");
+            };
+            assert_eq!(result.shape, shape);
+            assert_eq!(result.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn elementwise_neg_preserves_scalar_integer_class() {
+        assert_eq!(
+            elementwise_neg(&Value::Int(IntValue::I64(i64::MIN))).expect("neg"),
+            Value::Int(IntValue::I64(i64::MAX))
+        );
+        assert_eq!(
+            elementwise_neg(&Value::Int(IntValue::U64(u64::MAX))).expect("neg"),
+            Value::Int(IntValue::U64(0))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
