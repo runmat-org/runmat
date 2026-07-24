@@ -447,16 +447,15 @@ fn parse_sheet_selector(value: &Value) -> BuiltinResult<SheetSelector> {
     match value {
         Value::Num(n) => numeric_sheet_index(*n),
         Value::Int(i) => {
-            let index = i.to_i64();
-            if index <= 0 {
-                return Err(xlswrite_error_with(
-                    &XLSWRITE_ERROR_SHEET,
-                    "xlswrite: sheet index must be one-based",
-                ));
-            }
-            let index = usize::try_from(index - 1).map_err(|_| {
-                xlswrite_error_with(&XLSWRITE_ERROR_SHEET, "xlswrite: sheet index is too large")
-            })?;
+            let index = i
+                .try_to_usize()
+                .and_then(|index| index.checked_sub(1))
+                .ok_or_else(|| {
+                    xlswrite_error_with(
+                        &XLSWRITE_ERROR_SHEET,
+                        "xlswrite: sheet index must be one-based",
+                    )
+                })?;
             if index >= MAX_XLSWRITE_SHEETS {
                 return Err(xlswrite_error_with(
                     &XLSWRITE_ERROR_SHEET,

@@ -554,7 +554,16 @@ fn parse_sheet(value: &Value) -> BuiltinResult<SheetSelector> {
         Value::Num(n) if n.is_finite() && *n >= 1.0 && n.fract() == 0.0 => {
             Ok(SheetSelector::Index(*n as usize))
         }
-        Value::Int(i) if i.to_i64() >= 1 => Ok(SheetSelector::Index(i.to_i64() as usize)),
+        Value::Int(i) => i
+            .try_to_usize()
+            .filter(|index| *index >= 1)
+            .map(SheetSelector::Index)
+            .ok_or_else(|| {
+                writecell_error_with(
+                    &WRITECELL_ERROR_OPTION,
+                    "writecell: Sheet must be a name or one-based numeric index",
+                )
+            }),
         _ => {
             let text = string_scalar_from_value(value, "Sheet")
                 .map_err(|message| writecell_error_with(&WRITECELL_ERROR_OPTION, message))?;

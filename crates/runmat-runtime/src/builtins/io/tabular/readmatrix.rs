@@ -516,17 +516,12 @@ fn value_to_string_scalar(value: &Value, context: &str) -> BuiltinResult<String>
 
 fn value_to_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
     match value {
-        Value::Int(i) => {
-            let num = i.to_i64();
-            if num < 0 {
-                Err(readmatrix_error_with(
-                    &READMATRIX_ERROR_OPTION_VALUE,
-                    format!("readmatrix: {context} must be a non-negative integer"),
-                ))
-            } else {
-                Ok(num as usize)
-            }
-        }
+        Value::Int(i) => i.try_to_usize().ok_or_else(|| {
+            readmatrix_error_with(
+                &READMATRIX_ERROR_OPTION_VALUE,
+                format!("readmatrix: {context} must be a non-negative integer"),
+            )
+        }),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(readmatrix_error_with(
@@ -1625,6 +1620,15 @@ pub(crate) mod tests {
         let tokens = block_on(parse_treat_as_missing(&Value::Int(IntValue::U64(u64::MAX))))
             .expect("TreatAsMissing token");
         assert_eq!(tokens, vec!["18446744073709551615"]);
+    }
+
+    #[test]
+    fn option_usize_preserves_representable_uint64_values() {
+        assert_eq!(
+            value_to_usize(&Value::Int(IntValue::U64(u64::MAX)), "option").ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(value_to_usize(&Value::Int(IntValue::I64(-1)), "option").is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

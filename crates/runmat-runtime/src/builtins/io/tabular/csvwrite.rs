@@ -299,16 +299,12 @@ fn parse_offsets(args: &[Value]) -> BuiltinResult<(usize, usize)> {
 
 fn parse_offset(value: &Value, context: &str) -> BuiltinResult<usize> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(csvwrite_error_with(
-                    &CSVWRITE_ERROR_OFFSETS,
-                    format!("csvwrite: {context} must be >= 0"),
-                ));
-            }
-            Ok(raw as usize)
-        }
+        Value::Int(i) => i.try_to_usize().ok_or_else(|| {
+            csvwrite_error_with(
+                &CSVWRITE_ERROR_OFFSETS,
+                format!("csvwrite: {context} must be >= 0"),
+            )
+        }),
         Value::Num(n) => coerce_offset_from_float(*n, context),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {

@@ -402,20 +402,16 @@ fn parse_sheet_selector(value: &Value) -> BuiltinResult<SheetSelector> {
             Ok(SheetSelector::Name(trimmed.to_string()))
         }
         Value::Num(n) => numeric_sheet_index(*n),
-        Value::Int(i) => {
-            let index = i.to_i64();
-            if index <= 0 {
-                return Err(xlsread_error_with(
+        Value::Int(i) => i
+            .try_to_usize()
+            .and_then(|index| index.checked_sub(1))
+            .map(SheetSelector::Index)
+            .ok_or_else(|| {
+                xlsread_error_with(
                     &XLSREAD_ERROR_SHEET,
                     "xlsread: sheet index must be one-based",
-                ));
-            }
-            usize::try_from(index - 1)
-                .map(SheetSelector::Index)
-                .map_err(|_| {
-                    xlsread_error_with(&XLSREAD_ERROR_SHEET, "xlsread: sheet index is too large")
-                })
-        }
+                )
+            }),
         Value::Tensor(t) if t.data.len() == 1 => numeric_sheet_index(t.data[0]),
         _ => Err(xlsread_error_with(
             &XLSREAD_ERROR_SHEET,
@@ -1427,6 +1423,22 @@ fn cell_to_raw(cell: &SpreadsheetData) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::IntValue;
+
+    #[test]
+    fn typed_sheet_selector_does_not_clamp_uint64() {
+        let selected = parse_sheet_selector(&Value::Int(IntValue::U64(u64::MAX)));
+        match usize::try_from(u64::MAX)
+            .ok()
+            .and_then(|value| value.checked_sub(1))
+        {
+            Some(index) => {
+                assert!(matches!(selected, Ok(SheetSelector::Index(actual)) if actual == index))
+            }
+            None => assert!(selected.is_err()),
+        }
+        assert!(parse_sheet_selector(&Value::Int(IntValue::I64(-1))).is_err());
+    }
     use futures::executor::block_on;
     use std::fs;
     use std::io::Write;

@@ -1014,7 +1014,11 @@ pub(in crate::builtins::table) enum SheetSelector {
 impl SheetSelector {
     pub(in crate::builtins::table) fn parse(value: &Value) -> BuiltinResult<Self> {
         match value {
-            Value::Int(i) if i.to_i64() >= 1 => Ok(Self::Index(i.to_i64() as usize - 1)),
+            Value::Int(i) => i
+                .try_to_usize()
+                .and_then(|index| index.checked_sub(1))
+                .map(Self::Index)
+                .ok_or_else(|| invalid_argument("readtable: Sheet must be one-based")),
             Value::Num(n)
                 if n.is_finite() && *n >= 1.0 && (n.round() - n).abs() <= f64::EPSILON =>
             {

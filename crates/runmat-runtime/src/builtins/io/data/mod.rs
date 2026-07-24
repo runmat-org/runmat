@@ -2431,13 +2431,10 @@ fn parse_shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
             }
             Ok(vec![*v as usize])
         }
-        Value::Int(v) => {
-            let n = v.to_i64();
-            if n < 0 {
-                return Err(data_error("shape dimensions must be non-negative"));
-            }
-            Ok(vec![n as usize])
-        }
+        Value::Int(v) => v
+            .try_to_usize()
+            .map(|n| vec![n])
+            .ok_or_else(|| data_error("shape dimensions must be non-negative integers")),
         _ => Err(data_error("shape must be a numeric vector")),
     }
 }
@@ -2791,13 +2788,15 @@ fn parse_dim_range(value: &Value, extent: usize) -> BuiltinResult<DimRange> {
             })
         }
         Value::Int(i) => {
-            let idx = i.to_i64() - 1;
-            if idx < 0 || idx as usize >= extent {
+            let Some(idx) = i.try_to_usize().and_then(|index| index.checked_sub(1)) else {
+                return Err(data_error("INVALID_SLICE: index out of bounds"));
+            };
+            if idx >= extent {
                 return Err(data_error("INVALID_SLICE: index out of bounds"));
             }
             Ok(DimRange {
-                start: idx as usize,
-                end: idx as usize + 1,
+                start: idx,
+                end: idx + 1,
             })
         }
         Value::Tensor(t) if t.data.len() == 2 => {
@@ -3077,6 +3076,25 @@ fn json_to_value(value: &serde_json::Value) -> Value {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+    use runmat_builtins::IntValue;
+
+    #[test]
+    fn typed_data_slice_indices_do_not_saturate_through_i64() {
+        let extent = usize::MAX;
+        let result = parse_dim_range(&Value::Int(IntValue::U64(u64::MAX)), extent);
+        match usize::try_from(u64::MAX)
+            .ok()
+            .and_then(|value| value.checked_sub(1))
+        {
+            Some(index) if index < extent => {
+                let range = result.expect("index");
+                assert_eq!(range.start, index);
+                assert_eq!(range.end, index + 1);
+            }
+            _ => assert!(result.is_err()),
+        }
+        assert!(parse_dim_range(&Value::Int(IntValue::I64(-1)), extent).is_err());
+    }
     use crate::dispatcher::call_builtin;
     use async_trait::async_trait;
     use axum::extract::{Query, State};

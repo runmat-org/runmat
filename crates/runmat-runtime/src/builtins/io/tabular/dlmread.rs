@@ -572,7 +572,15 @@ fn parse_delimiter(value: &Value) -> BuiltinResult<DelimiterSpec> {
                 ))
             }
         }
-        Value::Int(i) => delimiter_from_ascii(i.to_i64()),
+        Value::Int(i) => i.try_to_i64().map_or_else(
+            || {
+                Err(dlmread_error_with(
+                    &DLMREAD_ERROR_DELIMITER,
+                    "dlmread: delimiter code must be within Unicode range",
+                ))
+            },
+            delimiter_from_ascii,
+        ),
         Value::Num(n) => delimiter_from_numeric(*n),
         Value::Tensor(t) if t.data.len() == 1 => delimiter_from_numeric(t.data[0]),
         _ => Err(dlmread_error_with(
@@ -617,21 +625,12 @@ fn delimiter_from_ascii(value: i64) -> BuiltinResult<DelimiterSpec> {
 
 fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<usize> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(dlmread_error_with(
-                    &DLMREAD_ERROR_INDEX,
-                    format!("dlmread: {name} must be a non-negative integer"),
-                ));
-            }
-            usize::try_from(raw).map_err(|_| {
-                dlmread_error_with(
-                    &DLMREAD_ERROR_INDEX,
-                    format!("dlmread: {name} is too large"),
-                )
-            })
-        }
+        Value::Int(i) => i.try_to_usize().ok_or_else(|| {
+            dlmread_error_with(
+                &DLMREAD_ERROR_INDEX,
+                format!("dlmread: {name} must be a non-negative integer"),
+            )
+        }),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(dlmread_error_with(
