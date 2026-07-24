@@ -619,6 +619,25 @@ async fn evaluate_network_gpu(
                 current = output;
                 current_is_temporary = true;
             }
+            "nnet.cnn.layer.SoftmaxLayer" => {
+                let output = match provider.activation_softmax_rows(&current).await {
+                    Ok(handle) => handle,
+                    Err(err) => {
+                        if current_is_temporary {
+                            let _ = provider.free(&current);
+                        }
+                        return Err(deep_learning_error(
+                            function,
+                            format!("{function}: provider-resident Softmax failed: {err}"),
+                        ));
+                    }
+                };
+                if current_is_temporary {
+                    let _ = provider.free(&current);
+                }
+                current = output;
+                current_is_temporary = true;
+            }
             _ => {}
         }
     }
@@ -696,6 +715,7 @@ fn validate_gpu_forward_layers(
                 let _ = elu_alpha(layer, function)?;
                 saw_transform = true;
             }
+            "nnet.cnn.layer.SoftmaxLayer" if saw_input => saw_transform = true,
             "nnet.cnn.layer.ClassificationOutputLayer" | "nnet.cnn.layer.RegressionOutputLayer"
                 if saw_input && saw_transform => {}
             other => {

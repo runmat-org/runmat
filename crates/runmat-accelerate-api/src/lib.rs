@@ -2254,6 +2254,13 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("activation_elu not supported by provider")
     }
+    /// Normalize each row of a real two-dimensional tensor with stable softmax.
+    fn activation_softmax_rows<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("activation_softmax_rows not supported by provider")
+    }
     fn unary_expm1<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,

@@ -448,13 +448,23 @@ fn forward_runs_arbitrary_alpha_elu_gpu_dlarray_with_cpu_parity() {
 }
 
 #[test]
-fn forward_rejects_unsupported_gpu_layer_before_host_gather_or_dispatch() {
+fn forward_runs_softmax_gpu_dlarray_without_host_gather() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
-        let shape = [1usize, 2usize];
+        let values = [1.0, 2.0, -1.0, 0.5];
+        let cpu = block_on(forward_builtin(
+            net.clone(),
+            Value::Tensor(Tensor::new(values.to_vec(), vec![2, 2]).unwrap()),
+            vec![],
+        ))
+        .expect("CPU forward");
+        let Value::Tensor(expected) = cpu else {
+            panic!("expected CPU tensor output");
+        };
+        let shape = [2usize, 2usize];
         let handle = provider
             .upload(&HostTensorView {
-                data: &[1.0, 2.0],
+                data: &values,
                 shape: &shape,
             })
             .expect("upload");
@@ -465,9 +475,45 @@ fn forward_rejects_unsupported_gpu_layer_before_host_gather_or_dispatch() {
         ))
         .expect("gpu dlarray");
 
-        let err = block_on(forward_builtin(net, dl, vec![])).unwrap_err();
+        let output = block_on(forward_builtin(net, dl, vec![])).expect("GPU softmax forward");
+        let Value::Object(output) = output else {
+            panic!("expected GPU dlarray output");
+        };
+        let Some(Value::GpuTensor(handle)) = output.properties.get("Data") else {
+            panic!("expected resident GPU output data");
+        };
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let actual =
+            crate::builtins::common::test_support::gather(Value::GpuTensor(handle.clone()))
+                .expect("gather GPU output for parity assertion");
+        assert_eq!(actual.shape, expected.shape);
+        for (actual, expected) in actual.data.iter().zip(&expected.data) {
+            assert!((actual - expected).abs() < 1.0e-12);
+        }
+    });
+}
 
-        assert!(err.to_string().contains("SoftmaxLayer"));
+#[test]
+fn forward_reports_invalid_gpu_softmax_without_host_gather() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+        let values = [f64::INFINITY, 0.0, 0.0, 1.0];
+        let shape = [2usize, 2usize];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &shape,
+            })
+            .expect("upload");
+        provider.reset_telemetry();
+        let dl = block_on(dlarray_builtin(Value::GpuTensor(handle), vec![])).expect("gpu dlarray");
+
+        let error = block_on(forward_builtin(net, dl, vec![]))
+            .expect_err("infinite Softmax input must not be normalized");
+
+        assert!(error
+            .to_string()
+            .contains("softmax produced invalid normalization"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
 }

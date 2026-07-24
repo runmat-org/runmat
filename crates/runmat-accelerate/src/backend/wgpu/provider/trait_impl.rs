@@ -741,6 +741,13 @@ impl AccelProvider for WgpuProvider {
         Box::pin(async move { self.elu_exec(a, alpha) })
     }
 
+    fn activation_softmax_rows<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.softmax_rows_exec(a) })
+    }
+
     fn unary_log<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(
             async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Log, a) },

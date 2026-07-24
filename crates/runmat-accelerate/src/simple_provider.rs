@@ -5708,6 +5708,49 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn activation_softmax_rows<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(a) == GpuTensorStorage::Real,
+                "activation_softmax_rows: complex inputs are not supported"
+            );
+            ensure!(
+                a.shape.len() == 2,
+                "activation_softmax_rows: input must be a 2-D tensor"
+            );
+            let rows = a.shape[0];
+            let cols = a.shape[1];
+            let guard = registry().lock().unwrap();
+            let input = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let mut out = vec![0.0; input.len()];
+            for row in 0..rows {
+                let max_value = (0..cols)
+                    .map(|col| input[row + col * rows])
+                    .fold(f64::NEG_INFINITY, f64::max);
+                let mut denom = 0.0;
+                for col in 0..cols {
+                    let value = (input[row + col * rows] - max_value).exp();
+                    out[row + col * rows] = value;
+                    denom += value;
+                }
+                ensure!(
+                    denom.is_finite() && denom > 0.0,
+                    "activation_softmax_rows: softmax produced invalid normalization"
+                );
+                for col in 0..cols {
+                    out[row + col * rows] /= denom;
+                }
+            }
+            drop(guard);
+            Ok(self.allocate_tensor(out, a.shape.clone()))
+        })
+    }
+
     fn unary_log<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let guard = registry().lock().unwrap();
