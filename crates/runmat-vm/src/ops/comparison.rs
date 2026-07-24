@@ -1,4 +1,7 @@
 use crate::interpreter::stack::pop2;
+use crate::ops::integer_comparison::{
+    scalar_order, tensor_element_equals_scalar, tensor_elements_equal,
+};
 use runmat_builtins::Value;
 use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use runmat_runtime::RuntimeError;
@@ -18,6 +21,22 @@ fn reject_typed_complex_integer_comparison(a: &Value, b: &Value) -> Result<(), R
         ));
     }
     Ok(())
+}
+
+fn scalar_relation(
+    a: &Value,
+    b: &Value,
+    predicate: fn(f64, f64) -> bool,
+) -> Result<bool, RuntimeError> {
+    if let Some(ordering) = scalar_order(a, b) {
+        let order = match ordering {
+            std::cmp::Ordering::Less => -1.0,
+            std::cmp::Ordering::Equal => 0.0,
+            std::cmp::Ordering::Greater => 1.0,
+        };
+        return Ok(predicate(order, 0.0));
+    }
+    Ok(predicate(a.try_into()?, b.try_into()?))
 }
 
 pub struct RelationInvertedSpec {
@@ -51,7 +70,7 @@ where
                     if rel_binary_use_builtin(&a, &b) {
                         call_builtin(name, a.clone(), b.clone()).await?
                     } else {
-                        Value::Num(if predicate((&a).try_into()?, (&b).try_into()?) {
+                        Value::Num(if scalar_relation(&a, &b, predicate)? {
                             1.0
                         } else {
                             0.0
@@ -67,7 +86,7 @@ where
                     if rel_binary_use_builtin(&a, &b) {
                         call_builtin(name, a.clone(), b.clone()).await?
                     } else {
-                        Value::Num(if predicate((&a).try_into()?, (&b).try_into()?) {
+                        Value::Num(if scalar_relation(&a, &b, predicate)? {
                             1.0
                         } else {
                             0.0
@@ -80,7 +99,7 @@ where
             if rel_binary_use_builtin(&a, &b) {
                 call_builtin(name, a.clone(), b.clone()).await?
             } else {
-                Value::Num(if predicate((&a).try_into()?, (&b).try_into()?) {
+                Value::Num(if scalar_relation(&a, &b, predicate)? {
                     1.0
                 } else {
                     0.0
@@ -127,13 +146,11 @@ where
                             if rel_binary_use_builtin(&a, &b) {
                                 call_builtin(spec.name, a.clone(), b.clone()).await?
                             } else {
-                                Value::Num(
-                                    if (spec.predicate)((&a).try_into()?, (&b).try_into()?) {
-                                        1.0
-                                    } else {
-                                        0.0
-                                    },
-                                )
+                                Value::Num(if scalar_relation(&a, &b, spec.predicate)? {
+                                    1.0
+                                } else {
+                                    0.0
+                                })
                             }
                         }
                     }
@@ -162,13 +179,11 @@ where
                             if rel_binary_use_builtin(&a, &b) {
                                 call_builtin(spec.name, a.clone(), b.clone()).await?
                             } else {
-                                Value::Num(
-                                    if (spec.predicate)((&a).try_into()?, (&b).try_into()?) {
-                                        1.0
-                                    } else {
-                                        0.0
-                                    },
-                                )
+                                Value::Num(if scalar_relation(&a, &b, spec.predicate)? {
+                                    1.0
+                                } else {
+                                    0.0
+                                })
                             }
                         }
                     }
@@ -179,7 +194,7 @@ where
             if rel_binary_use_builtin(&a, &b) {
                 call_builtin(spec.name, a.clone(), b.clone()).await?
             } else {
-                Value::Num(if (spec.predicate)((&a).try_into()?, (&b).try_into()?) {
+                Value::Num(if scalar_relation(&a, &b, spec.predicate)? {
                     1.0
                 } else {
                     0.0
@@ -319,7 +334,7 @@ where
             }
             let mut out = Vec::with_capacity(ta.data.len());
             for i in 0..ta.data.len() {
-                out.push(if (ta.data[i] - tb.data[i]).abs() < 1e-12 {
+                out.push(if tensor_elements_equal(ta, tb, i) {
                     1.0
                 } else {
                     0.0
@@ -331,15 +346,17 @@ where
             ));
         }
         (Value::Tensor(t), Value::Num(_)) | (Value::Tensor(t), Value::Int(_)) => {
-            let s = match &b {
-                Value::Num(n) => *n,
-                Value::Int(i) => i.to_f64(),
-                _ => 0.0,
-            };
             let out: Vec<f64> = t
                 .data
                 .iter()
-                .map(|x| if (*x - s).abs() < 1e-12 { 1.0 } else { 0.0 })
+                .enumerate()
+                .map(|(i, _)| {
+                    if tensor_element_equals_scalar(t, i, &b) {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                })
                 .collect();
             stack.push(Value::Tensor(
                 runmat_builtins::Tensor::new(out, t.shape.clone())
@@ -347,15 +364,17 @@ where
             ));
         }
         (Value::Num(_), Value::Tensor(t)) | (Value::Int(_), Value::Tensor(t)) => {
-            let s = match &a {
-                Value::Num(n) => *n,
-                Value::Int(i) => i.to_f64(),
-                _ => 0.0,
-            };
             let out: Vec<f64> = t
                 .data
                 .iter()
-                .map(|x| if (s - *x).abs() < 1e-12 { 1.0 } else { 0.0 })
+                .enumerate()
+                .map(|(i, _)| {
+                    if tensor_element_equals_scalar(t, i, &a) {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                })
                 .collect();
             stack.push(Value::Tensor(
                 runmat_builtins::Tensor::new(out, t.shape.clone())
@@ -402,9 +421,14 @@ where
             stack.push(Value::Num(if a_s == b_s { 1.0 } else { 0.0 }))
         }
         _ => {
-            let bb: f64 = (&b).try_into()?;
-            let aa: f64 = (&a).try_into()?;
-            stack.push(Value::Num(if aa == bb { 1.0 } else { 0.0 }));
+            let equal = if let Some(ordering) = scalar_order(&a, &b) {
+                ordering == std::cmp::Ordering::Equal
+            } else {
+                let aa: f64 = (&a).try_into()?;
+                let bb: f64 = (&b).try_into()?;
+                aa == bb
+            };
+            stack.push(Value::Num(if equal { 1.0 } else { 0.0 }));
         }
     }
     Ok(())
@@ -485,7 +509,7 @@ where
             }
             let mut out = Vec::with_capacity(ta.data.len());
             for i in 0..ta.data.len() {
-                out.push(if (ta.data[i] - tb.data[i]).abs() >= 1e-12 {
+                out.push(if !tensor_elements_equal(ta, tb, i) {
                     1.0
                 } else {
                     0.0
@@ -497,15 +521,17 @@ where
             ));
         }
         (Value::Tensor(t), Value::Num(_)) | (Value::Tensor(t), Value::Int(_)) => {
-            let s = match &b {
-                Value::Num(n) => *n,
-                Value::Int(i) => i.to_f64(),
-                _ => 0.0,
-            };
             let out: Vec<f64> = t
                 .data
                 .iter()
-                .map(|x| if (*x - s).abs() >= 1e-12 { 1.0 } else { 0.0 })
+                .enumerate()
+                .map(|(i, _)| {
+                    if !tensor_element_equals_scalar(t, i, &b) {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                })
                 .collect();
             stack.push(Value::Tensor(
                 runmat_builtins::Tensor::new(out, t.shape.clone())
@@ -513,15 +539,17 @@ where
             ));
         }
         (Value::Num(_), Value::Tensor(t)) | (Value::Int(_), Value::Tensor(t)) => {
-            let s = match &a {
-                Value::Num(n) => *n,
-                Value::Int(i) => i.to_f64(),
-                _ => 0.0,
-            };
             let out: Vec<f64> = t
                 .data
                 .iter()
-                .map(|x| if (s - *x).abs() >= 1e-12 { 1.0 } else { 0.0 })
+                .enumerate()
+                .map(|(i, _)| {
+                    if !tensor_element_equals_scalar(t, i, &a) {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                })
                 .collect();
             stack.push(Value::Tensor(
                 runmat_builtins::Tensor::new(out, t.shape.clone())
@@ -568,9 +596,14 @@ where
             stack.push(Value::Num(if a_s != b_s { 1.0 } else { 0.0 }))
         }
         _ => {
-            let bb: f64 = (&b).try_into()?;
-            let aa: f64 = (&a).try_into()?;
-            stack.push(Value::Num(if aa != bb { 1.0 } else { 0.0 }));
+            let equal = if let Some(ordering) = scalar_order(&a, &b) {
+                ordering == std::cmp::Ordering::Equal
+            } else {
+                let aa: f64 = (&a).try_into()?;
+                let bb: f64 = (&b).try_into()?;
+                aa == bb
+            };
+            stack.push(Value::Num(if !equal { 1.0 } else { 0.0 }));
         }
     }
     Ok(())
