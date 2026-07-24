@@ -226,6 +226,13 @@ const GPUARRAY_ERROR_TYPED_COMPLEX_INTEGER: BuiltinErrorDescriptor = BuiltinErro
     message: "gpuArray: typed complex integer arrays are not supported by the active acceleration provider",
 };
 
+const GPUARRAY_ERROR_TYPED_INTEGER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.TYPED_INTEGER",
+    identifier: Some("RunMat:gpuArray:TypedIntegerUnsupported"),
+    when: "A native integer value or integer GPU class is requested without matching provider storage.",
+    message: "gpuArray: native integer storage is not supported by the active acceleration provider",
+};
+
 const GPUARRAY_ERROR_CONVERSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.GPUARRAY.CONVERSION",
     identifier: Some("RunMat:gpuArray:ConversionFailed"),
@@ -254,7 +261,7 @@ const GPUARRAY_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "gpuArray: internal error",
 };
 
-const GPUARRAY_ERRORS: [BuiltinErrorDescriptor; 15] = [
+const GPUARRAY_ERRORS: [BuiltinErrorDescriptor; 16] = [
     GPUARRAY_ERROR_NO_PROVIDER,
     GPUARRAY_ERROR_OPTION_ARGUMENT,
     GPUARRAY_ERROR_LIKE_MISSING,
@@ -266,6 +273,7 @@ const GPUARRAY_ERRORS: [BuiltinErrorDescriptor; 15] = [
     GPUARRAY_ERROR_LIKE_PROTOTYPE,
     GPUARRAY_ERROR_INPUT_TYPE,
     GPUARRAY_ERROR_TYPED_COMPLEX_INTEGER,
+    GPUARRAY_ERROR_TYPED_INTEGER,
     GPUARRAY_ERROR_CONVERSION,
     GPUARRAY_ERROR_RESHAPE,
     GPUARRAY_ERROR_PROVIDER_IO,
@@ -344,11 +352,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let options = parse_options(&rest)?;
+    if matches!(&value, Value::Int(_))
+        || matches!(&value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+    {
+        return Err(gpu_array_error(&GPUARRAY_ERROR_TYPED_INTEGER));
+    }
     let incoming_precision = match &value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_precision(handle),
         _ => None,
     };
     let dtype = resolve_dtype(&value, &options)?;
+    if dtype.is_integer() {
+        return Err(gpu_array_error(&GPUARRAY_ERROR_TYPED_INTEGER));
+    }
     let dims = options.dims.clone();
 
     let prepared = match value {
@@ -396,6 +412,20 @@ enum DataClass {
 }
 
 impl DataClass {
+    fn is_integer(self) -> bool {
+        matches!(
+            self,
+            Self::Int8
+                | Self::Int16
+                | Self::Int32
+                | Self::Int64
+                | Self::UInt8
+                | Self::UInt16
+                | Self::UInt32
+                | Self::UInt64
+        )
+    }
+
     fn from_tag(tag: &str) -> Option<Self> {
         match tag {
             "double" => Some(Self::Double),
@@ -994,8 +1024,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
     use runmat_builtins::{
-        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
-        ResolveContext, Type,
+        ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext, Type,
     };
 
     fn call(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1507,17 +1536,32 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn gpu_array_accepts_int_scalars() {
+    fn gpu_array_rejects_native_integer_inputs_and_class_requests() {
         test_support::with_test_provider(|_| {
-            let value = Value::Int(IntValue::I32(7));
-            let result = call(value, Vec::new()).expect("gpuArray int");
-            let Value::GpuTensor(handle) = result else {
-                panic!("expected gpu tensor");
-            };
-            let gathered =
-                test_support::gather(Value::GpuTensor(handle.clone())).expect("gather int");
-            assert_eq!(gathered.shape, vec![1, 1]);
-            assert_eq!(gathered.data, vec![7.0]);
+            for storage in [
+                IntegerStorage::I8(vec![1]),
+                IntegerStorage::I16(vec![1]),
+                IntegerStorage::I32(vec![1]),
+                IntegerStorage::I64(vec![1]),
+                IntegerStorage::U8(vec![1]),
+                IntegerStorage::U16(vec![1]),
+                IntegerStorage::U32(vec![1]),
+                IntegerStorage::U64(vec![u64::MAX]),
+            ] {
+                let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+                let error = call(value, Vec::new()).expect_err("integer gpuArray input must fail");
+                assert_eq!(
+                    error.identifier.as_deref(),
+                    Some("RunMat:gpuArray:TypedIntegerUnsupported")
+                );
+            }
+
+            let error = call(Value::Num(1.0), vec![Value::from("uint64")])
+                .expect_err("integer gpuArray class request must fail");
+            assert_eq!(
+                error.identifier.as_deref(),
+                Some("RunMat:gpuArray:TypedIntegerUnsupported")
+            );
         });
     }
 

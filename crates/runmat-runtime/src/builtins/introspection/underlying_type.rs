@@ -446,26 +446,18 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn underlying_type_reports_integer_gpu_class_metadata() {
+    fn gpu_array_rejects_integer_gpu_class_without_provider_storage() {
         test_support::with_test_provider(|_| {
             let tensor = Tensor::new(vec![1.2, -3.7, 123456.0], vec![3, 1]).unwrap();
-            let value = crate::dispatcher::call_builtin(
+            let error = crate::dispatcher::call_builtin(
                 "gpuArray",
                 &[Value::Tensor(tensor), Value::from("int32")],
             )
-            .expect("gpuArray int32");
+            .expect_err("gpuArray int32 must require native provider storage");
 
             assert_eq!(
-                underlying_type_builtin(value.clone()).expect("underlying"),
-                "int32"
-            );
-            assert_eq!(
-                is_underlying_type_builtin(value.clone(), Value::from("int32")).expect("predicate"),
-                Value::Bool(true)
-            );
-            assert_eq!(
-                is_underlying_type_builtin(value, Value::from("double")).expect("predicate"),
-                Value::Bool(false)
+                error.identifier.as_deref(),
+                Some("RunMat:gpuArray:TypedIntegerUnsupported")
             );
         });
     }
