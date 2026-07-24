@@ -69,15 +69,23 @@ zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
 # Use Apple's Accelerate framework on macOS (works on both Intel and Apple Silicon)
 accelerate-src = { version = "0.3", optional = true }
 
+[target.'cfg(all(not(target_arch = "wasm32"), target_os = "macos"))'.dependencies]
+# macOS release artifacts must be self-contained and cross-buildable from Apple
+# Silicon hosts. Build HDF5 for Cargo's target architecture and link it
+# statically instead of discovering a host-architecture Homebrew installation.
+hdf5 = { package = "hdf5-metno", version = "0.13.0", features = ["static", "zlib"] }
+
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 # Use system OpenBLAS via vcpkg on Windows and distro packages on Linux; also expose CBLAS symbols
 openblas-src = { version = "0.10", features = ["system", "cblas"], optional = true }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))'.dependencies]
+hdf5 = { package = "hdf5-metno", version = "0.13.0" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arrow-array = "59.0.0"
 arrow-schema = "59.0.0"
 bytes = "1.12.0"
-hdf5 = { package = "hdf5-metno", version = "0.13.0" }
 ndarray = "0.17"
 parquet = { version = "59.0.0", features = ["arrow"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "charset", "gzip", "json", "rustls-tls"] }
