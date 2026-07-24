@@ -1,4 +1,14 @@
-use runmat_builtins::{LogicalArray, SparseTensor, Value};
+use runmat_builtins::{IntValue, LogicalArray, SparseTensor, Value};
+
+/// A scalar value in a workspace numeric preview.
+///
+/// Integer values retain their native class and exact magnitude until an
+/// outer presentation boundary selects an encoding for them.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NumericPreviewValue {
+    Float(f64),
+    Integer(IntValue),
+}
 
 /// MATLAB-style class name for a runtime value.
 pub fn matlab_class_name(value: &Value) -> String {
@@ -118,12 +128,21 @@ fn sparse_tensor_memory_bytes_from_lengths(
 }
 
 /// Produce a numeric preview (up to `limit` elements) for scalars and dense arrays.
-pub fn preview_numeric_values(value: &Value, limit: usize) -> Option<(Vec<f64>, bool)> {
+pub fn preview_numeric_values(
+    value: &Value,
+    limit: usize,
+) -> Option<(Vec<NumericPreviewValue>, bool)> {
     match value {
-        Value::Num(n) => Some((vec![*n], false)),
-        Value::Int(iv) => Some((vec![iv.to_f64()], false)),
-        Value::Bool(flag) => Some((vec![if *flag { 1.0 } else { 0.0 }], false)),
-        Value::Tensor(t) => Some(preview_f64_slice(&t.data, limit)),
+        Value::Num(n) => Some((vec![NumericPreviewValue::Float(*n)], false)),
+        Value::Int(iv) => Some((vec![NumericPreviewValue::Integer(iv.clone())], false)),
+        Value::Bool(flag) => Some((
+            vec![NumericPreviewValue::Float(if *flag { 1.0 } else { 0.0 })],
+            false,
+        )),
+        Value::Tensor(t) => match t.integer_storage() {
+            Some(storage) => Some(preview_integer_slice(storage, limit)),
+            None => Some(preview_f64_slice(&t.data, limit)),
+        },
         Value::SparseTensor(s) => Some(preview_sparse_tensor(s, limit)),
         Value::LogicalArray(arr) => Some(preview_logical_slice(arr, limit)),
         Value::StringArray(_) | Value::String(_) | Value::CharArray(_) => None,
@@ -146,15 +165,45 @@ pub fn preview_numeric_values(value: &Value, limit: usize) -> Option<(Vec<f64>, 
     }
 }
 
-fn preview_f64_slice(data: &[f64], limit: usize) -> (Vec<f64>, bool) {
+fn preview_f64_slice(data: &[f64], limit: usize) -> (Vec<NumericPreviewValue>, bool) {
     if data.len() > limit {
-        (data[..limit].to_vec(), true)
+        (
+            data[..limit]
+                .iter()
+                .copied()
+                .map(NumericPreviewValue::Float)
+                .collect(),
+            true,
+        )
     } else {
-        (data.to_vec(), false)
+        (
+            data.iter()
+                .copied()
+                .map(NumericPreviewValue::Float)
+                .collect(),
+            false,
+        )
     }
 }
 
-fn preview_sparse_tensor(sparse: &SparseTensor, limit: usize) -> (Vec<f64>, bool) {
+fn preview_integer_slice(
+    storage: &runmat_builtins::IntegerStorage,
+    limit: usize,
+) -> (Vec<NumericPreviewValue>, bool) {
+    let preview_len = storage.len().min(limit);
+    let values = (0..preview_len)
+        .map(|index| {
+            NumericPreviewValue::Integer(
+                storage
+                    .value_at(index)
+                    .expect("integer storage index is valid"),
+            )
+        })
+        .collect();
+    (values, storage.len() > limit)
+}
+
+fn preview_sparse_tensor(sparse: &SparseTensor, limit: usize) -> (Vec<NumericPreviewValue>, bool) {
     let total_len = sparse.rows.saturating_mul(sparse.cols);
     let preview_len = total_len.min(limit);
     let mut preview = Vec::with_capacity(preview_len);
@@ -164,16 +213,22 @@ fn preview_sparse_tensor(sparse: &SparseTensor, limit: usize) -> (Vec<f64>, bool
     for linear_index in 0..preview_len {
         let row = linear_index % sparse.rows;
         let col = linear_index / sparse.rows;
-        preview.push(sparse.get(row, col).unwrap_or(0.0));
+        preview.push(NumericPreviewValue::Float(
+            sparse.get(row, col).unwrap_or(0.0),
+        ));
     }
     (preview, total_len > limit)
 }
 
-fn preview_logical_slice(arr: &LogicalArray, limit: usize) -> (Vec<f64>, bool) {
+fn preview_logical_slice(arr: &LogicalArray, limit: usize) -> (Vec<NumericPreviewValue>, bool) {
     let truncated = arr.data.len() > limit;
     let mut preview = Vec::with_capacity(arr.data.len().min(limit));
     for value in arr.data.iter().take(limit) {
-        preview.push(if *value == 0 { 0.0 } else { 1.0 });
+        preview.push(NumericPreviewValue::Float(if *value == 0 {
+            0.0
+        } else {
+            1.0
+        }));
     }
     (preview, truncated)
 }
@@ -181,7 +236,7 @@ fn preview_logical_slice(arr: &LogicalArray, limit: usize) -> (Vec<f64>, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{NumericDType, ObjectInstance, Tensor};
+    use runmat_builtins::{IntegerStorage, NumericDType, ObjectInstance, Tensor};
 
     #[test]
     fn approximate_size_bytes_includes_exact_integer_storage() {
@@ -242,7 +297,13 @@ mod tests {
 
         assert_eq!(
             preview_numeric_values(&Value::SparseTensor(sparse), 9),
-            Some((vec![0.0, 4.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 6.0], false))
+            Some((
+                vec![0.0, 4.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 6.0]
+                    .into_iter()
+                    .map(NumericPreviewValue::Float)
+                    .collect(),
+                false
+            ))
         );
     }
 
@@ -252,7 +313,38 @@ mod tests {
 
         assert_eq!(
             preview_numeric_values(&Value::SparseTensor(sparse), 3),
-            Some((vec![0.0, 0.0, 0.0], true))
+            Some((
+                vec![0.0, 0.0, 0.0]
+                    .into_iter()
+                    .map(NumericPreviewValue::Float)
+                    .collect(),
+                true
+            ))
+        );
+    }
+
+    #[test]
+    fn typed_integer_preview_preserves_exact_class_and_magnitude() {
+        let values = vec![42, 9_007_199_254_740_993, u64::MAX];
+        let tensor = Tensor::new_integer(IntegerStorage::U64(values.clone()), vec![3, 1])
+            .expect("typed tensor");
+
+        assert_eq!(
+            preview_numeric_values(&Value::Tensor(tensor), 2),
+            Some((
+                vec![
+                    NumericPreviewValue::Integer(IntValue::U64(values[0])),
+                    NumericPreviewValue::Integer(IntValue::U64(values[1])),
+                ],
+                true
+            ))
+        );
+        assert_eq!(
+            preview_numeric_values(&Value::Int(IntValue::U64(u64::MAX)), 1),
+            Some((
+                vec![NumericPreviewValue::Integer(IntValue::U64(u64::MAX))],
+                false
+            ))
         );
     }
 }

@@ -1,3 +1,4 @@
+use crate::NumericPreviewValue;
 use runmat_builtins::Value;
 use uuid::Uuid;
 
@@ -5,7 +6,7 @@ use super::materialize::MATERIALIZE_DEFAULT_LIMIT;
 
 #[derive(Debug, Clone)]
 pub struct WorkspacePreview {
-    pub values: Vec<f64>,
+    pub values: Vec<NumericPreviewValue>,
     pub truncated: bool,
 }
 

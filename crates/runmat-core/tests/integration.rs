@@ -98,10 +98,16 @@ exactStopTime = t0 + t1/(1-ratio)";
                 .as_ref()
                 .expect("exactStopTime has scalar preview");
             assert_eq!(preview.values.len(), 1);
+            let Some(runmat_core::NumericPreviewValue::Float(value)) = preview.values.first()
+            else {
+                panic!(
+                    "unexpected non-floating workspace preview: {:?}",
+                    preview.values
+                );
+            };
             assert!(
-                (preview.values[0] - 11.458330203035164).abs() < 1e-10,
-                "unexpected workspace preview: {}",
-                preview.values[0]
+                (*value - 11.458330203035164).abs() < 1e-10,
+                "unexpected workspace preview: {value}"
             );
         }
     });
