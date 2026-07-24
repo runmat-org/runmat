@@ -1470,7 +1470,7 @@ fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect::<String>()),
         Value::Num(value) if value.is_finite() => Ok(format_number(*value)),
-        Value::Int(value) => Ok(value.to_i64().to_string()),
+        Value::Int(value) => Ok(value.decimal_string()),
         Value::Bool(value) => Ok(value.to_string()),
         other => Err(invalid(format!(
             "perfcurve: {name} must be text scalar; got {other:?}"
@@ -1512,6 +1512,18 @@ fn tensor_row(data: Vec<f64>) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use runmat_builtins::StringArray;
+
+    #[test]
+    fn perfcurve_scalar_text_preserves_exact_uint64() {
+        assert_eq!(
+            scalar_text(
+                &Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+                "option"
+            )
+            .expect("scalar text"),
+            "18446744073709551615"
+        );
+    }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), shape.to_vec()).unwrap())

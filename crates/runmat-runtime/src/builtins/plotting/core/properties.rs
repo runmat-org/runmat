@@ -6741,7 +6741,7 @@ pub(crate) fn label_strings_from_value(
         Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
         Value::String(text) => Ok(vec![text.clone()]),
         Value::Tensor(tensor) => Ok(tensor.data.iter().map(|v| v.to_string()).collect()),
-        Value::Int(i) => Ok(vec![i.to_i64().to_string()]),
+        Value::Int(i) => Ok(vec![i.decimal_string()]),
         Value::Num(v) => Ok(vec![v.to_string()]),
         other => Err(plotting_error(
             builtin,
@@ -7335,5 +7335,21 @@ impl AxesMetadataExt for runmat_plot::plots::AxesMetadata {
             | PlotObjectKind::XAxis
             | PlotObjectKind::YAxis => TextStyle::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn label_strings_preserve_exact_uint64_text() {
+        let labels = label_strings_from_value(
+            &Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            "legend",
+            "labels",
+        )
+        .expect("labels");
+        assert_eq!(labels, vec!["18446744073709551615"]);
     }
 }

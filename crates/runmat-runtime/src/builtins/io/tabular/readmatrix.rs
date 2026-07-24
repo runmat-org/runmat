@@ -602,7 +602,7 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
             Value::CharArray(ca) if ca.rows == 1 => out.push(ca.data.iter().collect()),
             Value::StringArray(sa) => out.extend(sa.data),
             Value::Num(n) => out.push(format_numeric_token(n)),
-            Value::Int(i) => out.push(format!("{}", i.to_i64())),
+            Value::Int(i) => out.push(i.decimal_string()),
             Value::Tensor(t) => {
                 if t.data.len() == 1 {
                     out.push(format_numeric_token(t.data[0]));
@@ -1617,6 +1617,14 @@ pub(crate) mod tests {
             other => panic!("expected tensor result, got {other:?}"),
         }
         let _ = fs::remove_file(&path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn treat_as_missing_preserves_exact_uint64_text() {
+        let tokens = block_on(parse_treat_as_missing(&Value::Int(IntValue::U64(u64::MAX))))
+            .expect("TreatAsMissing token");
+        assert_eq!(tokens, vec!["18446744073709551615"]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

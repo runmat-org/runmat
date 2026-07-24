@@ -1219,7 +1219,7 @@ fn parse_numeric_matrix(text: &str, fn_name: &str) -> BuiltinResult<Value> {
 fn mat2str_value(value: &Value, precision: Option<usize>) -> String {
     match value {
         Value::Num(n) => format_number(*n, precision),
-        Value::Int(i) => i.to_i64().to_string(),
+        Value::Int(i) => i.decimal_string(),
         Value::Bool(b) => {
             if *b {
                 "true".into()
@@ -1636,6 +1636,14 @@ async fn bounded_pattern(
 mod tests {
     use super::*;
     use runmat_builtins::NumericDType;
+
+    #[test]
+    fn mat2str_preserves_exact_uint64_scalar_text() {
+        assert_eq!(
+            mat2str_value(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX)), None),
+            "18446744073709551615"
+        );
+    }
 
     fn block(
         value: impl std::future::Future<Output = BuiltinResult<Value>>,

@@ -928,7 +928,7 @@ fn scalar_to_string(value: &Value) -> BuiltinResult<String> {
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
         Value::Num(n) => Ok(format!("{}", n)),
-        Value::Int(i) => Ok(i.to_i64().to_string()),
+        Value::Int(i) => Ok(i.decimal_string()),
         Value::Bool(b) => Ok(if *b { "true".into() } else { "false".into() }),
         Value::Tensor(tensor) => {
             if tensor.data.len() == 1 {
@@ -973,7 +973,7 @@ fn value_to_query_string(value: &Value, name: &str) -> BuiltinResult<String> {
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
         Value::Num(n) => Ok(format!("{}", n)),
-        Value::Int(i) => Ok(i.to_i64().to_string()),
+        Value::Int(i) => Ok(i.decimal_string()),
         Value::Bool(b) => Ok(if *b { "true".into() } else { "false".into() }),
         Value::Tensor(tensor) => {
             if tensor.data.len() == 1 {
@@ -1152,6 +1152,19 @@ pub(crate) mod tests {
     use std::net::{TcpListener, TcpStream};
     use std::sync::mpsc;
     use std::thread;
+
+    #[test]
+    fn body_and_query_text_preserve_exact_uint64() {
+        let value = Value::Int(runmat_builtins::IntValue::U64(u64::MAX));
+        assert_eq!(
+            scalar_to_string(&value).expect("body text"),
+            "18446744073709551615"
+        );
+        assert_eq!(
+            value_to_query_string(&value, "id").expect("query text"),
+            "18446744073709551615"
+        );
+    }
 
     fn spawn_server<F>(handler: F) -> String
     where

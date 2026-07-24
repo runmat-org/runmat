@@ -916,7 +916,7 @@ fn label_for_value(value: &Value) -> Option<String> {
         Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
         Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
         Value::Num(num) => Some(num.to_string()),
-        Value::Int(int) => Some(int.to_i64().to_string()),
+        Value::Int(int) => Some(int.decimal_string()),
         Value::Bool(flag) => Some(flag.to_string()),
         _ => None,
     }
@@ -1184,6 +1184,14 @@ pub mod tabulate {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+
+    #[test]
+    fn tabulate_labels_preserve_exact_uint64_text() {
+        assert_eq!(
+            label_for_value(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX))),
+            Some("18446744073709551615".to_string())
+        );
+    }
 
     fn assert_close(actual: f64, expected: f64) {
         assert!(
