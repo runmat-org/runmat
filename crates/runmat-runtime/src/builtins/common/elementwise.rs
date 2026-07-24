@@ -540,33 +540,27 @@ pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
 
         // Matrix^scalar case - matrix exponentiation
         (Value::Tensor(m), Value::Num(s)) => {
-            // Check if scalar is an integer for matrix power
-            if s.fract() == 0.0 {
-                let n = *s as i32;
-                let result = matrix_power(m, n)?;
-                Ok(Value::Tensor(result))
-            } else {
-                Err("Matrix power requires integer exponent".to_string())
-            }
+            let result = matrix_power(m, matrix_power_exponent_from_f64(*s)?)?;
+            Ok(Value::Tensor(result))
         }
         (Value::Tensor(m), Value::Int(s)) => {
-            let result = matrix_power(m, s.to_i64() as i32)?;
+            let result = matrix_power(m, matrix_power_exponent_from_int(s)?)?;
             Ok(Value::Tensor(result))
         }
 
         // Complex matrix^integer case
         (Value::ComplexTensor(m), Value::Num(s)) => {
-            if s.fract() == 0.0 {
-                let n = *s as i32;
-                let result = crate::builtins::common::matrix::complex_matrix_power(m, n)?;
-                Ok(Value::ComplexTensor(result))
-            } else {
-                Err("Matrix power requires integer exponent".to_string())
-            }
+            let result = crate::builtins::common::matrix::complex_matrix_power(
+                m,
+                matrix_power_exponent_from_f64(*s)?,
+            )?;
+            Ok(Value::ComplexTensor(result))
         }
         (Value::ComplexTensor(m), Value::Int(s)) => {
-            let result =
-                crate::builtins::common::matrix::complex_matrix_power(m, s.to_i64() as i32)?;
+            let result = crate::builtins::common::matrix::complex_matrix_power(
+                m,
+                matrix_power_exponent_from_int(s)?,
+            )?;
             Ok(Value::ComplexTensor(result))
         }
 
@@ -575,6 +569,22 @@ pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
             "Power operation not supported for types: {a:?} ^ {b:?}"
         )),
     }
+}
+
+fn matrix_power_exponent_from_f64(value: f64) -> Result<i32, String> {
+    if !value.is_finite() || value.fract() != 0.0 {
+        return Err("Matrix power requires integer exponent".to_string());
+    }
+    if value < i32::MIN as f64 || value > i32::MAX as f64 {
+        return Err("Matrix power exponent is outside the supported int32 range".to_string());
+    }
+    Ok(value as i32)
+}
+
+fn matrix_power_exponent_from_int(value: &IntValue) -> Result<i32, String> {
+    value
+        .try_to_i32()
+        .ok_or_else(|| "Matrix power exponent is outside the supported int32 range".to_string())
 }
 
 /// Element-wise power: A .^ B
@@ -745,6 +755,17 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+
+    #[test]
+    fn matrix_power_typed_exponent_parser_is_exact() {
+        assert_eq!(
+            matrix_power_exponent_from_int(&IntValue::U16(7)).unwrap(),
+            7
+        );
+        assert!(matrix_power_exponent_from_int(&IntValue::U64(u64::MAX)).is_err());
+        assert!(matrix_power_exponent_from_f64(f64::INFINITY).is_err());
+        assert!(matrix_power_exponent_from_f64(i32::MAX as f64 + 1.0).is_err());
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
