@@ -21,12 +21,21 @@ pub(in crate::builtins::table) fn parse_row_selector(
     }
     match selector {
         Value::Num(n) => Ok(vec![one_based_to_zero(*n, height, "row")?]),
-        Value::Int(i) => Ok(vec![one_based_to_zero(i.to_f64(), height, "row")?]),
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|value| one_based_to_zero(*value, height, "row"))
-            .collect(),
+        Value::Int(i) => Ok(vec![one_based_integer_to_zero(i, height, "row")?]),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .exact_values()
+                    .iter()
+                    .map(|value| one_based_integer_to_zero(value, height, "row"))
+                    .collect();
+            }
+            tensor
+                .data
+                .iter()
+                .map(|value| one_based_to_zero(*value, height, "row"))
+                .collect()
+        }
         Value::LogicalArray(array) => {
             if array.data.len() != height {
                 return Err(invalid_index(
@@ -171,12 +180,21 @@ pub(in crate::builtins::table) fn parse_variable_selector(
             Ok(selected)
         }
         Value::Num(n) => Ok(vec![name_at_index(names, *n)?]),
-        Value::Int(i) => Ok(vec![name_at_index(names, i.to_f64())?]),
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|value| name_at_index(names, *value))
-            .collect(),
+        Value::Int(i) => Ok(vec![name_at_integer_index(names, i)?]),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .exact_values()
+                    .iter()
+                    .map(|value| name_at_integer_index(names, value))
+                    .collect();
+            }
+            tensor
+                .data
+                .iter()
+                .map(|value| name_at_index(names, *value))
+                .collect()
+        }
         Value::LogicalArray(array) => {
             if array.data.len() != names.len() {
                 return Err(invalid_index(
@@ -533,6 +551,35 @@ pub(in crate::builtins::table) fn name_at_index(
     Ok(names[idx].clone())
 }
 
+fn name_at_integer_index(
+    names: &[String],
+    value: &runmat_builtins::IntValue,
+) -> BuiltinResult<String> {
+    let idx = one_based_integer_to_zero(value, names.len(), "variable")?;
+    Ok(names[idx].clone())
+}
+
+fn one_based_integer_to_zero(
+    value: &runmat_builtins::IntValue,
+    len: usize,
+    context: &str,
+) -> BuiltinResult<usize> {
+    let idx = value
+        .try_to_usize()
+        .and_then(|value| value.checked_sub(1))
+        .ok_or_else(|| {
+            invalid_index(format!(
+                "table: {context} indices must be positive finite integers"
+            ))
+        })?;
+    if idx >= len {
+        return Err(invalid_index(format!(
+            "table: {context} index exceeds bounds"
+        )));
+    }
+    Ok(idx)
+}
+
 pub(in crate::builtins::table) fn one_based_to_zero(
     value: f64,
     len: usize,
@@ -550,4 +597,36 @@ pub(in crate::builtins::table) fn one_based_to_zero(
         )));
     }
     Ok(idx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
+
+    #[test]
+    fn typed_row_and_variable_selectors_do_not_round_uint64() {
+        let rows = parse_row_selector(
+            Some(&Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![1, 2]), vec![1, 2]).unwrap(),
+            )),
+            2,
+        )
+        .unwrap();
+        assert_eq!(rows, vec![0, 1]);
+
+        let names = vec!["left".to_string(), "right".to_string()];
+        let variables =
+            parse_variable_selector(Some(&Value::Int(runmat_builtins::IntValue::U64(2))), &names)
+                .unwrap();
+        assert_eq!(variables, vec!["right"]);
+
+        let err = parse_row_selector(
+            Some(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX))),
+            2,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("exceeds bounds"), "unexpected error: {err}");
+    }
 }
