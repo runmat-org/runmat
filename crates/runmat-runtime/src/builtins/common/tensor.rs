@@ -238,6 +238,26 @@ fn parse_integer_dimension(
     Ok(dim)
 }
 
+/// Parse every element of a typed integer tensor as a dimension selector without
+/// routing through the tensor's f64 compatibility backing store.
+pub fn integer_tensor_dimension_vector(
+    tensor: &Tensor,
+    name: &str,
+    allow_zero: bool,
+) -> Option<Result<Vec<usize>, String>> {
+    let storage = tensor.integer_storage()?;
+    Some(
+        (0..storage.len())
+            .map(|index| {
+                let value = storage
+                    .value_at(index)
+                    .expect("integer tensor storage length matches element count");
+                parse_integer_dimension(&value, name, allow_zero)
+            })
+            .collect(),
+    )
+}
+
 fn parse_integer_shape_dimension(value: &IntValue) -> Result<usize, String> {
     value
         .try_to_usize()

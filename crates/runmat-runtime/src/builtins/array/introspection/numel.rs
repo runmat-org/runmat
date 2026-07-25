@@ -195,11 +195,14 @@ fn parse_dimension_args(args: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
                         "numel: dimension vector must contain at least one element",
                     ));
                 }
-                let parsed = t
-                    .data
-                    .iter()
-                    .map(|&raw| parse_dim_scalar(raw))
-                    .collect::<crate::BuiltinResult<Vec<_>>>()?;
+                let parsed = match tensor::integer_tensor_dimension_vector(t, "numel", false) {
+                    Some(parsed) => parsed.map_err(numel_error)?,
+                    None => t
+                        .data
+                        .iter()
+                        .map(|&raw| parse_dim_scalar(raw))
+                        .collect::<crate::BuiltinResult<Vec<_>>>()?,
+                };
                 dims.extend(parsed);
             }
             _ => {
@@ -255,7 +258,7 @@ pub(crate) mod tests {
     fn numel_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::numel_builtin(value, rest))
     }
-    use runmat_builtins::{CellArray, CharArray, Tensor};
+    use runmat_builtins::{CellArray, CharArray, IntegerStorage, Tensor};
 
     #[test]
     fn numel_type_returns_int() {
@@ -322,6 +325,16 @@ pub(crate) mod tests {
         let result =
             numel_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("numel");
         assert_eq!(result, Value::Num(8.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn numel_dimension_vector_reads_integer_tensor_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let dims =
+            Tensor::new_integer(IntegerStorage::U64(vec![1, large]), vec![1, 2]).expect("dims");
+        let parsed = parse_dimension_args(&[Value::Tensor(dims)]).expect("parse dims");
+        assert_eq!(parsed, vec![1, large as usize]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

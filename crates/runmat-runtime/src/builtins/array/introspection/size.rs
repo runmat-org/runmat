@@ -293,11 +293,14 @@ fn parse_dim_selection(arg: &Value) -> crate::BuiltinResult<DimSelection> {
                     "size: dimension vector must contain at least one element",
                 ));
             }
-            let dims = t
-                .data
-                .iter()
-                .map(|&raw| parse_dim_scalar(raw))
-                .collect::<crate::BuiltinResult<Vec<_>>>()?;
+            let dims = match tensor::integer_tensor_dimension_vector(t, "size", false) {
+                Some(parsed) => parsed.map_err(size_error)?,
+                None => t
+                    .data
+                    .iter()
+                    .map(|&raw| parse_dim_scalar(raw))
+                    .collect::<crate::BuiltinResult<Vec<_>>>()?,
+            };
             Ok(DimSelection::Multiple(dims))
         }
         _ => Err(size_error(
@@ -340,6 +343,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::size_builtin(value, rest))
@@ -484,6 +488,17 @@ pub(crate) mod tests {
         match result {
             Value::Num(v) => assert_eq!(v, 1.0),
             other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn size_dimension_vector_reads_integer_tensor_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let dims = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("dims");
+        match parse_dim_selection(&Value::Tensor(dims)).expect("parse dims") {
+            DimSelection::Multiple(parsed) => assert_eq!(parsed, vec![large as usize]),
+            DimSelection::Single(_) => panic!("expected vector dimension selection"),
         }
     }
 
