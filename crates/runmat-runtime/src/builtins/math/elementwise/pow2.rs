@@ -271,7 +271,10 @@ fn pow2_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn pow2_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data: Vec<f64> = tensor.data.iter().map(|&v| v.exp2()).collect();
+    let data: Vec<f64> = tensor::tensor_values_f64(&tensor)
+        .into_iter()
+        .map(|v| v.exp2())
+        .collect();
     Tensor::new(data, tensor.shape.clone())
         .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))
 }
@@ -369,7 +372,12 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(
+            tensor::tensor_values_f64(t)
+                .into_iter()
+                .next()
+                .unwrap_or(0.0),
+        ),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
@@ -525,6 +533,35 @@ pub(crate) mod tests {
         assert!(binary
             .message()
             .contains("complex numbers with integer types"));
+    }
+
+    #[test]
+    fn pow2_unary_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 3]), vec![1, 2]).expect("tensor");
+        tensor.data = vec![0.0, 0.0];
+
+        let result = pow2_builtin(Value::Tensor(tensor), vec![]).expect("pow2");
+
+        match result {
+            Value::Tensor(out) => assert_eq!(out.data, vec![2.0, 8.0]),
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pow2_binary_scalar_reads_typed_integer_storage_exactly() {
+        let mut mantissa =
+            Tensor::new_integer(IntegerStorage::I32(vec![5]), vec![1, 1]).expect("mantissa");
+        mantissa.data = vec![0.0];
+        let mut exponent =
+            Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("exponent");
+        exponent.data = vec![0.0];
+
+        let result = pow2_builtin(Value::Tensor(mantissa), vec![Value::Tensor(exponent)])
+            .expect("pow2 scale");
+
+        assert_eq!(result, Value::Num(40.0));
     }
 
     #[test]

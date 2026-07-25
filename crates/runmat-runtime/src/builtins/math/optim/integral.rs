@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::type_resolvers::numerical_integral_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -387,7 +388,13 @@ async fn scalar_bound(label: &str, value: Value) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => scalar_tensor_value(&tensor)
+            .ok_or_else(|| {
+                integral_error_with_detail(
+                    &INTEGRAL_ERROR_INVALID_INPUT,
+                    format!("{label} must be a finite real scalar"),
+                )
+            })?,
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
             if data[0] != 0 {
                 1.0
@@ -600,6 +607,10 @@ async fn adaptive_simpson(
     Ok(left_value + right_value)
 }
 
+fn scalar_tensor_value(tensor: &Tensor) -> Option<f64> {
+    tensor::tensor_values_f64(tensor).into_iter().next()
+}
+
 fn simpson(a: f64, b: f64, fa: f64, fm: f64, fb: f64) -> f64 {
     (b - a) * (fa + 4.0 * fm + fb) / 6.0
 }
@@ -611,8 +622,13 @@ async fn call_integrand(function: &Value, x: f64) -> BuiltinResult<f64> {
         Value::Num(n) if n.is_finite() => Ok(n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 && tensor.data[0].is_finite() => {
-            Ok(tensor.data[0])
+        Value::Tensor(tensor)
+            if tensor::is_scalar_tensor(&tensor)
+                && scalar_tensor_value(&tensor)
+                    .map(|value| value.is_finite())
+                    .unwrap_or(false) =>
+        {
+            Ok(scalar_tensor_value(&tensor).expect("finite scalar tensor value"))
         }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
@@ -632,6 +648,7 @@ async fn call_integrand(function: &Value, x: f64) -> BuiltinResult<f64> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     const INTEGRAL_HELPER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
         name: "fx",
@@ -698,6 +715,19 @@ mod tests {
         Ok(Value::Num(f64::NAN))
     }
 
+    #[runtime_builtin(
+        name = "__integral_integer_tensor",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn integer_tensor_helper(_x: Value) -> crate::BuiltinResult<Value> {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("tensor");
+        tensor.data = vec![0.0];
+        Ok(Value::Tensor(tensor))
+    }
+
     fn run(function: Value, a: f64, b: f64) -> crate::BuiltinResult<Value> {
         block_on(integral_builtin(
             function,
@@ -713,6 +743,44 @@ mod tests {
             INTEGRAL_TEST_HELPER_DESCRIPTOR.signatures[0].label,
             "fx = __integral_helper(x)"
         );
+    }
+
+    #[test]
+    fn integral_bounds_read_typed_integer_storage_exactly() {
+        let mut lower =
+            Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).expect("lower");
+        lower.data = vec![0.0];
+        let mut upper =
+            Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("upper");
+        upper.data = vec![0.0];
+
+        let result = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_square".to_string()),
+            Value::Tensor(lower),
+            Value::Tensor(upper),
+            Vec::new(),
+        ))
+        .expect("integral");
+
+        match result {
+            Value::Num(value) => assert!((value - (26.0 / 3.0)).abs() < 1.0e-6),
+            other => panic!("expected numeric result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn integral_integrand_reads_typed_integer_scalar_storage_exactly() {
+        let result = run(
+            Value::FunctionHandle("__integral_integer_tensor".to_string()),
+            0.0,
+            2.0,
+        )
+        .expect("integral");
+
+        match result {
+            Value::Num(value) => assert!((value - 6.0).abs() < 1.0e-9),
+            other => panic!("expected numeric result, got {other:?}"),
+        }
     }
 
     #[test]
