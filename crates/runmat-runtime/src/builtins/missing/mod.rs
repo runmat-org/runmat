@@ -3,8 +3,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, ObjectInstance, ResolveContext, StringArray, StructValue,
-    Tensor, Type, Value,
+    CellArray, CharArray, IntValue, LogicalArray, ObjectInstance, ResolveContext, StringArray,
+    StructValue, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -485,7 +485,7 @@ fn parse_size_args(args: &[Value]) -> BuiltinResult<Vec<usize>> {
     }
     if args.len() == 1 {
         match &args[0] {
-            Value::Tensor(tensor) => return tensor_shape_as_size(&tensor.data),
+            Value::Tensor(tensor) => return tensor_shape_as_size(tensor),
             Value::Int(_) | Value::Num(_) => {
                 let n = scalar_usize(&args[0], "missing size")?;
                 return Ok(vec![n, n]);
@@ -518,11 +518,23 @@ fn parse_size_args(args: &[Value]) -> BuiltinResult<Vec<usize>> {
     }
 }
 
-fn tensor_shape_as_size(data: &[f64]) -> BuiltinResult<Vec<usize>> {
-    if data.is_empty() {
+fn tensor_shape_as_size(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
+    if tensor.data.is_empty() {
         return Ok(vec![0, 0]);
     }
-    data.iter()
+    if let Some(storage) = tensor.integer_storage() {
+        return (0..storage.len())
+            .map(|index| {
+                let value = storage.value_at(index).ok_or_else(|| {
+                    internal_error("missing: integer size vector storage length mismatch")
+                })?;
+                integer_size_to_usize(&value, "missing size")
+            })
+            .collect();
+    }
+    tensor
+        .data
+        .iter()
         .map(|value| {
             if !value.is_finite() || *value < 0.0 || value.fract() != 0.0 {
                 return Err(invalid_argument(
@@ -2106,7 +2118,29 @@ fn validate_matrix_dim(dim: usize, context: &str) -> BuiltinResult<()> {
 }
 
 fn scalar_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
+    match value {
+        Value::Int(integer) => return integer_size_to_usize(integer, context),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            if let Some(storage) = tensor.integer_storage() {
+                let integer = storage.value_at(0).ok_or_else(|| {
+                    internal_error(format!("{context}: integer scalar storage length mismatch"))
+                })?;
+                return integer_size_to_usize(&integer, context);
+            }
+        }
+        _ => {}
+    }
     let n = numeric_scalar(value, context)?;
+    numeric_size_to_usize(n, context)
+}
+
+fn integer_size_to_usize(value: &IntValue, context: &str) -> BuiltinResult<usize> {
+    value.try_to_usize().ok_or_else(|| {
+        invalid_argument(format!("{context}: expected nonnegative platform integer"))
+    })
+}
+
+fn numeric_size_to_usize(n: f64, context: &str) -> BuiltinResult<usize> {
     if !n.is_finite() || n < 0.0 || n.fract() != 0.0 {
         return Err(invalid_argument(format!(
             "{context}: expected nonnegative integer"
@@ -2144,6 +2178,7 @@ fn is_missing_text(text: &str) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -2157,6 +2192,47 @@ mod tests {
         assert!(
             matches!(shaped, Value::StringArray(sa) if sa.shape == vec![2, 3] && sa.data.len() == 6)
         );
+    }
+
+    #[test]
+    fn missing_preserves_typed_integer_size_vectors_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let dims = Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
+
+        let result = block_on(missing_builtin(vec![Value::Tensor(dims)])).unwrap();
+
+        match result {
+            Value::StringArray(array) => {
+                assert_eq!(array.shape, vec![large as usize, 0]);
+                assert!(array.data.is_empty());
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_parses_typed_integer_scalar_tensors_exactly() {
+        let scalar = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap(),
+        );
+
+        assert_eq!(
+            scalar_usize(&scalar, "missing size").unwrap(),
+            9_007_199_254_740_993
+        );
+    }
+
+    #[test]
+    fn missing_rejects_negative_typed_integer_sizes() {
+        assert!(scalar_usize(
+            &Value::Tensor(Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1]).unwrap()),
+            "missing size",
+        )
+        .is_err());
+
+        let dims = Tensor::new_integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]).unwrap();
+        assert!(tensor_shape_as_size(&dims).is_err());
     }
 
     #[test]
