@@ -6,7 +6,7 @@ use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Tensor, Value,
+    IntValue, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
@@ -695,6 +695,7 @@ fn parse_hist_bins(arg: Option<Value>, sample_len: usize) -> BuiltinResult<HistB
     let spec = match arg {
         None => HistBinSpec::Auto,
         Some(Value::Tensor(tensor)) => parse_center_vector(tensor)?,
+        Some(Value::Int(value)) => parse_integer_bin_count(&value)?,
         Some(Value::GpuTensor(_)) => {
             return Err(hist_err("hist: bin definitions must reside on the host"))
         }
@@ -960,6 +961,9 @@ fn ensure_no_explicit_bins(options: &HistBinOptions, source: &str) -> BuiltinRes
 }
 
 fn parse_num_bins_value(value: &Value) -> BuiltinResult<usize> {
+    if let Some(count) = exact_integer_scalar(value) {
+        return parse_integer_num_bins(&count);
+    }
     let Some(scalar) = value_as_f64(value) else {
         return Err(hist_err("hist: NumBins must be a numeric scalar"));
     };
@@ -1019,13 +1023,19 @@ fn parse_hist_bin_method(value: &Value) -> BuiltinResult<HistBinMethod> {
 }
 
 fn parse_center_vector(tensor: Tensor) -> BuiltinResult<HistBinSpec> {
-    let values = numeric_vector(tensor);
-    if values.is_empty() {
+    if tensor.data.is_empty() {
         return Err(hist_err("hist: bin center array cannot be empty"));
     }
-    if values.len() == 1 {
-        return parse_bin_count_value(values[0]);
+    if tensor.data.len() == 1 {
+        if let Some(value) = tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+        {
+            return parse_integer_bin_count(&value);
+        }
+        return parse_bin_count_value(tensor.data[0]);
     }
+    let values = numeric_vector(tensor);
     validate_monotonic(&values)?;
     ensure_uniform_spacing(&values)?;
     Ok(HistBinSpec::Centers(values))
@@ -1037,6 +1047,36 @@ fn parse_bin_count_value(value: f64) -> BuiltinResult<HistBinSpec> {
     } else {
         Err(hist_err("hist: bin count must be positive"))
     }
+}
+
+fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn parse_integer_num_bins(value: &IntValue) -> BuiltinResult<usize> {
+    let Some(count) = value.try_to_usize() else {
+        return Err(hist_err("hist: NumBins must be a positive finite scalar"));
+    };
+    if count == 0 {
+        return Err(hist_err("hist: NumBins must be a positive finite scalar"));
+    }
+    Ok(count)
+}
+
+fn parse_integer_bin_count(value: &IntValue) -> BuiltinResult<HistBinSpec> {
+    let Some(count) = value.try_to_usize() else {
+        return Err(hist_err("hist: bin count must be positive"));
+    };
+    if count == 0 {
+        return Err(hist_err("hist: bin count must be positive"));
+    }
+    Ok(HistBinSpec::Count(count))
 }
 
 fn is_bin_candidate(value: &Value) -> bool {
@@ -1550,6 +1590,38 @@ pub(crate) mod tests {
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn hist_bin_counts_read_typed_integer_tensors_exactly() {
+        let exact = 9_007_199_254_740_993_u64;
+        let scalar_count = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![exact]),
+            vec![1, 1],
+        )
+        .expect("typed bin count");
+        match parse_hist_bins(Some(Value::Tensor(scalar_count)), 10).unwrap() {
+            HistBinSpec::Count(count) => assert_eq!(count, exact as usize),
+            _ => panic!("expected count bin spec"),
+        }
+
+        let num_bins = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![exact]),
+            vec![1, 1],
+        )
+        .expect("typed NumBins");
+        assert_eq!(
+            parse_num_bins_value(&Value::Tensor(num_bins)).unwrap(),
+            exact as usize
+        );
+
+        let negative = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![-1]),
+            vec![1, 1],
+        )
+        .expect("negative bin count");
+        assert!(parse_hist_bins(Some(Value::Tensor(negative)), 10).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

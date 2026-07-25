@@ -2,7 +2,8 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
@@ -434,6 +435,9 @@ fn split_mesh_density(args: Vec<Value>) -> BuiltinResult<(usize, Vec<Value>)> {
 }
 
 fn parse_mesh_density(value: &Value) -> BuiltinResult<usize> {
+    if let Some(count) = exact_integer_scalar(value) {
+        return parse_mesh_density_integer(&count);
+    }
     let values = numeric_vector(value)?;
     if values.len() != 1 {
         return Err(fsurf_invalid("MeshDensity must be a scalar"));
@@ -449,6 +453,35 @@ fn parse_mesh_density(value: &Value) -> BuiltinResult<usize> {
         ));
     }
     let density = rounded as usize;
+    if density > MAX_MESH_DENSITY {
+        return Err(fsurf_invalid(format!(
+            "MeshDensity must be at most {MAX_MESH_DENSITY}"
+        )));
+    }
+    Ok(density)
+}
+
+fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn parse_mesh_density_integer(value: &IntValue) -> BuiltinResult<usize> {
+    let Some(density) = value.try_to_usize() else {
+        return Err(fsurf_invalid(
+            "MeshDensity must be an integer greater than or equal to 2",
+        ));
+    };
+    if density < 2 {
+        return Err(fsurf_invalid(
+            "MeshDensity must be an integer greater than or equal to 2",
+        ));
+    }
     if density > MAX_MESH_DENSITY {
         return Err(fsurf_invalid(format!(
             "MeshDensity must be at most {MAX_MESH_DENSITY}"
@@ -822,6 +855,30 @@ mod tests {
         ]))
         .expect_err("expected mesh-density validation error");
         assert_eq!(err.identifier(), FSURF_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn fsurf_mesh_density_reads_typed_integer_tensor_exactly() {
+        let exact = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![400]),
+            vec![1, 1],
+        )
+        .expect("typed density");
+        assert_eq!(parse_mesh_density(&Value::Tensor(exact)).unwrap(), 400);
+
+        let too_large = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![401]),
+            vec![1, 1],
+        )
+        .expect("large density");
+        assert!(parse_mesh_density(&Value::Tensor(too_large)).is_err());
+
+        let negative = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![-1]),
+            vec![1, 1],
+        )
+        .expect("negative density");
+        assert!(parse_mesh_density(&Value::Tensor(negative)).is_err());
     }
 
     #[test]

@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Tensor, Type, Value,
+    IntValue, NumericDType, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::surface::ColorMap;
@@ -364,9 +364,11 @@ fn parse_length_arg(args: &[Value], builtin: &'static str) -> BuiltinResult<usiz
 }
 
 fn colormap_length(value: &Value, builtin: &'static str) -> BuiltinResult<usize> {
+    if let Some(length) = exact_integer_scalar(value) {
+        return colormap_integer_length(&length, builtin);
+    }
     let raw = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
         Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
         _ => return Err(invalid(builtin, "colormap length must be a numeric scalar")),
     };
@@ -380,6 +382,29 @@ fn colormap_length(value: &Value, builtin: &'static str) -> BuiltinResult<usize>
         return Err(invalid(builtin, "colormap length is too large"));
     }
     Ok(raw as usize)
+}
+
+fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn colormap_integer_length(value: &IntValue, builtin: &'static str) -> BuiltinResult<usize> {
+    let Some(length) = value.try_to_usize() else {
+        return Err(invalid(
+            builtin,
+            "colormap length must be a nonnegative integer",
+        ));
+    };
+    if length > MAX_COLORMAP_LENGTH {
+        return Err(invalid(builtin, "colormap length is too large"));
+    }
+    Ok(length)
 }
 
 fn rgb_tensor_from_colors(colors: &[[f64; 3]]) -> Tensor {
@@ -534,6 +559,33 @@ mod tests {
         assert!(err.message().contains("nonnegative integer"));
         let err = colorcube_builtin(vec![Value::Num(-1.0)]).expect_err("negative length");
         assert!(err.message().contains("nonnegative integer"));
+    }
+
+    #[test]
+    fn length_argument_reads_typed_integer_tensor_exactly() {
+        let length = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![MAX_COLORMAP_LENGTH as u64]),
+            vec![1, 1],
+        )
+        .expect("typed length");
+        assert_eq!(
+            colormap_length(&Value::Tensor(length), "parula").unwrap(),
+            MAX_COLORMAP_LENGTH
+        );
+
+        let too_large = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![MAX_COLORMAP_LENGTH as u64 + 1]),
+            vec![1, 1],
+        )
+        .expect("too large");
+        assert!(colormap_length(&Value::Tensor(too_large), "parula").is_err());
+
+        let negative = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![-1]),
+            vec![1, 1],
+        )
+        .expect("negative");
+        assert!(colormap_length(&Value::Tensor(negative), "parula").is_err());
     }
 
     #[test]

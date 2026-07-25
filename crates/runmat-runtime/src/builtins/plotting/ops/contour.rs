@@ -6,7 +6,7 @@ use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    IntValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::{BoundingBox, Vertex};
@@ -772,6 +772,7 @@ impl ContourCall {
 pub(crate) fn parse_level_spec(value: Value, context: &str) -> BuiltinResult<ContourLevelSpec> {
     match value {
         Value::Tensor(tensor) => parse_tensor_levels(tensor, context),
+        Value::Int(value) => parse_integer_level_count(&value, context),
         other => {
             if let Some(count) = value_as_f64(&other) {
                 parse_scalar_level_count(count, context)
@@ -815,6 +816,12 @@ fn parse_tensor_levels(tensor: Tensor, context: &str) -> BuiltinResult<ContourLe
         ));
     }
     if tensor.data.len() == 1 {
+        if let Some(value) = tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+        {
+            return parse_integer_level_count(&value, context);
+        }
         return parse_scalar_level_count(tensor.data[0], context);
     }
     if tensor.data.iter().all(|value| *value == tensor.data[0]) {
@@ -829,6 +836,22 @@ fn parse_tensor_levels(tensor: Tensor, context: &str) -> BuiltinResult<ContourLe
         }
     }
     Ok(ContourLevelSpec::Values(tensor.data))
+}
+
+fn parse_integer_level_count(value: &IntValue, context: &str) -> BuiltinResult<ContourLevelSpec> {
+    let Some(count) = value.try_to_usize() else {
+        return Err(plotting_error(
+            context,
+            format!("{context}: level count must be positive"),
+        ));
+    };
+    if count == 0 {
+        return Err(plotting_error(
+            context,
+            format!("{context}: level count must be positive"),
+        ));
+    }
+    Ok(ContourLevelSpec::Count(count))
 }
 
 pub(crate) fn apply_contour_options(
@@ -2290,6 +2313,30 @@ pub(crate) mod tests {
             ContourLevelSpec::Values(values) => assert_eq!(values, vec![0.0, 1.0, 2.0]),
             _ => panic!("expected explicit levels"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn scalar_level_count_reads_typed_integer_tensor_exactly() {
+        setup_plot_tests();
+        let exact = 9_007_199_254_740_993_u64;
+        let tensor = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![exact]),
+            vec![1, 1],
+        )
+        .expect("typed level count");
+
+        match parse_level_spec(Value::Tensor(tensor), "contour").unwrap() {
+            ContourLevelSpec::Count(count) => assert_eq!(count, exact as usize),
+            other => panic!("expected exact level count, got {other:?}"),
+        }
+
+        let negative = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![-1]),
+            vec![1, 1],
+        )
+        .expect("negative level count");
+        assert!(parse_level_spec(Value::Tensor(negative), "contour").is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

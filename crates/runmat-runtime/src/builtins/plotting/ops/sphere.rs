@@ -4,7 +4,7 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LiteralValue, ResolveContext, Tensor, Type, Value,
+    IntValue, LiteralValue, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::SurfacePlot;
@@ -379,6 +379,9 @@ fn tensor_to_plot_grid(tensor: Tensor) -> BuiltinResult<Vec<Vec<f64>>> {
 }
 
 async fn parse_n_value(value: &Value) -> BuiltinResult<usize> {
+    if let Some(raw) = exact_integer_scalar(value) {
+        return parse_n_integer(&raw);
+    }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
         .map_err(|err| sphere_error(&SPHERE_ERROR_INVALID_N, err))?
@@ -403,6 +406,27 @@ fn parse_n_number(raw: f64) -> BuiltinResult<usize> {
         ));
     }
     let n = rounded as usize;
+    validate_grid_size(n)?;
+    Ok(n)
+}
+
+fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn parse_n_integer(raw: &IntValue) -> BuiltinResult<usize> {
+    let Some(n) = raw.try_to_usize() else {
+        return Err(sphere_error(
+            &SPHERE_ERROR_INVALID_N,
+            "n must be a non-negative integer representable on this platform",
+        ));
+    };
     validate_grid_size(n)?;
     Ok(n)
 }
@@ -530,6 +554,30 @@ mod tests {
             panic!("expected X tensor");
         };
         assert_eq!(tensor.shape, vec![21, 21]);
+    }
+
+    #[test]
+    fn sphere_n_reads_typed_integer_tensor_exactly() {
+        let n = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![42]),
+            vec![1, 1],
+        )
+        .expect("typed n");
+        assert_eq!(block_on(parse_n_value(&Value::Tensor(n))).unwrap(), 42);
+
+        let negative = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![-1]),
+            vec![1, 1],
+        )
+        .expect("negative n");
+        assert!(block_on(parse_n_value(&Value::Tensor(negative))).is_err());
+
+        let too_large = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+            vec![1, 1],
+        )
+        .expect("large n");
+        assert!(block_on(parse_n_value(&Value::Tensor(too_large))).is_err());
     }
 
     #[test]
