@@ -245,6 +245,52 @@ fn write_sample_parquet(path: &Path) {
     fs::write(path, bytes).expect("write parquet sample");
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn write_integer_parquet(path: &Path) {
+    use arrow_array::{
+        Int16Array, Int32Array, Int64Array, Int8Array, RecordBatch, UInt16Array, UInt32Array,
+        UInt64Array, UInt8Array,
+    };
+    use arrow_schema::{DataType, Field, Schema};
+    use parquet::arrow::ArrowWriter;
+    use parquet::file::properties::WriterProperties;
+    use std::sync::Arc;
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("I8", DataType::Int8, true),
+        Field::new("I16", DataType::Int16, true),
+        Field::new("I32", DataType::Int32, true),
+        Field::new("I64", DataType::Int64, true),
+        Field::new("U8", DataType::UInt8, true),
+        Field::new("U16", DataType::UInt16, true),
+        Field::new("U32", DataType::UInt32, true),
+        Field::new("U64", DataType::UInt64, true),
+    ]));
+    let properties = WriterProperties::builder()
+        .set_max_row_group_row_count(Some(2))
+        .build();
+    let mut bytes = Vec::new();
+    let mut writer = ArrowWriter::try_new(&mut bytes, schema.clone(), Some(properties))
+        .expect("create parquet writer");
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(Int8Array::from(vec![Some(i8::MIN), None])),
+            Arc::new(Int16Array::from(vec![Some(i16::MIN), None])),
+            Arc::new(Int32Array::from(vec![Some(i32::MIN), None])),
+            Arc::new(Int64Array::from(vec![Some(i64::MIN), None])),
+            Arc::new(UInt8Array::from(vec![Some(u8::MAX), None])),
+            Arc::new(UInt16Array::from(vec![Some(u16::MAX), None])),
+            Arc::new(UInt32Array::from(vec![Some(u32::MAX), None])),
+            Arc::new(UInt64Array::from(vec![Some(u64::MAX), None])),
+        ],
+    )
+    .expect("create parquet batch");
+    writer.write(&batch).expect("write parquet batch");
+    writer.close().expect("close parquet writer");
+    fs::write(path, bytes).expect("write parquet integer sample");
+}
+
 #[test]
 fn readtable_imports_headered_numeric_and_text_columns() {
     let path = unique_path("readtable_basic");
@@ -315,6 +361,51 @@ fn parquetread_imports_common_column_types() {
         Value::LogicalArray(array) => assert_eq!(array.data, vec![1, 0, 0]),
         other => panic!("expected logical column, got {other:?}"),
     }
+    match table_member_get(&table, &Value::from("Group")).unwrap() {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![3, 1]);
+            assert_eq!(
+                tensor.integer_storage(),
+                Some(&IntegerStorage::I32(vec![1, 1, 2]))
+            );
+        }
+        other => panic!("expected integer tensor column, got {other:?}"),
+    }
+
+    let _ = fs::remove_file(&path);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn parquetread_preserves_all_integer_physical_column_classes() {
+    let path = unique_path("parquetread_integer_columns").with_extension("parquet");
+    write_integer_parquet(&path);
+
+    let table = object(
+        block_on(parquetread_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            Vec::new(),
+        ))
+        .expect("parquetread"),
+    );
+
+    let cases = [
+        ("I8", IntegerStorage::I8(vec![i8::MIN, 0])),
+        ("I16", IntegerStorage::I16(vec![i16::MIN, 0])),
+        ("I32", IntegerStorage::I32(vec![i32::MIN, 0])),
+        ("I64", IntegerStorage::I64(vec![i64::MIN, 0])),
+        ("U8", IntegerStorage::U8(vec![u8::MAX, 0])),
+        ("U16", IntegerStorage::U16(vec![u16::MAX, 0])),
+        ("U32", IntegerStorage::U32(vec![u32::MAX, 0])),
+        ("U64", IntegerStorage::U64(vec![u64::MAX, 0])),
+    ];
+    for (name, expected) in cases {
+        let Value::Tensor(column) = table_member_get(&table, &Value::from(name)).unwrap() else {
+            panic!("expected tensor column for {name}");
+        };
+        assert_eq!(column.shape, vec![2, 1], "{name}");
+        assert_eq!(column.integer_storage(), Some(&expected), "{name}");
+    }
 
     let _ = fs::remove_file(&path);
 }
@@ -346,7 +437,10 @@ fn parquetread_supports_selected_variables_and_row_groups() {
     match table_member_get(&table, &Value::from("Group")).unwrap() {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 1]);
-            assert_eq!(tensor.data, vec![2.0]);
+            assert_eq!(
+                tensor.integer_storage(),
+                Some(&IntegerStorage::I32(vec![2]))
+            );
         }
         other => panic!("expected tensor column, got {other:?}"),
     }
