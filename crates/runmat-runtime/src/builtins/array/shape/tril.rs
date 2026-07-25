@@ -296,8 +296,17 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
             Ok(rounded as isize)
         }
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
-            let val = t.data[0];
-            scalar_to_isize(&Value::Num(val), name)
+            if let Some(storage) = t.integer_storage() {
+                return scalar_to_isize(
+                    &Value::Int(
+                        storage
+                            .value_at(0)
+                            .expect("scalar integer storage has one element"),
+                    ),
+                    name,
+                );
+            }
+            scalar_to_isize(&Value::Num(t.data[0]), name)
         }
         Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
         other => Err(tril_error_with_message(
@@ -453,6 +462,12 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Type};
 
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
     #[test]
     fn tril_offset_parser_preserves_signed_values_and_rejects_unrepresentable_uint64() {
         assert_eq!(
@@ -461,6 +476,24 @@ pub(crate) mod tests {
         );
         let err = scalar_to_isize(&Value::Int(IntValue::U64(u64::MAX)), "tril")
             .expect_err("unrepresentable typed offset must not saturate");
+        assert_eq!(err.identifier(), TRIL_ERROR_INVALID_OFFSET.identifier);
+    }
+
+    #[test]
+    fn tril_offset_parser_reads_typed_integer_tensor_storage_exactly() {
+        assert_eq!(
+            scalar_to_isize(
+                &poisoned_int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1]),
+                "tril",
+            )
+            .expect("typed integer tensor offset"),
+            -1
+        );
+        let err = scalar_to_isize(
+            &poisoned_int_tensor(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]),
+            "tril",
+        )
+        .expect_err("unrepresentable typed integer tensor offset");
         assert_eq!(err.identifier(), TRIL_ERROR_INVALID_OFFSET.identifier);
     }
 
