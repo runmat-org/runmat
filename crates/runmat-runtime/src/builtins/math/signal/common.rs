@@ -123,8 +123,7 @@ fn tensor_to_complex_vector(
 ) -> BuiltinResult<ComplexVectorInput> {
     ensure_vector_shape(builtin, label, &tensor.shape)?;
     Ok(ComplexVectorInput {
-        data: tensor
-            .data
+        data: tensor::tensor_values_f64(&tensor)
             .into_iter()
             .map(|re| Complex::new(re, 0.0))
             .collect(),
@@ -268,7 +267,7 @@ pub(crate) fn parse_scalar_f64(
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
         Value::Bool(b) => f64::from(u8::from(*b)),
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if t.data.len() == 1 => tensor::tensor_values_f64(t)[0],
         _ => {
             return Err(signal_error(
                 builtin,
@@ -320,7 +319,7 @@ pub(crate) fn scalar_length_arg(value: Value) -> Result<usize, WindowArgError> {
         Value::Num(n) => n,
         Value::Int(i) => i.to_f64(),
         Value::Bool(b) => usize::from(b) as f64,
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if t.data.len() == 1 => tensor::tensor_values_f64(&t)[0],
         _ => return Err(WindowArgError::InvalidLength),
     };
     if !scalar.is_finite() || scalar < 0.0 {
@@ -424,6 +423,7 @@ fn string_keyword(value: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::IntegerStorage;
 
     #[test]
     fn complex_vector_to_value_treats_near_zero_imaginary_as_real() {
@@ -442,6 +442,34 @@ mod tests {
     }
 
     #[test]
+    fn signal_complex_vector_parser_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![3, -2, 5]), vec![1, 3]).unwrap();
+        tensor.data = vec![0.0, 0.0, 0.0];
+
+        let input = tensor_to_complex_vector("test", "x", tensor).expect("vector");
+
+        assert_eq!(
+            input.data,
+            vec![
+                Complex::new(3.0, 0.0),
+                Complex::new(-2.0, 0.0),
+                Complex::new(5.0, 0.0)
+            ]
+        );
+    }
+
+    #[test]
+    fn signal_scalar_parser_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).unwrap();
+        tensor.data[0] = 0.0;
+
+        let scalar = parse_scalar_f64("test", "fs", &Value::Tensor(tensor)).expect("scalar");
+
+        assert_eq!(scalar, 7.0);
+    }
+
+    #[test]
     fn parse_nonnegative_integer_rejects_values_outside_usize_range() {
         let err = parse_nonnegative_integer("test", "n", &Value::Num((usize::MAX as f64) * 2.0))
             .expect_err("out-of-range integer should fail");
@@ -455,6 +483,16 @@ mod tests {
             .expect_err("out-of-range length should fail");
 
         assert_eq!(err, WindowArgError::InvalidLength);
+    }
+
+    #[test]
+    fn scalar_length_arg_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
+        tensor.data[0] = 0.0;
+
+        let len = scalar_length_arg(Value::Tensor(tensor)).expect("valid length");
+
+        assert_eq!(len, 4);
     }
 
     #[test]
