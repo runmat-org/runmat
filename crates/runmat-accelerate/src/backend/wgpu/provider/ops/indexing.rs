@@ -1232,4 +1232,53 @@ mod tests {
             HostIntegerDataOwned::U64(vec![u64::MAX, 0, 1_u64 << 63])
         );
     }
+
+    #[test]
+    fn wgpu_linear_gather_and_scatter_preserve_all_native_integer_classes() {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        macro_rules! check {
+            ($view:ident, $owned:ident, $values:expr, $expected:expr) => {{
+                let source = provider
+                    .upload_integer_exec(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&$values),
+                        shape: &[1, 3],
+                    })
+                    .expect("upload integer source");
+                let gathered = provider
+                    .gather_linear_exec(&source, &[2, 0], &[1, 2])
+                    .expect("gather integer values");
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&gathered))
+                        .expect("download gathered")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![($expected)[0], ($expected)[1]])
+                );
+                let target = provider
+                    .upload_integer_exec(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&[0 as _, 0 as _, 0 as _]),
+                        shape: &[1, 3],
+                    })
+                    .expect("upload integer target");
+                provider
+                    .scatter_linear_exec(&target, &[0, 2], &gathered)
+                    .expect("scatter integer values");
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&target))
+                        .expect("download target")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![($expected)[0], 0, ($expected)[1]])
+                );
+            }};
+        }
+        check!(I8, I8, [i8::MIN, -1, i8::MAX], [i8::MAX, i8::MIN]);
+        check!(I16, I16, [i16::MIN, -1, i16::MAX], [i16::MAX, i16::MIN]);
+        check!(I32, I32, [i32::MIN, -1, i32::MAX], [i32::MAX, i32::MIN]);
+        check!(I64, I64, [i64::MIN, -1, i64::MAX], [i64::MAX, i64::MIN]);
+        check!(U8, U8, [0, 1, u8::MAX], [u8::MAX, 0]);
+        check!(U16, U16, [0, 1, u16::MAX], [u16::MAX, 0]);
+        check!(U32, U32, [0, 1, u32::MAX], [u32::MAX, 0]);
+        check!(U64, U64, [0, 1, u64::MAX], [u64::MAX, 0]);
+    }
 }
