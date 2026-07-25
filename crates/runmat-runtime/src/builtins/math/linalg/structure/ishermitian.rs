@@ -370,7 +370,7 @@ fn parse_tolerance_value(value: &Value) -> BuiltinResult<f64> {
     let raw = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => t.data[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_values_f64(t)[0],
         Value::Bool(b) => {
             if *b {
                 1.0
@@ -802,6 +802,23 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[test]
+    fn tolerance_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = ComplexTensor::new(
+            vec![(1.0, 0.0), (5.0, 0.0), (4.0, 0.0), (1.0, 0.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let mut tolerance =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("tolerance");
+        tolerance.data[0] = 0.0;
+
+        let result =
+            ishermitian_builtin(Value::ComplexTensor(tensor), vec![Value::Tensor(tolerance)])
+                .expect("ishermitian");
+        assert_eq!(result, Value::Bool(true));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_matrix_is_promoted() {
@@ -900,6 +917,18 @@ pub(crate) mod tests {
     fn rejects_negative_tolerance() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err = ishermitian_builtin(Value::Tensor(tensor), vec![Value::Num(-1.0)])
+            .expect_err("ishermitian should error on negative tolerance");
+        let message = err.to_string();
+        assert!(message.contains("tolerance must be >= 0"));
+    }
+
+    #[test]
+    fn rejects_negative_typed_integer_tensor_tolerance() {
+        let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let mut tolerance =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("tolerance");
+        tolerance.data[0] = 1.0;
+        let err = ishermitian_builtin(Value::Tensor(tensor), vec![Value::Tensor(tolerance)])
             .expect_err("ishermitian should error on negative tolerance");
         let message = err.to_string();
         assert!(message.contains("tolerance must be >= 0"));

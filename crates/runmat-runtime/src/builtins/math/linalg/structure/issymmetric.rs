@@ -385,7 +385,7 @@ fn parse_tolerance_value(value: &Value) -> BuiltinResult<f64> {
     let raw = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => t.data[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_values_f64(t)[0],
         Value::Bool(b) => {
             if *b {
                 1.0
@@ -781,6 +781,18 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[test]
+    fn tolerance_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new(vec![1.0, 5.0, 4.0, 1.0], vec![2, 2]).unwrap();
+        let mut tolerance =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("tolerance");
+        tolerance.data[0] = 0.0;
+
+        let result = issymmetric_builtin(Value::Tensor(tensor), vec![Value::Tensor(tolerance)])
+            .expect("issymmetric");
+        assert_eq!(result, Value::Bool(true));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_matrix_symmetry() {
@@ -880,6 +892,21 @@ pub(crate) mod tests {
     fn negative_tolerance_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let err = issymmetric_builtin(Value::Tensor(tensor), vec![Value::Num(-1.0)]).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("tolerance must be >= 0"),
+            "unexpected error message: {message}"
+        );
+    }
+
+    #[test]
+    fn negative_typed_integer_tensor_tolerance_errors() {
+        let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
+        let mut tolerance =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("tolerance");
+        tolerance.data[0] = 1.0;
+        let err =
+            issymmetric_builtin(Value::Tensor(tensor), vec![Value::Tensor(tolerance)]).unwrap_err();
         let message = err.to_string();
         assert!(
             message.contains("tolerance must be >= 0"),
