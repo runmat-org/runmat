@@ -1317,6 +1317,19 @@ impl AccelProvider for WgpuProvider {
             self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)
         })
     }
+    fn reduce_integer_sum_native<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_sum_prod_global_exec(false, "sum", a) })
+    }
+    fn reduce_integer_sum_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_sum_prod_dim_exec(false, dim, "sum", a) })
+    }
     fn reduce_nnz_dim<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
@@ -1338,6 +1351,19 @@ impl AccelProvider for WgpuProvider {
         Box::pin(async move {
             self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Prod)
         })
+    }
+    fn reduce_integer_prod_native<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_sum_prod_global_exec(true, "prod", a) })
+    }
+    fn reduce_integer_prod_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_sum_prod_dim_exec(true, dim, "prod", a) })
     }
     fn reduce_mean_dim<'a>(
         &'a self,

@@ -1,5 +1,8 @@
 use super::*;
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, IntegerElementType};
+use runmat_accelerate_api::{
+    GpuTensorHandle, GpuTensorStorage, HostIntegerDataView, HostIntegerTensorView,
+    IntegerElementType,
+};
 
 pub(crate) fn integer_type_code(element_type: IntegerElementType) -> u32 {
     match element_type {
@@ -21,6 +24,73 @@ fn integer_word_count(element_type: IntegerElementType, len: usize) -> Result<us
     };
     len.checked_mul(lanes)
         .ok_or_else(|| anyhow!("integer gpuArray word count overflow"))
+}
+
+fn identity_integer_buffer(
+    provider: &WgpuProvider,
+    element_type: IntegerElementType,
+    len: usize,
+    shape: &[usize],
+    is_product: bool,
+) -> Result<GpuTensorHandle> {
+    match element_type {
+        IntegerElementType::I8 => {
+            let data = vec![if is_product { 1_i8 } else { 0_i8 }; len];
+            provider.upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&data),
+                shape,
+            })
+        }
+        IntegerElementType::I16 => {
+            let data = vec![if is_product { 1_i16 } else { 0_i16 }; len];
+            provider.upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::I16(&data),
+                shape,
+            })
+        }
+        IntegerElementType::I32 => {
+            let data = vec![if is_product { 1_i32 } else { 0_i32 }; len];
+            provider.upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::I32(&data),
+                shape,
+            })
+        }
+        IntegerElementType::I64 => {
+            let data = vec![if is_product { 1_i64 } else { 0_i64 }; len];
+            provider.upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&data),
+                shape,
+            })
+        }
+        IntegerElementType::U8 => {
+            let data = vec![if is_product { 1_u8 } else { 0_u8 }; len];
+            provider.upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U8(&data),
+                shape,
+            })
+        }
+        IntegerElementType::U16 => {
+            let data = vec![if is_product { 1_u16 } else { 0_u16 }; len];
+            provider.upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U16(&data),
+                shape,
+            })
+        }
+        IntegerElementType::U32 => {
+            let data = vec![if is_product { 1_u32 } else { 0_u32 }; len];
+            provider.upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U32(&data),
+                shape,
+            })
+        }
+        IntegerElementType::U64 => {
+            let data = vec![if is_product { 1_u64 } else { 0_u64 }; len];
+            provider.upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&data),
+                shape,
+            })
+        }
+    }
 }
 
 pub(crate) struct IntegerBroadcastPlan {
@@ -133,6 +203,167 @@ pub(crate) fn integer_broadcast_plan(
 }
 
 impl WgpuProvider {
+    pub(crate) fn integer_reduce_sum_prod_dim_exec(
+        &self,
+        is_product: bool,
+        dim: usize,
+        operation_name: &str,
+        a: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry_raw(a)?;
+        let integer_type = entry
+            .integer_type
+            .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
+        ensure!(
+            entry.storage == GpuTensorStorage::Real,
+            "{operation_name}: complex integer gpuArray reduction is not supported"
+        );
+        ensure!(
+            entry.shape.len() == 2,
+            "{operation_name}: only 2D tensors are supported"
+        );
+        let rows = entry.shape[0];
+        let cols = entry.shape[1];
+        let (out_len, out_shape, reduce_len) = match dim {
+            0 => (cols, vec![1, cols], rows),
+            1 => (rows, vec![rows, 1], cols),
+            _ => return Err(anyhow!("{operation_name}: only dims 0 or 1 are supported")),
+        };
+        if rows > u32::MAX as usize || cols > u32::MAX as usize {
+            return Err(gpu_dispatch_length_limit_error(
+                operation_name,
+                rows.max(cols),
+            ));
+        }
+        let raw_words = integer_word_count(integer_type, out_len)?;
+        let allocated_bytes = (raw_words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
+        if out_len == 0 {
+            return Ok(self.register_integer_buffer(
+                self.create_storage_buffer(0, "runmat-integer-reduce-empty"),
+                out_shape,
+                0,
+                integer_type,
+                0,
+            ));
+        }
+        if reduce_len == 0 {
+            return identity_integer_buffer(self, integer_type, out_len, &out_shape, is_product);
+        }
+        let out = self.create_storage_buffer_checked(raw_words, "runmat-integer-reduce-out")?;
+        let workgroup_size = crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE;
+        let shader = crate::backend::wgpu::shaders::integer::reduce_dim_shader(workgroup_size);
+        let layout = self
+            .device_ref()
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("runmat-integer-reduce-dim-bgl"),
+                entries: &[
+                    crate::backend::wgpu::bindings::storage_read_entry(0),
+                    crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                    crate::backend::wgpu::bindings::uniform_entry(2),
+                ],
+            });
+        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+            self.device_ref(),
+            "runmat-integer-reduce-dim-pl",
+            &layout,
+        );
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-integer-reduce-dim-module",
+            &shader,
+        );
+        let key = self.compute_pipeline_hash_bytes(
+            shader.as_bytes(),
+            "runmat-integer-reduce-dim-bgl",
+            Some(workgroup_size),
+        );
+        let pipeline = self.get_or_create_pipeline(
+            key,
+            &pipeline_layout,
+            &module,
+            "runmat-integer-reduce-dim",
+            Some(shader.as_bytes()),
+            Some("runmat-integer-reduce-dim-bgl"),
+            Some(workgroup_size),
+        );
+        #[repr(C)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
+        struct Params {
+            rows: u32,
+            cols: u32,
+            dim: u32,
+            op: u32,
+            integer_type: u32,
+            slice_offset: u32,
+            _pad0: u32,
+            _pad1: u32,
+        }
+        let max_groups = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
+        let mut offset = 0usize;
+        while offset < out_len {
+            let chunk = (out_len - offset).min(max_groups);
+            let params = Params {
+                rows: rows as u32,
+                cols: cols as u32,
+                dim: dim as u32,
+                op: u32::from(is_product),
+                integer_type: integer_type_code(integer_type),
+                slice_offset: offset as u32,
+                _pad0: 0,
+                _pad1: 0,
+            };
+            let uniform = self.uniform_buffer(&params, "runmat-integer-reduce-dim-params");
+            let group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-integer-reduce-dim-bg"),
+                    layout: &layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: uniform.as_entire_binding(),
+                        },
+                    ],
+                });
+            crate::backend::wgpu::dispatch::elementwise::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline,
+                &group,
+                chunk as u32,
+            );
+            offset += chunk;
+        }
+        Ok(self.register_integer_buffer(out, out_shape, out_len, integer_type, allocated_bytes))
+    }
+
+    pub(crate) fn integer_reduce_sum_prod_global_exec(
+        &self,
+        is_product: bool,
+        operation_name: &str,
+        a: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let first = self.integer_reduce_sum_prod_dim_exec(is_product, 0, operation_name, a)?;
+        match self.integer_reduce_sum_prod_dim_exec(is_product, 1, operation_name, &first) {
+            Ok(handle) => {
+                let _ = self.free_exec(&first);
+                Ok(handle)
+            }
+            Err(error) => {
+                let _ = self.free_exec(&first);
+                Err(error)
+            }
+        }
+    }
+
     pub(crate) fn integer_reduce_extrema_dim_exec(
         &self,
         select_min: bool,
@@ -830,6 +1061,232 @@ mod tests {
                 .expect("download max indices")
                 .data,
             vec![1.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn wgpu_native_integer_sum_prod_reduce_all_classes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        macro_rules! check {
+            ($view:ident, $owned:ident, $values:expr, $sum_dim0:expr, $sum_dim1:expr, $prod_dim0:expr, $prod_dim1:expr, $sum_global:expr, $prod_global:expr) => {{
+                let values = $values;
+                let input = provider
+                    .upload_integer_exec(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&values),
+                        shape: &[3, 2],
+                    })
+                    .expect("upload exact integer reduction input");
+                let sum_dim0 = block_on(provider.reduce_integer_sum_native_dim(&input, 0))
+                    .expect("sum native dim 0");
+                let sum_dim1 = block_on(provider.reduce_integer_sum_native_dim(&input, 1))
+                    .expect("sum native dim 1");
+                let prod_dim0 = block_on(provider.reduce_integer_prod_native_dim(&input, 0))
+                    .expect("prod native dim 0");
+                let prod_dim1 = block_on(provider.reduce_integer_prod_native_dim(&input, 1))
+                    .expect("prod native dim 1");
+                let sum_global =
+                    block_on(provider.reduce_integer_sum_native(&input)).expect("sum native all");
+                let prod_global =
+                    block_on(provider.reduce_integer_prod_native(&input)).expect("prod native all");
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&sum_dim0))
+                        .expect("download sum dim 0")
+                        .data,
+                    HostIntegerDataOwned::$owned($sum_dim0.to_vec())
+                );
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&sum_dim1))
+                        .expect("download sum dim 1")
+                        .data,
+                    HostIntegerDataOwned::$owned($sum_dim1.to_vec())
+                );
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&prod_dim0))
+                        .expect("download prod dim 0")
+                        .data,
+                    HostIntegerDataOwned::$owned($prod_dim0.to_vec())
+                );
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&prod_dim1))
+                        .expect("download prod dim 1")
+                        .data,
+                    HostIntegerDataOwned::$owned($prod_dim1.to_vec())
+                );
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&sum_global))
+                        .expect("download global sum")
+                        .data,
+                    HostIntegerDataOwned::$owned($sum_global.to_vec())
+                );
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&prod_global))
+                        .expect("download global prod")
+                        .data,
+                    HostIntegerDataOwned::$owned($prod_global.to_vec())
+                );
+            }};
+        }
+        check!(
+            I8,
+            I8,
+            [2_i8, -4, 8, 3, 5, -2],
+            [6, 6],
+            [5, 1, 6],
+            [-64, -30],
+            [6, -20, -16],
+            [12],
+            [127]
+        );
+        check!(
+            I16,
+            I16,
+            [2_i16, -4, 8, 3, 5, -2],
+            [6, 6],
+            [5, 1, 6],
+            [-64, -30],
+            [6, -20, -16],
+            [12],
+            [7680]
+        );
+        check!(
+            I32,
+            I32,
+            [2_i32, -4, 8, 3, 5, -2],
+            [6, 6],
+            [5, 1, 6],
+            [-64, -30],
+            [6, -20, -16],
+            [12],
+            [7680]
+        );
+        check!(
+            I64,
+            I64,
+            [2_i64, -4, 8, 3, 5, -2],
+            [6, 6],
+            [5, 1, 6],
+            [-64, -30],
+            [6, -20, -16],
+            [12],
+            [7680]
+        );
+        check!(
+            U8,
+            U8,
+            [2_u8, 4, 8, 3, 5, 2],
+            [14, 10],
+            [5, 9, 10],
+            [64, 30],
+            [6, 20, 16],
+            [24],
+            [255]
+        );
+        check!(
+            U16,
+            U16,
+            [2_u16, 4, 8, 3, 5, 2],
+            [14, 10],
+            [5, 9, 10],
+            [64, 30],
+            [6, 20, 16],
+            [24],
+            [7680]
+        );
+        check!(
+            U32,
+            U32,
+            [2_u32, 4, 8, 3, 5, 2],
+            [14, 10],
+            [5, 9, 10],
+            [64, 30],
+            [6, 20, 16],
+            [24],
+            [7680]
+        );
+        check!(
+            U64,
+            U64,
+            [2_u64, 4, 8, 3, 5, 2],
+            [14, 10],
+            [5, 9, 10],
+            [64, 30],
+            [6, 20, 16],
+            [24],
+            [7680]
+        );
+    }
+
+    #[test]
+    fn wgpu_native_integer_sum_prod_saturate_packed_extremes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let signed = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[i64::MAX, 1, -2, 3]),
+                shape: &[2, 2],
+            })
+            .expect("upload signed packed integers");
+        let unsigned = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[u64::MAX, 2, 3, 4]),
+                shape: &[2, 2],
+            })
+            .expect("upload unsigned packed integers");
+        let signed_sum = block_on(provider.reduce_integer_sum_native_dim(&signed, 0))
+            .expect("signed packed sum");
+        let unsigned_sum = block_on(provider.reduce_integer_sum_native_dim(&unsigned, 0))
+            .expect("unsigned packed sum");
+        let unsigned_prod = block_on(provider.reduce_integer_prod_native_dim(&unsigned, 0))
+            .expect("unsigned packed product");
+        assert_eq!(
+            block_on(provider.download_integer_exec(&signed_sum))
+                .expect("download signed sum")
+                .data,
+            HostIntegerDataOwned::I64(vec![i64::MAX, 1])
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&unsigned_sum))
+                .expect("download unsigned sum")
+                .data,
+            HostIntegerDataOwned::U64(vec![u64::MAX, 7])
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&unsigned_prod))
+                .expect("download unsigned product")
+                .data,
+            HostIntegerDataOwned::U64(vec![u64::MAX, 12])
+        );
+    }
+
+    #[test]
+    fn wgpu_native_integer_sum_prod_empty_dimension_identities() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let input = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U32(&[]),
+                shape: &[0, 3],
+            })
+            .expect("upload empty native integer gpuArray");
+        let sum = block_on(provider.reduce_integer_sum_native_dim(&input, 0))
+            .expect("sum native empty dimension");
+        let prod = block_on(provider.reduce_integer_prod_native_dim(&input, 0))
+            .expect("prod native empty dimension");
+        assert_eq!(
+            block_on(provider.download_integer_exec(&sum))
+                .expect("download empty sum")
+                .data,
+            HostIntegerDataOwned::U32(vec![0, 0, 0])
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&prod))
+                .expect("download empty prod")
+                .data,
+            HostIntegerDataOwned::U32(vec![1, 1, 1])
         );
     }
 }

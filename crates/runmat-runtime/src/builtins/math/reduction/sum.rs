@@ -773,6 +773,33 @@ async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinRe
     if resolved.dims_in_bounds.is_empty() {
         return Ok(Value::GpuTensor(handle));
     }
+    if matches!(parsed.output, OutputTemplate::Native)
+        && runmat_accelerate_api::handle_integer_type(&handle).is_some()
+    {
+        if resolved.dims_in_bounds.len() == handle.shape.len() && !is_scalar_shape(&handle.shape) {
+            return provider
+                .reduce_integer_sum_native(&handle)
+                .await
+                .map(Value::GpuTensor)
+                .map_err(|err| {
+                    sum_internal_error(format!(
+                        "sum: native integer gpuArray reduction failed: {err}"
+                    ))
+                });
+        }
+        let mut current = handle.clone();
+        for &dim in &resolved.dims_in_bounds {
+            current = provider
+                .reduce_integer_sum_native_dim(&current, dim)
+                .await
+                .map_err(|err| {
+                    sum_internal_error(format!(
+                        "sum: native integer gpuArray reduction failed: {err}"
+                    ))
+                })?;
+        }
+        return Ok(Value::GpuTensor(current));
+    }
 
     if resolved.dims_in_bounds.len() == handle.shape.len() && !is_scalar_shape(&handle.shape) {
         if let Ok(reduced) = provider.reduce_sum(&handle).await {
@@ -1404,7 +1431,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{
+        HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+        IntegerElementType,
+    };
     use runmat_builtins::IntValue;
 
     fn sum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1692,6 +1722,43 @@ pub(crate) mod tests {
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
         });
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn sum_native_integer_gpu_stays_resident() {
+        match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) {
+            Ok(_) => {}
+            Err(error) if error.to_string() == "wgpu: no compatible adapter found" => return,
+            Err(error) => panic!("register wgpu provider failed: {error:?}"),
+        }
+        let provider = runmat_accelerate_api::provider().expect("provider");
+        let handle = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I16(&[10, 20, 30, 40]),
+                shape: &[2, 2],
+            })
+            .expect("upload native integer gpuArray");
+        let result = sum_builtin(
+            Value::GpuTensor(handle),
+            vec![Value::Int(IntValue::I32(1)), Value::from("native")],
+        )
+        .expect("sum native integer gpuArray");
+        let Value::GpuTensor(out) = result else {
+            panic!("expected resident gpuArray result");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&out),
+            Some(IntegerElementType::I16)
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&out))
+                .expect("download native sum")
+                .data,
+            HostIntegerDataOwned::I16(vec![30, 70])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

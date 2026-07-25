@@ -2809,6 +2809,23 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("reduce_sum_dim not supported by provider")
     }
+    /// Reduce a native integer gpuArray while preserving its exact element
+    /// class. This is intentionally separate from `reduce_sum`, whose MATLAB
+    /// default output semantics are floating point for integer inputs.
+    fn reduce_integer_sum_native<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_sum_native not supported by provider")
+    }
+    /// Dimension form of [`Self::reduce_integer_sum_native`].
+    fn reduce_integer_sum_native_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_sum_native_dim not supported by provider")
+    }
     fn dot<'a>(
         &'a self,
         _lhs: &'a GpuTensorHandle,
@@ -2842,6 +2859,22 @@ pub trait AccelProvider: Send + Sync {
         _dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("reduce_prod_dim not supported by provider")
+    }
+    /// Reduce a native integer gpuArray by product while preserving its exact
+    /// element class, distinct from MATLAB's default floating-point output.
+    fn reduce_integer_prod_native<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_prod_native not supported by provider")
+    }
+    /// Dimension form of [`Self::reduce_integer_prod_native`].
+    fn reduce_integer_prod_native_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_prod_native_dim not supported by provider")
     }
     fn reduce_mean<'a>(
         &'a self,
