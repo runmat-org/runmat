@@ -9,6 +9,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor;
 use crate::{
     build_runtime_error, gather_if_needed_async, output_count, BuiltinResult, RuntimeError,
 };
@@ -792,7 +793,7 @@ fn coerce_label_to_kind(label: Label, kind: LabelKind, name: &str) -> BuiltinRes
 
 fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
     ensure_vector_shape(&tensor.shape, name)?;
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn ensure_vector_shape(shape: &[usize], name: &str) -> BuiltinResult<()> {
@@ -1511,7 +1512,7 @@ fn tensor_row(data: Vec<f64>) -> BuiltinResult<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::StringArray;
+    use runmat_builtins::{IntegerStorage, StringArray};
 
     #[test]
     fn perfcurve_scalar_text_preserves_exact_uint64() {
@@ -1527,6 +1528,10 @@ mod tests {
 
     fn tensor(data: &[f64], shape: &[usize]) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), shape.to_vec()).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: &[usize]) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape.to_vec()).unwrap())
     }
 
     fn output_tensor(value: &Value, index: usize) -> &Tensor {
@@ -1574,6 +1579,25 @@ mod tests {
         assert_eq!(y.data[4], 1.0);
         let opt = output_tensor(&result, 4);
         assert_eq!(opt.shape, vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn perfcurve_accepts_typed_integer_labels_scores_and_weights() {
+        let _guard = output_count::push_output_count(Some(4));
+        let result = perfcurve_builtin(
+            int_tensor(IntegerStorage::U8(vec![1, 0, 1, 0]), &[4, 1]),
+            int_tensor(IntegerStorage::U16(vec![9, 8, 4, 1]), &[4, 1]),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+            vec![
+                Value::String("Weights".into()),
+                int_tensor(IntegerStorage::U8(vec![1, 2, 1, 1]), &[4, 1]),
+            ],
+        )
+        .await
+        .unwrap();
+        assert_eq!(output_tensor(&result, 0).shape, vec![5, 1]);
+        assert_eq!(output_tensor(&result, 1).shape, vec![5, 1]);
+        assert!(output_num(&result, 3).is_finite());
     }
 
     #[tokio::test]

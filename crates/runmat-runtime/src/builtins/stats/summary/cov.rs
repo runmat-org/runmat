@@ -686,7 +686,7 @@ async fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
         }
         other => tensor::value_into_tensor_for("cov", other).map_err(cov_internal_error),
     }?;
-    normalize_integer_tensor(tensor)
+    tensor::integer_tensor_to_f64(tensor).map_err(cov_internal_error)
 }
 
 async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinResult<Vec<f64>> {
@@ -697,7 +697,7 @@ async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinRe
         }
         other => tensor::value_into_tensor_for("cov", other).map_err(cov_internal_error)?,
     };
-    let tensor = normalize_integer_tensor(tensor)?;
+    let tensor = tensor::integer_tensor_to_f64(tensor).map_err(cov_internal_error)?;
 
     if tensor.shape.len() > 2 {
         return Err(cov_error_with_detail(
@@ -726,18 +726,6 @@ async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinRe
         ));
     }
     Ok(tensor.data)
-}
-
-fn normalize_integer_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let Some(storage) = tensor.integer_storage() else {
-        return Ok(tensor);
-    };
-    let data = storage
-        .exact_values()
-        .into_iter()
-        .map(|value| value.to_f64())
-        .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(cov_internal_error)
 }
 
 fn parse_rows_option(value: &str) -> BuiltinResult<CovRows> {

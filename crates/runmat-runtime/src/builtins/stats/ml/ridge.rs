@@ -250,7 +250,7 @@ fn vector_values(tensor: &Tensor, label: &str) -> BuiltinResult<Vec<f64>> {
     if tensor.shape.len() > 2 || !(tensor.rows == 1 || tensor.cols == 1) {
         return Err(invalid_argument(format!("ridge: {label} must be a vector")));
     }
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn ridge_parameters(tensor: &Tensor) -> BuiltinResult<Vec<f64>> {
@@ -389,9 +389,14 @@ fn x_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).unwrap())
     }
 
     fn tensor_out(value: Value) -> Tensor {
@@ -408,6 +413,18 @@ mod tests {
         let out = block_on(ridge_builtin(y, x, Value::Num(0.0), vec![Value::Num(0.0)])).unwrap();
         let out = tensor_out(out);
         assert_eq!(out.shape, vec![2, 1]);
+        assert!((out.data[0] - 1.0).abs() < 1.0e-10);
+        assert!((out.data[1] - 2.0).abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn ridge_accepts_typed_integer_response_design_and_k() {
+        let y = int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1);
+        let x = int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1);
+        let k = int_tensor(IntegerStorage::U8(vec![0, 1]), 1, 2);
+        let out = block_on(ridge_builtin(y, x, k, vec![Value::Num(0.0)])).unwrap();
+        let out = tensor_out(out);
+        assert_eq!(out.shape, vec![2, 2]);
         assert!((out.data[0] - 1.0).abs() < 1.0e-10);
         assert!((out.data[1] - 2.0).abs() < 1.0e-10);
     }

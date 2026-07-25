@@ -321,9 +321,13 @@ async fn gather_numeric_matrix(value: Value) -> BuiltinResult<NumericMatrix> {
         Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
             .map(NumericMatrix::Complex)
             .map_err(|err| invalid(format!("lscov: {err}"))),
-        other => tensor::value_into_tensor_for(NAME, other)
-            .map(NumericMatrix::Real)
-            .map_err(|err| invalid(format!("lscov: {err}"))),
+        other => {
+            let tensor = tensor::value_into_tensor_for(NAME, other)
+                .map_err(|err| invalid(format!("lscov: {err}")))?;
+            tensor::integer_tensor_to_f64(tensor)
+                .map(NumericMatrix::Real)
+                .map_err(|err| invalid(format!("lscov: {err}")))
+        }
     }
 }
 
@@ -376,6 +380,8 @@ async fn parse_weighting(
         .map_err(|err| invalid(format!("lscov: {err}")))?;
     let tensor = tensor::value_into_tensor_for(NAME, gathered)
         .map_err(|err| invalid(format!("lscov: {err}")))?;
+    let tensor =
+        tensor::integer_tensor_to_f64(tensor).map_err(|err| invalid(format!("lscov: {err}")))?;
     if tensor.data.is_empty() {
         return Ok(Weighting::Identity);
     }
@@ -1132,10 +1138,14 @@ fn complex_matrix_value(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::CharArray;
+    use runmat_builtins::{CharArray, IntegerStorage};
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).unwrap())
     }
 
     fn complex_tensor(data: Vec<(f64, f64)>, rows: usize, cols: usize) -> Value {
@@ -1191,6 +1201,19 @@ mod tests {
         assert_eq!(tensor_ref(&out[1]).shape, vec![2, 1]);
         assert_close(tensor_ref(&out[2]).data[0], 0.0);
         assert_eq!(tensor_ref(&out[3]).shape, vec![2, 2]);
+    }
+
+    #[test]
+    fn lscov_accepts_typed_integer_matrices_and_weights() {
+        let _guard = crate::output_count::push_output_count(Some(1));
+        let a = int_tensor(IntegerStorage::I16(vec![1, 1, 1, 0, 1, 2]), 3, 2);
+        let b = int_tensor(IntegerStorage::I16(vec![1, 3, 5]), 3, 1);
+        let weights = int_tensor(IntegerStorage::U16(vec![1, 1, 1]), 3, 1);
+        let out = outputs(block_on(lscov_builtin(a, b, vec![weights])).unwrap());
+        let x = tensor_ref(&out[0]);
+        assert_eq!(x.shape, vec![2, 1]);
+        assert_close(x.data[0], 1.0);
+        assert_close(x.data[1], 2.0);
     }
 
     #[test]

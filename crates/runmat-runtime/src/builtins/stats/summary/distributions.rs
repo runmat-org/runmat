@@ -496,7 +496,9 @@ async fn value_to_tensor(name: &str, value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
-    tensor::value_into_tensor_for(name, gathered)
+    let tensor = tensor::value_into_tensor_for(name, gathered)
+        .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
+    tensor::integer_tensor_to_f64(tensor)
         .map_err(|err| normal_error(name, format!("{name}: {err}")))
 }
 
@@ -1576,6 +1578,7 @@ pub mod icdf {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn assert_close(actual: f64, expected: f64, tol: f64) {
         assert!(
@@ -1589,6 +1592,10 @@ mod tests {
             Value::Num(value) => value,
             other => panic!("expected scalar icdf result, got {other:?}"),
         }
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
     }
 
     #[test]
@@ -2112,6 +2119,36 @@ mod tests {
                 assert_close(value, 3.0 * std::f64::consts::LN_2.powf(0.25), 1.0e-12)
             }
             other => panic!("expected scalar wblinv, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn distribution_helpers_accept_typed_integer_tensors_at_f64_boundary() {
+        let out = block_on(normcdf::normcdf_builtin(
+            int_tensor(IntegerStorage::I16(vec![0, 1]), vec![1, 2]),
+            vec![
+                int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
+                int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
+            ],
+        ))
+        .unwrap();
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_close(tensor.data[0], 0.5, 1.0e-12);
+                assert_close(tensor.data[1], 0.841_344_746_068_543, 1.0e-12);
+            }
+            other => panic!("expected tensor normcdf, got {other:?}"),
+        }
+
+        let chi2 = block_on(chi2cdf::chi2cdf_builtin(
+            int_tensor(IntegerStorage::U16(vec![3]), vec![1, 1]),
+            vec![int_tensor(IntegerStorage::U16(vec![5]), vec![1, 1])],
+        ))
+        .unwrap();
+        match chi2 {
+            Value::Num(value) => assert_close(value, 0.300_014_164_121_372, 1.0e-12),
+            other => panic!("expected scalar chi2cdf, got {other:?}"),
         }
     }
 

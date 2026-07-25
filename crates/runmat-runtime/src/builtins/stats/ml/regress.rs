@@ -327,7 +327,9 @@ async fn gather_tensor(value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(|err| invalid(format!("regress: {err}")))?;
-    tensor::value_into_tensor_for(NAME, gathered).map_err(|err| invalid(format!("regress: {err}")))
+    let tensor = tensor::value_into_tensor_for(NAME, gathered)
+        .map_err(|err| invalid(format!("regress: {err}")))?;
+    tensor::integer_tensor_to_f64(tensor).map_err(|err| invalid(format!("regress: {err}")))
 }
 
 async fn parse_alpha(value: &Value) -> BuiltinResult<f64> {
@@ -337,7 +339,7 @@ async fn parse_alpha(value: &Value) -> BuiltinResult<f64> {
     let alpha = match gathered {
         Value::Num(value) => value,
         Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(&tensor)[0],
         other => {
             return Err(invalid(format!(
                 "regress: alpha must be a numeric scalar, got {other:?}"
@@ -827,9 +829,14 @@ fn tensor_value(data: Vec<f64>, shape: Vec<usize>, label: &str) -> BuiltinResult
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).unwrap())
     }
 
     fn outputs(value: Value) -> Vec<Value> {
@@ -874,6 +881,27 @@ mod tests {
         assert_eq!(stats.shape, vec![1, 4]);
         assert_close(stats.data[0], 1.0);
         assert_close(stats.data[3], 0.0);
+    }
+
+    #[test]
+    fn regress_accepts_typed_integer_design_and_response() {
+        let _guard = crate::output_count::push_output_count(Some(1));
+        let y = int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1);
+        let x = int_tensor(IntegerStorage::I16(vec![1, 1, 1, 1, 0, 1, 2, 3]), 4, 2);
+        let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
+        let b = tensor_ref(&out[0]);
+        assert_eq!(b.shape, vec![2, 1]);
+        assert_close(b.data[0], 1.0);
+        assert_close(b.data[1], 2.0);
+    }
+
+    #[test]
+    fn regress_rejects_typed_integer_alpha_boundaries() {
+        let y = int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1);
+        let x = int_tensor(IntegerStorage::I16(vec![1, 1, 1, 1, 0, 1, 2, 3]), 4, 2);
+        let alpha = int_tensor(IntegerStorage::U8(vec![1]), 1, 1);
+        let err = block_on(regress_builtin(y, x, vec![alpha])).unwrap_err();
+        assert!(err.message.contains("alpha must be between 0 and 1"));
     }
 
     #[test]

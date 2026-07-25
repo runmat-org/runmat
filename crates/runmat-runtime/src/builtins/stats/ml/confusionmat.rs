@@ -10,6 +10,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "confusionmat";
@@ -385,7 +386,7 @@ fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
 
 fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
     ensure_vector_shape(&tensor.shape, name)?;
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn ensure_vector_shape(shape: &[usize], name: &str) -> BuiltinResult<()> {
@@ -667,9 +668,14 @@ fn canonical(text: &str) -> String {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
     }
 
     fn with_outputs<T>(count: usize, f: impl FnOnce() -> T) -> T {
@@ -705,6 +711,21 @@ mod tests {
             panic!("order");
         };
         assert_eq!(order.data, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn numeric_labels_accept_typed_integer_tensors() {
+        let values = confusionmat(
+            int_tensor(IntegerStorage::I16(vec![1, 2, 2]), vec![3, 1]),
+            int_tensor(IntegerStorage::U16(vec![1, 1, 2]), vec![3, 1]),
+            Vec::new(),
+            2,
+        );
+        let Value::Tensor(c) = &values[0] else {
+            panic!("matrix");
+        };
+        assert_eq!(c.shape, vec![2, 2]);
+        assert_eq!(c.data, vec![1.0, 1.0, 0.0, 1.0]);
     }
 
     #[test]

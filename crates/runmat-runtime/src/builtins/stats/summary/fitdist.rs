@@ -651,8 +651,9 @@ async fn value_to_tensor(name: &'static str, value: Value) -> BuiltinResult<Tens
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(|err| invalid_for(name, format!("{name}: {err}")))?;
-    tensor::value_into_tensor_for(name, gathered)
-        .map_err(|_| invalid_for(name, format!("{name}: expected numeric input")))
+    let tensor = tensor::value_into_tensor_for(name, gathered)
+        .map_err(|_| invalid_for(name, format!("{name}: expected numeric input")))?;
+    tensor::integer_tensor_to_f64(tensor).map_err(|err| invalid_for(name, format!("{name}: {err}")))
 }
 
 fn scalar_tensor(value: f64) -> Tensor {
@@ -1427,9 +1428,14 @@ fn trigamma(mut x: f64) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn vec_tensor(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
+    }
+
+    fn int_vec_tensor(storage: IntegerStorage, len: usize) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, vec![len, 1]).unwrap())
     }
 
     fn object(value: Value) -> ObjectInstance {
@@ -1467,6 +1473,33 @@ mod tests {
 
         let x = block_on(icdf_probability_distribution(pd, Value::Num(0.5))).unwrap();
         assert_eq!(x, Value::Num(2.0));
+    }
+
+    #[test]
+    fn fitdist_accepts_typed_integer_sample_and_eval_points() {
+        let pd = block_on(fitdist_builtin(
+            int_vec_tensor(IntegerStorage::I16(vec![1, 2, 3]), 3),
+            Value::String("Normal".into()),
+            Vec::new(),
+        ))
+        .unwrap();
+        let object = object(pd.clone());
+        let values = numeric_vector_property(&object, "ParameterValues").unwrap();
+        assert!((values[0] - 2.0).abs() < 1.0e-12);
+
+        let density = block_on(pdf_builtin(
+            pd,
+            int_vec_tensor(IntegerStorage::U16(vec![2, 3]), 2),
+            Vec::new(),
+        ))
+        .unwrap();
+        match density {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 1]);
+                assert!(tensor.data.iter().all(|value| value.is_finite()));
+            }
+            other => panic!("expected tensor density, got {other:?}"),
+        }
     }
 
     #[test]

@@ -258,7 +258,9 @@ async fn value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(|err| corr_error(format!("corr: {err}")))?;
-    tensor::value_into_tensor_for(NAME, gathered).map_err(|err| corr_error(format!("corr: {err}")))
+    let tensor = tensor::value_into_tensor_for(NAME, gathered)
+        .map_err(|err| corr_error(format!("corr: {err}")))?;
+    tensor::integer_tensor_to_f64(tensor).map_err(|err| corr_error(format!("corr: {err}")))
 }
 
 fn matrix_shape(tensor: &Tensor) -> (usize, usize) {
@@ -550,9 +552,14 @@ fn tail_pvalue(cdf: f64, tail: Tail) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
     }
 
     #[test]
@@ -571,6 +578,23 @@ mod tests {
                 assert!((tensor.data[3] - 1.0).abs() < 1e-12);
             }
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn corr_accepts_typed_integer_matrix_inputs() {
+        let out = block_on(corr_builtin(
+            int_tensor(IntegerStorage::I16(vec![1, 2, 1, 4]), vec![2, 2]),
+            Vec::new(),
+        ))
+        .unwrap();
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 2]);
+                assert!((tensor.data[0] - 1.0).abs() < 1.0e-12);
+                assert!((tensor.data[3] - 1.0).abs() < 1.0e-12);
+            }
+            other => panic!("expected tensor correlation, got {other:?}"),
         }
     }
 

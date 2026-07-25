@@ -268,7 +268,9 @@ async fn gathered(value: Value, name: &str) -> BuiltinResult<Value> {
 
 async fn value_to_tensor(name: &str, value: Value) -> BuiltinResult<Tensor> {
     let gathered = gathered(value, name).await?;
-    tensor::value_into_tensor_for(name, gathered)
+    let tensor = tensor::value_into_tensor_for(name, gathered)
+        .map_err(|err| descriptive_error(name, format!("{name}: {err}")))?;
+    tensor::integer_tensor_to_f64(tensor)
         .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
 }
 

@@ -548,10 +548,11 @@ async fn corrcoef_host(args: CorrcoefArgs) -> BuiltinResult<Value> {
 }
 
 async fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
-    match value {
+    let tensor = match value {
         Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle).await,
         other => tensor::value_into_tensor_for("corrcoef", other).map_err(corrcoef_internal_error),
-    }
+    }?;
+    tensor::integer_tensor_to_f64(tensor).map_err(corrcoef_internal_error)
 }
 
 fn parse_rows_option(value: &str) -> BuiltinResult<CorrcoefRows> {
@@ -941,7 +942,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value};
 
     fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
         let dim = (expected.len() as f64).sqrt() as usize;
@@ -1028,6 +1029,22 @@ pub(crate) mod tests {
                     1.0,
                 ];
                 assert_tensor_close(&out, &expected, 1.0e-10);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn corrcoef_accepts_typed_integer_matrix_inputs() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 1, 4]), vec![2, 2]).unwrap();
+        let result =
+            block_on(corrcoef_builtin(Value::Tensor(tensor), Vec::new())).expect("corrcoef");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert!((out.data[0] - 1.0).abs() < 1.0e-12);
+                assert!((out.data[3] - 1.0).abs() < 1.0e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

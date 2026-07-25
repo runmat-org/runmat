@@ -85,6 +85,31 @@ pub fn integer_tensor_from_f64_like(
         .map_err(|e| format!("integer tensor conversion: {e}"))
 }
 
+/// Return a tensor's numeric values as f64, reading typed integer storage
+/// exactly instead of using the compatibility backing buffer.
+pub fn tensor_values_f64(tensor: &Tensor) -> Vec<f64> {
+    tensor
+        .integer_storage()
+        .map(|storage| {
+            storage
+                .exact_values()
+                .into_iter()
+                .map(|value| value.to_f64())
+                .collect()
+        })
+        .unwrap_or_else(|| tensor.data.clone())
+}
+
+/// Normalize typed integer tensors to f64 at builtin boundaries that
+/// intentionally compute double-valued numeric/statistical results.
+pub fn integer_tensor_to_f64(tensor: Tensor) -> Result<Tensor, String> {
+    if tensor.integer_storage().is_none() {
+        return Ok(tensor);
+    }
+    Tensor::new(tensor_values_f64(&tensor), tensor.shape.clone())
+        .map_err(|e| format!("integer tensor conversion: {e}"))
+}
+
 /// Convert a logical array (0/1 bytes) into a numeric tensor.
 pub fn logical_to_tensor(logical: &LogicalArray) -> Result<Tensor, String> {
     let data: Vec<f64> = logical
@@ -559,7 +584,10 @@ mod dtype_tests {
 
 #[cfg(test)]
 mod dimension_tests {
-    use super::{dimension_from_value_async, dims_from_value_async, parse_dimension};
+    use super::{
+        dimension_from_value_async, dims_from_value_async, integer_tensor_to_f64, parse_dimension,
+        tensor_values_f64,
+    };
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
@@ -652,6 +680,31 @@ mod dimension_tests {
         ))
         .is_err());
         assert!(block_on(dims_from_value_async(&Value::Tensor(negative))).is_err());
+    }
+
+    #[test]
+    fn typed_integer_tensor_f64_boundary_reads_exact_storage() {
+        let wide = 9_007_199_254_740_993_u64;
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide, wide - 1]), vec![1, 2])
+            .expect("integer tensor");
+        assert_eq!(
+            tensor_values_f64(&tensor),
+            vec![
+                IntValue::U64(wide).to_f64(),
+                IntValue::U64(wide - 1).to_f64()
+            ]
+        );
+
+        let normalized = integer_tensor_to_f64(tensor).expect("normalize");
+        assert!(normalized.integer_storage().is_none());
+        assert_eq!(normalized.shape, vec![1, 2]);
+        assert_eq!(
+            normalized.data,
+            vec![
+                IntValue::U64(wide).to_f64(),
+                IntValue::U64(wide - 1).to_f64()
+            ]
+        );
     }
 
     #[test]

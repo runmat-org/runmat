@@ -904,7 +904,7 @@ fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
             "classify: {name} must be a vector"
         )));
     }
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
@@ -1110,9 +1110,14 @@ fn canonical(text: &str) -> String {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
     }
 
     fn classify(sample: Value, training: Value, group: Value, rest: Vec<Value>) -> Vec<Value> {
@@ -1157,6 +1162,23 @@ mod tests {
             assert!(
                 matches!(&coeff.data[1], Value::Struct(st) if st.fields.contains_key("linear"))
             );
+        });
+    }
+
+    #[test]
+    fn classify_accepts_typed_integer_numeric_inputs_and_groups() {
+        with_outputs(2, || {
+            let values = classify(
+                int_tensor(IntegerStorage::I16(vec![0, 2]), vec![2, 1]),
+                int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), vec![4, 1]),
+                int_tensor(IntegerStorage::U8(vec![1, 1, 2, 2]), vec![4, 1]),
+                Vec::new(),
+            );
+            let Value::Tensor(labels) = &values[0] else {
+                panic!("labels");
+            };
+            assert_eq!(labels.data, vec![1.0, 2.0]);
+            assert!(matches!(values[1], Value::Num(err) if err <= EPS));
         });
     }
 
