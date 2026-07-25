@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, Tensor, Type, Value,
+    IntValue, ObjectInstance, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
@@ -342,9 +342,16 @@ fn table_variable_name(selector: &Value, names: &[String], context: &str) -> Bui
 }
 
 fn numeric_selector_index(selector: &Value) -> BuiltinResult<Option<usize>> {
+    if let Some(value) = integer_scalar(selector) {
+        let Some(index) = value.try_to_usize().and_then(|value| value.checked_sub(1)) else {
+            return Err(invalid(
+                "binscatter: table variable index must be a positive integer",
+            ));
+        };
+        return Ok(Some(index));
+    }
     let raw = match selector {
         Value::Num(value) => Some(*value),
-        Value::Int(value) => Some(value.to_f64()),
         Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
         _ => None,
     };
@@ -362,7 +369,7 @@ fn numeric_selector_index(selector: &Value) -> BuiltinResult<Option<usize>> {
 fn numeric_data_from_value(value: Value, context: &str) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_into_tensor_for(NAME, value)
         .map_err(|_| invalid(format!("binscatter: {context} must be numeric")))?;
-    Ok(tensor.data)
+    Ok(tensor_values_f64(&tensor))
 }
 
 fn ensure_compatible_lengths(x_data: &[f64], y_data: &[f64]) -> BuiltinResult<()> {
@@ -451,6 +458,21 @@ fn is_option_name(value: &Value) -> bool {
 }
 
 pub(crate) fn parse_num_bins(value: &Value) -> BuiltinResult<[usize; 2]> {
+    if let Some(values) = integer_values(value) {
+        let bins = match values.as_slice() {
+            [n] => [positive_bin_count_integer(n, "NumBins")?; 2],
+            [nx, ny] => [
+                positive_bin_count_integer(nx, "NumBins")?,
+                positive_bin_count_integer(ny, "NumBins")?,
+            ],
+            _ => {
+                return Err(invalid(
+                    "binscatter: NumBins must be a scalar or two-element vector",
+                ))
+            }
+        };
+        return Ok(bins);
+    }
     let values = numeric_vector(value, "NumBins")?;
     let bins = match values.as_slice() {
         [n] => [positive_bin_count(*n, "NumBins")?; 2],
@@ -480,7 +502,7 @@ pub(crate) fn parse_limits(value: &Value, name: &str) -> BuiltinResult<(f64, f64
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| invalid(format!("binscatter: {name} must be numeric")))?;
-    Ok(tensor.data)
+    Ok(tensor_values_f64(&tensor))
 }
 
 fn positive_bin_count(value: f64, name: &str) -> BuiltinResult<usize> {
@@ -490,6 +512,25 @@ fn positive_bin_count(value: f64, name: &str) -> BuiltinResult<usize> {
         )));
     }
     let count = value as usize;
+    if count > MAX_NUM_BINS {
+        return Err(invalid(format!(
+            "binscatter: {name} entries must be no greater than {MAX_NUM_BINS}"
+        )));
+    }
+    Ok(count)
+}
+
+fn positive_bin_count_integer(value: &IntValue, name: &str) -> BuiltinResult<usize> {
+    let Some(count) = value.try_to_usize() else {
+        return Err(invalid(format!(
+            "binscatter: {name} entries must be positive integers"
+        )));
+    };
+    if count == 0 {
+        return Err(invalid(format!(
+            "binscatter: {name} entries must be positive integers"
+        )));
+    }
     if count > MAX_NUM_BINS {
         return Err(invalid(format!(
             "binscatter: {name} entries must be no greater than {MAX_NUM_BINS}"
@@ -508,10 +549,12 @@ fn validate_limits(lo: f64, hi: f64, name: &str) -> BuiltinResult<(f64, f64)> {
 }
 
 pub(crate) fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
+    if let Some(value) = integer_scalar(value) {
+        return integer_bool(&value, name);
+    }
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) => numeric_bool(*value, name),
-        Value::Int(value) => numeric_bool(value.to_f64(), name),
         _ => {
             if let Some(text) = tensor::value_to_string(value) {
                 match text.trim().to_ascii_lowercase().as_str() {
@@ -536,14 +579,57 @@ fn numeric_bool(value: f64, name: &str) -> BuiltinResult<bool> {
     }
 }
 
+fn integer_bool(value: &IntValue, name: &str) -> BuiltinResult<bool> {
+    match value.try_to_usize() {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        _ => Err(invalid(format!("binscatter: {name} must be 0 or 1"))),
+    }
+}
+
 fn option_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
+    if let Some(value) = integer_scalar(value) {
+        return Ok(value.to_f64());
+    }
     match value {
         Value::Num(value) => Ok(*value),
-        Value::Int(value) => Ok(value.to_f64()),
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
         _ => Err(invalid(format!("binscatter: {name} must be a scalar"))),
     }
+}
+
+fn integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn integer_values(value: &Value) -> Option<Vec<IntValue>> {
+    match value {
+        Value::Int(value) => Some(vec![value.clone()]),
+        Value::Tensor(tensor) => tensor
+            .integer_storage()
+            .map(|storage| storage.exact_values()),
+        _ => None,
+    }
+}
+
+fn tensor_values_f64(tensor: &Tensor) -> Vec<f64> {
+    tensor
+        .integer_storage()
+        .map(|storage| {
+            storage
+                .exact_values()
+                .into_iter()
+                .map(|value| value.to_f64())
+                .collect()
+        })
+        .unwrap_or_else(|| tensor.data.clone())
 }
 
 pub(crate) fn validate_face_alpha(value: f64) -> BuiltinResult<()> {
@@ -837,10 +923,70 @@ mod tests {
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
     use crate::builtins::table::table_from_columns;
+    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::figure::PlotElement;
 
     fn vec_tensor(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
+    }
+
+    #[test]
+    fn binscatter_parses_typed_integer_options_exactly() {
+        assert_eq!(
+            parse_num_bins(&int_tensor(IntegerStorage::U16(vec![12, 8]), vec![1, 2])).unwrap(),
+            [12, 8]
+        );
+        assert_eq!(
+            parse_num_bins(&Value::Int(IntValue::U8(9))).unwrap(),
+            [9, 9]
+        );
+        assert_eq!(
+            numeric_selector_index(&int_tensor(IntegerStorage::I32(vec![2]), vec![1, 1])).unwrap(),
+            Some(1)
+        );
+        assert!(option_bool(
+            &int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+            "ShowEmptyBins"
+        )
+        .unwrap());
+        assert_eq!(
+            option_scalar(
+                &int_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1]),
+                "FaceAlpha",
+            )
+            .unwrap(),
+            IntValue::U64(9_007_199_254_740_993).to_f64()
+        );
+    }
+
+    #[test]
+    fn binscatter_rejects_invalid_typed_integer_options() {
+        let err =
+            parse_num_bins(&int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1])).unwrap_err();
+        assert!(
+            err.message().contains("positive integers"),
+            "{}",
+            err.message()
+        );
+
+        let err =
+            parse_num_bins(&int_tensor(IntegerStorage::U16(vec![251]), vec![1, 1])).unwrap_err();
+        assert!(
+            err.message().contains("no greater than 250"),
+            "{}",
+            err.message()
+        );
+
+        let err = option_bool(
+            &int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+            "ShowEmptyBins",
+        )
+        .unwrap_err();
+        assert!(err.message().contains("0 or 1"), "{}", err.message());
     }
 
     #[test]
