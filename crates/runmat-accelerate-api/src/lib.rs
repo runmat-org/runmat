@@ -2876,6 +2876,33 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("reduce_integer_prod_native_dim not supported by provider")
     }
+    /// Compute MATLAB's explicit native-output mean for a native integer
+    /// gpuArray. Providers must avoid floating-point accumulation so int64 and
+    /// uint64 values remain exact before the final class-preserving rounding.
+    fn reduce_integer_mean_native<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_mean_native not supported by provider")
+    }
+    /// Dimension form of [`Self::reduce_integer_mean_native`].
+    fn reduce_integer_mean_native_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_mean_native_dim not supported by provider")
+    }
+    /// Multi-dimension form of [`Self::reduce_integer_mean_native`]. All
+    /// requested zero-based dimensions must be reduced in one logical pass so
+    /// native integer output rounds only once.
+    fn reduce_integer_mean_native_dims<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dims_zero_based: &'a [usize],
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_mean_native_dims not supported by provider")
+    }
     fn reduce_mean<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,

@@ -1413,6 +1413,26 @@ impl AccelProvider for WgpuProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.integer_reduce_sum_prod_dim_exec(true, dim, "prod", a) })
     }
+    fn reduce_integer_mean_native<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_mean_global_exec("mean", a) })
+    }
+    fn reduce_integer_mean_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_mean_dim_exec(dim, "mean", a) })
+    }
+    fn reduce_integer_mean_native_dims<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dims_zero_based: &'a [usize],
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_mean_dims_exec(dims_zero_based, "mean", a) })
+    }
     fn reduce_mean_dim<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

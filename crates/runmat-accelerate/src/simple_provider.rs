@@ -189,6 +189,294 @@ fn reduce_integer_data_dim(
     })
 }
 
+fn reduce_integer_mean_data_dim(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    dim: usize,
+) -> Result<(HostIntegerDataOwned, Vec<usize>)> {
+    ensure!(
+        dim < shape.len(),
+        "native integer mean: dimension out of bounds"
+    );
+    let expected_len = shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer mean: shape too large"))
+    })?;
+    ensure!(
+        integer_data_len(data) == expected_len,
+        "native integer mean: data length does not match shape"
+    );
+    let mut output_shape = shape.to_vec();
+    output_shape[dim] = 1;
+    let output_len = output_shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer mean: output shape too large"))
+    })?;
+    let mut output_strides = vec![1usize; output_shape.len()];
+    let mut stride = 1usize;
+    for (index, &extent) in output_shape.iter().enumerate() {
+        output_strides[index] = stride;
+        stride = stride
+            .checked_mul(extent.max(1))
+            .ok_or_else(|| anyhow!("native integer mean: output strides too large"))?;
+    }
+    let rows = shape[dim];
+
+    macro_rules! reduce_signed {
+        ($values:expr, $owned:ident, $ty:ty) => {{
+            let mut sums = vec![0i128; output_len];
+            let mut counts = vec![0usize; output_len];
+            let mut coords = vec![0usize; shape.len()];
+            for (linear, &value) in $values.iter().enumerate() {
+                let mut remainder = linear;
+                for (axis, &extent) in shape.iter().enumerate() {
+                    if extent == 0 {
+                        coords[axis] = 0;
+                    } else {
+                        coords[axis] = remainder % extent;
+                        remainder /= extent;
+                    }
+                }
+                let mut out_index = 0usize;
+                for (axis, &coord) in coords.iter().enumerate() {
+                    if axis != dim {
+                        out_index += coord * output_strides[axis];
+                    }
+                }
+                sums[out_index] += value as i128;
+                counts[out_index] += 1;
+            }
+            let out = sums
+                .into_iter()
+                .zip(counts)
+                .map(|(sum, count)| rounded_signed_mean_i128(sum, count) as $ty)
+                .collect();
+            (HostIntegerDataOwned::$owned(out), output_shape.clone())
+        }};
+    }
+    macro_rules! reduce_unsigned {
+        ($values:expr, $owned:ident, $ty:ty) => {{
+            let mut sums = vec![0u128; output_len];
+            let mut counts = vec![0usize; output_len];
+            let mut coords = vec![0usize; shape.len()];
+            for (linear, &value) in $values.iter().enumerate() {
+                let mut remainder = linear;
+                for (axis, &extent) in shape.iter().enumerate() {
+                    if extent == 0 {
+                        coords[axis] = 0;
+                    } else {
+                        coords[axis] = remainder % extent;
+                        remainder /= extent;
+                    }
+                }
+                let mut out_index = 0usize;
+                for (axis, &coord) in coords.iter().enumerate() {
+                    if axis != dim {
+                        out_index += coord * output_strides[axis];
+                    }
+                }
+                sums[out_index] += value as u128;
+                counts[out_index] += 1;
+            }
+            let out = sums
+                .into_iter()
+                .zip(counts)
+                .map(|(sum, count)| rounded_unsigned_mean_u128(sum, count) as $ty)
+                .collect();
+            (HostIntegerDataOwned::$owned(out), output_shape.clone())
+        }};
+    }
+    if rows == 0 || output_len == 0 {
+        return Ok(match data {
+            HostIntegerDataOwned::I8(_) => {
+                (HostIntegerDataOwned::I8(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::I16(_) => {
+                (HostIntegerDataOwned::I16(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::I32(_) => {
+                (HostIntegerDataOwned::I32(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::I64(_) => {
+                (HostIntegerDataOwned::I64(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::U8(_) => {
+                (HostIntegerDataOwned::U8(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::U16(_) => {
+                (HostIntegerDataOwned::U16(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::U32(_) => {
+                (HostIntegerDataOwned::U32(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::U64(_) => {
+                (HostIntegerDataOwned::U64(vec![0; output_len]), output_shape)
+            }
+        });
+    }
+    Ok(match data {
+        HostIntegerDataOwned::I8(values) => reduce_signed!(values, I8, i8),
+        HostIntegerDataOwned::I16(values) => reduce_signed!(values, I16, i16),
+        HostIntegerDataOwned::I32(values) => reduce_signed!(values, I32, i32),
+        HostIntegerDataOwned::I64(values) => reduce_signed!(values, I64, i64),
+        HostIntegerDataOwned::U8(values) => reduce_unsigned!(values, U8, u8),
+        HostIntegerDataOwned::U16(values) => reduce_unsigned!(values, U16, u16),
+        HostIntegerDataOwned::U32(values) => reduce_unsigned!(values, U32, u32),
+        HostIntegerDataOwned::U64(values) => reduce_unsigned!(values, U64, u64),
+    })
+}
+
+fn reduce_integer_mean_data_dims(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    dims: &[usize],
+) -> Result<(HostIntegerDataOwned, Vec<usize>)> {
+    if dims.len() == 1 {
+        return reduce_integer_mean_data_dim(data, shape, dims[0]);
+    }
+    let mut reduced = vec![false; shape.len()];
+    for &dim in dims {
+        ensure!(
+            dim < shape.len(),
+            "native integer mean: dimension out of bounds"
+        );
+        reduced[dim] = true;
+    }
+    if !reduced.iter().any(|&value| value) {
+        return Ok((data.clone(), shape.to_vec()));
+    }
+    let expected_len = shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer mean: shape too large"))
+    })?;
+    ensure!(
+        integer_data_len(data) == expected_len,
+        "native integer mean: data length does not match shape"
+    );
+    let mut output_shape = shape.to_vec();
+    for (dim, extent) in output_shape.iter_mut().enumerate() {
+        if reduced[dim] {
+            *extent = 1;
+        }
+    }
+    let output_len = output_shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer mean: output shape too large"))
+    })?;
+    let mut output_strides = vec![1usize; output_shape.len()];
+    let mut stride = 1usize;
+    for (index, &extent) in output_shape.iter().enumerate() {
+        output_strides[index] = stride;
+        stride = stride
+            .checked_mul(extent.max(1))
+            .ok_or_else(|| anyhow!("native integer mean: output strides too large"))?;
+    }
+    macro_rules! reduce_signed {
+        ($values:expr, $owned:ident, $ty:ty) => {{
+            let mut sums = vec![0i128; output_len];
+            let mut counts = vec![0usize; output_len];
+            let mut coords = vec![0usize; shape.len()];
+            for (linear, &value) in $values.iter().enumerate() {
+                let mut remainder = linear;
+                for (axis, &extent) in shape.iter().enumerate() {
+                    coords[axis] = if extent == 0 {
+                        0
+                    } else {
+                        let coord = remainder % extent;
+                        remainder /= extent;
+                        coord
+                    };
+                }
+                let mut out_index = 0usize;
+                for (axis, &coord) in coords.iter().enumerate() {
+                    if !reduced[axis] {
+                        out_index += coord * output_strides[axis];
+                    }
+                }
+                sums[out_index] += value as i128;
+                counts[out_index] += 1;
+            }
+            let out = sums
+                .into_iter()
+                .zip(counts)
+                .map(|(sum, count)| rounded_signed_mean_i128(sum, count) as $ty)
+                .collect();
+            (HostIntegerDataOwned::$owned(out), output_shape.clone())
+        }};
+    }
+    macro_rules! reduce_unsigned {
+        ($values:expr, $owned:ident, $ty:ty) => {{
+            let mut sums = vec![0u128; output_len];
+            let mut counts = vec![0usize; output_len];
+            let mut coords = vec![0usize; shape.len()];
+            for (linear, &value) in $values.iter().enumerate() {
+                let mut remainder = linear;
+                for (axis, &extent) in shape.iter().enumerate() {
+                    coords[axis] = if extent == 0 {
+                        0
+                    } else {
+                        let coord = remainder % extent;
+                        remainder /= extent;
+                        coord
+                    };
+                }
+                let mut out_index = 0usize;
+                for (axis, &coord) in coords.iter().enumerate() {
+                    if !reduced[axis] {
+                        out_index += coord * output_strides[axis];
+                    }
+                }
+                sums[out_index] += value as u128;
+                counts[out_index] += 1;
+            }
+            let out = sums
+                .into_iter()
+                .zip(counts)
+                .map(|(sum, count)| rounded_unsigned_mean_u128(sum, count) as $ty)
+                .collect();
+            (HostIntegerDataOwned::$owned(out), output_shape.clone())
+        }};
+    }
+    Ok(match data {
+        HostIntegerDataOwned::I8(values) => reduce_signed!(values, I8, i8),
+        HostIntegerDataOwned::I16(values) => reduce_signed!(values, I16, i16),
+        HostIntegerDataOwned::I32(values) => reduce_signed!(values, I32, i32),
+        HostIntegerDataOwned::I64(values) => reduce_signed!(values, I64, i64),
+        HostIntegerDataOwned::U8(values) => reduce_unsigned!(values, U8, u8),
+        HostIntegerDataOwned::U16(values) => reduce_unsigned!(values, U16, u16),
+        HostIntegerDataOwned::U32(values) => reduce_unsigned!(values, U32, u32),
+        HostIntegerDataOwned::U64(values) => reduce_unsigned!(values, U64, u64),
+    })
+}
+
+fn rounded_signed_mean_i128(sum: i128, count: usize) -> i128 {
+    if count == 0 {
+        return 0;
+    }
+    let divisor = count as i128;
+    let quotient = sum / divisor;
+    let remainder = sum % divisor;
+    if remainder.unsigned_abs() * 2 >= count as u128 {
+        quotient + remainder.signum()
+    } else {
+        quotient
+    }
+}
+
+fn rounded_unsigned_mean_u128(sum: u128, count: usize) -> u128 {
+    if count == 0 {
+        return 0;
+    }
+    let divisor = count as u128;
+    let quotient = sum / divisor;
+    let remainder = sum % divisor;
+    if remainder * 2 >= divisor {
+        quotient + 1
+    } else {
+        quotient
+    }
+}
+
 fn scan_integer_data_dim(
     data: &HostIntegerDataOwned,
     shape: &[usize],
@@ -7448,6 +7736,50 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn reduce_integer_mean_native<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let dims: Vec<usize> = (0..a.shape.len()).collect();
+            self.reduce_integer_mean_native_dims(a, &dims).await
+        })
+    }
+
+    fn reduce_integer_mean_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id))?;
+            let (out, shape) = reduce_integer_mean_data_dim(&data, &a.shape, dim)?;
+            Ok(self.allocate_integer_tensor(out, shape))
+        })
+    }
+
+    fn reduce_integer_mean_native_dims<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dims_zero_based: &'a [usize],
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id))?;
+            let (out, shape) = reduce_integer_mean_data_dims(&data, &a.shape, dims_zero_based)?;
+            Ok(self.allocate_integer_tensor(out, shape))
+        })
+    }
+
     fn reduce_mean<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
@@ -9094,7 +9426,9 @@ pub fn reset_inprocess_rng() {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_accelerate_api::{ProviderBlackScholesPriceInput, ProviderNdgridAxis};
+    use runmat_accelerate_api::{
+        IntegerElementType, ProviderBlackScholesPriceInput, ProviderNdgridAxis,
+    };
 
     fn complex_handle(
         provider: &InProcessProvider,
@@ -9286,6 +9620,136 @@ mod tests {
                 .expect("cummax indices"),
             vec![2.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
         );
+    }
+
+    #[test]
+    fn inprocess_native_integer_mean_preserves_64bit_precision_and_vecdim_rounding() {
+        let provider = InProcessProvider::new();
+        let large = 1_u64 << 63;
+        let unsigned = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[large + 1, large + 3, 7, 9]),
+                shape: &[2, 2],
+            })
+            .expect("upload uint64 mean input");
+        let signed = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[-2, -3, 10, 13]),
+                shape: &[2, 2],
+            })
+            .expect("upload int64 mean input");
+        let vecdim_input = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I16(&[1, 1, 1, 3]),
+                shape: &[2, 2],
+            })
+            .expect("upload int16 vecdim mean input");
+        let unsigned_dim0 = block_on(provider.reduce_integer_mean_native_dim(&unsigned, 0))
+            .expect("uint64 mean dim 0");
+        let signed_dim0 = block_on(provider.reduce_integer_mean_native_dim(&signed, 0))
+            .expect("int64 mean dim 0");
+        let vecdim = block_on(provider.reduce_integer_mean_native_dims(&vecdim_input, &[0, 1]))
+            .expect("int16 mean vecdim");
+        assert_eq!(
+            block_on(provider.download_integer(&unsigned_dim0))
+                .expect("download uint64 mean")
+                .data,
+            HostIntegerDataOwned::U64(vec![large + 2, 8])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&signed_dim0))
+                .expect("download int64 mean")
+                .data,
+            HostIntegerDataOwned::I64(vec![-3, 12])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&vecdim))
+                .expect("download vecdim mean")
+                .data,
+            HostIntegerDataOwned::I16(vec![2])
+        );
+        assert_eq!(vecdim.shape, vec![1, 1]);
+    }
+
+    #[test]
+    fn inprocess_native_integer_mean_covers_all_classes_and_empty_reductions() {
+        let provider = InProcessProvider::new();
+        macro_rules! check {
+            ($view:ident, $owned:ident, $ty:ty, $element_type:expr) => {{
+                let values: [$ty; 4] = [1 as $ty, 2 as $ty, 3 as $ty, 4 as $ty];
+                let input = provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&values),
+                        shape: &[2, 2],
+                    })
+                    .expect("upload integer mean values");
+                let dim0 = block_on(provider.reduce_integer_mean_native_dim(&input, 0))
+                    .expect("mean dim 0");
+                let dim1 = block_on(provider.reduce_integer_mean_native_dim(&input, 1))
+                    .expect("mean dim 1");
+                let global =
+                    block_on(provider.reduce_integer_mean_native(&input)).expect("mean global");
+                assert_eq!(
+                    block_on(provider.download_integer(&dim0))
+                        .expect("download mean dim 0")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![2 as $ty, 4 as $ty])
+                );
+                assert_eq!(
+                    block_on(provider.download_integer(&dim1))
+                        .expect("download mean dim 1")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![2 as $ty, 3 as $ty])
+                );
+                assert_eq!(
+                    block_on(provider.download_integer(&global))
+                        .expect("download global mean")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![3 as $ty])
+                );
+                assert_eq!(dim0.shape, vec![1, 2]);
+                assert_eq!(dim1.shape, vec![2, 1]);
+                assert_eq!(global.shape, vec![1, 1]);
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&dim0),
+                    Some($element_type)
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&global),
+                    Some($element_type)
+                );
+
+                let empty_values: [$ty; 0] = [];
+                let empty = provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&empty_values),
+                        shape: &[0, 3],
+                    })
+                    .expect("upload empty integer mean values");
+                let empty_dim0 = block_on(provider.reduce_integer_mean_native_dim(&empty, 0))
+                    .expect("mean empty dim 0");
+                assert_eq!(empty_dim0.shape, vec![1, 3]);
+                assert_eq!(
+                    block_on(provider.download_integer(&empty_dim0))
+                        .expect("download empty mean")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![0 as $ty, 0 as $ty, 0 as $ty])
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&empty_dim0),
+                    Some($element_type)
+                );
+            }};
+        }
+
+        check!(I8, I8, i8, IntegerElementType::I8);
+        check!(I16, I16, i16, IntegerElementType::I16);
+        check!(I32, I32, i32, IntegerElementType::I32);
+        check!(I64, I64, i64, IntegerElementType::I64);
+        check!(U8, U8, u8, IntegerElementType::U8);
+        check!(U16, U16, u16, IntegerElementType::U16);
+        check!(U32, U32, u32, IntegerElementType::U32);
+        check!(U64, U64, u64, IntegerElementType::U64);
     }
 
     #[test]

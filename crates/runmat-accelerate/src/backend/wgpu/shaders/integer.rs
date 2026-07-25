@@ -28,6 +28,10 @@ pub fn cumulative_scan_shader(scalar_type: &str, workgroup_size: u32) -> String 
         .replace("@WG@", &workgroup_size.to_string())
 }
 
+pub fn mean_dim_shader(workgroup_size: u32) -> String {
+    INTEGER_MEAN_DIM_SHADER.replace("@WG@", &workgroup_size.to_string())
+}
+
 const INTEGER_COMPARISON_SHADER: &str = r#"
 struct Words { data: array<u32> };
 struct Output { data: array<$SCALAR> };
@@ -1366,6 +1370,193 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
             offset = offset + 1u;
         }
+    }
+}
+"#;
+
+const INTEGER_MEAN_DIM_SHADER: &str = r#"
+struct Words { data: array<u32> };
+struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
+alias PackedArray = array<PackedValue, 128>;
+
+struct Params {
+    rank: u32,
+    kept_count: u32,
+    reduce_count: u32,
+    rows: u32,
+    cols: u32,
+    integer_type: u32,
+    slice_offset: u32,
+    _pad0: u32,
+    kept_sizes: PackedArray,
+    reduce_sizes: PackedArray,
+    kept_strides: PackedArray,
+    reduce_strides: PackedArray,
+};
+
+@group(0) @binding(0) var<storage, read> InBuf: Words;
+@group(0) @binding(1) var<storage, read_write> OutBuf: Words;
+@group(0) @binding(2) var<uniform> params: Params;
+
+fn sx8_mean(x: u32) -> i64 { return i64(bitcast<i32>(x << 24u) >> 24); }
+fn sx16_mean(x: u32) -> i64 { return i64(bitcast<i32>(x << 16u) >> 16); }
+
+fn map_mean_col_to_base(col: u32) -> u32 {
+    var rem = col;
+    var base = 0u;
+    var j = 0u;
+    loop {
+        if (j >= params.kept_count) { break; }
+        let size = params.kept_sizes[j].value;
+        if (size != 0u) {
+            let coord = rem % size;
+            rem = rem / size;
+            base = base + coord * params.kept_strides[j].value;
+        }
+        j = j + 1u;
+    }
+    return base;
+}
+
+fn map_mean_row_offset(row: u32) -> u32 {
+    var rem = row;
+    var offset = 0u;
+    var j = 0u;
+    loop {
+        if (j >= params.reduce_count) { break; }
+        let size = params.reduce_sizes[j].value;
+        if (size != 0u) {
+            let coord = rem % size;
+            rem = rem / size;
+            offset = offset + coord * params.reduce_strides[j].value;
+        }
+        j = j + 1u;
+    }
+    return offset;
+}
+
+fn read_unsigned_mean(logical_index: u32) -> u64 {
+    let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
+    let lane = logical_index * lanes;
+    let low = InBuf.data[lane];
+    if (params.integer_type == 7u) {
+        return (u64(InBuf.data[lane + 1u]) << 32u) | u64(low);
+    }
+    switch params.integer_type {
+        case 4u: { return u64(low & 0xffu); }
+        case 5u: { return u64(low & 0xffffu); }
+        default: { return u64(low); }
+    }
+}
+
+fn read_signed_mean(logical_index: u32) -> i64 {
+    let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
+    let lane = logical_index * lanes;
+    let low = InBuf.data[lane];
+    switch params.integer_type {
+        case 0u: { return sx8_mean(low); }
+        case 1u: { return sx16_mean(low); }
+        case 2u: { return i64(bitcast<i32>(low)); }
+        case 3u: {
+            let bits = (u64(InBuf.data[lane + 1u]) << 32u) | u64(low);
+            return bitcast<i64>(bits);
+        }
+        default: { return i64(read_unsigned_mean(logical_index)); }
+    }
+}
+
+fn write_unsigned_mean(out_index: u32, value: u64) {
+    let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
+    let lane = out_index * lanes;
+    switch params.integer_type {
+        case 4u: { OutBuf.data[lane] = u32(min(value, 255u)); }
+        case 5u: { OutBuf.data[lane] = u32(min(value, 65535u)); }
+        case 6u: { OutBuf.data[lane] = u32(min(value, 4294967295u)); }
+        case 7u: {
+            OutBuf.data[lane] = u32(value & 0xffffffffu);
+            OutBuf.data[lane + 1u] = u32(value >> 32u);
+        }
+        default: { OutBuf.data[lane] = u32(value); }
+    }
+}
+
+fn write_signed_mean(out_index: u32, value: i64) {
+    let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
+    let lane = out_index * lanes;
+    switch params.integer_type {
+        case 0u: { OutBuf.data[lane] = bitcast<u32>(i32(clamp(value, -128i, 127i))); }
+        case 1u: { OutBuf.data[lane] = bitcast<u32>(i32(clamp(value, -32768i, 32767i))); }
+        case 2u: { OutBuf.data[lane] = bitcast<u32>(i32(clamp(value, -2147483648i, 2147483647i))); }
+        case 3u: {
+            let bits = bitcast<u64>(value);
+            OutBuf.data[lane] = u32(bits & 0xffffffffu);
+            OutBuf.data[lane + 1u] = u32(bits >> 32u);
+        }
+        default: { write_unsigned_mean(out_index, u64(max(value, 0i))); }
+    }
+}
+
+fn unsigned_mean(base: u32) -> u64 {
+    let divisor = u64(params.rows);
+    var quotient = 0u64;
+    var remainder = 0u64;
+    var row = 0u;
+    loop {
+        if (row >= params.rows) { break; }
+        let value = read_unsigned_mean(base + map_mean_row_offset(row));
+        quotient = quotient + value / divisor;
+        remainder = remainder + value % divisor;
+        if (remainder >= divisor) {
+            quotient = quotient + 1u;
+            remainder = remainder - divisor;
+        }
+        row = row + 1u;
+    }
+    if (remainder * 2u >= divisor) {
+        quotient = quotient + 1u;
+    }
+    return quotient;
+}
+
+fn signed_mean(base: u32) -> i64 {
+    let divisor = i64(params.rows);
+    var quotient = 0i64;
+    var remainder = 0i64;
+    var row = 0u;
+    loop {
+        if (row >= params.rows) { break; }
+        let value = read_signed_mean(base + map_mean_row_offset(row));
+        quotient = quotient + value / divisor;
+        remainder = remainder + value % divisor;
+        if (remainder >= divisor) {
+            quotient = quotient + 1i;
+            remainder = remainder - divisor;
+        }
+        if (remainder <= -divisor) {
+            quotient = quotient - 1i;
+            remainder = remainder + divisor;
+        }
+        row = row + 1u;
+    }
+    let magnitude = select(u64(remainder), u64(-remainder), remainder < 0i);
+    if (magnitude * 2u >= u64(params.rows)) {
+        quotient = quotient + select(1i, -1i, remainder < 0i);
+    }
+    return quotient;
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let local = gid.x;
+    let slice = params.slice_offset + local;
+    if (local >= params.cols || slice >= params.cols || params.rows == 0u) {
+        return;
+    }
+    let base = map_mean_col_to_base(slice);
+    if (params.integer_type <= 3u) {
+        write_signed_mean(slice, signed_mean(base));
+    } else {
+        write_unsigned_mean(slice, unsigned_mean(base));
     }
 }
 "#;

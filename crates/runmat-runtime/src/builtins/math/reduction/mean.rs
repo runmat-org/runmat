@@ -500,6 +500,11 @@ pub(crate) async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::Built
     let input_meta = InputMeta::from_value(&value);
     let parsed = parse_arguments(&rest).await?;
     if matches!(parsed.output, OutputTemplate::Native) {
+        if let Value::GpuTensor(handle) = &value {
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                return mean_native_integer_gpu(handle.clone(), &parsed).await;
+            }
+        }
         if let Some(result) = mean_native_integer(&value, &parsed)? {
             return Ok(result);
         }
@@ -531,6 +536,32 @@ fn mean_native_integer(value: &Value, parsed: &ParsedArguments) -> BuiltinResult
     crate::builtins::math::reduction::integer_native::mean(&storage, &shape, &dims)
         .map(Some)
         .map_err(mean_internal_error)
+}
+
+async fn mean_native_integer_gpu(
+    handle: GpuTensorHandle,
+    parsed: &ParsedArguments,
+) -> BuiltinResult<Value> {
+    let dims = resolve_native_dims(&handle.shape, &parsed.axes)?;
+    if dims.is_empty() {
+        return Ok(Value::GpuTensor(handle));
+    }
+    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+        mean_internal_error("mean: native integer gpuArray requires an acceleration provider")
+    })?;
+    let result = if dims.len() == handle.shape.len() {
+        provider.reduce_integer_mean_native(&handle).await
+    } else if dims.len() == 1 {
+        provider
+            .reduce_integer_mean_native_dim(&handle, dims[0])
+            .await
+    } else {
+        provider
+            .reduce_integer_mean_native_dims(&handle, &dims)
+            .await
+    }
+    .map_err(|err| mean_internal_error(format!("mean: {err}")))?;
+    Ok(Value::GpuTensor(result))
 }
 
 fn resolve_native_dims(shape: &[usize], axes: &MeanAxes) -> BuiltinResult<Vec<usize>> {
@@ -2176,6 +2207,76 @@ pub(crate) mod tests {
             for (a, b) in gpu_tensor.data.iter().zip(cpu_tensor.data.iter()) {
                 assert!((a - b).abs() < 1e-12);
             }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn mean_native_integer_gpu_preserves_exact_class_and_residency() {
+        test_support::with_test_provider(|provider| {
+            let large = 1_u64 << 63;
+            let handle = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&[
+                        large + 1,
+                        large + 3,
+                        7,
+                        9,
+                    ]),
+                    shape: &[2, 2],
+                })
+                .expect("upload native integer");
+            let result = mean_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::Int(IntValue::I32(1)), Value::from("native")],
+            )
+            .expect("native mean");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected resident GPU tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&out),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&out))
+                    .expect("download native integer mean")
+                    .data,
+                runmat_accelerate_api::HostIntegerDataOwned::U64(vec![large + 2, 8])
+            );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn mean_native_integer_gpu_vecdim_rounds_once() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::I16(&[1, 1, 1, 3]),
+                    shape: &[2, 2],
+                })
+                .expect("upload native integer");
+            let dims = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("dims");
+            let result = mean_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::Tensor(dims), Value::from("native")],
+            )
+            .expect("native vecdim mean");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected resident GPU tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&out),
+                Some(runmat_accelerate_api::IntegerElementType::I16)
+            );
+            assert_eq!(out.shape, vec![1, 1]);
+            assert_eq!(
+                block_on(provider.download_integer(&out))
+                    .expect("download native integer vecdim mean")
+                    .data,
+                runmat_accelerate_api::HostIntegerDataOwned::I16(vec![2])
+            );
         });
     }
 

@@ -648,6 +648,239 @@ impl WgpuProvider {
         Ok(current)
     }
 
+    pub(crate) fn integer_reduce_mean_dim_exec(
+        &self,
+        dim: usize,
+        operation_name: &str,
+        a: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        self.integer_reduce_mean_dims_exec(&[dim], operation_name, a)
+    }
+
+    pub(crate) fn integer_reduce_mean_global_exec(
+        &self,
+        operation_name: &str,
+        a: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let rank = a.shape.len();
+        if rank == 0 {
+            return Err(anyhow!("{operation_name}: rank must be greater than zero"));
+        }
+        let dims: Vec<usize> = (0..rank).collect();
+        self.integer_reduce_mean_dims_exec(&dims, operation_name, a)
+    }
+
+    pub(crate) fn integer_reduce_mean_dims_exec(
+        &self,
+        dims: &[usize],
+        operation_name: &str,
+        a: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry_raw(a)?;
+        let integer_type = entry
+            .integer_type
+            .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
+        ensure!(
+            entry.storage == GpuTensorStorage::Real,
+            "{operation_name}: complex integer gpuArray mean is not supported"
+        );
+        let rank = entry.shape.len();
+        ensure!(rank > 0, "{operation_name}: rank must be greater than zero");
+        ensure!(
+            rank <= crate::backend::wgpu::params::BCAST_MAX_RANK,
+            "{operation_name}: rank exceeds GPU kernel limit"
+        );
+        let mut reduced = vec![false; rank];
+        for &dim in dims {
+            ensure!(dim < rank, "{operation_name}: dimension out of bounds");
+            reduced[dim] = true;
+        }
+        if !reduced.iter().any(|&value| value) {
+            return Ok(a.clone());
+        }
+        let mut strides = vec![0usize; rank];
+        let mut stride = 1usize;
+        for (index, slot) in strides.iter_mut().enumerate() {
+            *slot = stride;
+            stride = stride
+                .checked_mul(entry.shape[index].max(1))
+                .ok_or_else(|| anyhow!("{operation_name}: shape strides overflow"))?;
+        }
+        let kept: Vec<usize> = (0..rank).filter(|&index| !reduced[index]).collect();
+        let reduce_dims: Vec<usize> = (0..rank).filter(|&index| reduced[index]).collect();
+        let rows = reduce_dims.iter().try_fold(1usize, |product, &index| {
+            product
+                .checked_mul(entry.shape[index])
+                .ok_or_else(|| anyhow!("{operation_name}: reduce length overflow"))
+        })?;
+        let cols = kept.iter().try_fold(1usize, |product, &index| {
+            product
+                .checked_mul(entry.shape[index])
+                .ok_or_else(|| anyhow!("{operation_name}: output length overflow"))
+        })?;
+        let mut out_shape = entry.shape.clone();
+        for &dim in &reduce_dims {
+            out_shape[dim] = 1;
+        }
+        if rows > u32::MAX as usize || cols > u32::MAX as usize {
+            return Err(gpu_dispatch_length_limit_error(
+                operation_name,
+                rows.max(cols),
+            ));
+        }
+        if strides.iter().any(|&value| value > u32::MAX as usize) {
+            return Err(anyhow!("{operation_name}: strides exceed GPU kernel limit"));
+        }
+        if cols == 0 {
+            return Ok(self.register_integer_buffer(
+                self.create_storage_buffer(0, "runmat-integer-mean-empty"),
+                out_shape,
+                0,
+                integer_type,
+                0,
+            ));
+        }
+        if rows == 0 {
+            return identity_integer_buffer(self, integer_type, cols, &out_shape, false);
+        }
+        let raw_words = integer_word_count(integer_type, cols)?;
+        let allocated_bytes = (raw_words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
+        let out = self.create_storage_buffer_checked(raw_words, "runmat-integer-mean-out")?;
+        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+        let shader = crate::backend::wgpu::shaders::integer::mean_dim_shader(workgroup_size);
+        let layout = self
+            .device_ref()
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("runmat-integer-mean-dim-bgl"),
+                entries: &[
+                    crate::backend::wgpu::bindings::storage_read_entry(0),
+                    crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                    crate::backend::wgpu::bindings::uniform_entry(2),
+                ],
+            });
+        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+            self.device_ref(),
+            "runmat-integer-mean-dim-pl",
+            &layout,
+        );
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-integer-mean-dim-module",
+            &shader,
+        );
+        let key = self.compute_pipeline_hash_bytes(
+            shader.as_bytes(),
+            "runmat-integer-mean-dim-bgl",
+            Some(workgroup_size),
+        );
+        let pipeline = self.get_or_create_pipeline(
+            key,
+            &pipeline_layout,
+            &module,
+            "runmat-integer-mean-dim",
+            Some(shader.as_bytes()),
+            Some("runmat-integer-mean-dim-bgl"),
+            Some(workgroup_size),
+        );
+        #[repr(C)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
+        struct Params {
+            rank: u32,
+            kept_count: u32,
+            reduce_count: u32,
+            rows: u32,
+            cols: u32,
+            integer_type: u32,
+            slice_offset: u32,
+            _pad0: u32,
+            kept_sizes: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            reduce_sizes: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            kept_strides: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            reduce_strides: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+        }
+        let mut kept_sizes = [crate::backend::wgpu::params::AlignedU32::default();
+            crate::backend::wgpu::params::BCAST_MAX_RANK];
+        let mut reduce_sizes = [crate::backend::wgpu::params::AlignedU32::default();
+            crate::backend::wgpu::params::BCAST_MAX_RANK];
+        let mut kept_strides = [crate::backend::wgpu::params::AlignedU32::default();
+            crate::backend::wgpu::params::BCAST_MAX_RANK];
+        let mut reduce_strides = [crate::backend::wgpu::params::AlignedU32::default();
+            crate::backend::wgpu::params::BCAST_MAX_RANK];
+        for (position, &index) in kept.iter().enumerate() {
+            kept_sizes[position] = crate::backend::wgpu::params::AlignedU32::new(
+                u32::try_from(entry.shape[index])
+                    .map_err(|_| anyhow!("{operation_name}: shape exceeds GPU kernel limit"))?,
+            );
+            kept_strides[position] = crate::backend::wgpu::params::AlignedU32::new(
+                u32::try_from(strides[index])
+                    .map_err(|_| anyhow!("{operation_name}: stride exceeds GPU kernel limit"))?,
+            );
+        }
+        for (position, &index) in reduce_dims.iter().enumerate() {
+            reduce_sizes[position] = crate::backend::wgpu::params::AlignedU32::new(
+                u32::try_from(entry.shape[index])
+                    .map_err(|_| anyhow!("{operation_name}: shape exceeds GPU kernel limit"))?,
+            );
+            reduce_strides[position] = crate::backend::wgpu::params::AlignedU32::new(
+                u32::try_from(strides[index])
+                    .map_err(|_| anyhow!("{operation_name}: stride exceeds GPU kernel limit"))?,
+            );
+        }
+        let max_groups = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
+        let mut offset = 0usize;
+        while offset < cols {
+            let chunk = (cols - offset).min(max_groups);
+            let params = Params {
+                rank: rank as u32,
+                kept_count: kept.len() as u32,
+                reduce_count: reduce_dims.len() as u32,
+                rows: rows as u32,
+                cols: cols as u32,
+                integer_type: integer_type_code(integer_type),
+                slice_offset: offset as u32,
+                _pad0: 0,
+                kept_sizes,
+                reduce_sizes,
+                kept_strides,
+                reduce_strides,
+            };
+            let uniform = self.uniform_buffer(&params, "runmat-integer-mean-dim-params");
+            let group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-integer-mean-dim-bg"),
+                    layout: &layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: uniform.as_entire_binding(),
+                        },
+                    ],
+                });
+            crate::backend::wgpu::dispatch::elementwise::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline,
+                &group,
+                chunk as u32,
+            );
+            offset += chunk;
+        }
+        Ok(self.register_integer_buffer(out, out_shape, cols, integer_type, allocated_bytes))
+    }
+
     pub(crate) fn integer_reduce_extrema_dim_exec(
         &self,
         select_min: bool,
@@ -1939,5 +2172,154 @@ mod tests {
         check!(U16, U16, u16);
         check!(U32, U32, u32);
         check!(U64, U64, u64);
+    }
+
+    #[test]
+    fn wgpu_native_integer_mean_preserves_64bit_precision_and_rounding() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let large = 1_u64 << 63;
+        let unsigned = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[large + 1, large + 3, 7, 9]),
+                shape: &[2, 2],
+            })
+            .expect("upload uint64 mean input");
+        let signed = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[-2, -3, 10, 13]),
+                shape: &[2, 2],
+            })
+            .expect("upload int64 mean input");
+        let unsigned_dim0 = block_on(provider.reduce_integer_mean_native_dim(&unsigned, 0))
+            .expect("uint64 mean dim 0");
+        let signed_dim0 = block_on(provider.reduce_integer_mean_native_dim(&signed, 0))
+            .expect("int64 mean dim 0");
+        assert_eq!(
+            block_on(provider.download_integer_exec(&unsigned_dim0))
+                .expect("download uint64 mean")
+                .data,
+            HostIntegerDataOwned::U64(vec![large + 2, 8])
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&signed_dim0))
+                .expect("download int64 mean")
+                .data,
+            HostIntegerDataOwned::I64(vec![-3, 12])
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&unsigned_dim0),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&signed_dim0),
+            Some(IntegerElementType::I64)
+        );
+    }
+
+    #[test]
+    fn wgpu_native_integer_mean_vecdim_rounds_once() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let input = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::I16(&[1, 1, 1, 3]),
+                shape: &[2, 2],
+            })
+            .expect("upload int16 mean input");
+        let vecdim = block_on(provider.reduce_integer_mean_native_dims(&input, &[0, 1]))
+            .expect("int16 mean vecdim");
+        assert_eq!(
+            block_on(provider.download_integer_exec(&vecdim))
+                .expect("download vecdim mean")
+                .data,
+            HostIntegerDataOwned::I16(vec![2])
+        );
+        assert_eq!(vecdim.shape, vec![1, 1]);
+    }
+
+    #[test]
+    fn wgpu_native_integer_mean_covers_all_classes_and_empty_reductions() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        macro_rules! check {
+            ($view:ident, $owned:ident, $ty:ty, $element_type:expr) => {{
+                let values: [$ty; 4] = [1 as $ty, 2 as $ty, 3 as $ty, 4 as $ty];
+                let input = provider
+                    .upload_integer_exec(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&values),
+                        shape: &[2, 2],
+                    })
+                    .expect("upload integer mean values");
+                let dim0 = block_on(provider.reduce_integer_mean_native_dim(&input, 0))
+                    .expect("mean dim 0");
+                let dim1 = block_on(provider.reduce_integer_mean_native_dim(&input, 1))
+                    .expect("mean dim 1");
+                let global =
+                    block_on(provider.reduce_integer_mean_native(&input)).expect("mean global");
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&dim0))
+                        .expect("download mean dim 0")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![2 as $ty, 4 as $ty])
+                );
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&dim1))
+                        .expect("download mean dim 1")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![2 as $ty, 3 as $ty])
+                );
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&global))
+                        .expect("download global mean")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![3 as $ty])
+                );
+                assert_eq!(dim0.shape, vec![1, 2]);
+                assert_eq!(dim1.shape, vec![2, 1]);
+                assert_eq!(global.shape, vec![1, 1]);
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&dim0),
+                    Some($element_type)
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&global),
+                    Some($element_type)
+                );
+
+                let empty_values: [$ty; 0] = [];
+                let empty = provider
+                    .upload_integer_exec(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&empty_values),
+                        shape: &[0, 3],
+                    })
+                    .expect("upload empty integer mean values");
+                let empty_dim0 = block_on(provider.reduce_integer_mean_native_dim(&empty, 0))
+                    .expect("mean empty dim 0");
+                assert_eq!(empty_dim0.shape, vec![1, 3]);
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&empty_dim0))
+                        .expect("download empty mean")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![0 as $ty, 0 as $ty, 0 as $ty])
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&empty_dim0),
+                    Some($element_type)
+                );
+            }};
+        }
+
+        check!(I8, I8, i8, IntegerElementType::I8);
+        check!(I16, I16, i16, IntegerElementType::I16);
+        check!(I32, I32, i32, IntegerElementType::I32);
+        check!(I64, I64, i64, IntegerElementType::I64);
+        check!(U8, U8, u8, IntegerElementType::U8);
+        check!(U16, U16, u16, IntegerElementType::U16);
+        check!(U32, U32, u32, IntegerElementType::U32);
+        check!(U64, U64, u64, IntegerElementType::U64);
     }
 }
