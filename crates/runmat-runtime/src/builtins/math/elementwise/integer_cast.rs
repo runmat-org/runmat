@@ -4,7 +4,7 @@ use runmat_builtins::{
     ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Value,
 };
 
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::tensor;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum IntegerTarget {
@@ -72,6 +72,19 @@ impl IntegerTarget {
             IntegerStorage::U16(_) => Self::U16,
             IntegerStorage::U32(_) => Self::U32,
             IntegerStorage::U64(_) => Self::U64,
+        }
+    }
+
+    pub(crate) fn accelerator_type(self) -> runmat_accelerate_api::IntegerElementType {
+        match self {
+            Self::I8 => runmat_accelerate_api::IntegerElementType::I8,
+            Self::I16 => runmat_accelerate_api::IntegerElementType::I16,
+            Self::I32 => runmat_accelerate_api::IntegerElementType::I32,
+            Self::I64 => runmat_accelerate_api::IntegerElementType::I64,
+            Self::U8 => runmat_accelerate_api::IntegerElementType::U8,
+            Self::U16 => runmat_accelerate_api::IntegerElementType::U16,
+            Self::U32 => runmat_accelerate_api::IntegerElementType::U32,
+            Self::U64 => runmat_accelerate_api::IntegerElementType::U64,
         }
     }
 
@@ -232,10 +245,13 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
             cast_tensor_value(target, tensor)
         }
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
+            let provider = runmat_accelerate_api::provider()
+                .ok_or_else(|| CastError::Internal("no acceleration provider registered".into()))?;
+            provider
+                .cast_to_integer(&handle, target.accelerator_type())
                 .await
-                .map_err(|error| CastError::Internal(error.message))?;
-            cast_tensor_value(target, tensor)
+                .map(Value::GpuTensor)
+                .map_err(|error| CastError::Internal(error.to_string()))
         }
         value @ (Value::Complex(_, _) | Value::ComplexTensor(_)) => {
             cast_complex_value(value, target)

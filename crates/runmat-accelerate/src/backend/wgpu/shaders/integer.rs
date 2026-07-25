@@ -32,6 +32,28 @@ pub fn mean_dim_shader(workgroup_size: u32) -> String {
     INTEGER_MEAN_DIM_SHADER.replace("@WG@", &workgroup_size.to_string())
 }
 
+pub fn cast_shader(scalar_type: &str, workgroup_size: u32) -> String {
+    let read_float = if scalar_type == "f64" {
+        r#"
+fn read_float_cast(logical_index: u32) -> f64 {
+    let lane = logical_index * 2u;
+    let bits = (u64(InBuf.data[lane + 1u]) << 32u) | u64(InBuf.data[lane]);
+    return bitcast<f64>(bits);
+}
+"#
+    } else {
+        r#"
+fn read_float_cast(logical_index: u32) -> f32 {
+    return bitcast<f32>(InBuf.data[logical_index]);
+}
+"#
+    };
+    INTEGER_CAST_SHADER
+        .replace("$SCALAR", scalar_type)
+        .replace("$READ_FLOAT", read_float)
+        .replace("@WG@", &workgroup_size.to_string())
+}
+
 const INTEGER_COMPARISON_SHADER: &str = r#"
 struct Words { data: array<u32> };
 struct Output { data: array<$SCALAR> };
@@ -1557,6 +1579,174 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         write_signed_mean(slice, signed_mean(base));
     } else {
         write_unsigned_mean(slice, unsigned_mean(base));
+    }
+}
+"#;
+
+const INTEGER_CAST_SHADER: &str = r#"
+struct Words { data: array<u32> };
+struct Params {
+    len: u32,
+    offset: u32,
+    source_type: u32,
+    target_type: u32,
+};
+
+@group(0) @binding(0) var<storage, read> InBuf: Words;
+@group(0) @binding(1) var<storage, read_write> OutBuf: Words;
+@group(0) @binding(2) var<uniform> params: Params;
+
+fn sx8_cast(x: u32) -> i64 { return i64(bitcast<i32>(x << 24u) >> 24); }
+fn sx16_cast(x: u32) -> i64 { return i64(bitcast<i32>(x << 16u) >> 16); }
+
+fn is_source_integer() -> bool {
+    return params.source_type <= 7u;
+}
+
+fn read_unsigned_cast(logical_index: u32) -> u64 {
+    let lanes = select(1u, 2u, params.source_type == 3u || params.source_type == 7u);
+    let lane = logical_index * lanes;
+    let low = InBuf.data[lane];
+    if (params.source_type == 7u) {
+        return (u64(InBuf.data[lane + 1u]) << 32u) | u64(low);
+    }
+    switch params.source_type {
+        case 4u: { return u64(low & 0xffu); }
+        case 5u: { return u64(low & 0xffffu); }
+        default: { return u64(low); }
+    }
+}
+
+fn read_signed_cast(logical_index: u32) -> i64 {
+    let lanes = select(1u, 2u, params.source_type == 3u || params.source_type == 7u);
+    let lane = logical_index * lanes;
+    let low = InBuf.data[lane];
+    switch params.source_type {
+        case 0u: { return sx8_cast(low); }
+        case 1u: { return sx16_cast(low); }
+        case 2u: { return i64(bitcast<i32>(low)); }
+        case 3u: {
+            let bits = (u64(InBuf.data[lane + 1u]) << 32u) | u64(low);
+            return bitcast<i64>(bits);
+        }
+        default: { return i64(read_unsigned_cast(logical_index)); }
+    }
+}
+
+$READ_FLOAT
+
+fn rounded_float_cast(value: $SCALAR) -> $SCALAR {
+    if (value != value) {
+        return $SCALAR(0.0);
+    }
+    if (value >= $SCALAR(0.0)) {
+        return floor(value + $SCALAR(0.5));
+    }
+    return ceil(value - $SCALAR(0.5));
+}
+
+fn float_to_signed_cast(value: $SCALAR, min_value: i64, max_value: i64) -> i64 {
+    let rounded = rounded_float_cast(value);
+    if (rounded <= $SCALAR(min_value)) {
+        return min_value;
+    }
+    if (rounded >= $SCALAR(max_value)) {
+        return max_value;
+    }
+    return i64(rounded);
+}
+
+fn float_to_unsigned_cast(value: $SCALAR, max_value: u64) -> u64 {
+    let rounded = rounded_float_cast(value);
+    if (rounded <= $SCALAR(0.0)) {
+        return 0u64;
+    }
+    if (rounded >= $SCALAR(max_value)) {
+        return max_value;
+    }
+    return u64(rounded);
+}
+
+fn source_to_signed_cast(logical_index: u32, min_value: i64, max_value: i64) -> i64 {
+    if (is_source_integer()) {
+        if (params.source_type <= 3u) {
+            return clamp(read_signed_cast(logical_index), min_value, max_value);
+        }
+        let value = read_unsigned_cast(logical_index);
+        if (value >= u64(max_value)) {
+            return max_value;
+        }
+        return i64(value);
+    }
+    return float_to_signed_cast(read_float_cast(logical_index), min_value, max_value);
+}
+
+fn source_to_unsigned_cast(logical_index: u32, max_value: u64) -> u64 {
+    if (is_source_integer()) {
+        if (params.source_type <= 3u) {
+            let value = read_signed_cast(logical_index);
+            if (value <= 0i64) {
+                return 0u64;
+            }
+            return min(u64(value), max_value);
+        }
+        return min(read_unsigned_cast(logical_index), max_value);
+    }
+    return float_to_unsigned_cast(read_float_cast(logical_index), max_value);
+}
+
+fn write_unsigned_cast(out_index: u32, value: u64) {
+    let lanes = select(1u, 2u, params.target_type == 3u || params.target_type == 7u);
+    let lane = out_index * lanes;
+    switch params.target_type {
+        case 4u: { OutBuf.data[lane] = u32(min(value, 255u)); }
+        case 5u: { OutBuf.data[lane] = u32(min(value, 65535u)); }
+        case 6u: { OutBuf.data[lane] = u32(min(value, 4294967295u)); }
+        case 7u: {
+            OutBuf.data[lane] = u32(value & 0xffffffffu);
+            OutBuf.data[lane + 1u] = u32(value >> 32u);
+        }
+        default: { OutBuf.data[lane] = u32(value); }
+    }
+}
+
+fn write_signed_cast(out_index: u32, value: i64) {
+    let lanes = select(1u, 2u, params.target_type == 3u || params.target_type == 7u);
+    let lane = out_index * lanes;
+    switch params.target_type {
+        case 0u: { OutBuf.data[lane] = bitcast<u32>(i32(clamp(value, -128i, 127i))); }
+        case 1u: { OutBuf.data[lane] = bitcast<u32>(i32(clamp(value, -32768i, 32767i))); }
+        case 2u: { OutBuf.data[lane] = bitcast<u32>(i32(clamp(value, -2147483648i, 2147483647i))); }
+        case 3u: {
+            let bits = bitcast<u64>(value);
+            OutBuf.data[lane] = u32(bits & 0xffffffffu);
+            OutBuf.data[lane + 1u] = u32(bits >> 32u);
+        }
+        default: { write_unsigned_cast(out_index, u64(max(value, 0i))); }
+    }
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let local = gid.x;
+    if (local >= params.len) {
+        return;
+    }
+    let index = params.offset + local;
+    if (params.target_type <= 3u) {
+        switch params.target_type {
+            case 0u: { write_signed_cast(index, source_to_signed_cast(index, -128i64, 127i64)); }
+            case 1u: { write_signed_cast(index, source_to_signed_cast(index, -32768i64, 32767i64)); }
+            case 2u: { write_signed_cast(index, source_to_signed_cast(index, -2147483648i64, 2147483647i64)); }
+            default: { write_signed_cast(index, source_to_signed_cast(index, -9223372036854775808i64, 9223372036854775807i64)); }
+        }
+    } else {
+        switch params.target_type {
+            case 4u: { write_unsigned_cast(index, source_to_unsigned_cast(index, 255u64)); }
+            case 5u: { write_unsigned_cast(index, source_to_unsigned_cast(index, 65535u64)); }
+            case 6u: { write_unsigned_cast(index, source_to_unsigned_cast(index, 4294967295u64)); }
+            default: { write_unsigned_cast(index, source_to_unsigned_cast(index, 18446744073709551615u64)); }
+        }
     }
 }
 "#;

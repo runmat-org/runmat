@@ -2903,6 +2903,16 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("reduce_integer_mean_native_dims not supported by provider")
     }
+    /// Convert a real gpuArray to exact native integer storage while preserving
+    /// device residency. Floating-point inputs use MATLAB-compatible saturating
+    /// rounding; native integer inputs use exact class-to-class clamping.
+    fn cast_to_integer<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _target: IntegerElementType,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("cast_to_integer not supported by provider")
+    }
     fn reduce_mean<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,

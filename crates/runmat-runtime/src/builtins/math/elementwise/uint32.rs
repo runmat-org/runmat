@@ -9,10 +9,9 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
-    gpu_helpers,
     spec::{
         BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-        ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+        ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
     },
     tensor,
 };
@@ -84,14 +83,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Elementwise,
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[],
+    provider_hooks: &[ProviderHook::Custom("cast_to_integer")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "No provider-native uint32 storage hook yet; gpuArray inputs gather to host and return a host uint32 result.",
+    notes: "Real gpuArray inputs use the provider resident integer-cast hook and return native uint32 gpuArray storage. Complex gpuArray integer casts remain unsupported until typed complex integer provider storage exists.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::uint32")]
@@ -102,8 +101,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes:
-        "Runs outside fusion today because integer storage remains host-represented in f64 buffers.",
+    notes: "Resident integer cast uses provider-native integer storage; fusion can target the provider hook when integer buffers are supported.",
 };
 
 #[runtime_builtin(
@@ -186,13 +184,13 @@ fn from_char_array(chars: CharArray) -> BuiltinResult<Value> {
 }
 
 async fn from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let converted = tensor_to_host(
-        gpu_helpers::gather_tensor_async(&handle)
-            .await
-            .map_err(|e| error_with_detail(&ERROR_INTERNAL, e))?,
-    )
-    .map_err(|e| error_with_detail(&ERROR_INTERNAL, e))?;
-    Ok(value_from_tensor(converted))
+    let provider = runmat_accelerate_api::provider()
+        .ok_or_else(|| error_with_detail(&ERROR_INTERNAL, "no acceleration provider registered"))?;
+    provider
+        .cast_to_integer(&handle, runmat_accelerate_api::IntegerElementType::U32)
+        .await
+        .map(Value::GpuTensor)
+        .map_err(|e| error_with_detail(&ERROR_INTERNAL, e))
 }
 
 fn tensor_to_host(tensor: Tensor) -> Result<Tensor, String> {
@@ -252,7 +250,9 @@ fn error_with_detail(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::{HostIntegerDataOwned, HostTensorView, IntegerElementType};
     use runmat_builtins::IntegerComplexStorage;
 
     fn call(value: Value) -> BuiltinResult<Value> {
@@ -313,5 +313,34 @@ pub(crate) mod tests {
                 .expect("matching components")
             )
         );
+    }
+
+    #[test]
+    fn uint32_gpu_roundtrip_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![-1.0, 4.4, 5.6, (u32::MAX as f64) + 99.0], vec![2, 2])
+                .expect("source");
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &tensor.data,
+                    shape: &tensor.shape,
+                })
+                .expect("upload");
+            let result = call(Value::GpuTensor(handle)).expect("uint32");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected resident gpuArray result");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(IntegerElementType::U32)
+            );
+            assert_eq!(handle.shape, vec![2, 2]);
+            assert_eq!(
+                block_on(provider.download_integer(&handle))
+                    .expect("download uint32 cast")
+                    .data,
+                HostIntegerDataOwned::U32(vec![0, 4, 6, u32::MAX])
+            );
+        });
     }
 }

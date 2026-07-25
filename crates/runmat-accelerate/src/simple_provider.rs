@@ -7,8 +7,8 @@ use runmat_accelerate_api::{
     AccelDownloadFuture, AccelIntegerDownloadFuture, AccelProvider, AccelProviderFuture,
     CorrcoefOptions, CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle,
     GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorOwned,
-    HostIntegerTensorView, HostTensorOwned, HostTensorView, ImfilterOptions, PagefunRequest,
-    ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBandwidth,
+    HostIntegerTensorView, HostTensorOwned, HostTensorView, ImfilterOptions, IntegerElementType,
+    PagefunRequest, ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBandwidth,
     ProviderBitModulationRequest, ProviderBlackScholesPriceRequest,
     ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
     ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
@@ -86,6 +86,176 @@ fn owned_integer_data(data: HostIntegerDataView<'_>) -> HostIntegerDataOwned {
         HostIntegerDataView::U16(values) => HostIntegerDataOwned::U16(values.to_vec()),
         HostIntegerDataView::U32(values) => HostIntegerDataOwned::U32(values.to_vec()),
         HostIntegerDataView::U64(values) => HostIntegerDataOwned::U64(values.to_vec()),
+    }
+}
+
+fn cast_f64_to_integer_data(values: &[f64], target: IntegerElementType) -> HostIntegerDataOwned {
+    match target {
+        IntegerElementType::I8 => HostIntegerDataOwned::I8(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_signed(value, i8::MIN as f64, i8::MAX as f64) as i8)
+                .collect(),
+        ),
+        IntegerElementType::I16 => HostIntegerDataOwned::I16(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_signed(value, i16::MIN as f64, i16::MAX as f64) as i16)
+                .collect(),
+        ),
+        IntegerElementType::I32 => HostIntegerDataOwned::I32(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_signed(value, i32::MIN as f64, i32::MAX as f64) as i32)
+                .collect(),
+        ),
+        IntegerElementType::I64 => HostIntegerDataOwned::I64(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_signed(value, i64::MIN as f64, i64::MAX as f64))
+                .collect(),
+        ),
+        IntegerElementType::U8 => HostIntegerDataOwned::U8(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_unsigned(value, u8::MAX as f64) as u8)
+                .collect(),
+        ),
+        IntegerElementType::U16 => HostIntegerDataOwned::U16(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_unsigned(value, u16::MAX as f64) as u16)
+                .collect(),
+        ),
+        IntegerElementType::U32 => HostIntegerDataOwned::U32(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_unsigned(value, u32::MAX as f64) as u32)
+                .collect(),
+        ),
+        IntegerElementType::U64 => HostIntegerDataOwned::U64(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_unsigned(value, u64::MAX as f64))
+                .collect(),
+        ),
+    }
+}
+
+fn cast_integer_data_to_integer(
+    data: &HostIntegerDataOwned,
+    target: IntegerElementType,
+) -> HostIntegerDataOwned {
+    match target {
+        IntegerElementType::I8 => HostIntegerDataOwned::I8(
+            integer_data_as_i128(data)
+                .into_iter()
+                .map(|value| value.clamp(i8::MIN as i128, i8::MAX as i128) as i8)
+                .collect(),
+        ),
+        IntegerElementType::I16 => HostIntegerDataOwned::I16(
+            integer_data_as_i128(data)
+                .into_iter()
+                .map(|value| value.clamp(i16::MIN as i128, i16::MAX as i128) as i16)
+                .collect(),
+        ),
+        IntegerElementType::I32 => HostIntegerDataOwned::I32(
+            integer_data_as_i128(data)
+                .into_iter()
+                .map(|value| value.clamp(i32::MIN as i128, i32::MAX as i128) as i32)
+                .collect(),
+        ),
+        IntegerElementType::I64 => HostIntegerDataOwned::I64(
+            integer_data_as_i128(data)
+                .into_iter()
+                .map(|value| value.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
+                .collect(),
+        ),
+        IntegerElementType::U8 => HostIntegerDataOwned::U8(
+            integer_data_as_u128(data)
+                .into_iter()
+                .map(|value| value.min(u8::MAX as u128) as u8)
+                .collect(),
+        ),
+        IntegerElementType::U16 => HostIntegerDataOwned::U16(
+            integer_data_as_u128(data)
+                .into_iter()
+                .map(|value| value.min(u16::MAX as u128) as u16)
+                .collect(),
+        ),
+        IntegerElementType::U32 => HostIntegerDataOwned::U32(
+            integer_data_as_u128(data)
+                .into_iter()
+                .map(|value| value.min(u32::MAX as u128) as u32)
+                .collect(),
+        ),
+        IntegerElementType::U64 => HostIntegerDataOwned::U64(
+            integer_data_as_u128(data)
+                .into_iter()
+                .map(|value| value.min(u64::MAX as u128) as u64)
+                .collect(),
+        ),
+    }
+}
+
+fn integer_data_as_i128(data: &HostIntegerDataOwned) -> Vec<i128> {
+    match data {
+        HostIntegerDataOwned::I8(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::I16(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::I32(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::I64(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::U8(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::U16(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::U32(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::U64(values) => values
+            .iter()
+            .map(|&value| (value as u128).min(i128::MAX as u128) as i128)
+            .collect(),
+    }
+}
+
+fn integer_data_as_u128(data: &HostIntegerDataOwned) -> Vec<u128> {
+    match data {
+        HostIntegerDataOwned::I8(values) => {
+            values.iter().map(|&value| value.max(0) as u128).collect()
+        }
+        HostIntegerDataOwned::I16(values) => {
+            values.iter().map(|&value| value.max(0) as u128).collect()
+        }
+        HostIntegerDataOwned::I32(values) => {
+            values.iter().map(|&value| value.max(0) as u128).collect()
+        }
+        HostIntegerDataOwned::I64(values) => {
+            values.iter().map(|&value| value.max(0) as u128).collect()
+        }
+        HostIntegerDataOwned::U8(values) => values.iter().map(|&value| value as u128).collect(),
+        HostIntegerDataOwned::U16(values) => values.iter().map(|&value| value as u128).collect(),
+        HostIntegerDataOwned::U32(values) => values.iter().map(|&value| value as u128).collect(),
+        HostIntegerDataOwned::U64(values) => values.iter().map(|&value| value as u128).collect(),
+    }
+}
+
+fn cast_f64_to_signed(value: f64, min: f64, max: f64) -> i64 {
+    if value.is_nan() {
+        0
+    } else if value.is_infinite() {
+        if value.is_sign_negative() {
+            min as i64
+        } else {
+            max as i64
+        }
+    } else {
+        value.round().clamp(min, max) as i64
+    }
+}
+
+fn cast_f64_to_unsigned(value: f64, max: f64) -> u64 {
+    if value.is_nan() || value.is_sign_negative() {
+        0
+    } else if value.is_infinite() {
+        max as u64
+    } else {
+        value.round().clamp(0.0, max) as u64
     }
 }
 
@@ -7780,6 +7950,36 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn cast_to_integer<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        target: IntegerElementType,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let integer_data = {
+                integer_registry()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&a.buffer_id)
+                    .cloned()
+            };
+            if let Some(data) = integer_data {
+                let out = cast_integer_data_to_integer(&data, target);
+                return Ok(self.allocate_integer_tensor(out, a.shape.clone()));
+            }
+            let data = {
+                registry()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&a.buffer_id)
+                    .cloned()
+            }
+            .ok_or_else(|| anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out = cast_f64_to_integer_data(&data, target);
+            Ok(self.allocate_integer_tensor(out, a.shape.clone()))
+        })
+    }
+
     fn reduce_mean<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
@@ -9750,6 +9950,89 @@ mod tests {
         check!(U16, U16, u16, IntegerElementType::U16);
         check!(U32, U32, u32, IntegerElementType::U32);
         check!(U64, U64, u64, IntegerElementType::U64);
+    }
+
+    #[test]
+    fn inprocess_integer_cast_covers_all_target_classes_and_exact_native_inputs() {
+        let provider = InProcessProvider::new();
+        let real = provider
+            .upload(&HostTensorView {
+                data: &[-129.6, -1.0, 4.4, 5.6, f64::NAN, f64::INFINITY],
+                shape: &[2, 3],
+            })
+            .expect("upload real cast input");
+        let signed = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[-1, 0, i64::MAX]),
+                shape: &[1, 3],
+            })
+            .expect("upload signed integer cast input");
+        let unsigned = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[0, 1_u64 << 63, u64::MAX]),
+                shape: &[1, 3],
+            })
+            .expect("upload unsigned integer cast input");
+
+        macro_rules! check_real {
+            ($target:expr, $owned:ident, $expected:expr) => {{
+                let output = block_on(provider.cast_to_integer(&real, $target))
+                    .expect("resident real-to-integer cast");
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&output),
+                    Some($target)
+                );
+                assert_eq!(output.shape, vec![2, 3]);
+                assert_eq!(
+                    block_on(provider.download_integer(&output))
+                        .expect("download integer cast")
+                        .data,
+                    HostIntegerDataOwned::$owned($expected)
+                );
+            }};
+        }
+
+        check_real!(
+            IntegerElementType::I8,
+            I8,
+            vec![i8::MIN, -1, 4, 6, 0, i8::MAX]
+        );
+        check_real!(
+            IntegerElementType::I16,
+            I16,
+            vec![-130, -1, 4, 6, 0, i16::MAX]
+        );
+        check_real!(
+            IntegerElementType::I32,
+            I32,
+            vec![-130, -1, 4, 6, 0, i32::MAX]
+        );
+        check_real!(
+            IntegerElementType::I64,
+            I64,
+            vec![-130, -1, 4, 6, 0, i64::MAX]
+        );
+        check_real!(IntegerElementType::U8, U8, vec![0, 0, 4, 6, 0, u8::MAX]);
+        check_real!(IntegerElementType::U16, U16, vec![0, 0, 4, 6, 0, u16::MAX]);
+        check_real!(IntegerElementType::U32, U32, vec![0, 0, 4, 6, 0, u32::MAX]);
+        check_real!(IntegerElementType::U64, U64, vec![0, 0, 4, 6, 0, u64::MAX]);
+
+        let to_u64 = block_on(provider.cast_to_integer(&signed, IntegerElementType::U64))
+            .expect("resident int64-to-uint64 cast");
+        let to_i64 = block_on(provider.cast_to_integer(&unsigned, IntegerElementType::I64))
+            .expect("resident uint64-to-int64 cast");
+        assert_eq!(
+            block_on(provider.download_integer(&to_u64))
+                .expect("download uint64")
+                .data,
+            HostIntegerDataOwned::U64(vec![0, 0, i64::MAX as u64])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&to_i64))
+                .expect("download int64")
+                .data,
+            HostIntegerDataOwned::I64(vec![0, i64::MAX, i64::MAX])
+        );
     }
 
     #[test]

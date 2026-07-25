@@ -1,5 +1,7 @@
 use super::*;
-use runmat_accelerate_api::{AccelIntegerDownloadFuture, HostIntegerTensorView};
+use runmat_accelerate_api::{
+    AccelIntegerDownloadFuture, HostIntegerTensorView, IntegerElementType,
+};
 use runmat_accelerate_api::{
     ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBitModulationRequest,
     ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult,
@@ -1432,6 +1434,13 @@ impl AccelProvider for WgpuProvider {
         dims_zero_based: &'a [usize],
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.integer_reduce_mean_dims_exec(dims_zero_based, "mean", a) })
+    }
+    fn cast_to_integer<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        target: IntegerElementType,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.cast_to_integer_exec(a, target) })
     }
     fn reduce_mean_dim<'a>(
         &'a self,

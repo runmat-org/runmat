@@ -24,7 +24,8 @@ macro_rules! define_integer_cast_builtin {
 
             use crate::builtins::common::spec::{
                 BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy,
-                GpuOpKind, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+                GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+                ShapeRequirements,
             };
             use crate::builtins::math::elementwise::integer_cast::{
                 cast_value, CastError, IntegerTarget,
@@ -84,14 +85,14 @@ macro_rules! define_integer_cast_builtin {
                 op_kind: GpuOpKind::Elementwise,
                 supported_precisions: &[ScalarType::F32, ScalarType::F64],
                 broadcast: BroadcastSemantics::Matlab,
-                provider_hooks: &[],
+                provider_hooks: &[ProviderHook::Custom("cast_to_integer")],
                 constant_strategy: ConstantStrategy::InlineLiteral,
-                residency: ResidencyPolicy::GatherImmediately,
+                residency: ResidencyPolicy::NewHandle,
                 nan_mode: ReductionNaN::Include,
                 two_pass_threshold: None,
                 workgroup_size: None,
                 accepts_nan_mode: false,
-                notes: "Exact native integer buffers are available, but integer conversion kernels are not yet provider-resident; gpuArray inputs gather and return an exact host integer tensor.",
+                notes: "Real gpuArray inputs use the provider resident integer-cast hook and return native integer gpuArray storage. Complex gpuArray integer casts remain unsupported until typed complex integer provider storage exists.",
             };
 
             #[runmat_macros::register_fusion_spec(builtin_path = $path)]
@@ -102,7 +103,7 @@ macro_rules! define_integer_cast_builtin {
                 elementwise: None,
                 reduction: None,
                 emits_nan: false,
-                notes: "Integer casts remain host-side until providers support exact integer conversion kernels.",
+                notes: "Resident integer casts use provider-native integer storage; fusion can target the provider hook when integer buffers are supported.",
             };
 
             #[runtime_builtin(
@@ -200,7 +201,7 @@ define_integer_cast_builtin!(
 mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{HostIntegerDataOwned, HostTensorView, IntegerElementType};
     use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Tensor, Value};
 
     #[test]
@@ -277,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn uint64_gpu_input_gathers_to_exact_host_tensor() {
+    fn uint64_gpu_input_stays_resident_with_exact_integer_storage() {
         test_support::with_test_provider(|provider| {
             let source = Tensor::new(vec![-1.0, 4.4], vec![1, 2]).expect("source");
             let handle = provider
@@ -292,13 +293,19 @@ mod tests {
             ))
             .expect("uint64 GPU conversion");
 
-            match output {
-                Value::Tensor(tensor) => assert_eq!(
-                    tensor.integer_storage(),
-                    Some(&IntegerStorage::U64(vec![0, 4]))
-                ),
-                other => panic!("expected exact host tensor, got {other:?}"),
-            }
+            let Value::GpuTensor(handle) = output else {
+                panic!("expected resident gpuArray result");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(IntegerElementType::U64)
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&handle))
+                    .expect("download uint64 cast")
+                    .data,
+                HostIntegerDataOwned::U64(vec![0, 4])
+            );
         });
     }
 

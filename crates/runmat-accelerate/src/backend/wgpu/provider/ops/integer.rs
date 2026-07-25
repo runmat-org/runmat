@@ -1363,6 +1363,134 @@ impl WgpuProvider {
             allocated_bytes,
         ))
     }
+
+    pub(crate) fn cast_to_integer_exec(
+        &self,
+        a: &GpuTensorHandle,
+        target_type: IntegerElementType,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry_raw(a)?;
+        ensure!(
+            entry.storage == GpuTensorStorage::Real,
+            "integer cast: complex gpuArray inputs are not supported by the resident integer cast kernel"
+        );
+        let len = entry.len;
+        let raw_len = integer_word_count(target_type, len)?;
+        let allocated_bytes = (raw_len as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
+        if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-integer-cast-empty");
+            return Ok(self.register_integer_buffer(out, entry.shape, 0, target_type, 0));
+        }
+        if len > u32::MAX as usize {
+            return Err(gpu_dispatch_length_limit_error("integer cast", len));
+        }
+        let source_type = if let Some(integer_type) = entry.integer_type {
+            integer_type_code(integer_type)
+        } else {
+            match entry.precision {
+                NumericPrecision::F32 => 8,
+                NumericPrecision::F64 => 9,
+            }
+        };
+        let raw_out = self.create_storage_buffer_checked(raw_len, "runmat-integer-cast-out")?;
+        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+        let scalar_type = match entry.precision {
+            NumericPrecision::F32 => "f32",
+            NumericPrecision::F64 => "f64",
+        };
+        let shader =
+            crate::backend::wgpu::shaders::integer::cast_shader(scalar_type, workgroup_size);
+        let bind_group_layout =
+            self.device_ref()
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("runmat-integer-cast-bgl"),
+                    entries: &[
+                        crate::backend::wgpu::bindings::storage_read_entry(0),
+                        crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                        crate::backend::wgpu::bindings::uniform_entry(2),
+                    ],
+                });
+        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+            self.device_ref(),
+            "runmat-integer-cast-pl",
+            &bind_group_layout,
+        );
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-integer-cast-module",
+            &shader,
+        );
+        let key = self.compute_pipeline_hash_bytes(
+            shader.as_bytes(),
+            "runmat-integer-cast-bgl",
+            Some(workgroup_size),
+        );
+        let pipeline = self.get_or_create_pipeline(
+            key,
+            &pipeline_layout,
+            &module,
+            "runmat-integer-cast",
+            Some(shader.as_bytes()),
+            Some("runmat-integer-cast-bgl"),
+            Some(workgroup_size),
+        );
+
+        #[repr(C)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
+        struct Params {
+            len: u32,
+            offset: u32,
+            source_type: u32,
+            target_type: u32,
+        }
+
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * workgroup_size as usize;
+        let mut offset = 0usize;
+        while offset < len {
+            let chunk_len = (len - offset).min(chunk_capacity);
+            let params = Params {
+                len: chunk_len as u32,
+                offset: offset as u32,
+                source_type,
+                target_type: integer_type_code(target_type),
+            };
+            let params_buffer = self.uniform_buffer(&params, "runmat-integer-cast-params");
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-integer-cast-bg"),
+                    layout: &bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: raw_out.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                chunk_len as u32,
+                workgroup_size,
+            );
+            crate::backend::wgpu::dispatch::elementwise::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline,
+                &bind_group,
+                groups,
+            );
+            offset += chunk_len;
+        }
+        Ok(self.register_integer_buffer(raw_out, entry.shape, len, target_type, allocated_bytes))
+    }
 }
 
 #[cfg(test)]
@@ -1371,7 +1499,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::{
         AccelProvider, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView,
-        IntegerElementType,
+        HostTensorView, IntegerElementType,
     };
 
     fn register_wgpu_provider_for_test() -> Option<&'static WgpuProvider> {
@@ -2321,5 +2449,80 @@ mod tests {
         check!(U16, U16, u16, IntegerElementType::U16);
         check!(U32, U32, u32, IntegerElementType::U32);
         check!(U64, U64, u64, IntegerElementType::U64);
+    }
+
+    #[test]
+    fn wgpu_integer_cast_from_real_gpuarray_stays_resident() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let values = [-129.6, -1.0, 4.4, 5.6, f64::NAN, f64::INFINITY];
+        let input = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &[2, 3],
+            })
+            .expect("upload real cast input");
+        let int8 = block_on(provider.cast_to_integer(&input, IntegerElementType::I8))
+            .expect("cast to int8");
+        let uint32 = block_on(provider.cast_to_integer(&input, IntegerElementType::U32))
+            .expect("cast to uint32");
+        assert_eq!(int8.shape, vec![2, 3]);
+        assert_eq!(uint32.shape, vec![2, 3]);
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&int8),
+            Some(IntegerElementType::I8)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&uint32),
+            Some(IntegerElementType::U32)
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&int8))
+                .expect("download int8 cast")
+                .data,
+            HostIntegerDataOwned::I8(vec![i8::MIN, -1, 4, 6, 0, i8::MAX])
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&uint32))
+                .expect("download uint32 cast")
+                .data,
+            HostIntegerDataOwned::U32(vec![0, 0, 4, 6, 0, u32::MAX])
+        );
+    }
+
+    #[test]
+    fn wgpu_integer_cast_between_native_classes_is_exact() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let signed = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[-1, 0, i64::MAX]),
+                shape: &[1, 3],
+            })
+            .expect("upload signed integer cast input");
+        let unsigned = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[0, 1_u64 << 63, u64::MAX]),
+                shape: &[1, 3],
+            })
+            .expect("upload unsigned integer cast input");
+        let to_u64 = block_on(provider.cast_to_integer(&signed, IntegerElementType::U64))
+            .expect("cast int64 to uint64");
+        let to_i64 = block_on(provider.cast_to_integer(&unsigned, IntegerElementType::I64))
+            .expect("cast uint64 to int64");
+        assert_eq!(
+            block_on(provider.download_integer_exec(&to_u64))
+                .expect("download uint64 cast")
+                .data,
+            HostIntegerDataOwned::U64(vec![0, 0, i64::MAX as u64])
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&to_i64))
+                .expect("download int64 cast")
+                .data,
+            HostIntegerDataOwned::I64(vec![0, i64::MAX, i64::MAX])
+        );
     }
 }
