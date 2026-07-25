@@ -221,22 +221,7 @@ pub async fn dimension_from_value_async(
     let Some(raw) = scalar_f64_from_value_async(value).await? else {
         return Ok(None);
     };
-    if !raw.is_finite() {
-        return Err(format!("{name}: dimension must be finite"));
-    }
-    let rounded = raw.round();
-    if (rounded - raw).abs() > 1e-6 {
-        return Err(format!("{name}: dimension must be an integer"));
-    }
-    let min = if allow_zero { 0.0 } else { 1.0 };
-    if rounded < min {
-        let bound = if allow_zero { 0 } else { 1 };
-        return Err(format!("{name}: dimension must be >= {bound}"));
-    }
-    if !fits_platform_usize(rounded) {
-        return Err(format!("{name}: dimension is outside the supported range"));
-    }
-    Ok(Some(rounded as usize))
+    parse_numeric_dimension_value(raw, name, allow_zero).map(Some)
 }
 
 fn parse_integer_dimension(
@@ -398,28 +383,43 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
 pub fn parse_dimension(value: &Value, name: &str) -> Result<usize, String> {
     match value {
         Value::Int(i) => parse_integer_dimension(i, name, false),
-        Value::Num(n) => {
-            if !n.is_finite() {
-                return Err(format!("{name}: dimension must be finite"));
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            if let Some(storage) = tensor.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                return parse_integer_dimension(&value, name, false);
             }
-            let rounded = n.round();
-            // Allow small floating error tolerance when users pass float-typed dims
-            if (rounded - n).abs() > 1e-6 {
-                return Err(format!("{name}: dimension must be an integer"));
-            }
-            if rounded < 1.0 {
-                return Err(format!("{name}: dimension must be >= 1"));
-            }
-            if !fits_platform_usize(rounded) {
-                return Err(format!("{name}: dimension is outside the supported range"));
-            }
-            Ok(rounded as usize)
+            parse_numeric_dimension_value(tensor.data[0], name, false)
         }
+        Value::Num(n) => parse_numeric_dimension_value(*n, name, false),
         other => Err(format!(
             "{name}: dimension must be numeric, got {:?}",
             other
         )),
     }
+}
+
+fn parse_numeric_dimension_value(
+    value: f64,
+    name: &str,
+    allow_zero: bool,
+) -> Result<usize, String> {
+    if !value.is_finite() {
+        return Err(format!("{name}: dimension must be finite"));
+    }
+    let rounded = value.round();
+    // Allow small floating error tolerance when users pass float-typed dims
+    if (rounded - value).abs() > 1e-6 {
+        return Err(format!("{name}: dimension must be an integer"));
+    }
+    let min = if allow_zero { 0.0 } else { 1.0 };
+    if rounded < min {
+        let bound = if allow_zero { 0 } else { 1 };
+        return Err(format!("{name}: dimension must be >= {bound}"));
+    }
+    if !fits_platform_usize(rounded) {
+        return Err(format!("{name}: dimension is outside the supported range"));
+    }
+    Ok(rounded as usize)
 }
 
 /// Attempt to extract a string from a runtime value.
@@ -600,6 +600,10 @@ mod dimension_tests {
         let scalar = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1])
             .expect("large integer dim");
         assert_eq!(
+            parse_dimension(&Value::Tensor(scalar.clone()), "size"),
+            Ok(large as usize)
+        );
+        assert_eq!(
             block_on(dimension_from_value_async(
                 &Value::Tensor(scalar),
                 "size",
@@ -620,6 +624,7 @@ mod dimension_tests {
     fn typed_integer_tensor_dimension_parsers_reject_negative_values() {
         let negative =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative dim");
+        assert!(parse_dimension(&Value::Tensor(negative.clone()), "size").is_err());
         assert!(block_on(dimension_from_value_async(
             &Value::Tensor(negative.clone()),
             "size",

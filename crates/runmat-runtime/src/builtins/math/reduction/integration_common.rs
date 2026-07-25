@@ -118,11 +118,9 @@ pub(crate) fn parse_optional_dim(name: &str, value: &Value) -> BuiltinResult<Opt
         Value::Int(_) | Value::Num(_) => tensor::parse_dimension(value, name)
             .map(Some)
             .map_err(|err| integration_error(name, err)),
-        Value::Tensor(t) if t.data.len() == 1 => {
-            tensor::parse_dimension(&Value::Num(t.data[0]), name)
-                .map(Some)
-                .map_err(|err| integration_error(name, err))
-        }
+        Value::Tensor(t) if t.data.len() == 1 => tensor::parse_dimension(value, name)
+            .map(Some)
+            .map_err(|err| integration_error(name, err)),
         other => Err(integration_error(
             name,
             format!("{name}: dimension must be a positive integer scalar, got {other:?}"),
@@ -369,4 +367,29 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 fn shapes_equal_with_trailing_ones(lhs: &[usize], rhs: &[usize]) -> bool {
     let len = lhs.len().max(rhs.len());
     (0..len).all(|idx| lhs.get(idx).copied().unwrap_or(1) == rhs.get(idx).copied().unwrap_or(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
+
+    #[test]
+    fn optional_dim_parses_typed_integer_tensor_exactly() {
+        let dim = Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+            .expect("typed dim");
+
+        assert_eq!(
+            parse_optional_dim("trapz", &Value::Tensor(dim)).expect("typed dim"),
+            Some(9_007_199_254_740_993)
+        );
+    }
+
+    #[test]
+    fn optional_dim_rejects_negative_typed_integer_tensor() {
+        let dim =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative dim");
+
+        assert!(parse_optional_dim("trapz", &Value::Tensor(dim)).is_err());
+    }
 }

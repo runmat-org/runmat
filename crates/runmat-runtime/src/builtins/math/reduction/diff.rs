@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntegerStorage, ResolveContext, Tensor, Type, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -354,13 +354,29 @@ fn parse_order(value: &Value) -> BuiltinResult<Option<usize>> {
             diff_invalid_argument("diff: order must be a non-negative integer scalar")
         }),
         Value::Num(n) => parse_numeric_order(*n).map(Some),
-        Value::Tensor(t) if t.data.len() == 1 => parse_numeric_order(t.data[0]).map(Some),
+        Value::Tensor(t) if t.data.len() == 1 => parse_tensor_order(t).map(Some),
         Value::Bool(b) => Ok(Some(if *b { 1 } else { 0 })),
         other => Err(diff_invalid_argument(format!(
             "diff: order must be a non-negative integer scalar, got {:?}",
             other
         ))),
     }
+}
+
+fn parse_tensor_order(tensor: &Tensor) -> BuiltinResult<usize> {
+    if let Some(storage) = tensor.integer_storage() {
+        let value = storage
+            .value_at(0)
+            .ok_or_else(|| diff_invalid_argument("diff: integer order storage length mismatch"))?;
+        return parse_integer_order(&value);
+    }
+    parse_numeric_order(tensor.data[0])
+}
+
+fn parse_integer_order(value: &IntValue) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .ok_or_else(|| diff_invalid_argument("diff: order must be a non-negative integer scalar"))
 }
 
 fn parse_numeric_order(value: f64) -> BuiltinResult<usize> {
@@ -389,11 +405,9 @@ fn parse_dimension_arg(value: &Value) -> BuiltinResult<Option<usize>> {
         Value::Int(_) | Value::Num(_) => tensor::parse_dimension(value, "diff")
             .map(Some)
             .map_err(diff_invalid_argument),
-        Value::Tensor(t) if t.data.len() == 1 => {
-            tensor::parse_dimension(&Value::Num(t.data[0]), "diff")
-                .map(Some)
-                .map_err(diff_invalid_argument)
-        }
+        Value::Tensor(t) if t.data.len() == 1 => tensor::parse_dimension(value, "diff")
+            .map(Some)
+            .map_err(diff_invalid_argument),
         other => Err(diff_invalid_argument(format!(
             "diff: dimension must be a positive integer scalar, got {:?}",
             other
@@ -640,6 +654,34 @@ pub(crate) mod tests {
             Err(_) => assert!(parse_order(&Value::Int(IntValue::U64(u64::MAX))).is_err()),
         }
         assert!(parse_order(&Value::Int(IntValue::I64(-1))).is_err());
+    }
+
+    #[test]
+    fn diff_typed_integer_tensor_order_and_dimension_parse_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let order =
+            Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("typed order");
+        assert_eq!(
+            parse_order(&Value::Tensor(order)).expect("typed order"),
+            Some(large as usize)
+        );
+
+        let dim = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1]).expect("typed dim");
+        assert_eq!(
+            parse_dimension_arg(&Value::Tensor(dim)).expect("typed dim"),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn diff_typed_integer_tensor_order_and_dimension_reject_negative_values() {
+        let order =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative order");
+        assert!(parse_order(&Value::Tensor(order)).is_err());
+
+        let dim =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative dim");
+        assert!(parse_dimension_arg(&Value::Tensor(dim)).is_err());
     }
 
     #[test]
