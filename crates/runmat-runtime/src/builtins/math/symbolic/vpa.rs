@@ -15,6 +15,7 @@ use super::{
     digits::{current_digits, validate_digits, MAX_DIGITS},
     symbolic_expr_to_value, text_scalar, value_to_symbolic_scalar,
 };
+use crate::builtins::common::tensor;
 
 const BUILTIN_NAME: &str = "vpa";
 
@@ -123,7 +124,7 @@ fn parse_precision(value: &Value) -> BuiltinResult<usize> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
         _ => return Err(vpa_error(&VPA_ERRORS[2])),
     };
     validate_digits(parsed).map_err(|err| {
@@ -450,6 +451,7 @@ fn vpa_error_with_message(
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::{IntegerStorage, Tensor};
     use std::sync::Mutex;
 
     static DIGITS_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -465,6 +467,20 @@ mod tests {
         let text = value.to_string();
         assert!(text.starts_with("3.141592653589793"));
         assert_eq!(text.chars().filter(|ch| ch.is_ascii_digit()).count(), 50);
+    }
+
+    #[test]
+    fn vpa_precision_reads_typed_integer_tensor_storage_exactly() {
+        let mut precision =
+            Tensor::new_integer(IntegerStorage::U16(vec![12]), vec![1, 1]).expect("precision");
+        precision.data[0] = 2.5;
+
+        let value = block_on(vpa_builtin(
+            Value::Num(std::f64::consts::PI),
+            vec![Value::Tensor(precision)],
+        ))
+        .expect("vpa");
+        assert_eq!(value.to_string(), "3.14159265359");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -542,6 +558,17 @@ mod tests {
     #[test]
     fn vpa_rejects_invalid_precision() {
         let err = block_on(vpa_builtin(Value::Num(1.0), vec![Value::Num(0.0)])).unwrap_err();
+        assert_eq!(err.identifier.as_deref(), Some("RunMat:vpa:InvalidDigits"));
+    }
+
+    #[test]
+    fn vpa_rejects_negative_typed_integer_tensor_precision() {
+        let mut precision =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("precision");
+        precision.data[0] = 12.0;
+
+        let err =
+            block_on(vpa_builtin(Value::Num(1.0), vec![Value::Tensor(precision)])).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:vpa:InvalidDigits"));
     }
 }

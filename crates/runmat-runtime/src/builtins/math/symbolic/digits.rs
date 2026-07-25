@@ -11,6 +11,7 @@ use runmat_macros::runtime_builtin;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::text_scalar;
+use crate::builtins::common::tensor;
 
 const BUILTIN_NAME: &str = "digits";
 pub(crate) const DEFAULT_DIGITS: usize = 32;
@@ -126,7 +127,7 @@ fn parse_digits(value: &Value) -> BuiltinResult<usize> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
         other => {
             return Err(digits_error_with_message(
                 &DIGITS_ERRORS[1],
@@ -172,6 +173,7 @@ fn digits_error_with_message(
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::{IntegerStorage, Tensor};
     use std::sync::{Mutex, MutexGuard};
 
     static DIGITS_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -214,5 +216,34 @@ mod tests {
             err.identifier.as_deref(),
             Some("RunMat:digits:InvalidDigits")
         );
+    }
+
+    #[test]
+    fn digits_reads_typed_integer_tensor_storage_exactly() {
+        let _guard = lock_digits();
+        let mut precision =
+            Tensor::new_integer(IntegerStorage::U16(vec![40]), vec![1, 1]).expect("precision");
+        precision.data[0] = 2.5;
+
+        assert_eq!(
+            block_on(digits_builtin(vec![Value::Tensor(precision)])).expect("digits"),
+            Value::Num(DEFAULT_DIGITS as f64)
+        );
+        assert_eq!(current_digits(), 40);
+    }
+
+    #[test]
+    fn digits_rejects_negative_typed_integer_tensor_storage() {
+        let _guard = lock_digits();
+        let mut precision =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("precision");
+        precision.data[0] = 40.0;
+
+        let err = block_on(digits_builtin(vec![Value::Tensor(precision)])).unwrap_err();
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:digits:InvalidDigits")
+        );
+        assert_eq!(current_digits(), DEFAULT_DIGITS);
     }
 }
