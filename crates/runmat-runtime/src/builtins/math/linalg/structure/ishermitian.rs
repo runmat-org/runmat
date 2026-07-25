@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, ProviderHermitianKind};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, Tensor, Value,
+    ComplexTensor, IntegerStorage, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::structure::integer_symmetry;
 use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -457,6 +458,9 @@ fn is_hermitian_real(tensor: &Tensor, mode: HermitianMode, tol: f64) -> bool {
     let rows = tensor.rows();
     let cols = tensor.cols();
     debug_assert_eq!(rows, cols, "is_hermitian_real requires a square matrix");
+    if let Some(storage) = tensor.integer_storage() {
+        return is_hermitian_integer(storage, rows, cols, mode, tol);
+    }
     let data = &tensor.data;
 
     for col in 0..cols {
@@ -475,6 +479,34 @@ fn is_hermitian_real(tensor: &Tensor, mode: HermitianMode, tol: f64) -> bool {
                 HermitianMode::Skew => -b,
             };
             if !real_within(a, target, tol) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn is_hermitian_integer(
+    storage: &IntegerStorage,
+    rows: usize,
+    cols: usize,
+    mode: HermitianMode,
+    tol: f64,
+) -> bool {
+    let values = storage.exact_values();
+    for col in 0..cols {
+        let diag = &values[col + col * rows];
+        if matches!(mode, HermitianMode::Skew) && !integer_symmetry::zero_within(diag, tol) {
+            return false;
+        }
+        for row in 0..col {
+            let a = &values[row + col * rows];
+            let b = &values[col + row * rows];
+            let ok = match mode {
+                HermitianMode::Hermitian => integer_symmetry::equal_within(a, b, tol),
+                HermitianMode::Skew => integer_symmetry::negated_equal_within(a, b, tol),
+            };
+            if !ok {
                 return false;
             }
         }
@@ -687,6 +719,52 @@ pub(crate) mod tests {
         let result =
             ishermitian_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("ishermitian");
         assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn ishermitian_real_uses_exact_integer_storage_above_f64_precision() {
+        let lossy_left = 9_007_199_254_740_992_u64;
+        let lossy_right = 9_007_199_254_740_993_u64;
+        assert_eq!(lossy_left as f64, lossy_right as f64);
+
+        let exact_mismatch = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, lossy_left, lossy_right, 1]),
+            vec![2, 2],
+        )
+        .expect("typed uint64 matrix");
+        let result =
+            ishermitian_builtin(Value::Tensor(exact_mismatch), Vec::new()).expect("ishermitian");
+        assert_eq!(result, Value::Bool(false));
+
+        let exact_match = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, lossy_right, lossy_right, 1]),
+            vec![2, 2],
+        )
+        .expect("typed uint64 matrix");
+        let result =
+            ishermitian_builtin(Value::Tensor(exact_match), Vec::new()).expect("ishermitian");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn ishermitian_skew_real_uses_exact_signed_integer_negation() {
+        let matrix = Tensor::new_integer(
+            IntegerStorage::I64(vec![0, i64::MIN, i64::MAX, 0]),
+            vec![2, 2],
+        )
+        .expect("typed int64 matrix");
+        let result = ishermitian_builtin(Value::Tensor(matrix), vec![Value::from("skew")])
+            .expect("ishermitian skew");
+        assert_eq!(result, Value::Bool(false));
+
+        let matrix = Tensor::new_integer(
+            IntegerStorage::I64(vec![0, i64::MAX, -i64::MAX, 0]),
+            vec![2, 2],
+        )
+        .expect("typed int64 matrix");
+        let result = ishermitian_builtin(Value::Tensor(matrix), vec![Value::from("skew")])
+            .expect("ishermitian skew");
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

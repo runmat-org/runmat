@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, ProviderSymmetryKind};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, Tensor, Value,
+    ComplexTensor, IntegerStorage, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::structure::integer_symmetry;
 use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -472,6 +473,9 @@ fn is_symmetric_real(tensor: &Tensor, mode: SymmetryMode, tol: f64) -> bool {
     let rows = tensor.rows();
     let cols = tensor.cols();
     debug_assert_eq!(rows, cols, "is_symmetric_real requires a square matrix");
+    if let Some(storage) = tensor.integer_storage() {
+        return is_symmetric_integer(storage, rows, cols, mode, tol);
+    }
     let data = &tensor.data;
 
     for col in 0..cols {
@@ -489,6 +493,36 @@ fn is_symmetric_real(tensor: &Tensor, mode: SymmetryMode, tol: f64) -> bool {
                 SymmetryMode::Skew => (a, -b),
             };
             if !real_within(diff, reference, tol) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn is_symmetric_integer(
+    storage: &IntegerStorage,
+    rows: usize,
+    cols: usize,
+    mode: SymmetryMode,
+    tol: f64,
+) -> bool {
+    let values = storage.exact_values();
+    for col in 0..cols {
+        if matches!(mode, SymmetryMode::Skew) {
+            let diag = &values[col + col * rows];
+            if !integer_symmetry::zero_within(diag, tol) {
+                return false;
+            }
+        }
+        for row in 0..col {
+            let a = &values[row + col * rows];
+            let b = &values[col + row * rows];
+            let ok = match mode {
+                SymmetryMode::Symmetric => integer_symmetry::equal_within(a, b, tol),
+                SymmetryMode::Skew => integer_symmetry::negated_equal_within(a, b, tol),
+            };
+            if !ok {
                 return false;
             }
         }
@@ -690,6 +724,52 @@ pub(crate) mod tests {
         let result =
             issymmetric_builtin(Value::Tensor(tensor), vec![Value::from("skew")]).expect("skew");
         assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn issymmetric_uses_exact_integer_storage_above_f64_precision() {
+        let lossy_left = 9_007_199_254_740_992_u64;
+        let lossy_right = 9_007_199_254_740_993_u64;
+        assert_eq!(lossy_left as f64, lossy_right as f64);
+
+        let exact_mismatch = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, lossy_left, lossy_right, 1]),
+            vec![2, 2],
+        )
+        .expect("typed uint64 matrix");
+        let result =
+            issymmetric_builtin(Value::Tensor(exact_mismatch), Vec::new()).expect("issymmetric");
+        assert_eq!(result, Value::Bool(false));
+
+        let exact_match = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, lossy_right, lossy_right, 1]),
+            vec![2, 2],
+        )
+        .expect("typed uint64 matrix");
+        let result =
+            issymmetric_builtin(Value::Tensor(exact_match), Vec::new()).expect("issymmetric");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn issymmetric_skew_uses_exact_signed_integer_negation() {
+        let matrix = Tensor::new_integer(
+            IntegerStorage::I64(vec![0, i64::MIN, i64::MAX, 0]),
+            vec![2, 2],
+        )
+        .expect("typed int64 matrix");
+        let result = issymmetric_builtin(Value::Tensor(matrix), vec![Value::from("skew")])
+            .expect("issymmetric skew");
+        assert_eq!(result, Value::Bool(false));
+
+        let matrix = Tensor::new_integer(
+            IntegerStorage::I64(vec![0, i64::MAX, -i64::MAX, 0]),
+            vec![2, 2],
+        )
+        .expect("typed int64 matrix");
+        let result = issymmetric_builtin(Value::Tensor(matrix), vec![Value::from("skew")])
+            .expect("issymmetric skew");
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
