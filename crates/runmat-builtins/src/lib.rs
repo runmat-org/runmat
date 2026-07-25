@@ -2194,15 +2194,23 @@ fn write_nd_pages(
 
 impl fmt::Display for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let format_element = |idx: usize| {
+            self.integer_data
+                .as_ref()
+                .and_then(|storage| storage.value_at(idx))
+                .map(|value| value.decimal_string())
+                .unwrap_or_else(|| format_number(self.data[idx]))
+        };
+
         match self.shape.len() {
             0 | 1 => {
                 // Treat as row vector for display
                 write!(f, "[")?;
-                for (i, v) in self.data.iter().enumerate() {
+                for i in 0..self.data.len() {
                     if i > 0 {
                         write!(f, " ")?;
                     }
-                    write!(f, "{}", format_number(*v))?;
+                    write!(f, "{}", format_element(i))?;
                 }
                 write!(f, "]")
             }
@@ -2217,8 +2225,7 @@ impl fmt::Display for Tensor {
                         if c > 0 {
                             write!(f, "  ")?;
                         }
-                        let v = self.data[r + c * rows];
-                        write!(f, "{}", format_number(v))?;
+                        write!(f, "{}", format_element(r + c * rows))?;
                     }
                 }
                 Ok(())
@@ -2226,7 +2233,7 @@ impl fmt::Display for Tensor {
             _ => {
                 if should_expand_nd_display(&self.shape) {
                     write_nd_pages(f, &self.shape, |f, idx| {
-                        write!(f, "{}", format_number(self.data[idx]))
+                        write!(f, "{}", format_element(idx))
                     })
                 } else {
                     write!(f, "Tensor(shape={:?})", self.shape)
@@ -3826,6 +3833,42 @@ mod display_tests {
         assert!(rendered.contains("(:, :, 1) ="));
         assert!(rendered.contains("(:, :, 2) ="));
         assert!(rendered.contains("  1  0  0"));
+    }
+
+    #[test]
+    fn dense_integer_tensor_display_uses_exact_storage_values() {
+        let vector = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![2],
+        )
+        .expect("uint64 vector");
+        assert_eq!(
+            vector.to_string(),
+            "[18446744073709551615 9007199254740993]"
+        );
+
+        let matrix = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, -1, 1, i64::MAX]),
+            vec![2, 2],
+        )
+        .expect("int64 matrix");
+        let rendered = matrix.to_string();
+        assert!(rendered.contains("-9223372036854775808"));
+        assert!(rendered.contains("9223372036854775807"));
+    }
+
+    #[test]
+    fn dense_integer_nd_display_uses_exact_storage_values() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 7, 8]),
+            vec![1, 2, 2],
+        )
+        .expect("uint64 nd tensor");
+        let rendered = tensor.to_string();
+        assert!(rendered.contains("(:, :, 1) ="));
+        assert!(rendered.contains("(:, :, 2) ="));
+        assert!(rendered.contains("18446744073709551615"));
+        assert!(rendered.contains("9007199254740993"));
     }
 
     #[test]
