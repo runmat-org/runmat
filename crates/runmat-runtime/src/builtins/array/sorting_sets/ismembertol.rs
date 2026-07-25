@@ -299,10 +299,12 @@ async fn evaluate_with_options(
 ) -> BuiltinResult<IsMemberTolEvaluation> {
     let a = gather_if_gpu(a).await?;
     let b = gather_if_gpu(b).await?;
-    let tensor_a =
+    let mut tensor_a =
         tensor::value_into_tensor_for(NAME, a).map_err(|_| error(&ERROR_INVALID_INPUT))?;
-    let tensor_b =
+    let mut tensor_b =
         tensor::value_into_tensor_for(NAME, b).map_err(|_| error(&ERROR_INVALID_INPUT))?;
+    materialize_exact_numeric_data(&mut tensor_a);
+    materialize_exact_numeric_data(&mut tensor_b);
     evaluate_tensors(tensor_a, tensor_b, opts, loc_request)
 }
 
@@ -763,9 +765,9 @@ fn parse_bool_option(value: &Value) -> BuiltinResult<bool> {
 fn parse_data_scale(value: &Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(n) => validate_data_scale(vec![*n]),
-        Value::Int(i) => validate_data_scale(vec![i.to_i64() as f64]),
+        Value::Int(i) => validate_data_scale(vec![i.to_f64()]),
         Value::Bool(flag) => validate_data_scale(vec![if *flag { 1.0 } else { 0.0 }]),
-        Value::Tensor(tensor) => validate_data_scale(tensor.data.clone()),
+        Value::Tensor(tensor) => validate_data_scale(tensor::tensor_values_f64(tensor)),
         Value::LogicalArray(logical) => validate_data_scale(
             logical
                 .data
@@ -793,13 +795,21 @@ fn validate_data_scale(values: Vec<f64>) -> BuiltinResult<Vec<f64>> {
 fn numeric_scalar(value: &Value) -> Option<f64> {
     match value {
         Value::Num(n) => Some(*n),
-        Value::Int(i) => Some(i.to_i64() as f64),
+        Value::Int(i) => Some(i.to_f64()),
         Value::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Some(t.data[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            tensor::tensor_values_f64(t).first().copied()
+        }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Some(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
         _ => None,
+    }
+}
+
+fn materialize_exact_numeric_data(tensor: &mut Tensor) {
+    if tensor.integer_storage().is_some() {
+        tensor.data = tensor::tensor_values_f64(tensor);
     }
 }
 
@@ -859,7 +869,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LiteralValue, ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, LiteralValue, ResolveContext, Type};
 
     fn eval(a: Value, b: Value, rest: &[Value]) -> BuiltinResult<IsMemberTolEvaluation> {
         block_on(evaluate(a, b, rest))
@@ -924,6 +934,48 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.mask_value(), Value::Bool(false));
+    }
+
+    #[test]
+    fn typed_integer_inputs_are_compared_from_exact_storage() {
+        let mut a = Tensor::new_integer(IntegerStorage::I16(vec![10, 20, 30]), vec![1, 3]).unwrap();
+        let mut b = Tensor::new_integer(IntegerStorage::I16(vec![9, 31]), vec![1, 2]).unwrap();
+        a.data = vec![0.0, 0.0, 0.0];
+        b.data = vec![0.0, 0.0];
+
+        let result = eval(
+            Value::Tensor(a),
+            Value::Tensor(b),
+            &[Value::Num(0.2), Value::from("DataScale"), Value::Num(10.0)],
+        )
+        .unwrap();
+
+        assert_eq!(result.mask.data, vec![1, 0, 1]);
+    }
+
+    #[test]
+    fn typed_integer_tolerance_and_datascale_read_exact_storage() {
+        let a = Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap();
+        let b = Tensor::new(vec![11.0, 24.0], vec![1, 2]).unwrap();
+        let mut tolerance = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
+        tolerance.data = vec![0.0];
+        let mut scale = Tensor::new_integer(IntegerStorage::U16(vec![1, 4]), vec![1, 2]).unwrap();
+        scale.data = vec![0.0, 0.0];
+
+        let result = eval(
+            Value::Tensor(a),
+            Value::Tensor(b),
+            &[
+                Value::Tensor(tolerance),
+                Value::from("DataScale"),
+                Value::Tensor(scale),
+                Value::from("ByRows"),
+                Value::Bool(true),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(result.mask.data, vec![1]);
     }
 
     #[test]
@@ -1045,6 +1097,31 @@ mod tests {
             }
             other => panic!("expected tensor loc, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn by_rows_typed_integer_inputs_are_compared_from_exact_storage() {
+        let mut a =
+            Tensor::new_integer(IntegerStorage::U16(vec![10, 20, 30, 40]), vec![2, 2]).unwrap();
+        let mut b =
+            Tensor::new_integer(IntegerStorage::U16(vec![11, 21, 31, 41]), vec![2, 2]).unwrap();
+        a.data = vec![0.0, 0.0, 0.0, 0.0];
+        b.data = vec![0.0, 0.0, 0.0, 0.0];
+
+        let result = eval(
+            Value::Tensor(a),
+            Value::Tensor(b),
+            &[
+                Value::Num(0.2),
+                Value::from("ByRows"),
+                Value::Bool(true),
+                Value::from("DataScale"),
+                Value::Num(10.0),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(result.mask.data, vec![1, 1]);
     }
 
     #[test]
