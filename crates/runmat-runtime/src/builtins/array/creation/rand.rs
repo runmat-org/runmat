@@ -347,7 +347,14 @@ fn parse_legacy_seed(value: &Value) -> crate::BuiltinResult<u64> {
             }
             Ok(rounded as u64)
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return parse_legacy_seed(&Value::Int(
+                    storage
+                        .value_at(0)
+                        .expect("scalar integer storage has one element"),
+                ));
+            }
             parse_legacy_seed(&Value::Num(tensor.data[0]))
         }
         _ => Err(builtin_error("rand: seed must be a scalar numeric value")),
@@ -690,6 +697,12 @@ pub(crate) mod tests {
         random::reset_rng();
     }
 
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_default_scalar() {
@@ -822,6 +835,26 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor outputs, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rand_legacy_seed_reads_typed_integer_tensor_storage_exactly() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset_rng_clean();
+        block_on(rand_builtin(vec![
+            Value::from("seed"),
+            poisoned_int_tensor(IntegerStorage::U16(vec![2026]), vec![1, 1]),
+        ]))
+        .expect("typed integer tensor seed");
+        let query = block_on(rand_builtin(vec![Value::from("seed")])).expect("rand seed query");
+        assert!(matches!(query, Value::Num(seed) if (seed - 2026.0).abs() < f64::EPSILON));
+
+        let err = block_on(rand_builtin(vec![
+            Value::from("seed"),
+            poisoned_int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1]),
+        ]))
+        .expect_err("negative typed integer seed");
+        assert!(err.message().contains("non-negative"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

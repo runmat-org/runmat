@@ -1045,7 +1045,7 @@ fn string_property(object: &ObjectInstance, name: &str) -> BuiltinResult<String>
 
 fn numeric_vector_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f64>> {
     match object.properties.get(name) {
-        Some(Value::Tensor(tensor)) => Ok(tensor.data.clone()),
+        Some(Value::Tensor(tensor)) => Ok(tensor::tensor_values_f64(tensor)),
         Some(Value::Num(value)) => Ok(vec![*value]),
         _ => Err(invalid(format!(
             "fitdist: ProbabilityDistribution object is missing {name}"
@@ -1438,6 +1438,12 @@ mod tests {
         Value::Tensor(Tensor::new_integer(storage, vec![len, 1]).unwrap())
     }
 
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
     fn object(value: Value) -> ObjectInstance {
         match value {
             Value::Object(object) => object,
@@ -1500,6 +1506,32 @@ mod tests {
             }
             other => panic!("expected tensor density, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn fitdist_reads_typed_integer_storage_exactly() {
+        let pd = block_on(fitdist_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]),
+            Value::String("Exponential".into()),
+            vec![
+                Value::String("Frequency".into()),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1, 3, 2]), vec![3, 1]),
+            ],
+        ))
+        .unwrap();
+        let object = object(pd.clone());
+        let values = numeric_vector_property(&object, "ParameterValues").unwrap();
+        assert!((values[0] - (13.0 / 6.0)).abs() < 1.0e-12);
+
+        let mut typed_object = object;
+        typed_object.properties.insert(
+            "ParameterValues".to_string(),
+            poisoned_int_tensor(IntegerStorage::U16(vec![7]), vec![1, 1]),
+        );
+        assert_eq!(
+            numeric_vector_property(&typed_object, "ParameterValues").unwrap(),
+            vec![7.0]
+        );
     }
 
     #[test]
