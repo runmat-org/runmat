@@ -22,6 +22,12 @@ pub fn reduce_dim_shader(workgroup_size: u32) -> String {
     INTEGER_REDUCE_DIM_SHADER.replace("@WG@", &workgroup_size.to_string())
 }
 
+pub fn cumulative_scan_shader(scalar_type: &str, workgroup_size: u32) -> String {
+    INTEGER_CUMULATIVE_SCAN_SHADER
+        .replace("$SCALAR", scalar_type)
+        .replace("@WG@", &workgroup_size.to_string())
+}
+
 const INTEGER_COMPARISON_SHADER: &str = r#"
 struct Words { data: array<u32> };
 struct Output { data: array<$SCALAR> };
@@ -1009,6 +1015,356 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid
         OutBuf.data[out_lane] = tile_lo[0u];
         if (lanes == 2u) {
             OutBuf.data[out_lane + 1u] = tile_hi[0u];
+        }
+    }
+}
+"#;
+
+const INTEGER_CUMULATIVE_SCAN_SHADER: &str = r#"
+struct Words { data: array<u32> };
+struct Indices { data: array<$SCALAR> };
+
+struct Params {
+    segment_len: u32,
+    segments: u32,
+    stride_before: u32,
+    block: u32,
+    total_len: u32,
+    integer_type: u32,
+    op: u32,
+    direction: u32,
+};
+
+@group(0) @binding(0) var<storage, read> InBuf: Words;
+@group(0) @binding(1) var<storage, read_write> OutVals: Words;
+@group(0) @binding(2) var<storage, read_write> OutIdx: Indices;
+@group(0) @binding(3) var<uniform> params: Params;
+
+fn sx8_scan(x: u32) -> i32 { return bitcast<i32>(x << 24u) >> 24; }
+fn sx16_scan(x: u32) -> i32 { return bitcast<i32>(x << 16u) >> 16; }
+
+fn add_with_carry_scan(a: u32, b: u32, carry: u32) -> vec2<u32> {
+    let first = a + b;
+    let second = first + carry;
+    return vec2<u32>(second, select(0u, 1u, first < a) + select(0u, 1u, second < first));
+}
+
+fn mul_hi_u32_scan(a: u32, b: u32) -> u32 {
+    let a_hi = a >> 16u;
+    let a_lo = a & 0xffffu;
+    let b_hi = b >> 16u;
+    let b_lo = b & 0xffffu;
+    let p0 = a_lo * b_lo;
+    let p1 = a_lo * b_hi;
+    let p2 = a_hi * b_lo;
+    let p3 = a_hi * b_hi;
+    let mid = (p0 >> 16u) + (p1 & 0xffffu) + (p2 & 0xffffu);
+    return p3 + (p1 >> 16u) + (p2 >> 16u) + (mid >> 16u);
+}
+
+fn multiply_unsigned64_scan(a0: u32, a1: u32, b0: u32, b1: u32) -> vec4<u32> {
+    let p00_lo = a0 * b0;
+    let p00_hi = mul_hi_u32_scan(a0, b0);
+    let p01_lo = a0 * b1;
+    let p01_hi = mul_hi_u32_scan(a0, b1);
+    let p10_lo = a1 * b0;
+    let p10_hi = mul_hi_u32_scan(a1, b0);
+    let p11_lo = a1 * b1;
+    let p11_hi = mul_hi_u32_scan(a1, b1);
+    let word1 = add_with_carry_scan(p00_hi, p01_lo, 0u);
+    let word1_final = add_with_carry_scan(word1.x, p10_lo, 0u);
+    let word2 = add_with_carry_scan(p01_hi, p10_hi, word1.y + word1_final.y);
+    let word2_final = add_with_carry_scan(word2.x, p11_lo, 0u);
+    return vec4<u32>(p00_lo, word1_final.x, word2_final.x, p11_hi + word2.y + word2_final.y);
+}
+
+fn negate64_scan(lo: u32, hi: u32) -> vec2<u32> {
+    let neg_lo = 0u - lo;
+    return vec2<u32>(neg_lo, ~hi + select(0u, 1u, neg_lo == 0u));
+}
+
+fn add64_scan(a0: u32, a1: u32, b0: u32, b1: u32, is_signed: bool) -> vec2<u32> {
+    let carry = select(0u, 1u, a0 + b0 < a0);
+    let lo = a0 + b0;
+    let hi = a1 + b1 + carry;
+    let unsigned_overflow = hi < a1 || (carry != 0u && hi == a1);
+    if (!is_signed) {
+        return select(vec2<u32>(lo, hi), vec2<u32>(0xffffffffu, 0xffffffffu), unsigned_overflow);
+    }
+    let a_negative = bitcast<i32>(a1) < 0;
+    let b_negative = bitcast<i32>(b1) < 0;
+    let result_negative = bitcast<i32>(hi) < 0;
+    if (a_negative == b_negative && result_negative != a_negative) {
+        return select(vec2<u32>(0xffffffffu, 0x7fffffffu), vec2<u32>(0u, 0x80000000u), a_negative);
+    }
+    return vec2<u32>(lo, hi);
+}
+
+fn multiply_signed64_scan(a0: u32, a1: u32, b0: u32, b1: u32) -> vec2<u32> {
+    let a_negative = bitcast<i32>(a1) < 0;
+    let b_negative = bitcast<i32>(b1) < 0;
+    let negative = a_negative != b_negative;
+    let abs_a = select(vec2<u32>(a0, a1), negate64_scan(a0, a1), a_negative);
+    let abs_b = select(vec2<u32>(b0, b1), negate64_scan(b0, b1), b_negative);
+    let product = multiply_unsigned64_scan(abs_a.x, abs_a.y, abs_b.x, abs_b.y);
+    let limit = select(vec2<u32>(0xffffffffu, 0x7fffffffu), vec2<u32>(0u, 0x80000000u), negative);
+    if (product.z != 0u || product.w != 0u || product.y > limit.y || (product.y == limit.y && product.x > limit.x)) {
+        return limit;
+    }
+    return select(vec2<u32>(product.x, product.y), negate64_scan(product.x, product.y), negative);
+}
+
+fn multiply_unsigned64_saturating_scan(a0: u32, a1: u32, b0: u32, b1: u32) -> vec2<u32> {
+    let product = multiply_unsigned64_scan(a0, a1, b0, b1);
+    if (product.z != 0u || product.w != 0u) { return vec2<u32>(0xffffffffu, 0xffffffffu); }
+    return vec2<u32>(product.x, product.y);
+}
+
+fn signed32_add_scan(a: i32, b: i32, minv: i32, maxv: i32) -> i32 {
+    let r = a + b;
+    if ((a < 0) == (b < 0) && (r < 0) != (a < 0)) {
+        return select(maxv, minv, a < 0);
+    }
+    return r;
+}
+
+fn signed_narrow_add_scan(a: i32, b: i32, minv: i32, maxv: i32) -> i32 {
+    let r = a + b;
+    if (r < minv) { return minv; }
+    if (r > maxv) { return maxv; }
+    return r;
+}
+
+fn unsigned_add_scan(a: u32, b: u32, maxv: u32) -> u32 {
+    let r = a + b;
+    return select(r, maxv, r < a || r > maxv);
+}
+
+fn multiply_unsigned32_scan(a: u32, b: u32, maxv: u32) -> u32 {
+    let lo = a * b;
+    let hi = mul_hi_u32_scan(a, b);
+    return select(lo, maxv, hi != 0u || lo > maxv);
+}
+
+fn multiply_signed32_scan(a: i32, b: i32, min_bits: u32, max_bits: u32) -> u32 {
+    let negative = (a < 0) != (b < 0);
+    let a_bits = bitcast<u32>(a);
+    let b_bits = bitcast<u32>(b);
+    let a_abs = select(a_bits, 0u - a_bits, a < 0);
+    let b_abs = select(b_bits, 0u - b_bits, b < 0);
+    let lo = a_abs * b_abs;
+    let hi = mul_hi_u32_scan(a_abs, b_abs);
+    let limit = select(max_bits, min_bits, negative);
+    if (hi != 0u || lo > limit) { return select(max_bits, min_bits, negative); }
+    return select(lo, 0u - lo, negative);
+}
+
+fn combine_scan(a0: u32, a1: u32, b0: u32, b1: u32) -> vec2<u32> {
+    let is_product = params.op == 1u;
+    switch params.integer_type {
+        case 0u: {
+            let v = select(
+                bitcast<u32>(signed_narrow_add_scan(sx8_scan(a0), sx8_scan(b0), -128, 127)),
+                multiply_signed32_scan(sx8_scan(a0), sx8_scan(b0), 0x80u, 0x7fu),
+                is_product,
+            );
+            return vec2<u32>(v, 0u);
+        }
+        case 1u: {
+            let v = select(
+                bitcast<u32>(signed_narrow_add_scan(sx16_scan(a0), sx16_scan(b0), -32768, 32767)),
+                multiply_signed32_scan(sx16_scan(a0), sx16_scan(b0), 0x8000u, 0x7fffu),
+                is_product,
+            );
+            return vec2<u32>(v, 0u);
+        }
+        case 2u: {
+            let v = select(
+                bitcast<u32>(signed32_add_scan(bitcast<i32>(a0), bitcast<i32>(b0), -2147483648, 2147483647)),
+                multiply_signed32_scan(bitcast<i32>(a0), bitcast<i32>(b0), 0x80000000u, 0x7fffffffu),
+                is_product,
+            );
+            return vec2<u32>(v, 0u);
+        }
+        case 3u: {
+            return select(
+                add64_scan(a0, a1, b0, b1, true),
+                multiply_signed64_scan(a0, a1, b0, b1),
+                is_product,
+            );
+        }
+        case 4u: {
+            return vec2<u32>(select(unsigned_add_scan(a0 & 0xffu, b0 & 0xffu, 0xffu), multiply_unsigned32_scan(a0 & 0xffu, b0 & 0xffu, 0xffu), is_product), 0u);
+        }
+        case 5u: {
+            return vec2<u32>(select(unsigned_add_scan(a0 & 0xffffu, b0 & 0xffffu, 0xffffu), multiply_unsigned32_scan(a0 & 0xffffu, b0 & 0xffffu, 0xffffu), is_product), 0u);
+        }
+        case 6u: {
+            return vec2<u32>(select(unsigned_add_scan(a0, b0, 0xffffffffu), multiply_unsigned32_scan(a0, b0, 0xffffffffu), is_product), 0u);
+        }
+        case 7u: {
+            return select(
+                add64_scan(a0, a1, b0, b1, false),
+                multiply_unsigned64_saturating_scan(a0, a1, b0, b1),
+                is_product,
+            );
+        }
+        default: { return vec2<u32>(0u, 0u); }
+    }
+}
+
+fn compare_scan(a0: u32, a1: u32, b0: u32, b1: u32) -> i32 {
+    switch params.integer_type {
+        case 0u: {
+            let a = sx8_scan(a0);
+            let b = sx8_scan(b0);
+            if (a < b) { return -1; }
+            if (a > b) { return 1; }
+        }
+        case 1u: {
+            let a = sx16_scan(a0);
+            let b = sx16_scan(b0);
+            if (a < b) { return -1; }
+            if (a > b) { return 1; }
+        }
+        case 2u: {
+            let a = bitcast<i32>(a0);
+            let b = bitcast<i32>(b0);
+            if (a < b) { return -1; }
+            if (a > b) { return 1; }
+        }
+        case 3u: {
+            let a_high = bitcast<i32>(a1);
+            let b_high = bitcast<i32>(b1);
+            if (a_high < b_high) { return -1; }
+            if (a_high > b_high) { return 1; }
+            if (a0 < b0) { return -1; }
+            if (a0 > b0) { return 1; }
+        }
+        case 4u: {
+            let a = a0 & 0xffu;
+            let b = b0 & 0xffu;
+            if (a < b) { return -1; }
+            if (a > b) { return 1; }
+        }
+        case 5u: {
+            let a = a0 & 0xffffu;
+            let b = b0 & 0xffffu;
+            if (a < b) { return -1; }
+            if (a > b) { return 1; }
+        }
+        case 6u: {
+            if (a0 < b0) { return -1; }
+            if (a0 > b0) { return 1; }
+        }
+        case 7u: {
+            if (a1 < b1) { return -1; }
+            if (a1 > b1) { return 1; }
+            if (a0 < b0) { return -1; }
+            if (a0 > b0) { return 1; }
+        }
+        default: { return 0; }
+    }
+    return 0;
+}
+
+fn should_replace_scan(ordering: i32) -> bool {
+    if (params.op == 2u) {
+        return ordering < 0;
+    }
+    return ordering > 0;
+}
+
+fn identity_scan() -> vec2<u32> {
+    if (params.op == 1u) {
+        return vec2<u32>(1u, 0u);
+    }
+    return vec2<u32>(0u, 0u);
+}
+
+fn read_value(logical_index: u32) -> vec2<u32> {
+    let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
+    let lane = logical_index * lanes;
+    var high = 0u;
+    if (lanes == 2u) {
+        high = InBuf.data[lane + 1u];
+    }
+    return vec2<u32>(InBuf.data[lane], high);
+}
+
+fn write_value(logical_index: u32, value: vec2<u32>) {
+    let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
+    let lane = logical_index * lanes;
+    OutVals.data[lane] = value.x;
+    if (lanes == 2u) {
+        OutVals.data[lane + 1u] = value.y;
+    }
+}
+
+fn scan_offset(segment: u32, offset: u32) -> u32 {
+    let before = segment % params.stride_before;
+    let after = segment / params.stride_before;
+    let base = after * params.block;
+    return base + before + offset * params.stride_before;
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let segment = gid.x;
+    if (segment >= params.segments || params.stride_before == 0u) {
+        return;
+    }
+    let is_reverse = params.direction == 1u;
+    let is_extrema = params.op >= 2u;
+    var accumulator = identity_scan();
+    var current = vec2<u32>(0u, 0u);
+    var current_position = 0u;
+    var has_value = false;
+
+    if (is_reverse) {
+        var offset = params.segment_len;
+        loop {
+            if (offset == 0u) { break; }
+            offset = offset - 1u;
+            let logical_index = scan_offset(segment, offset);
+            if (logical_index >= params.total_len) { continue; }
+            let value = read_value(logical_index);
+            if (is_extrema) {
+                if (!has_value || should_replace_scan(compare_scan(current.x, current.y, value.x, value.y))) {
+                    current = value;
+                    current_position = offset + 1u;
+                    has_value = true;
+                }
+                write_value(logical_index, current);
+                OutIdx.data[logical_index] = $SCALAR(current_position);
+            } else {
+                accumulator = combine_scan(accumulator.x, accumulator.y, value.x, value.y);
+                write_value(logical_index, accumulator);
+            }
+        }
+    } else {
+        var offset: u32 = 0u;
+        loop {
+            if (offset >= params.segment_len) { break; }
+            let logical_index = scan_offset(segment, offset);
+            if (logical_index >= params.total_len) {
+                offset = offset + 1u;
+                continue;
+            }
+            let value = read_value(logical_index);
+            if (is_extrema) {
+                if (!has_value || should_replace_scan(compare_scan(current.x, current.y, value.x, value.y))) {
+                    current = value;
+                    current_position = offset + 1u;
+                    has_value = true;
+                }
+                write_value(logical_index, current);
+                OutIdx.data[logical_index] = $SCALAR(current_position);
+            } else {
+                accumulator = combine_scan(accumulator.x, accumulator.y, value.x, value.y);
+                write_value(logical_index, accumulator);
+            }
+            offset = offset + 1u;
         }
     }
 }

@@ -189,6 +189,202 @@ fn reduce_integer_data_dim(
     })
 }
 
+fn scan_integer_data_dim(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    dim: usize,
+    op: u32,
+    direction: ProviderScanDirection,
+) -> Result<(HostIntegerDataOwned, Option<Vec<f64>>)> {
+    ensure!(
+        dim < shape.len(),
+        "native integer cumulative scan: dimension out of bounds"
+    );
+    ensure!(op <= 3, "native integer cumulative scan: invalid operation");
+    let expected_len = shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer cumulative scan: shape too large"))
+    })?;
+    ensure!(
+        integer_data_len(data) == expected_len,
+        "native integer cumulative scan: data length does not match shape"
+    );
+    if expected_len == 0 {
+        let empty = match data {
+            HostIntegerDataOwned::I8(_) => HostIntegerDataOwned::I8(Vec::new()),
+            HostIntegerDataOwned::I16(_) => HostIntegerDataOwned::I16(Vec::new()),
+            HostIntegerDataOwned::I32(_) => HostIntegerDataOwned::I32(Vec::new()),
+            HostIntegerDataOwned::I64(_) => HostIntegerDataOwned::I64(Vec::new()),
+            HostIntegerDataOwned::U8(_) => HostIntegerDataOwned::U8(Vec::new()),
+            HostIntegerDataOwned::U16(_) => HostIntegerDataOwned::U16(Vec::new()),
+            HostIntegerDataOwned::U32(_) => HostIntegerDataOwned::U32(Vec::new()),
+            HostIntegerDataOwned::U64(_) => HostIntegerDataOwned::U64(Vec::new()),
+        };
+        return Ok((empty, (op >= 2).then(Vec::new)));
+    }
+
+    let segment_len = shape[dim];
+    if segment_len == 0 {
+        let empty = match data {
+            HostIntegerDataOwned::I8(_) => HostIntegerDataOwned::I8(Vec::new()),
+            HostIntegerDataOwned::I16(_) => HostIntegerDataOwned::I16(Vec::new()),
+            HostIntegerDataOwned::I32(_) => HostIntegerDataOwned::I32(Vec::new()),
+            HostIntegerDataOwned::I64(_) => HostIntegerDataOwned::I64(Vec::new()),
+            HostIntegerDataOwned::U8(_) => HostIntegerDataOwned::U8(Vec::new()),
+            HostIntegerDataOwned::U16(_) => HostIntegerDataOwned::U16(Vec::new()),
+            HostIntegerDataOwned::U32(_) => HostIntegerDataOwned::U32(Vec::new()),
+            HostIntegerDataOwned::U64(_) => HostIntegerDataOwned::U64(Vec::new()),
+        };
+        return Ok((empty, (op >= 2).then(Vec::new)));
+    }
+    let stride_before = shape[..dim].iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent.max(1))
+            .ok_or_else(|| anyhow!("native integer cumulative scan: stride overflow"))
+    })?;
+    let stride_after = shape[dim + 1..].iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent.max(1))
+            .ok_or_else(|| anyhow!("native integer cumulative scan: stride overflow"))
+    })?;
+    let block = stride_before
+        .checked_mul(segment_len)
+        .ok_or_else(|| anyhow!("native integer cumulative scan: block overflow"))?;
+
+    macro_rules! scan_arithmetic {
+        ($values:expr, $owned:ident, $zero:expr, $one:expr, $method:ident) => {{
+            let identity = if op == 1 { $one } else { $zero };
+            let mut output = vec![identity; $values.len()];
+            for after in 0..stride_after {
+                let base = after * block;
+                for before in 0..stride_before {
+                    let mut accumulator = identity;
+                    match direction {
+                        ProviderScanDirection::Forward => {
+                            for offset in 0..segment_len {
+                                let index = base + before + offset * stride_before;
+                                accumulator = accumulator.$method($values[index]);
+                                output[index] = accumulator;
+                            }
+                        }
+                        ProviderScanDirection::Reverse => {
+                            for offset in (0..segment_len).rev() {
+                                let index = base + before + offset * stride_before;
+                                accumulator = accumulator.$method($values[index]);
+                                output[index] = accumulator;
+                            }
+                        }
+                    }
+                }
+            }
+            (HostIntegerDataOwned::$owned(output), None)
+        }};
+    }
+
+    macro_rules! scan_extrema {
+        ($values:expr, $owned:ident) => {{
+            let mut output = vec![$values[0]; $values.len()];
+            let mut indices = vec![0.0f64; $values.len()];
+            for after in 0..stride_after {
+                let base = after * block;
+                for before in 0..stride_before {
+                    let mut current_index = 0usize;
+                    let mut has_value = false;
+                    macro_rules! step {
+                        ($offset:expr) => {{
+                            let index = base + before + $offset * stride_before;
+                            if !has_value
+                                || if op == 2 {
+                                    $values[index] < $values[current_index]
+                                } else {
+                                    $values[index] > $values[current_index]
+                                }
+                            {
+                                current_index = index;
+                                has_value = true;
+                            }
+                            output[index] = $values[current_index];
+                            indices[index] =
+                                ((current_index - base - before) / stride_before + 1) as f64;
+                        }};
+                    }
+                    match direction {
+                        ProviderScanDirection::Forward => {
+                            for offset in 0..segment_len {
+                                step!(offset);
+                            }
+                        }
+                        ProviderScanDirection::Reverse => {
+                            for offset in (0..segment_len).rev() {
+                                step!(offset);
+                            }
+                        }
+                    }
+                }
+            }
+            (HostIntegerDataOwned::$owned(output), Some(indices))
+        }};
+    }
+
+    Ok(match (data, op) {
+        (HostIntegerDataOwned::I8(values), 0) => {
+            scan_arithmetic!(values, I8, 0_i8, 1_i8, saturating_add)
+        }
+        (HostIntegerDataOwned::I16(values), 0) => {
+            scan_arithmetic!(values, I16, 0_i16, 1_i16, saturating_add)
+        }
+        (HostIntegerDataOwned::I32(values), 0) => {
+            scan_arithmetic!(values, I32, 0_i32, 1_i32, saturating_add)
+        }
+        (HostIntegerDataOwned::I64(values), 0) => {
+            scan_arithmetic!(values, I64, 0_i64, 1_i64, saturating_add)
+        }
+        (HostIntegerDataOwned::U8(values), 0) => {
+            scan_arithmetic!(values, U8, 0_u8, 1_u8, saturating_add)
+        }
+        (HostIntegerDataOwned::U16(values), 0) => {
+            scan_arithmetic!(values, U16, 0_u16, 1_u16, saturating_add)
+        }
+        (HostIntegerDataOwned::U32(values), 0) => {
+            scan_arithmetic!(values, U32, 0_u32, 1_u32, saturating_add)
+        }
+        (HostIntegerDataOwned::U64(values), 0) => {
+            scan_arithmetic!(values, U64, 0_u64, 1_u64, saturating_add)
+        }
+        (HostIntegerDataOwned::I8(values), 1) => {
+            scan_arithmetic!(values, I8, 0_i8, 1_i8, saturating_mul)
+        }
+        (HostIntegerDataOwned::I16(values), 1) => {
+            scan_arithmetic!(values, I16, 0_i16, 1_i16, saturating_mul)
+        }
+        (HostIntegerDataOwned::I32(values), 1) => {
+            scan_arithmetic!(values, I32, 0_i32, 1_i32, saturating_mul)
+        }
+        (HostIntegerDataOwned::I64(values), 1) => {
+            scan_arithmetic!(values, I64, 0_i64, 1_i64, saturating_mul)
+        }
+        (HostIntegerDataOwned::U8(values), 1) => {
+            scan_arithmetic!(values, U8, 0_u8, 1_u8, saturating_mul)
+        }
+        (HostIntegerDataOwned::U16(values), 1) => {
+            scan_arithmetic!(values, U16, 0_u16, 1_u16, saturating_mul)
+        }
+        (HostIntegerDataOwned::U32(values), 1) => {
+            scan_arithmetic!(values, U32, 0_u32, 1_u32, saturating_mul)
+        }
+        (HostIntegerDataOwned::U64(values), 1) => {
+            scan_arithmetic!(values, U64, 0_u64, 1_u64, saturating_mul)
+        }
+        (HostIntegerDataOwned::I8(values), 2 | 3) => scan_extrema!(values, I8),
+        (HostIntegerDataOwned::I16(values), 2 | 3) => scan_extrema!(values, I16),
+        (HostIntegerDataOwned::I32(values), 2 | 3) => scan_extrema!(values, I32),
+        (HostIntegerDataOwned::I64(values), 2 | 3) => scan_extrema!(values, I64),
+        (HostIntegerDataOwned::U8(values), 2 | 3) => scan_extrema!(values, U8),
+        (HostIntegerDataOwned::U16(values), 2 | 3) => scan_extrema!(values, U16),
+        (HostIntegerDataOwned::U32(values), 2 | 3) => scan_extrema!(values, U32),
+        (HostIntegerDataOwned::U64(values), 2 | 3) => scan_extrema!(values, U64),
+        _ => return Err(anyhow!("native integer cumulative scan: invalid operation")),
+    })
+}
+
 const POLYDER_EPS: f64 = 1.0e-12;
 const FACTORIAL_MAX_HOST: usize = 170;
 const GAMMALN_LN_SQRT_TWO_PI: f64 = 0.918_938_533_204_672_7;
@@ -7831,6 +8027,38 @@ impl AccelProvider for InProcessProvider {
         Err(anyhow!("cumsum_scan not supported by provider"))
     }
 
+    fn integer_cumsum_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<GpuTensorHandle> {
+        let data = integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&input.buffer_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id))?;
+        let (values, _) = scan_integer_data_dim(&data, &input.shape, dim, 0, direction)?;
+        Ok(self.allocate_integer_tensor(values, input.shape.clone()))
+    }
+
+    fn integer_cumprod_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<GpuTensorHandle> {
+        let data = integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&input.buffer_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id))?;
+        let (values, _) = scan_integer_data_dim(&data, &input.shape, dim, 1, direction)?;
+        Ok(self.allocate_integer_tensor(values, input.shape.clone()))
+    }
+
     fn trapz_dim(
         &self,
         input: &GpuTensorHandle,
@@ -7867,6 +8095,44 @@ impl AccelProvider for InProcessProvider {
         _nan_mode: ProviderNanMode,
     ) -> Result<runmat_accelerate_api::ProviderCumminResult> {
         Err(anyhow!("cummin_scan not supported by provider"))
+    }
+
+    fn integer_cummin_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<runmat_accelerate_api::ProviderCumminResult> {
+        let data = integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&input.buffer_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id))?;
+        let (values, indices) = scan_integer_data_dim(&data, &input.shape, dim, 2, direction)?;
+        Ok(runmat_accelerate_api::ProviderCumminResult {
+            values: self.allocate_integer_tensor(values, input.shape.clone()),
+            indices: self.allocate_tensor(indices.unwrap_or_default(), input.shape.clone()),
+        })
+    }
+
+    fn integer_cummax_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<runmat_accelerate_api::ProviderCummaxResult> {
+        let data = integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&input.buffer_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id))?;
+        let (values, indices) = scan_integer_data_dim(&data, &input.shape, dim, 3, direction)?;
+        Ok(runmat_accelerate_api::ProviderCummaxResult {
+            values: self.allocate_integer_tensor(values, input.shape.clone()),
+            indices: self.allocate_tensor(indices.unwrap_or_default(), input.shape.clone()),
+        })
     }
 
     fn find(
@@ -8935,6 +9201,91 @@ mod tests {
             HostIntegerDataOwned::U16(vec![u16::MAX])
         );
         assert_eq!(prod_all.shape, vec![1, 1, 1]);
+    }
+
+    #[test]
+    fn inprocess_native_integer_cumulative_hooks_preserve_class_and_direction() {
+        let provider = InProcessProvider::new();
+        let handle = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&[120, 10, 2, 4, -5, 3]),
+                shape: &[3, 2],
+            })
+            .expect("upload native integer");
+        let forward = provider
+            .integer_cumsum_scan(&handle, 0, ProviderScanDirection::Forward)
+            .expect("integer cumsum");
+        let reverse = provider
+            .integer_cumprod_scan(&handle, 0, ProviderScanDirection::Reverse)
+            .expect("integer cumprod reverse");
+        assert_eq!(
+            block_on(provider.download_integer(&forward))
+                .expect("download cumsum")
+                .data,
+            HostIntegerDataOwned::I8(vec![120, 127, 127, 4, -1, 2])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&reverse))
+                .expect("download cumprod")
+                .data,
+            HostIntegerDataOwned::I8(vec![127, 20, 2, -60, -15, 3])
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&forward),
+            Some(runmat_accelerate_api::IntegerElementType::I8)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&reverse),
+            Some(runmat_accelerate_api::IntegerElementType::I8)
+        );
+    }
+
+    #[test]
+    fn inprocess_native_integer_cumulative_extrema_return_indices() {
+        let provider = InProcessProvider::new();
+        let handle = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U16(&[4, 2, 2, 7, 3, 7, 9, 9, 1, 8, 8, 0]),
+                shape: &[2, 3, 2],
+            })
+            .expect("upload native integer ndarray");
+        let mins = provider
+            .integer_cummin_scan(&handle, 1, ProviderScanDirection::Forward)
+            .expect("integer cummin");
+        let maxes = provider
+            .integer_cummax_scan(&handle, 2, ProviderScanDirection::Reverse)
+            .expect("integer cummax reverse");
+        assert_eq!(
+            block_on(provider.download_integer(&mins.values))
+                .expect("download cummin values")
+                .data,
+            HostIntegerDataOwned::U16(vec![4, 2, 2, 2, 2, 2, 9, 9, 1, 8, 1, 0])
+        );
+        assert_eq!(mins.values.shape, vec![2, 3, 2]);
+        assert_eq!(
+            registry()
+                .lock()
+                .unwrap()
+                .get(&mins.indices.buffer_id)
+                .cloned()
+                .expect("cummin indices"),
+            vec![1.0, 1.0, 2.0, 1.0, 2.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 3.0]
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&maxes.values))
+                .expect("download cummax values")
+                .data,
+            HostIntegerDataOwned::U16(vec![9, 9, 2, 8, 8, 7, 9, 9, 1, 8, 8, 0])
+        );
+        assert_eq!(
+            registry()
+                .lock()
+                .unwrap()
+                .get(&maxes.indices.buffer_id)
+                .cloned()
+                .expect("cummax indices"),
+            vec![2.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+        );
     }
 
     #[test]

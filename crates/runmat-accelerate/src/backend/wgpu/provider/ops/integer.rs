@@ -203,6 +203,222 @@ pub(crate) fn integer_broadcast_plan(
 }
 
 impl WgpuProvider {
+    pub(crate) fn integer_cumulative_scan_exec(
+        &self,
+        op: u32,
+        operation_name: &str,
+        a: &GpuTensorHandle,
+        dim: usize,
+        direction: runmat_accelerate_api::ProviderScanDirection,
+    ) -> Result<(GpuTensorHandle, Option<GpuTensorHandle>)> {
+        let entry = self.get_entry_raw(a)?;
+        let integer_type = entry
+            .integer_type
+            .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
+        ensure!(
+            entry.storage == GpuTensorStorage::Real,
+            "{operation_name}: complex integer gpuArray scan is not supported"
+        );
+        let rank = entry.shape.len();
+        ensure!(rank > 0, "{operation_name}: rank must be greater than zero");
+        ensure!(dim < rank, "{operation_name}: dimension out of bounds");
+        ensure!(op <= 3, "{operation_name}: unsupported integer scan opcode");
+        if entry.len == 0 {
+            let values = self.register_integer_buffer(
+                self.create_storage_buffer(0, "runmat-integer-cumulative-empty"),
+                entry.shape.clone(),
+                0,
+                integer_type,
+                0,
+            );
+            let indices = if op >= 2 {
+                Some(self.register_existing_buffer(
+                    self.create_storage_buffer(0, "runmat-integer-cumulative-indices-empty"),
+                    entry.shape.clone(),
+                    0,
+                ))
+            } else {
+                None
+            };
+            return Ok((values, indices));
+        }
+
+        let segment_len = entry.shape[dim];
+        if segment_len == 0 {
+            let values = self.register_integer_buffer(
+                self.create_storage_buffer(0, "runmat-integer-cumulative-empty"),
+                entry.shape.clone(),
+                0,
+                integer_type,
+                0,
+            );
+            let indices = if op >= 2 {
+                Some(self.register_existing_buffer(
+                    self.create_storage_buffer(0, "runmat-integer-cumulative-indices-empty"),
+                    entry.shape.clone(),
+                    0,
+                ))
+            } else {
+                None
+            };
+            return Ok((values, indices));
+        }
+
+        let stride_before = entry.shape[..dim].iter().try_fold(1usize, |acc, &value| {
+            acc.checked_mul(value.max(1))
+                .ok_or_else(|| anyhow!("{operation_name}: stride_before overflow"))
+        })?;
+        let stride_after = entry.shape[dim + 1..]
+            .iter()
+            .try_fold(1usize, |acc, &value| {
+                acc.checked_mul(value.max(1))
+                    .ok_or_else(|| anyhow!("{operation_name}: stride_after overflow"))
+            })?;
+        let segments = stride_before
+            .checked_mul(stride_after)
+            .ok_or_else(|| anyhow!("{operation_name}: segment count exceeds GPU limits"))?;
+        let block = stride_before
+            .checked_mul(segment_len)
+            .ok_or_else(|| anyhow!("{operation_name}: segment stride exceeds GPU limits"))?;
+        ensure!(
+            segment_len <= u32::MAX as usize
+                && stride_before <= u32::MAX as usize
+                && segments <= u32::MAX as usize
+                && block <= u32::MAX as usize
+                && entry.len <= u32::MAX as usize,
+            "{operation_name}: tensor too large for GPU kernel"
+        );
+
+        let words = integer_word_count(integer_type, entry.len)?;
+        let value_bytes = (words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
+        let values_buffer =
+            self.create_storage_buffer_checked(words, "runmat-integer-cumulative-values")?;
+        let indices_buffer = if op >= 2 {
+            self.create_storage_buffer(entry.len, "runmat-integer-cumulative-indices")
+        } else {
+            values_buffer.clone()
+        };
+
+        let scalar_type = match self.precision {
+            crate::backend::wgpu::types::NumericPrecision::F64 => "f64",
+            crate::backend::wgpu::types::NumericPrecision::F32 => "f32",
+        };
+        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+        let shader = crate::backend::wgpu::shaders::integer::cumulative_scan_shader(
+            scalar_type,
+            workgroup_size,
+        );
+        let layout = self
+            .device_ref()
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("runmat-integer-cumulative-bgl"),
+                entries: &[
+                    crate::backend::wgpu::bindings::storage_read_entry(0),
+                    crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                    crate::backend::wgpu::bindings::storage_read_write_entry(2),
+                    crate::backend::wgpu::bindings::uniform_entry(3),
+                ],
+            });
+        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+            self.device_ref(),
+            "runmat-integer-cumulative-pl",
+            &layout,
+        );
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-integer-cumulative-module",
+            &shader,
+        );
+        let key = self.compute_pipeline_hash_bytes(
+            shader.as_bytes(),
+            "runmat-integer-cumulative-bgl",
+            Some(workgroup_size),
+        );
+        let pipeline = self.get_or_create_pipeline(
+            key,
+            &pipeline_layout,
+            &module,
+            "runmat-integer-cumulative",
+            Some(shader.as_bytes()),
+            Some("runmat-integer-cumulative-bgl"),
+            Some(workgroup_size),
+        );
+
+        #[repr(C)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
+        struct Params {
+            segment_len: u32,
+            segments: u32,
+            stride_before: u32,
+            block: u32,
+            total_len: u32,
+            integer_type: u32,
+            op: u32,
+            direction: u32,
+        }
+        let params = Params {
+            segment_len: segment_len as u32,
+            segments: segments as u32,
+            stride_before: stride_before as u32,
+            block: block as u32,
+            total_len: entry.len as u32,
+            integer_type: integer_type_code(integer_type),
+            op,
+            direction: u32::from(matches!(
+                direction,
+                runmat_accelerate_api::ProviderScanDirection::Reverse
+            )),
+        };
+        let uniform = self.uniform_buffer(&params, "runmat-integer-cumulative-params");
+        let group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-integer-cumulative-bg"),
+                layout: &layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: values_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: indices_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: uniform.as_entire_binding(),
+                    },
+                ],
+            });
+        let groups =
+            crate::backend::wgpu::dispatch::common::dispatch_size(segments as u32, workgroup_size);
+        crate::backend::wgpu::dispatch::elementwise::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &pipeline,
+            &group,
+            groups,
+        );
+
+        let values = self.register_integer_buffer(
+            values_buffer,
+            entry.shape.clone(),
+            entry.len,
+            integer_type,
+            value_bytes,
+        );
+        let indices = if op >= 2 {
+            Some(self.register_existing_buffer(indices_buffer, entry.shape, entry.len))
+        } else {
+            None
+        };
+        Ok((values, indices))
+    }
+
     pub(crate) fn integer_reduce_sum_prod_dim_exec(
         &self,
         is_product: bool,
@@ -1405,5 +1621,111 @@ mod tests {
             HostIntegerDataOwned::U16(vec![u16::MAX])
         );
         assert_eq!(prod_all.shape, vec![1, 1, 1]);
+    }
+
+    #[test]
+    fn wgpu_native_integer_cumulative_scans_preserve_class_and_direction() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let input = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&[120, 10, 2, 4, -5, 3]),
+                shape: &[3, 2],
+            })
+            .expect("upload native integer scan input");
+        let cumsum = provider
+            .integer_cumsum_scan(
+                &input,
+                0,
+                runmat_accelerate_api::ProviderScanDirection::Forward,
+            )
+            .expect("native integer cumsum");
+        let cumprod = provider
+            .integer_cumprod_scan(
+                &input,
+                0,
+                runmat_accelerate_api::ProviderScanDirection::Reverse,
+            )
+            .expect("native integer cumprod reverse");
+        assert_eq!(
+            block_on(provider.download_integer_exec(&cumsum))
+                .expect("download cumsum")
+                .data,
+            HostIntegerDataOwned::I8(vec![120, 127, 127, 4, -1, 2])
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&cumprod))
+                .expect("download cumprod")
+                .data,
+            HostIntegerDataOwned::I8(vec![127, 20, 2, -60, -15, 3])
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&cumsum),
+            Some(IntegerElementType::I8)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&cumprod),
+            Some(IntegerElementType::I8)
+        );
+    }
+
+    #[test]
+    fn wgpu_native_integer_cumulative_extrema_return_indices() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let input = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[4, 2, 2, 7, 3, 7, 9, 9, 1, 8, 8, 0]),
+                shape: &[2, 3, 2],
+            })
+            .expect("upload packed native integer scan input");
+        let mins = provider
+            .integer_cummin_scan(
+                &input,
+                1,
+                runmat_accelerate_api::ProviderScanDirection::Forward,
+            )
+            .expect("native integer cummin");
+        let maxes = provider
+            .integer_cummax_scan(
+                &input,
+                2,
+                runmat_accelerate_api::ProviderScanDirection::Reverse,
+            )
+            .expect("native integer cummax reverse");
+        assert_eq!(
+            block_on(provider.download_integer_exec(&mins.values))
+                .expect("download cummin")
+                .data,
+            HostIntegerDataOwned::U64(vec![4, 2, 2, 2, 2, 2, 9, 9, 1, 8, 1, 0])
+        );
+        assert_eq!(
+            block_on(provider.download_exec(&mins.indices))
+                .expect("download cummin indices")
+                .data,
+            vec![1.0, 1.0, 2.0, 1.0, 2.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 3.0]
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&maxes.values))
+                .expect("download cummax")
+                .data,
+            HostIntegerDataOwned::U64(vec![9, 9, 2, 8, 8, 7, 9, 9, 1, 8, 8, 0])
+        );
+        assert_eq!(
+            block_on(provider.download_exec(&maxes.indices))
+                .expect("download cummax indices")
+                .data,
+            vec![2.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&mins.values),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&maxes.values),
+            Some(IntegerElementType::U64)
+        );
     }
 }

@@ -978,6 +978,16 @@ impl AccelProvider for WgpuProvider {
         self.cumsum_exec(input, dim, direction, nan_mode)
     }
 
+    fn integer_cumsum_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<GpuTensorHandle> {
+        let (values, _) = self.integer_cumulative_scan_exec(0, "cumsum", input, dim, direction)?;
+        Ok(values)
+    }
+
     fn trapz_dim(
         &self,
         input: &GpuTensorHandle,
@@ -1006,6 +1016,16 @@ impl AccelProvider for WgpuProvider {
         self.cumprod_exec(input, dim, direction, nan_mode)
     }
 
+    fn integer_cumprod_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<GpuTensorHandle> {
+        let (values, _) = self.integer_cumulative_scan_exec(1, "cumprod", input, dim, direction)?;
+        Ok(values)
+    }
+
     fn cummin_scan(
         &self,
         input: &GpuTensorHandle,
@@ -1016,6 +1036,20 @@ impl AccelProvider for WgpuProvider {
         self.cummin_exec(input, dim, direction, nan_mode)
     }
 
+    fn integer_cummin_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<runmat_accelerate_api::ProviderCumminResult> {
+        let (values, indices) =
+            self.integer_cumulative_scan_exec(2, "cummin", input, dim, direction)?;
+        Ok(runmat_accelerate_api::ProviderCumminResult {
+            values,
+            indices: indices.expect("cummin integer scan returns indices"),
+        })
+    }
+
     fn cummax_scan(
         &self,
         input: &GpuTensorHandle,
@@ -1024,6 +1058,20 @@ impl AccelProvider for WgpuProvider {
         nan_mode: ProviderNanMode,
     ) -> Result<runmat_accelerate_api::ProviderCummaxResult> {
         self.cummax_exec(input, dim, direction, nan_mode)
+    }
+
+    fn integer_cummax_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<runmat_accelerate_api::ProviderCummaxResult> {
+        let (values, indices) =
+            self.integer_cumulative_scan_exec(3, "cummax", input, dim, direction)?;
+        Ok(runmat_accelerate_api::ProviderCummaxResult {
+            values,
+            indices: indices.expect("cummax integer scan returns indices"),
+        })
     }
 
     fn circshift(&self, handle: &GpuTensorHandle, shifts: &[isize]) -> Result<GpuTensorHandle> {

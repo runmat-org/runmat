@@ -470,25 +470,25 @@ fn cumprod_host(
         Value::Int(value) => {
             let storage =
                 crate::builtins::math::reduction::integer_native::storage_from_scalar(&value);
-            return crate::builtins::math::reduction::integer_native::cumulative(
+            crate::builtins::math::reduction::integer_native::cumulative(
                 &storage,
                 &[1, 1],
                 dim.unwrap_or(1),
                 integer_direction(direction),
                 crate::builtins::math::reduction::integer_native::CumulativeOperation::Product,
             )
-            .map_err(|error| cumprod_internal_error(&error));
+            .map_err(|error| cumprod_internal_error(&error))
         }
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
-            return crate::builtins::math::reduction::integer_native::cumulative(
+            crate::builtins::math::reduction::integer_native::cumulative(
                 tensor.integer_storage().expect("checked integer storage"),
                 &tensor.shape,
                 target_dim,
                 integer_direction(direction),
                 crate::builtins::math::reduction::integer_native::CumulativeOperation::Product,
             )
-            .map_err(|error| cumprod_internal_error(&error));
+            .map_err(|error| cumprod_internal_error(&error))
         }
         other => cumprod_host_floating(other, dim, direction, nan_mode),
     }
@@ -533,6 +533,40 @@ async fn cumprod_gpu(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
         }
+    }
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        if let Some(target) = dim {
+            if target == 0 {
+                return Err(cumprod_error_with_detail(
+                    &CUMPROD_ERROR_INVALID_ARGUMENT,
+                    "dimension must be >= 1",
+                ));
+            }
+            if target > handle.shape.len() {
+                return Ok(Value::GpuTensor(handle));
+            }
+        }
+        let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
+        if target_dim == 0 {
+            return Err(cumprod_error_with_detail(
+                &CUMPROD_ERROR_INVALID_ARGUMENT,
+                "dimension must be >= 1",
+            ));
+        }
+        let provider_direction = match direction {
+            CumprodDirection::Forward => ProviderScanDirection::Forward,
+            CumprodDirection::Reverse => ProviderScanDirection::Reverse,
+        };
+        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+            cumprod_error_with_detail(
+                &CUMPROD_ERROR_INVALID_INPUT,
+                "cumprod: native integer gpuArray requires an acceleration provider",
+            )
+        })?;
+        let device_result = provider
+            .integer_cumprod_scan(&handle, target_dim - 1, provider_direction)
+            .map_err(|err| cumprod_internal_error(format!("cumprod: {err}")))?;
+        return Ok(Value::GpuTensor(device_result));
     }
     if matches!(direction, CumprodDirection::Reverse) && matches!(nan_mode, CumprodNanMode::Omit) {
         let tensor = gpu_helpers::gather_tensor_async(&handle)
@@ -1162,6 +1196,41 @@ pub(crate) mod tests {
             }
             Ok(_) => panic!("expected error"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cumprod_native_integer_gpu_reverse_omitnan_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U8(&[20, 4, 5, 2]),
+                    shape: &[2, 2],
+                })
+                .expect("upload native integer");
+            let result = cumprod_builtin(
+                Value::GpuTensor(handle),
+                vec![
+                    Value::Int(IntValue::I32(1)),
+                    Value::from("reverse"),
+                    Value::from("omitnan"),
+                ],
+            )
+            .expect("cumprod");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected resident GPU tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&out),
+                Some(runmat_accelerate_api::IntegerElementType::U8)
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&out))
+                    .expect("download native integer result")
+                    .data,
+                runmat_accelerate_api::HostIntegerDataOwned::U8(vec![80, 4, 10, 2])
+            );
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

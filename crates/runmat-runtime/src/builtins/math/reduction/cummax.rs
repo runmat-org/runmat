@@ -598,16 +598,16 @@ fn cummax_host(
         Value::Int(value) => {
             let storage =
                 crate::builtins::math::reduction::integer_native::storage_from_scalar(&value);
-            return integer_cummax(&storage, vec![1, 1], dim.unwrap_or(1), direction);
+            integer_cummax(&storage, vec![1, 1], dim.unwrap_or(1), direction)
         }
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
-            return integer_cummax(
+            integer_cummax(
                 tensor.integer_storage().expect("checked integer storage"),
                 tensor.shape.clone(),
                 target_dim,
                 direction,
-            );
+            )
         }
         other => cummax_host_floating(other, dim, direction, nan_mode),
     }
@@ -692,6 +692,26 @@ async fn cummax_gpu(
         return Ok(CummaxEvaluation {
             values: Value::GpuTensor(handle),
             indices: tensor::tensor_into_value(indices),
+        });
+    }
+
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let provider_direction = match direction {
+            CummaxDirection::Forward => ProviderScanDirection::Forward,
+            CummaxDirection::Reverse => ProviderScanDirection::Reverse,
+        };
+        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+            cummax_error_with_detail(
+                &CUMMAX_ERROR_INVALID_INPUT,
+                "cummax: native integer gpuArray requires an acceleration provider",
+            )
+        })?;
+        let ProviderCummaxResult { values, indices } = provider
+            .integer_cummax_scan(&handle, target_dim - 1, provider_direction)
+            .map_err(|err| cummax_internal_error(format!("cummax: {err}")))?;
+        return Ok(CummaxEvaluation {
+            values: Value::GpuTensor(values),
+            indices: Value::GpuTensor(indices),
         });
     }
 
@@ -1539,6 +1559,41 @@ pub(crate) mod tests {
             let gathered_indices = test_support::gather(indices).expect("gather indices");
             assert_eq!(gathered_values.data, vec![4.0, 4.0, 7.0, 7.0]);
             assert_eq!(gathered_indices.data, vec![1.0, 1.0, 3.0, 3.0]);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cummax_native_integer_gpu_reverse_values_and_indices_stay_resident() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&[4, 9, 9, 7]),
+                    shape: &[4, 1],
+                })
+                .expect("upload native integer");
+            let eval = evaluate(Value::GpuTensor(handle), &[Value::from("reverse")])
+                .expect("cummax reverse");
+            let (values, indices) = eval.into_pair();
+            let Value::GpuTensor(value_handle) = values else {
+                panic!("expected GPU value tensor");
+            };
+            let Value::GpuTensor(index_handle) = indices else {
+                panic!("expected GPU index tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&value_handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&value_handle))
+                    .expect("download native integer values")
+                    .data,
+                runmat_accelerate_api::HostIntegerDataOwned::U64(vec![9, 9, 9, 7])
+            );
+            let gathered_indices =
+                test_support::gather(Value::GpuTensor(index_handle)).expect("gather indices");
+            assert_eq!(gathered_indices.data, vec![3.0, 3.0, 3.0, 4.0]);
         });
     }
 

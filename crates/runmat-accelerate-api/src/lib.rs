@@ -3013,6 +3013,16 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("cumsum_scan not supported by provider"))
     }
+    fn integer_cumsum_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "integer_cumsum_scan not supported by provider"
+        ))
+    }
     fn trapz_dim(
         &self,
         _input: &GpuTensorHandle,
@@ -3038,6 +3048,16 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("cumprod_scan not supported by provider"))
     }
+    fn integer_cumprod_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "integer_cumprod_scan not supported by provider"
+        ))
+    }
     fn cummin_scan(
         &self,
         _input: &GpuTensorHandle,
@@ -3047,6 +3067,16 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<ProviderCumminResult> {
         Err(anyhow::anyhow!("cummin_scan not supported by provider"))
     }
+    fn integer_cummin_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+    ) -> anyhow::Result<ProviderCumminResult> {
+        Err(anyhow::anyhow!(
+            "integer_cummin_scan not supported by provider"
+        ))
+    }
     fn cummax_scan(
         &self,
         _input: &GpuTensorHandle,
@@ -3055,6 +3085,16 @@ pub trait AccelProvider: Send + Sync {
         _nan_mode: ProviderNanMode,
     ) -> anyhow::Result<ProviderCummaxResult> {
         Err(anyhow::anyhow!("cummax_scan not supported by provider"))
+    }
+    fn integer_cummax_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+    ) -> anyhow::Result<ProviderCummaxResult> {
+        Err(anyhow::anyhow!(
+            "integer_cummax_scan not supported by provider"
+        ))
     }
 
     fn find(
