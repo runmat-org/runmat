@@ -4,6 +4,7 @@
 //! These operations work element-by-element on matrices and support scalar broadcasting.
 
 use crate::builtins::common::matrix::matrix_power;
+use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
 fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (f64, f64) {
@@ -182,6 +183,9 @@ pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
             }
         }
     }
+    if let Some(result) = try_integer_binary(a, b, IntegerBinaryOp::Multiply, "times")? {
+        return Ok(result);
+    }
     match (a, b) {
         // Complex scalars
         (Value::Complex(ar, ai), Value::Complex(br, bi)) => {
@@ -318,6 +322,9 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
                 return Ok(Value::GpuTensor(hc));
             }
         }
+    }
+    if let Some(result) = try_integer_binary(a, b, IntegerBinaryOp::Divide, "rdivide")? {
+        return Ok(result);
     }
     match (a, b) {
         // Complex scalars
@@ -504,6 +511,11 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
 /// For matrices, this is matrix exponentiation (A^n where n is integer)
 /// For scalars, this is regular exponentiation
 pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
+    if scalar_power_integer_candidate(a) && scalar_power_integer_candidate(b) {
+        if let Some(result) = try_integer_binary(a, b, IntegerBinaryOp::Power, "power")? {
+            return Ok(result);
+        }
+    }
     if let Some(result) = scalar_power_value(a, b) {
         return Ok(result);
     }
@@ -571,6 +583,15 @@ pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
     }
 }
 
+fn scalar_power_integer_candidate(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Num(_) | Value::Bool(_) => true,
+        Value::Tensor(tensor) => tensor.data.len() == 1,
+        Value::LogicalArray(array) => array.data.len() == 1,
+        _ => false,
+    }
+}
+
 fn matrix_power_exponent_from_f64(value: f64) -> Result<i32, String> {
     if !value.is_finite() || value.fract() != 0.0 {
         return Err("Matrix power requires integer exponent".to_string());
@@ -590,6 +611,9 @@ fn matrix_power_exponent_from_int(value: &IntValue) -> Result<i32, String> {
 /// Element-wise power: A .^ B
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
 pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
+    if let Some(result) = try_integer_binary(a, b, IntegerBinaryOp::Power, "power")? {
+        return Ok(result);
+    }
     match (a, b) {
         // Complex scalar cases
         (Value::Complex(ar, ai), Value::Complex(br, bi)) => {
@@ -780,7 +804,7 @@ mod tests {
                 &Value::Num(4.5)
             ))
             .unwrap(),
-            Value::Num(13.5)
+            Value::Int(runmat_builtins::IntValue::I32(14))
         );
     }
 
@@ -894,6 +918,65 @@ mod tests {
         assert_eq!(
             elementwise_neg(&Value::Int(IntValue::U64(u64::MAX))).expect("neg"),
             Value::Int(IntValue::U64(0))
+        );
+    }
+
+    #[test]
+    fn transitional_elementwise_helpers_preserve_exact_integer_storage() {
+        let lhs = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, (1_u64 << 63) + 1]),
+            vec![1, 2],
+        )
+        .expect("lhs");
+        let rhs = Tensor::new_integer(IntegerStorage::U64(vec![1, 2]), vec![1, 2]).expect("rhs");
+
+        let Value::Tensor(product) = block_on(elementwise_mul(
+            &Value::Tensor(lhs.clone()),
+            &Value::Tensor(rhs),
+        ))
+        .expect("mul") else {
+            panic!("expected integer tensor product");
+        };
+        assert_eq!(
+            product.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, u64::MAX]))
+        );
+
+        let Value::Tensor(quotient) =
+            block_on(elementwise_div(&Value::Tensor(lhs), &Value::Num(2.0))).expect("div")
+        else {
+            panic!("expected integer tensor quotient");
+        };
+        assert_eq!(
+            quotient.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1_u64 << 63, (1_u64 << 62) + 1]))
+        );
+    }
+
+    #[test]
+    fn transitional_power_helpers_preserve_exact_scalar_and_array_integers() {
+        let scalar_power =
+            power(&Value::Int(IntValue::U64(u64::MAX)), &Value::Num(1.0)).expect("scalar power");
+        assert_eq!(scalar_power, Value::Int(IntValue::U64(u64::MAX)));
+
+        let scalar_tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("scalar tensor");
+        let scalar_tensor_power =
+            power(&Value::Tensor(scalar_tensor), &Value::Num(1.0)).expect("tensor scalar power");
+        assert_eq!(scalar_tensor_power, Value::Int(IntValue::U64(u64::MAX)));
+
+        let base =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 2]), vec![1, 2]).expect("base");
+        let exponent =
+            Tensor::new_integer(IntegerStorage::U64(vec![1, 64]), vec![1, 2]).expect("exponent");
+        let Value::Tensor(result) =
+            elementwise_pow(&Value::Tensor(base), &Value::Tensor(exponent)).expect("pow")
+        else {
+            panic!("expected integer tensor power");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, u64::MAX]))
         );
     }
 

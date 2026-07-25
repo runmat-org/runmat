@@ -1,4 +1,4 @@
-use runmat_builtins::{LogicalArray, Tensor, Value};
+use runmat_builtins::{IntValue, LogicalArray, Tensor, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -63,4 +63,25 @@ fn direct_relational_builtins_keep_uint64_comparisons_exact() {
         "eq must be false: {vars:?}"
     );
     assert!(vars.contains(&Value::Num(1.0)), "gt must be true: {vars:?}");
+}
+
+#[test]
+fn vm_power_paths_keep_uint64_integer_results_exact() {
+    let vars = execute_source(
+        r#"
+        a = uint64(9007199254740992) + uint64(1);
+        b = a ^ uint64(1);
+        c = uint64(2) .^ uint64(64);
+        "#,
+    )
+    .expect("exact uint64 power paths should execute");
+
+    assert!(
+        vars.contains(&Value::Int(IntValue::U64(9_007_199_254_740_993))),
+        "matrix-power scalar fallback must preserve exact uint64 input: {vars:?}"
+    );
+    assert!(
+        vars.contains(&Value::Int(IntValue::U64(u64::MAX))),
+        "elementwise uint64 power must saturate in the uint64 class: {vars:?}"
+    );
 }
