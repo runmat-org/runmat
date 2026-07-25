@@ -771,7 +771,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
 
     let scalar_hint = match value {
         Value::Num(_) | Value::Int(_) => true,
-        Value::Tensor(t) => t.data.len() == 1,
+        Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         Value::GpuTensor(handle) => {
             is_scalar_shape(&handle.shape) || tensor::element_count(&handle.shape) == 1
@@ -1165,15 +1165,16 @@ fn mean_tensor(tensor: Tensor, axes: MeanAxes, nan_mode: ReductionNaN) -> Builti
 
 fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Tensor> {
     if is_scalar_shape(&tensor.shape) {
-        return Ok(tensor.clone());
+        return reduce_tensor_mean_dim(tensor, 1, nan_mode);
     }
+    let values = tensor::tensor_values_f64(tensor);
     let total_elems = tensor
         .shape
         .iter()
         .copied()
         .map(|dim| dim.max(1))
         .fold(1usize, |acc, dim| acc.saturating_mul(dim));
-    if total_elems == 0 || tensor.data.is_empty() {
+    if total_elems == 0 || values.is_empty() {
         return Tensor::new(vec![f64::NAN], vec![1, 1])
             .map_err(|e| mean_internal_error(format!("mean: {e}")));
     }
@@ -1182,7 +1183,7 @@ fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Ten
     let mut saw_nan = false;
     match nan_mode {
         ReductionNaN::Include => {
-            for &value in &tensor.data {
+            for &value in &values {
                 if value.is_nan() {
                     saw_nan = true;
                     break;
@@ -1198,7 +1199,7 @@ fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Ten
                 .map_err(|e| mean_internal_error(format!("mean: {e}")))
         }
         ReductionNaN::Omit => {
-            for &value in &tensor.data {
+            for &value in &values {
                 if value.is_nan() {
                     continue;
                 }
@@ -1226,7 +1227,10 @@ fn reduce_tensor_mean_dim(
     }
 
     if is_scalar_shape(&tensor.shape) {
-        let value = tensor.data.first().copied().unwrap_or(f64::NAN);
+        let value = tensor::tensor_values_f64(tensor)
+            .into_iter()
+            .next()
+            .unwrap_or(f64::NAN);
         let result = match nan_mode {
             ReductionNaN::Include => value,
             ReductionNaN::Omit => {
@@ -1245,7 +1249,8 @@ fn reduce_tensor_mean_dim(
         return Ok(tensor.clone());
     };
 
-    if tensor.data.is_empty() {
+    let values = tensor::tensor_values_f64(tensor);
+    if values.is_empty() {
         let fill = vec![f64::NAN; tensor::element_count(&output_shape)];
         return Tensor::new(fill, output_shape)
             .map_err(|e| mean_internal_error(format!("mean: {e}")));
@@ -1266,7 +1271,7 @@ fn reduce_tensor_mean_dim(
 
             for k in 0..reduce_len {
                 let idx = before + k * stride_before + after * stride_before * reduce_len;
-                let value = tensor.data[idx];
+                let value = values[idx];
                 match nan_mode {
                     ReductionNaN::Include => {
                         if value.is_nan() {
@@ -1679,7 +1684,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     fn mean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::mean_builtin(value, rest))
@@ -1754,6 +1759,48 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn mean_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![0, 2, 4, 6]), vec![2, 2]).expect("tensor");
+        tensor.data = vec![0.0, 0.0, 0.0, 0.0];
+
+        let result = mean_builtin(Value::Tensor(tensor), Vec::new()).expect("mean");
+
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![1.0, 5.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mean_all_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 2, 4, 6]), vec![2, 2]).expect("tensor");
+        tensor.data = vec![0.0, 0.0, 0.0, 0.0];
+
+        let result = mean_builtin(Value::Tensor(tensor), vec![Value::from("all")]).expect("mean");
+
+        assert_eq!(result, Value::Num(3.0));
+    }
+
+    #[test]
+    fn mean_vecdim_reads_typed_integer_dimensions_and_values_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 5, 7]), vec![2, 2]).expect("tensor");
+        tensor.data = vec![0.0, 0.0, 0.0, 0.0];
+        let mut dims =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("dims");
+        dims.data = vec![0.0, 0.0];
+
+        let result = mean_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("mean");
+
+        assert_eq!(result, Value::Num(4.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
