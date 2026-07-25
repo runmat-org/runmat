@@ -675,12 +675,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
 fn parse_normalization(value: &Value) -> BuiltinResult<NormParse> {
     match value {
         Value::Tensor(tensor) => {
-            if tensor.data.is_empty() {
+            let values = tensor::tensor_values_f64(tensor);
+            if values.is_empty() {
                 return Ok(NormParse::Placeholder);
             }
-            if tensor.data.len() == 1 {
-                let scalar = tensor.data[0];
-                return parse_normalization_scalar(scalar);
+            if values.len() == 1 {
+                return parse_normalization_scalar(values[0]);
             }
             Ok(NormParse::NotMatched)
         }
@@ -741,7 +741,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
 
     let (scalar_hint, is_empty) = match value {
         Value::Num(_) | Value::Int(_) => (true, false),
-        Value::Tensor(t) => (t.data.len() == 1, t.data.is_empty()),
+        Value::Tensor(t) => (tensor::is_scalar_tensor(t), t.data.is_empty()),
         Value::LogicalArray(logical) => (logical.data.len() == 1, logical.data.is_empty()),
         Value::GpuTensor(handle) => {
             let count = tensor::element_count(&handle.shape);
@@ -835,7 +835,7 @@ fn std_tensor(
 ) -> BuiltinResult<Tensor> {
     let (dims, had_request) = resolve_axes(&tensor.shape, axes)?;
     if dims.is_empty() {
-        if had_request && tensor.data.len() == 1 {
+        if had_request && tensor::is_scalar_tensor(&tensor) {
             return std_scalar_tensor(&tensor, nan_mode);
         }
         return Ok(tensor);
@@ -844,7 +844,10 @@ fn std_tensor(
 }
 
 fn std_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Tensor> {
-    let value = tensor.data.first().copied().unwrap_or(f64::NAN);
+    let value = tensor::tensor_values_f64(tensor)
+        .into_iter()
+        .next()
+        .unwrap_or(f64::NAN);
     let result = if value.is_nan() {
         f64::NAN
     } else {
@@ -870,7 +873,8 @@ fn std_tensor_reduce(
 
     let output_shape = reduced_shape(&tensor.shape, &dims_sorted);
     let out_len = tensor::element_count(&output_shape);
-    if tensor.data.is_empty() {
+    let values = tensor::tensor_values_f64(tensor);
+    if values.is_empty() {
         let fill = vec![f64::NAN; out_len];
         return Tensor::new(fill, output_shape)
             .map_err(|e| std_internal_error(format!("std: {e}")));
@@ -889,7 +893,7 @@ fn std_tensor_reduce(
         }
     }
 
-    for (linear, &value) in tensor.data.iter().enumerate() {
+    for (linear, value) in values.into_iter().enumerate() {
         linear_to_multi(linear, &tensor.shape, &mut coords);
         for (i, coord) in coords.iter().enumerate() {
             out_coords[i] = if reduce_mask[i] { 0 } else { *coord };
@@ -1321,7 +1325,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
     use std::f64::consts::{FRAC_1_SQRT_2, SQRT_2};
 
     fn std_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1345,6 +1349,18 @@ pub(crate) mod tests {
         assert!(matches!(
             parse_normalization(&Value::Int(IntValue::I64(-1))),
             Ok(NormParse::NotMatched)
+        ));
+    }
+
+    #[test]
+    fn std_typed_integer_tensor_normalization_reads_exact_storage() {
+        let mut normalization =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("normalization");
+        normalization.data = vec![0.0];
+
+        assert!(matches!(
+            parse_normalization(&Value::Tensor(normalization)),
+            Ok(NormParse::Value(StdNormalization::Population))
         ));
     }
 
@@ -1496,6 +1512,35 @@ pub(crate) mod tests {
         match result {
             Value::Num(v) => assert!(v.is_nan()),
             other => panic!("expected NaN scalar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn std_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![0, 2, 4]), vec![1, 3]).expect("tensor");
+        tensor.data = vec![0.0, 0.0, 0.0];
+
+        let result = std_builtin(Value::Tensor(tensor), Vec::new()).expect("std");
+
+        assert_eq!(result, Value::Num(2.0));
+    }
+
+    #[test]
+    fn std_reads_typed_integer_population_flag_tensor_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![0, 2, 4]), vec![1, 3]).expect("tensor");
+        tensor.data = vec![0.0, 0.0, 0.0];
+        let mut normalization =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("normalization");
+        normalization.data = vec![0.0];
+
+        let result =
+            std_builtin(Value::Tensor(tensor), vec![Value::Tensor(normalization)]).expect("std");
+
+        match result {
+            Value::Num(value) => assert!((value - (8.0_f64 / 3.0).sqrt()).abs() < 1e-12),
+            other => panic!("expected numeric result, got {other:?}"),
         }
     }
 
