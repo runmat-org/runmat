@@ -390,6 +390,9 @@ fn parse_dims_tensor(tensor: &Tensor) -> crate::BuiltinResult<Vec<usize>> {
             "flip: dimension vector must be a row or column vector",
         ));
     }
+    if let Some(parsed) = tensor::integer_tensor_dimension_vector(tensor, "flip", false) {
+        return parsed.map_err(|e| flip_error_for("flip", e));
+    }
     let mut dims = Vec::with_capacity(tensor.data.len());
     for entry in &tensor.data {
         if !entry.is_finite() {
@@ -645,19 +648,14 @@ fn flip_generic<T: Clone>(
     if data.is_empty() {
         return Ok(Vec::new());
     }
-    let max_dim = dims.iter().copied().max().unwrap_or(0);
-    let mut ext_shape = shape.to_vec();
-    if max_dim > ext_shape.len() {
-        ext_shape.extend(std::iter::repeat_n(1, max_dim - ext_shape.len()));
-    }
-    let total: usize = ext_shape.iter().product();
+    let total: usize = shape.iter().product();
     if total != data.len() {
         return Err(flip_error_for(
             builtin,
             format!("{builtin}: shape does not match data length"),
         ));
     }
-    let mut flip_flags = vec![false; ext_shape.len()];
+    let mut flip_flags = vec![false; shape.len()];
     for &dim in dims {
         let axis = dim - 1;
         if axis >= flip_flags.len() {
@@ -670,13 +668,13 @@ fn flip_generic<T: Clone>(
     }
     let mut out = Vec::with_capacity(total);
     for idx in 0..total {
-        let mut coords = unravel_index(idx, &ext_shape);
+        let mut coords = unravel_index(idx, shape);
         for (axis, flag) in flip_flags.iter().enumerate() {
-            if *flag && ext_shape[axis] > 1 {
-                coords[axis] = ext_shape[axis] - 1 - coords[axis];
+            if *flag && shape[axis] > 1 {
+                coords[axis] = shape[axis] - 1 - coords[axis];
             }
         }
-        let src_idx = ravel_index(&coords, &ext_shape);
+        let src_idx = ravel_index(&coords, shape);
         out.push(data[src_idx].clone());
     }
     Ok(out)
@@ -903,6 +901,37 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.data, vec![4.0, 3.0, 2.0, 1.0, 8.0, 7.0, 6.0, 5.0]);
             }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn flip_dimension_vector_reads_integer_tensor_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let dims = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![1, large]),
+            vec![1, 2],
+        )
+        .expect("dims");
+        let parsed = parse_dims_tensor(&dims).expect("parse dims");
+        assert_eq!(parsed, vec![1, large as usize]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn flip_large_integer_dimension_beyond_rank_is_noop() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let original = tensor.clone();
+        let large = 9_007_199_254_740_993_u64;
+        let dims = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![large]),
+            vec![1, 1],
+        )
+        .expect("dims");
+        let value = flip_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("flip");
+        match value {
+            Value::Tensor(t) => assert_eq!(t.data, original.data),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
