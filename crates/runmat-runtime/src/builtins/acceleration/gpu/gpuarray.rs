@@ -610,6 +610,14 @@ fn float_to_dim(value: f64) -> BuiltinResult<usize> {
 }
 
 fn tensor_to_dims(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
+    if let Some(storage) = tensor.integer_storage() {
+        return storage
+            .exact_values()
+            .iter()
+            .map(int_to_dim)
+            .collect::<BuiltinResult<Vec<_>>>();
+    }
+
     let mut dims = Vec::with_capacity(tensor.data.len());
     for value in &tensor.data {
         dims.push(float_to_dim(*value)?);
@@ -695,7 +703,11 @@ fn infer_dtype_from_prototype(proto: &Value) -> BuiltinResult<DataClass> {
             IntValue::U32(_) => DataClass::UInt32,
             IntValue::U64(_) => DataClass::UInt64,
         }),
-        Value::Tensor(_) | Value::Num(_) => Ok(DataClass::Double),
+        Value::Tensor(tensor) => Ok(tensor
+            .integer_storage()
+            .map(data_class_from_integer_storage)
+            .unwrap_or(DataClass::Double)),
+        Value::Num(_) => Ok(DataClass::Double),
         Value::CharArray(_) => Ok(DataClass::Double),
         Value::String(_) => Err(gpu_array_error_with_message(
             "gpuArray: 'like' does not accept MATLAB string scalars; convert to char() first",
@@ -1210,6 +1222,18 @@ pub(crate) mod tests {
         let expected = usize::try_from(u64::MAX).ok();
         assert_eq!(int_to_dim(&IntValue::U64(u64::MAX)).ok(), expected);
         assert!(int_to_dim(&IntValue::I64(-1)).is_err());
+    }
+
+    #[test]
+    fn gpu_array_tensor_dimensions_use_exact_integer_storage() {
+        let expected = usize::try_from(u64::MAX).ok();
+        let dims = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("integer size vector");
+        assert_eq!(tensor_to_dims(&dims).ok(), expected.map(|dim| vec![dim]));
+
+        let negative = Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1])
+            .expect("integer size vector");
+        assert!(tensor_to_dims(&negative).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1791,6 +1815,37 @@ pub(crate) mod tests {
             assert_eq!(
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![1]))
+            );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gpu_array_like_integer_tensor_prototype_preserves_native_class() {
+        test_support::with_test_provider(|_| {
+            let prototype = Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                    .expect("prototype"),
+            );
+            let handle = match call(Value::Num(7.0), vec![Value::from("like"), prototype])
+                .expect("gpuArray like integer prototype")
+            {
+                Value::GpuTensor(handle) => handle,
+                other => panic!("expected gpu tensor, got {other:?}"),
+            };
+
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_class_name(&handle).as_deref(),
+                Some("uint64")
+            );
+            let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![7]))
             );
         });
     }
