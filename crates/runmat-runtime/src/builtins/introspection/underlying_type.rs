@@ -201,7 +201,7 @@ pub(crate) fn underlying_type_for_value(value: &Value) -> String {
             || tensor.dtype.class_name().to_string(),
             |storage| storage.class_name().to_string(),
         ),
-        Value::SparseTensor(_) => "double".to_string(),
+        Value::SparseTensor(sparse) => sparse.class_name().to_string(),
         Value::ComplexTensor(tensor) => tensor.integer_data.as_ref().map_or_else(
             || "double".to_string(),
             |storage| storage.class_name().to_string(),
@@ -290,6 +290,23 @@ pub(crate) mod tests {
         assert_eq!(
             underlying_type_for_value(&Value::String("abc".into())),
             "string"
+        );
+    }
+
+    #[test]
+    fn underlying_type_reports_typed_sparse_integer_class() {
+        let sparse = runmat_builtins::SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 1],
+            vec![1],
+            IntegerStorage::I64(vec![i64::MIN]),
+        )
+        .expect("int64 sparse");
+
+        assert_eq!(
+            underlying_type_for_value(&Value::SparseTensor(sparse)),
+            "int64"
         );
     }
 

@@ -94,7 +94,7 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
             || tensor.dtype.class_name().to_string(),
             |storage| storage.class_name().to_string(),
         ),
-        Value::SparseTensor(_) => "double".to_string(),
+        Value::SparseTensor(sparse) => sparse.class_name().to_string(),
         Value::Int(iv) => iv.class_name().to_string(),
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
         Value::String(_) | Value::StringArray(_) => "string".to_string(),
@@ -161,6 +161,20 @@ pub(crate) mod tests {
         .expect("uint64 tensor");
 
         assert_eq!(class_name_for_value(&Value::Tensor(tensor)), "uint64");
+    }
+
+    #[test]
+    fn class_reports_exact_integer_sparse_storage_type() {
+        let sparse = runmat_builtins::SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 1],
+            vec![1],
+            IntegerStorage::U64(vec![u64::MAX]),
+        )
+        .expect("uint64 sparse");
+
+        assert_eq!(class_name_for_value(&Value::SparseTensor(sparse)), "uint64");
     }
 
     #[test]

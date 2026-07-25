@@ -584,20 +584,27 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
                     .saturating_mul(integer_storage_element_bytes(storage))
             },
         ),
-        Value::SparseTensor(t) => t
-            .values
-            .len()
-            .saturating_mul(std::mem::size_of::<f64>())
-            .saturating_add(
-                t.row_indices
-                    .len()
-                    .saturating_mul(std::mem::size_of::<usize>()),
-            )
-            .saturating_add(
-                t.col_ptrs
-                    .len()
-                    .saturating_mul(std::mem::size_of::<usize>()),
-            ),
+        Value::SparseTensor(t) => {
+            let value_bytes = t.integer_storage().map_or_else(
+                || t.values.len().saturating_mul(std::mem::size_of::<f64>()),
+                |storage| {
+                    storage
+                        .len()
+                        .saturating_mul(integer_storage_element_bytes(storage))
+                },
+            );
+            value_bytes
+                .saturating_add(
+                    t.row_indices
+                        .len()
+                        .saturating_mul(std::mem::size_of::<usize>()),
+                )
+                .saturating_add(
+                    t.col_ptrs
+                        .len()
+                        .saturating_mul(std::mem::size_of::<usize>()),
+                )
+        }
         Value::Complex(_, _) => 16,
         Value::ComplexTensor(t) => t.integer_data.as_ref().map_or_else(
             || t.data.len().saturating_mul(16),
@@ -1291,6 +1298,26 @@ pub(crate) mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn whos_memory_bytes_use_native_width_for_typed_sparse_integer_values() {
+        let sparse = runmat_builtins::SparseTensor::new_integer(
+            4,
+            2,
+            vec![0, 1, 2],
+            vec![0, 3],
+            IntegerStorage::U16(vec![1, u16::MAX]),
+        )
+        .expect("uint16 sparse");
+        let expected = 2 * std::mem::size_of::<u16>()
+            + 2 * std::mem::size_of::<usize>()
+            + 3 * std::mem::size_of::<usize>();
+
+        assert_eq!(
+            value_memory_bytes(&Value::SparseTensor(sparse), &mut HashSet::new()).expect("bytes"),
+            expected
+        );
     }
 
     #[test]

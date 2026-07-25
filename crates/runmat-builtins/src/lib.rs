@@ -83,7 +83,7 @@ pub enum Value {
     // Char array (single-quoted): 2-D character array (rows x cols)
     CharArray(CharArray),
     Tensor(Tensor),
-    /// Real double sparse matrix in compressed sparse column form.
+    /// Real sparse matrix in compressed sparse column form.
     SparseTensor(SparseTensor),
     /// Complex numeric array; same column-major shape semantics as `Tensor`
     ComplexTensor(ComplexTensor),
@@ -1935,6 +1935,23 @@ mod sparse_tensor_tests {
     }
 
     #[test]
+    fn sparse_display_reports_exact_integer_class_and_values() {
+        let sparse = SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 1],
+            vec![1],
+            IntegerStorage::U64(vec![u64::MAX]),
+        )
+        .expect("uint64 sparse");
+        let text = sparse.to_string();
+
+        assert!(text.contains("2x1 uint64 sparse matrix with 1 nonzero entries"));
+        assert!(text.contains("18446744073709551615"));
+        assert!(!text.contains("18446744073709552000"));
+    }
+
+    #[test]
     fn to_dense_rejects_overflowing_dimensions() {
         let sparse = SparseTensor {
             rows: usize::MAX,
@@ -2223,9 +2240,10 @@ impl fmt::Display for SparseTensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "{}x{} sparse double matrix with {} nonzero entries",
+            "{}x{} {} sparse matrix with {} nonzero entries",
             self.rows,
             self.cols,
+            self.class_name(),
             self.nnz()
         )?;
         if self.nnz() == 0 {
@@ -2234,16 +2252,33 @@ impl fmt::Display for SparseTensor {
         for col in 0..self.cols {
             for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
                 let row = self.row_indices[idx];
+                let value = self
+                    .integer_data
+                    .as_ref()
+                    .and_then(|storage| storage.value_at(idx).map(format_int_value));
                 writeln!(
                     f,
                     "  ({},{})  {}",
                     row + 1,
                     col + 1,
-                    format_number(self.values[idx])
+                    value.unwrap_or_else(|| format_number(self.values[idx]))
                 )?;
             }
         }
         Ok(())
+    }
+}
+
+fn format_int_value(value: IntValue) -> String {
+    match value {
+        IntValue::I8(value) => value.to_string(),
+        IntValue::I16(value) => value.to_string(),
+        IntValue::I32(value) => value.to_string(),
+        IntValue::I64(value) => value.to_string(),
+        IntValue::U8(value) => value.to_string(),
+        IntValue::U16(value) => value.to_string(),
+        IntValue::U32(value) => value.to_string(),
+        IntValue::U64(value) => value.to_string(),
     }
 }
 
