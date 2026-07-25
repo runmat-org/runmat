@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerStorage, LogicalArray, ResolveContext, SparseTensor, Tensor, Type, Value,
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, SparseTensor, Tensor,
+    Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -425,8 +426,9 @@ fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize)> {
         [] => Ok((1, 1)),
         [n] => match n {
             Value::Tensor(tensor) if is_vector_shape(&tensor.shape) && tensor.data.len() == 2 => {
-                let rows = parse_speye_size_raw(tensor.data[0], "m")?;
-                let cols = parse_speye_size_raw(tensor.data[1], "n")?;
+                let dims = parse_speye_shape_tensor(tensor)?;
+                let rows = dims[0];
+                let cols = dims[1];
                 Ok((rows, cols))
             }
             Value::SparseTensor(sparse) if is_vector_shape(&[sparse.rows, sparse.cols]) => {
@@ -439,8 +441,9 @@ fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize)> {
                         "speye: size vector must have two elements",
                     ));
                 }
-                let rows = parse_speye_size_raw(dense.data[0], "m")?;
-                let cols = parse_speye_size_raw(dense.data[1], "n")?;
+                let dims = parse_speye_shape_tensor(&dense)?;
+                let rows = dims[0];
+                let cols = dims[1];
                 Ok((rows, cols))
             }
             _ => {
@@ -459,6 +462,23 @@ fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize)> {
     }
 }
 
+fn parse_speye_shape_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
+    if let Some(values) = tensor_integer_values(tensor) {
+        return values
+            .iter()
+            .zip(["m", "n"])
+            .map(|(value, name)| parse_speye_integer_size(value, name))
+            .collect();
+    }
+    tensor
+        .data
+        .iter()
+        .copied()
+        .zip(["m", "n"])
+        .map(|(value, name)| parse_speye_size_raw(value, name))
+        .collect()
+}
+
 fn optional_sparse_double_typename(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.clone()),
@@ -468,9 +488,11 @@ fn optional_sparse_double_typename(value: &Value) -> Option<String> {
 }
 
 fn parse_speye_size_value(value: &Value, name: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = scalar_integer_value(value) {
+        return parse_speye_integer_size(&integer, name);
+    }
     let raw = match value {
         Value::Num(n) => *n,
-        Value::Int(i) => i.to_f64(),
         Value::Bool(b) => {
             if *b {
                 1.0
@@ -486,6 +508,18 @@ fn parse_speye_size_value(value: &Value, name: &str) -> BuiltinResult<usize> {
         }
     };
     parse_speye_size_raw(raw, name)
+}
+
+fn parse_speye_integer_size(value: &IntValue, name: &str) -> BuiltinResult<usize> {
+    if value.try_to_i64().is_some_and(|raw| raw <= 0) {
+        return Ok(0);
+    }
+    value.try_to_usize().ok_or_else(|| {
+        sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!("speye: {name} exceeds the maximum supported size"),
+        )
+    })
 }
 
 fn parse_speye_size_raw(raw: f64, name: &str) -> BuiltinResult<usize> {
@@ -2016,8 +2050,8 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 }
 
 fn parse_size_arg(value: &Value, name: &str) -> BuiltinResult<usize> {
-    if let Value::Int(value) = value {
-        return integer_to_usize(value).ok_or_else(|| {
+    if let Some(value) = scalar_integer_value(value) {
+        return value.try_to_usize().ok_or_else(|| {
             sparse_error(
                 &SPARSE_ERROR_INVALID_INPUT,
                 format!("sparse: {name} exceeds the maximum supported size"),
@@ -2053,6 +2087,28 @@ fn parse_size_arg(value: &Value, name: &str) -> BuiltinResult<usize> {
         ));
     }
     Ok(raw as usize)
+}
+
+fn scalar_integer_value(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn tensor_integer_values(tensor: &Tensor) -> Option<Vec<IntValue>> {
+    tensor.integer_storage().map(|storage| {
+        (0..storage.len())
+            .map(|index| {
+                storage
+                    .value_at(index)
+                    .expect("integer tensor storage length matches tensor data")
+            })
+            .collect()
+    })
 }
 
 fn parse_subscript(raw: f64, name: &str) -> BuiltinResult<usize> {
@@ -2146,6 +2202,77 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sparse_size_args_accept_typed_integer_scalar_tensors_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let rows = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("rows");
+        let cols = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("cols");
+
+        let sparse = expect_sparse(
+            sparse_builtin(vec![Value::Tensor(rows), Value::Tensor(cols)]).expect("sparse"),
+        );
+        assert_eq!(sparse.shape(), vec![large as usize, 1]);
+        assert_eq!(sparse.nnz(), 0);
+    }
+
+    #[test]
+    fn sparse_triplet_integer_subscripts_do_not_round_through_double() {
+        let large = 9_007_199_254_740_993_u64;
+        let row =
+            Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("row index");
+        let col = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("col index");
+        let value = Tensor::new(vec![0.0], vec![1, 1]).expect("zero value");
+        let rows = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("rows");
+        let cols = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("cols");
+
+        let sparse = expect_sparse(
+            sparse_builtin(vec![
+                Value::Tensor(row.clone()),
+                Value::Tensor(col.clone()),
+                Value::Tensor(value.clone()),
+                Value::Tensor(rows),
+                Value::Tensor(cols),
+            ])
+            .expect("sparse exact row"),
+        );
+        assert_eq!(sparse.shape(), vec![large as usize, 1]);
+        assert_eq!(sparse.nnz(), 0);
+
+        let smaller_rows =
+            Tensor::new_integer(IntegerStorage::U64(vec![large - 1]), vec![1, 1]).expect("rows");
+        let err = sparse_builtin(vec![
+            Value::Tensor(row),
+            Value::Tensor(col),
+            Value::Tensor(value),
+            Value::Tensor(smaller_rows),
+            Value::Int(IntValue::U8(1)),
+        ])
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidIndex"));
+        assert!(err
+            .message()
+            .contains("subscript exceeds matrix dimensions"));
+    }
+
+    #[test]
+    fn speye_shape_parsing_accepts_typed_integer_tensors_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let shape =
+            Tensor::new_integer(IntegerStorage::U64(vec![large, 1]), vec![1, 2]).expect("shape");
+        let sparse =
+            expect_sparse(super::speye_builtin(vec![Value::Tensor(shape)]).expect("speye"));
+        assert_eq!(sparse.shape(), vec![large as usize, 1]);
+        assert_eq!(sparse.nnz(), 1);
+        assert_eq!(sparse.get(0, 0), Some(1.0));
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I64(vec![-3]), vec![1, 1]).expect("negative");
+        let empty =
+            expect_sparse(super::speye_builtin(vec![Value::Tensor(negative)]).expect("speye"));
+        assert_eq!(empty.shape(), vec![0, 0]);
+        assert_eq!(empty.nnz(), 0);
+    }
+
+    #[test]
     fn sparse_from_integer_tensor_preserves_every_integer_class_exactly() {
         let cases = vec![
             IntegerStorage::I8(vec![0, i8::MIN, i8::MAX, 0]),
@@ -2223,17 +2350,19 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn sparse_triplets_reject_matrix_inputs() {
+    fn sparse_triplets_accept_dense_matrices_but_reject_sparse_and_logical_matrices() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let vector = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
-        let err = sparse_builtin(vec![
-            Value::Tensor(matrix),
-            Value::Tensor(vector.clone()),
-            Value::Tensor(vector.clone()),
-        ])
-        .unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidInput"));
-        assert!(err.message().contains("i must be a real numeric vector"));
+        let sparse = expect_sparse(
+            sparse_builtin(vec![
+                Value::Tensor(matrix),
+                Value::Tensor(vector.clone()),
+                Value::Tensor(vector.clone()),
+            ])
+            .expect("dense matrix triplets"),
+        );
+        assert_eq!(sparse.shape(), vec![4, 4]);
+        assert_eq!(sparse.nnz(), 4);
 
         let sparse_matrix =
             SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![1.0, 2.0]).unwrap();
@@ -2243,8 +2372,8 @@ pub(crate) mod tests {
             Value::Tensor(vector.clone()),
         ])
         .unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidInput"));
-        assert!(err.message().contains("i must be a real numeric vector"));
+        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidIndex"));
+        assert!(err.message().contains("positive integers"));
 
         let logical_matrix = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
         let err = sparse_builtin(vec![
@@ -2253,8 +2382,8 @@ pub(crate) mod tests {
             Value::Tensor(vector),
         ])
         .unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidInput"));
-        assert!(err.message().contains("i must be a real numeric vector"));
+        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidIndex"));
+        assert!(err.message().contains("positive integers"));
     }
 
     #[test]
