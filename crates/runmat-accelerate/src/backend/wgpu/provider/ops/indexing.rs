@@ -38,6 +38,42 @@ impl WgpuProvider {
         col_index: usize,
         values: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        let raw_matrix = self.get_entry_raw(matrix)?;
+        if raw_matrix.integer_type.is_some() {
+            ensure!(
+                raw_matrix.shape.len() == 2,
+                "scatter_column: only 2D tensors supported"
+            );
+            let rows = raw_matrix.shape[0];
+            let cols = raw_matrix.shape[1];
+            ensure!(
+                col_index < cols,
+                "scatter_column: column index out of bounds"
+            );
+            let raw_values = self.get_entry_raw(values)?;
+            ensure!(
+                raw_values.integer_type == raw_matrix.integer_type,
+                "scatter_column: integer storage mismatch"
+            );
+            ensure!(
+                raw_values.shape.len() <= 2 && raw_values.shape[0] == rows,
+                "scatter_column: length mismatch"
+            );
+            let indices: Vec<u32> = (0..rows)
+                .map(|row| {
+                    u32::try_from(col_index * rows + row)
+                        .map_err(|_| anyhow!("scatter_column: index exceeds u32"))
+                })
+                .collect::<Result<_>>()?;
+            let all_indices: Vec<u32> = (0..rows * cols)
+                .map(|index| {
+                    u32::try_from(index).map_err(|_| anyhow!("scatter_column: index exceeds u32"))
+                })
+                .collect::<Result<_>>()?;
+            let out = self.gather_linear_exec(matrix, &all_indices, &raw_matrix.shape)?;
+            self.scatter_linear_exec(&out, &indices, values)?;
+            return Ok(out);
+        }
         let m_entry = self.get_entry(matrix)?;
         if m_entry.shape.len() != 2 {
             return Err(anyhow!("scatter_column: only 2D tensors supported"));
@@ -536,6 +572,40 @@ impl WgpuProvider {
         row_index: usize,
         values: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        let raw_matrix = self.get_entry_raw(matrix)?;
+        if raw_matrix.integer_type.is_some() {
+            ensure!(
+                raw_matrix.shape.len() == 2,
+                "scatter_row: only 2D tensors supported"
+            );
+            let rows = raw_matrix.shape[0];
+            let cols = raw_matrix.shape[1];
+            ensure!(row_index < rows, "scatter_row: row index out of bounds");
+            let raw_values = self.get_entry_raw(values)?;
+            ensure!(
+                raw_values.integer_type == raw_matrix.integer_type,
+                "scatter_row: integer storage mismatch"
+            );
+            ensure!(
+                raw_values.shape.len() <= 2
+                    && (raw_values.shape.len() == 1 || raw_values.shape[1] == cols),
+                "scatter_row: length mismatch"
+            );
+            let indices: Vec<u32> = (0..cols)
+                .map(|col| {
+                    u32::try_from(col * rows + row_index)
+                        .map_err(|_| anyhow!("scatter_row: index exceeds u32"))
+                })
+                .collect::<Result<_>>()?;
+            let all_indices: Vec<u32> = (0..rows * cols)
+                .map(|index| {
+                    u32::try_from(index).map_err(|_| anyhow!("scatter_row: index exceeds u32"))
+                })
+                .collect::<Result<_>>()?;
+            let out = self.gather_linear_exec(matrix, &all_indices, &raw_matrix.shape)?;
+            self.scatter_linear_exec(&out, &indices, values)?;
+            return Ok(out);
+        }
         let m_entry = self.get_entry(matrix)?;
         if m_entry.shape.len() != 2 {
             return Err(anyhow!("scatter_row: only 2D tensors supported"));
@@ -1280,5 +1350,45 @@ mod tests {
         check!(U16, U16, [0, 1, u16::MAX], [u16::MAX, 0]);
         check!(U32, U32, [0, 1, u32::MAX], [u32::MAX, 0]);
         check!(U64, U64, [0, 1, u64::MAX], [u64::MAX, 0]);
+    }
+
+    #[test]
+    fn wgpu_row_and_column_scatter_preserve_native_u64_words() {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let matrix = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[0, 0, 0, 0, 0, 0]),
+                shape: &[2, 3],
+            })
+            .expect("upload matrix");
+        let column = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[u64::MAX, 1 << 63]),
+                shape: &[2, 1],
+            })
+            .expect("upload column");
+        let after_column = provider
+            .scatter_column_exec(&matrix, 1, &column)
+            .expect("scatter column");
+        let row = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[7, 8, 9]),
+                shape: &[1, 3],
+            })
+            .expect("upload row");
+        let after_row = provider
+            .scatter_row_exec(&after_column, 0, &row)
+            .expect("scatter row");
+        assert_eq!(
+            block_on(provider.download_integer_exec(&after_row))
+                .expect("download")
+                .data,
+            HostIntegerDataOwned::U64(vec![7, 0, 8, 1 << 63, 9, 0])
+        );
+        for handle in [&matrix, &column, &after_column, &row, &after_row] {
+            provider.free_exec(handle).expect("free handle");
+        }
     }
 }
