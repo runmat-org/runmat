@@ -102,6 +102,94 @@ fn integer_data_bytes(data: &HostIntegerDataOwned) -> u64 {
     }
 }
 
+fn integer_data_len(data: &HostIntegerDataOwned) -> usize {
+    match data {
+        HostIntegerDataOwned::I8(values) => values.len(),
+        HostIntegerDataOwned::I16(values) => values.len(),
+        HostIntegerDataOwned::I32(values) => values.len(),
+        HostIntegerDataOwned::I64(values) => values.len(),
+        HostIntegerDataOwned::U8(values) => values.len(),
+        HostIntegerDataOwned::U16(values) => values.len(),
+        HostIntegerDataOwned::U32(values) => values.len(),
+        HostIntegerDataOwned::U64(values) => values.len(),
+    }
+}
+
+macro_rules! reduce_integer_values {
+    ($values:expr, $rows:expr, $cols:expr, $dim:expr, $identity:expr, $method:ident) => {{
+        match $dim {
+            0 => {
+                let mut out = vec![$identity; $cols];
+                for c in 0..$cols {
+                    let mut acc = $identity;
+                    for r in 0..$rows {
+                        acc = acc.$method($values[r + c * $rows]);
+                    }
+                    out[c] = acc;
+                }
+                (out, vec![1, $cols])
+            }
+            1 => {
+                let mut out = vec![$identity; $rows];
+                for r in 0..$rows {
+                    let mut acc = $identity;
+                    for c in 0..$cols {
+                        acc = acc.$method($values[r + c * $rows]);
+                    }
+                    out[r] = acc;
+                }
+                (out, vec![$rows, 1])
+            }
+            _ => unreachable!("integer reduction dimension was checked"),
+        }
+    }};
+}
+
+fn reduce_integer_data_dim(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    dim: usize,
+    is_product: bool,
+) -> Result<(HostIntegerDataOwned, Vec<usize>)> {
+    ensure!(
+        shape.len() == 2,
+        "native integer reduction: only 2D tensors are supported"
+    );
+    ensure!(
+        dim <= 1,
+        "native integer reduction: only dims 0 or 1 are supported"
+    );
+    let rows = shape[0];
+    let cols = shape[1];
+    ensure!(
+        integer_data_len(data) == rows.saturating_mul(cols),
+        "native integer reduction: data length does not match shape"
+    );
+    macro_rules! reduce {
+        ($values:expr, $owned:ident, $zero:expr, $one:expr) => {{
+            if is_product {
+                let (out, shape) =
+                    reduce_integer_values!($values, rows, cols, dim, $one, saturating_mul);
+                (HostIntegerDataOwned::$owned(out), shape)
+            } else {
+                let (out, shape) =
+                    reduce_integer_values!($values, rows, cols, dim, $zero, saturating_add);
+                (HostIntegerDataOwned::$owned(out), shape)
+            }
+        }};
+    }
+    Ok(match data {
+        HostIntegerDataOwned::I8(values) => reduce!(values, I8, 0_i8, 1_i8),
+        HostIntegerDataOwned::I16(values) => reduce!(values, I16, 0_i16, 1_i16),
+        HostIntegerDataOwned::I32(values) => reduce!(values, I32, 0_i32, 1_i32),
+        HostIntegerDataOwned::I64(values) => reduce!(values, I64, 0_i64, 1_i64),
+        HostIntegerDataOwned::U8(values) => reduce!(values, U8, 0_u8, 1_u8),
+        HostIntegerDataOwned::U16(values) => reduce!(values, U16, 0_u16, 1_u16),
+        HostIntegerDataOwned::U32(values) => reduce!(values, U32, 0_u32, 1_u32),
+        HostIntegerDataOwned::U64(values) => reduce!(values, U64, 0_u64, 1_u64),
+    })
+}
+
 const POLYDER_EPS: f64 = 1.0e-12;
 const FACTORIAL_MAX_HOST: usize = 170;
 const GAMMALN_LN_SQRT_TWO_PI: f64 = 0.918_938_533_204_672_7;
@@ -764,6 +852,39 @@ impl InProcessProvider {
             &handle,
             runmat_accelerate_api::ProviderPrecision::F64,
         );
+        handle
+    }
+
+    fn allocate_integer_tensor(
+        &self,
+        data: HostIntegerDataOwned,
+        shape: Vec<usize>,
+    ) -> GpuTensorHandle {
+        let element_type = data.element_type();
+        let bytes = integer_data_bytes(&data);
+        let id = self
+            .next_id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                if current < self.id_limit {
+                    current.checked_add(1)
+                } else {
+                    None
+                }
+            })
+            .expect("in-process provider id range exhausted");
+        integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, data);
+        self.telemetry.record_upload_bytes(bytes);
+        let handle = GpuTensorHandle {
+            shape,
+            device_id: self.device_id,
+            buffer_id: id,
+        };
+        runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
+        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
+        runmat_accelerate_api::set_handle_logical(&handle, false);
         handle
     }
 
@@ -6967,6 +7088,42 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn reduce_integer_sum_native<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let first = self.reduce_integer_sum_native_dim(a, 0).await?;
+            match self.reduce_integer_sum_native_dim(&first, 1).await {
+                Ok(out) => {
+                    let _ = self.free(&first);
+                    Ok(out)
+                }
+                Err(error) => {
+                    let _ = self.free(&first);
+                    Err(error)
+                }
+            }
+        })
+    }
+
+    fn reduce_integer_sum_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id))?;
+            let (out, shape) = reduce_integer_data_dim(&data, &a.shape, dim, false)?;
+            Ok(self.allocate_integer_tensor(out, shape))
+        })
+    }
+
     fn reduce_prod<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
@@ -7039,6 +7196,42 @@ impl AccelProvider for InProcessProvider {
                 device_id: self.device_id,
                 buffer_id: id,
             })
+        })
+    }
+
+    fn reduce_integer_prod_native<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let first = self.reduce_integer_prod_native_dim(a, 0).await?;
+            match self.reduce_integer_prod_native_dim(&first, 1).await {
+                Ok(out) => {
+                    let _ = self.free(&first);
+                    Ok(out)
+                }
+                Err(error) => {
+                    let _ = self.free(&first);
+                    Err(error)
+                }
+            }
+        })
+    }
+
+    fn reduce_integer_prod_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id))?;
+            let (out, shape) = reduce_integer_data_dim(&data, &a.shape, dim, true)?;
+            Ok(self.allocate_integer_tensor(out, shape))
         })
     }
 
@@ -8651,6 +8844,41 @@ mod tests {
                 shape,
             })
             .expect("upload real")
+    }
+
+    #[test]
+    fn inprocess_native_integer_sum_prod_hooks_preserve_class() {
+        let provider = InProcessProvider::new();
+        let handle = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&[100, 50, -20, 3]),
+                shape: &[2, 2],
+            })
+            .expect("upload native integer");
+        let sum = block_on(provider.reduce_integer_sum_native_dim(&handle, 0))
+            .expect("native integer sum dim");
+        let prod =
+            block_on(provider.reduce_integer_prod_native(&handle)).expect("native integer prod");
+        assert_eq!(
+            block_on(provider.download_integer(&sum))
+                .expect("download sum")
+                .data,
+            HostIntegerDataOwned::I8(vec![127, -17])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&prod))
+                .expect("download prod")
+                .data,
+            HostIntegerDataOwned::I8(vec![-128])
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&sum),
+            Some(runmat_accelerate_api::IntegerElementType::I8)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&prod),
+            Some(runmat_accelerate_api::IntegerElementType::I8)
+        );
     }
 
     #[test]
