@@ -2,25 +2,13 @@ use crate::interpreter::stack::pop2;
 use crate::ops::integer_comparison::{
     scalar_order, tensor_element_equals_scalar, tensor_elements_equal,
 };
-use runmat_builtins::{IntValue, Value};
+use runmat_builtins::{ComplexTensor, IntValue, IntegerComplexStorage, Tensor, Value};
 use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
 fn rel_binary_use_builtin(a: &Value, b: &Value) -> bool {
     !matches!(a, Value::Num(_) | Value::Int(_)) || !matches!(b, Value::Num(_) | Value::Int(_))
-}
-
-fn reject_typed_complex_integer_comparison(a: &Value, b: &Value) -> Result<(), RuntimeError> {
-    if matches!(a, Value::ComplexTensor(tensor) if tensor.integer_data.is_some())
-        || matches!(b, Value::ComplexTensor(tensor) if tensor.integer_data.is_some())
-    {
-        return Err(crate::interpreter::errors::mex(
-            "ComplexIntegerComparison",
-            "operations involving complex numbers with integer types are not supported",
-        ));
-    }
-    Ok(())
 }
 
 fn logical_bit_equals_int(bit: u8, scalar: &IntValue) -> bool {
@@ -58,6 +46,267 @@ fn scalar_relation(
         return Ok(predicate(order, 0.0));
     }
     Ok(predicate(a.try_into()?, b.try_into()?))
+}
+
+fn integer_value_equals_value(integer: &IntValue, value: &Value) -> bool {
+    scalar_order(&Value::Int(integer.clone()), value) == Some(std::cmp::Ordering::Equal)
+}
+
+fn integer_value_equals_f64(integer: &IntValue, value: f64) -> bool {
+    integer_value_equals_value(integer, &Value::Num(value))
+}
+
+fn complex_integer_component_equals(
+    left: &IntegerComplexStorage,
+    left_index: usize,
+    right: &IntegerComplexStorage,
+    right_index: usize,
+) -> bool {
+    let left_real = left
+        .real
+        .value_at(left_index)
+        .expect("left real integer component index");
+    let right_real = right
+        .real
+        .value_at(right_index)
+        .expect("right real integer component index");
+    let left_imag = left
+        .imag
+        .value_at(left_index)
+        .expect("left imaginary integer component index");
+    let right_imag = right
+        .imag
+        .value_at(right_index)
+        .expect("right imaginary integer component index");
+    integer_value_equals_value(&left_real, &Value::Int(right_real))
+        && integer_value_equals_value(&left_imag, &Value::Int(right_imag))
+}
+
+fn complex_integer_element_equals_pair(
+    storage: &IntegerComplexStorage,
+    index: usize,
+    real: f64,
+    imag: f64,
+) -> bool {
+    let storage_real = storage
+        .real
+        .value_at(index)
+        .expect("real integer component index");
+    let storage_imag = storage
+        .imag
+        .value_at(index)
+        .expect("imaginary integer component index");
+    integer_value_equals_f64(&storage_real, real) && integer_value_equals_f64(&storage_imag, imag)
+}
+
+fn complex_integer_element_equals_real_value(
+    storage: &IntegerComplexStorage,
+    index: usize,
+    scalar: &Value,
+) -> bool {
+    let storage_real = storage
+        .real
+        .value_at(index)
+        .expect("real integer component index");
+    let storage_imag = storage
+        .imag
+        .value_at(index)
+        .expect("imaginary integer component index");
+    storage_imag.is_zero() && integer_value_equals_value(&storage_real, scalar)
+}
+
+fn tensor_element_pair(tensor: &ComplexTensor, index: usize) -> (f64, f64) {
+    tensor
+        .data
+        .get(index)
+        .copied()
+        .expect("complex tensor index")
+}
+
+fn typed_complex_integer_comparison(
+    a: &Value,
+    b: &Value,
+    invert: bool,
+) -> Result<Option<Value>, RuntimeError> {
+    let make = |matches: bool| -> f64 {
+        if matches ^ invert {
+            1.0
+        } else {
+            0.0
+        }
+    };
+    match (a, b) {
+        (Value::ComplexTensor(left), Value::ComplexTensor(right))
+            if left.integer_data.is_some() || right.integer_data.is_some() =>
+        {
+            if left.shape != right.shape {
+                return Err(crate::interpreter::errors::mex(
+                    "ShapeMismatch",
+                    "shape mismatch for element-wise comparison",
+                ));
+            }
+            let mut out = Vec::with_capacity(left.data.len());
+            match (left.integer_data.as_ref(), right.integer_data.as_ref()) {
+                (Some(left_storage), Some(right_storage)) => {
+                    for index in 0..left.data.len() {
+                        out.push(make(complex_integer_component_equals(
+                            left_storage,
+                            index,
+                            right_storage,
+                            index,
+                        )));
+                    }
+                }
+                (Some(left_storage), None) => {
+                    for index in 0..left.data.len() {
+                        let (real, imag) = tensor_element_pair(right, index);
+                        out.push(make(complex_integer_element_equals_pair(
+                            left_storage,
+                            index,
+                            real,
+                            imag,
+                        )));
+                    }
+                }
+                (None, Some(right_storage)) => {
+                    for index in 0..left.data.len() {
+                        let (real, imag) = tensor_element_pair(left, index);
+                        out.push(make(complex_integer_element_equals_pair(
+                            right_storage,
+                            index,
+                            real,
+                            imag,
+                        )));
+                    }
+                }
+                (None, None) => unreachable!("guard requires one typed complex integer operand"),
+            }
+            return Ok(Some(Value::Tensor(
+                Tensor::new(out, left.shape.clone())
+                    .map_err(|error| format!("complex eq: {error}"))?,
+            )));
+        }
+        (Value::ComplexTensor(tensor), Value::Complex(real, imag))
+            if tensor.integer_data.is_some() =>
+        {
+            let storage = tensor
+                .integer_data
+                .as_ref()
+                .expect("typed complex tensor storage");
+            let out = (0..tensor.data.len())
+                .map(|index| {
+                    make(complex_integer_element_equals_pair(
+                        storage, index, *real, *imag,
+                    ))
+                })
+                .collect();
+            return Ok(Some(Value::Tensor(
+                Tensor::new(out, tensor.shape.clone())
+                    .map_err(|error| format!("complex scalar eq: {error}"))?,
+            )));
+        }
+        (Value::Complex(real, imag), Value::ComplexTensor(tensor))
+            if tensor.integer_data.is_some() =>
+        {
+            let storage = tensor
+                .integer_data
+                .as_ref()
+                .expect("typed complex tensor storage");
+            let out = (0..tensor.data.len())
+                .map(|index| {
+                    make(complex_integer_element_equals_pair(
+                        storage, index, *real, *imag,
+                    ))
+                })
+                .collect();
+            return Ok(Some(Value::Tensor(
+                Tensor::new(out, tensor.shape.clone())
+                    .map_err(|error| format!("complex scalar eq: {error}"))?,
+            )));
+        }
+        (Value::ComplexTensor(tensor), Value::Tensor(real)) if tensor.integer_data.is_some() => {
+            if tensor.shape != real.shape {
+                return Err(crate::interpreter::errors::mex(
+                    "ShapeMismatch",
+                    "shape mismatch for element-wise comparison",
+                ));
+            }
+            let storage = tensor
+                .integer_data
+                .as_ref()
+                .expect("typed complex tensor storage");
+            let out = (0..tensor.data.len())
+                .map(|index| {
+                    make(complex_integer_element_equals_real_value(
+                        storage,
+                        index,
+                        &Value::Num(real.data[index]),
+                    ))
+                })
+                .collect();
+            return Ok(Some(Value::Tensor(
+                Tensor::new(out, tensor.shape.clone())
+                    .map_err(|error| format!("complex real eq: {error}"))?,
+            )));
+        }
+        (Value::Tensor(real), Value::ComplexTensor(tensor)) if tensor.integer_data.is_some() => {
+            if tensor.shape != real.shape {
+                return Err(crate::interpreter::errors::mex(
+                    "ShapeMismatch",
+                    "shape mismatch for element-wise comparison",
+                ));
+            }
+            let storage = tensor
+                .integer_data
+                .as_ref()
+                .expect("typed complex tensor storage");
+            let out = (0..tensor.data.len())
+                .map(|index| {
+                    make(complex_integer_element_equals_real_value(
+                        storage,
+                        index,
+                        &Value::Num(real.data[index]),
+                    ))
+                })
+                .collect();
+            return Ok(Some(Value::Tensor(
+                Tensor::new(out, tensor.shape.clone())
+                    .map_err(|error| format!("real complex eq: {error}"))?,
+            )));
+        }
+        (Value::ComplexTensor(tensor), Value::Num(_) | Value::Int(_))
+            if tensor.integer_data.is_some() =>
+        {
+            let storage = tensor
+                .integer_data
+                .as_ref()
+                .expect("typed complex tensor storage");
+            let out = (0..tensor.data.len())
+                .map(|index| make(complex_integer_element_equals_real_value(storage, index, b)))
+                .collect();
+            return Ok(Some(Value::Tensor(
+                Tensor::new(out, tensor.shape.clone())
+                    .map_err(|error| format!("complex scalar eq: {error}"))?,
+            )));
+        }
+        (Value::Num(_) | Value::Int(_), Value::ComplexTensor(tensor))
+            if tensor.integer_data.is_some() =>
+        {
+            let storage = tensor
+                .integer_data
+                .as_ref()
+                .expect("typed complex tensor storage");
+            let out = (0..tensor.data.len())
+                .map(|index| make(complex_integer_element_equals_real_value(storage, index, a)))
+                .collect();
+            return Ok(Some(Value::Tensor(
+                Tensor::new(out, tensor.shape.clone())
+                    .map_err(|error| format!("scalar complex eq: {error}"))?,
+            )));
+        }
+        _ => {}
+    }
+    Ok(None)
 }
 
 pub struct RelationInvertedSpec {
@@ -242,7 +491,10 @@ where
     LTFut: Future<Output = Result<bool, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
-    reject_typed_complex_integer_comparison(&a, &b)?;
+    if let Some(result) = typed_complex_integer_comparison(&a, &b, false)? {
+        stack.push(result);
+        return Ok(());
+    }
     let push_logical =
         |data: Vec<u8>, shape: Vec<usize>, stack: &mut Vec<Value>| -> Result<(), RuntimeError> {
             if data.len() == 1 && is_scalar_shape(&shape) {
@@ -484,7 +736,10 @@ where
     LTFut: Future<Output = Result<bool, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
-    reject_typed_complex_integer_comparison(&a, &b)?;
+    if let Some(result) = typed_complex_integer_comparison(&a, &b, true)? {
+        stack.push(result);
+        return Ok(());
+    }
     match (&a, &b) {
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), "ne", b.clone()).await {
@@ -648,7 +903,7 @@ where
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, LogicalArray};
 
     async fn unreachable_call_method(
         _receiver: Value,
@@ -683,6 +938,25 @@ mod tests {
         };
         assert_eq!(array.shape, vec![1, 3]);
         assert_eq!(array.data, expected);
+    }
+
+    fn assert_tensor_result(value: &Value, shape: &[usize], expected: &[f64]) {
+        let Value::Tensor(tensor) = value else {
+            panic!("expected tensor result, got {value:?}");
+        };
+        assert_eq!(tensor.shape, shape);
+        assert_eq!(tensor.data, expected);
+    }
+
+    fn complex_uint64(real: Vec<u64>, imag: Vec<u64>, shape: Vec<usize>) -> Value {
+        Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(IntegerStorage::U64(real), IntegerStorage::U64(imag))
+                    .expect("matching integer components"),
+                shape,
+            )
+            .expect("typed complex integer tensor"),
+        )
     }
 
     #[test]
@@ -744,5 +1018,81 @@ mod tests {
         ))
         .expect("eq one");
         assert_logical_result(&one_stack[0], &[0, 1, 1]);
+    }
+
+    #[test]
+    fn typed_complex_integer_eq_is_exact_above_f64_precision() {
+        let large = (1_u64 << 53) + 1;
+        let mut stack = vec![
+            complex_uint64(vec![large, u64::MAX], vec![0, 7], vec![1, 2]),
+            complex_uint64(vec![large, u64::MAX - 1], vec![0, 7], vec![1, 2]),
+        ];
+
+        block_on(equal(
+            &mut stack,
+            unreachable_call_method,
+            unreachable_call_builtin,
+            unreachable_logical_truth,
+        ))
+        .expect("eq");
+
+        assert_eq!(stack.len(), 1);
+        assert_tensor_result(&stack[0], &[1, 2], &[1.0, 0.0]);
+    }
+
+    #[test]
+    fn typed_complex_integer_ne_inverts_exact_component_comparison() {
+        let mut stack = vec![
+            complex_uint64(vec![42, 42, 42], vec![0, 1, 2], vec![1, 3]),
+            complex_uint64(vec![42, 42, 43], vec![0, 9, 2], vec![1, 3]),
+        ];
+
+        block_on(not_equal(
+            &mut stack,
+            unreachable_call_method,
+            unreachable_call_builtin,
+            unreachable_logical_truth,
+        ))
+        .expect("ne");
+
+        assert_eq!(stack.len(), 1);
+        assert_tensor_result(&stack[0], &[1, 3], &[0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn typed_complex_integer_eq_real_requires_zero_imaginary_component() {
+        let mut stack = vec![
+            complex_uint64(vec![(1_u64 << 53) + 1, 5], vec![0, 1], vec![1, 2]),
+            Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+        ];
+
+        block_on(equal(
+            &mut stack,
+            unreachable_call_method,
+            unreachable_call_builtin,
+            unreachable_logical_truth,
+        ))
+        .expect("eq real scalar");
+
+        assert_eq!(stack.len(), 1);
+        assert_tensor_result(&stack[0], &[1, 2], &[1.0, 0.0]);
+    }
+
+    #[test]
+    fn typed_complex_integer_eq_rejects_shape_mismatch() {
+        let mut stack = vec![
+            complex_uint64(vec![1, 2], vec![0, 0], vec![1, 2]),
+            complex_uint64(vec![1, 2], vec![0, 0], vec![2, 1]),
+        ];
+
+        let error = block_on(equal(
+            &mut stack,
+            unreachable_call_method,
+            unreachable_call_builtin,
+            unreachable_logical_truth,
+        ))
+        .expect_err("shape mismatch");
+
+        assert!(error.to_string().contains("shape mismatch"));
     }
 }
