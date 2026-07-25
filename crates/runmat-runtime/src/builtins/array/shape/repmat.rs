@@ -15,8 +15,8 @@ use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray,
-    StringArray, Tensor, Type, Value,
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+    LogicalArray, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -440,6 +440,12 @@ async fn parse_replication_vector(value: &Value) -> crate::BuiltinResult<Vec<usi
         ));
     }
     let mut factors = Vec::with_capacity(tensor.data.len());
+    if let Some(storage) = tensor.integer_storage() {
+        for (idx, value) in storage.exact_values().iter().enumerate() {
+            factors.push(coerce_integer_rep_factor(value, idx + 1)?);
+        }
+        return Ok(factors);
+    }
     for (idx, &raw) in tensor.data.iter().enumerate() {
         factors.push(coerce_rep_factor(raw, idx + 1)?);
     }
@@ -448,11 +454,18 @@ async fn parse_replication_vector(value: &Value) -> crate::BuiltinResult<Vec<usi
 
 async fn parse_replication_scalar(value: &Value) -> crate::BuiltinResult<usize> {
     match value {
+        Value::Int(value) => return coerce_integer_rep_factor(value, 1),
         Value::Tensor(t) => {
             if t.data.len() != 1 {
                 return Err(repmat_invalid_factors(
                     "repmat: size arguments must be scalars",
                 ));
+            }
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).ok_or_else(|| {
+                    repmat_invalid_factors("repmat: integer scalar storage length mismatch")
+                })?;
+                return coerce_integer_rep_factor(&value, 1);
             }
         }
         Value::LogicalArray(la) => {
@@ -480,6 +493,14 @@ async fn parse_replication_scalar(value: &Value) -> crate::BuiltinResult<usize> 
         ));
     }
     coerce_rep_factor(tensor.data[0], 1)
+}
+
+fn coerce_integer_rep_factor(value: &IntValue, position: usize) -> crate::BuiltinResult<usize> {
+    value.try_to_usize().ok_or_else(|| {
+        repmat_invalid_factors(format!(
+            "repmat: replication factor {position} must be a non-negative platform integer"
+        ))
+    })
 }
 
 fn coerce_rep_factor(value: f64, position: usize) -> crate::BuiltinResult<usize> {
@@ -849,6 +870,31 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn repmat_parses_typed_integer_replication_factors_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
+        assert_eq!(
+            block_on(parse_replication_scalar(&Value::Tensor(scalar))).unwrap(),
+            large as usize
+        );
+
+        let vector = Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
+        assert_eq!(
+            block_on(parse_replication_vector(&Value::Tensor(vector))).unwrap(),
+            vec![large as usize, 0]
+        );
+    }
+
+    #[test]
+    fn repmat_rejects_negative_typed_integer_replication_factors() {
+        let scalar = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
+        assert!(block_on(parse_replication_scalar(&Value::Tensor(scalar))).is_err());
+
+        let vector = Tensor::new_integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]).unwrap();
+        assert!(block_on(parse_replication_vector(&Value::Tensor(vector))).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

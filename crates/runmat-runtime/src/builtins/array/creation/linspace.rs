@@ -5,7 +5,7 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Type, Value,
+    ComplexTensor, IntValue, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -306,7 +306,7 @@ async fn parse_count(value: &Value) -> crate::BuiltinResult<usize> {
             if !tensor::is_scalar_tensor(&tensor) {
                 return Err(linspace_error(&LINSPACE_ERROR_COUNT_NOT_SCALAR));
             }
-            parse_numeric_count(tensor.data[0])
+            parse_tensor_count(&tensor)
         }
         other => parse_count_host(other),
     }
@@ -323,7 +323,7 @@ fn parse_count_host(value: &Value) -> crate::BuiltinResult<usize> {
             if !tensor::is_scalar_tensor(t) {
                 return Err(linspace_error(&LINSPACE_ERROR_COUNT_NOT_SCALAR));
             }
-            parse_numeric_count(t.data[0])
+            parse_tensor_count(t)
         }
         Value::GpuTensor(_) => unreachable!("GpuTensor handled by parse_count"),
         other => Err(linspace_error_with_detail(
@@ -331,6 +331,22 @@ fn parse_count_host(value: &Value) -> crate::BuiltinResult<usize> {
             format!("got {other:?}"),
         )),
     }
+}
+
+fn parse_tensor_count(tensor: &Tensor) -> crate::BuiltinResult<usize> {
+    if let Some(storage) = tensor.integer_storage() {
+        let value = storage
+            .value_at(0)
+            .expect("scalar integer tensor has one storage value");
+        return parse_integer_count(&value);
+    }
+    parse_numeric_count(tensor.data[0])
+}
+
+fn parse_integer_count(value: &IntValue) -> crate::BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .ok_or_else(|| linspace_error(&LINSPACE_ERROR_COUNT_NEGATIVE))
 }
 
 fn parse_numeric_count(raw: f64) -> crate::BuiltinResult<usize> {
@@ -485,7 +501,7 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     fn linspace_builtin(
         start: Value,
@@ -514,6 +530,24 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn linspace_count_parser_preserves_typed_integer_tensors_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let count = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
+
+        assert_eq!(
+            parse_count_host(&Value::Tensor(count)).unwrap(),
+            large as usize
+        );
+    }
+
+    #[test]
+    fn linspace_count_parser_rejects_negative_typed_integer_tensors() {
+        let count = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
+
+        assert!(parse_count_host(&Value::Tensor(count)).is_err());
     }
 
     #[test]
