@@ -175,7 +175,10 @@ async fn linear_index_values_to_f64(values: &[Value]) -> Result<Vec<f64>, Runtim
                     &format!("Unsupported index type: expected numeric scalar, got {value:?}"),
                 )
             })?;
-        out.push(index_val as f64);
+        let index = index_val.positive_usize().ok_or_else(|| {
+            crate::interpreter::errors::mex("IndexOutOfBounds", "Index out of bounds")
+        })?;
+        out.push(index as f64);
     }
     Ok(out)
 }
@@ -1197,13 +1200,16 @@ pub async fn dispatch_indexing(
                         "StoreIndex requires scalar indices; use StoreSlice for vector, range, or logical indices",
                     )
                 })?;
-                if idx_val < 1 {
+                if idx_val.is_below_one() {
                     return Err(crate::interpreter::errors::mex(
                         "IndexOutOfBounds",
                         "Index out of bounds",
                     ));
                 }
-                indices.push(idx_val as usize);
+                let index = idx_val.positive_usize().ok_or_else(|| {
+                    crate::interpreter::errors::mex("IndexOutOfBounds", "Index out of bounds")
+                })?;
+                indices.push(index);
             }
             indices.reverse();
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(

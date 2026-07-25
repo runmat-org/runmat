@@ -504,10 +504,13 @@ where
                 .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index"))?;
             num_iter += 1;
             if let Some(idx) = index_scalar_from_value(v).await? {
-                if idx < 1 {
+                if idx.is_below_one() {
                     return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                 }
-                selectors.push(ExprSel::Scalar(idx as usize));
+                let index = idx
+                    .positive_usize()
+                    .ok_or_else(|| mex("IndexOutOfBounds", "Index out of bounds"))?;
+                selectors.push(ExprSel::Scalar(index));
             } else {
                 match v {
                     Value::Bool(b) => {
