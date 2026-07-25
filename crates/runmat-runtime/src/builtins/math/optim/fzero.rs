@@ -20,6 +20,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::brent::{
     brent_zero, BrentParams, BrentZeroBracket, BrentZeroObserver, BrentZeroResult,
     BrentZeroStepKind,
@@ -432,12 +433,13 @@ async fn initial_bracket(
     let x = crate::dispatcher::gather_if_needed_async(&x).await?;
     match x {
         Value::Tensor(tensor) if tensor.data.len() == 2 => {
-            let a = tensor.data[0];
-            let b = tensor.data[1];
+            let values = tensor::tensor_values_f64(&tensor);
+            let a = values[0];
+            let b = values[1];
             bracket_from_endpoints(function, a, b).await
         }
         Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            expand_bracket(function, tensor.data[0], options).await
+            expand_bracket(function, tensor::tensor_values_f64(&tensor)[0], options).await
         }
         Value::Num(n) => expand_bracket(function, n, options).await,
         Value::Int(i) => expand_bracket(function, i.to_f64(), options).await,
@@ -674,7 +676,7 @@ mod tests {
     use super::*;
     use crate::builtins::math::optim::brent::interpolation_step_accepted;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntegerStorage, Tensor};
     use std::sync::Arc;
 
     #[test]
@@ -693,10 +695,47 @@ mod tests {
     }
 
     #[test]
+    fn fzero_bracket_reads_typed_integer_storage_exactly() {
+        let mut bracket =
+            Tensor::new_integer(IntegerStorage::U16(vec![3, 4]), vec![1, 2]).expect("bracket");
+        bracket.data[0] = 0.0;
+        bracket.data[1] = 1.0;
+
+        let root = block_on(fzero_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Tensor(bracket),
+            Vec::new(),
+        ))
+        .unwrap();
+        match root {
+            Value::Num(n) => assert!((n - std::f64::consts::PI).abs() < 1.0e-6),
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
+
+    #[test]
     fn fzero_scalar_initial_guess_expands_bracket() {
         let root = block_on(fzero_builtin(
             Value::FunctionHandle("cos".into()),
             Value::Num(1.0),
+            Vec::new(),
+        ))
+        .unwrap();
+        match root {
+            Value::Num(n) => assert!((n - std::f64::consts::FRAC_PI_2).abs() < 1.0e-6),
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fzero_initial_guess_reads_typed_integer_storage_exactly() {
+        let mut guess =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("guess");
+        guess.data[0] = 10.0;
+
+        let root = block_on(fzero_builtin(
+            Value::FunctionHandle("cos".into()),
+            Value::Tensor(guess),
             Vec::new(),
         ))
         .unwrap();

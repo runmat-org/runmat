@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, StructValue, Tensor, Value,
+    CharArray, LogicalArray, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -684,8 +684,8 @@ fn logical_value(field: &str, value: &Value) -> BuiltinResult<bool> {
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => Ok(data[0] != 0),
         Value::Num(n) => logical_from_number(field, *n),
         Value::Int(i) => logical_from_number(field, i.to_f64()),
-        Value::Tensor(Tensor { data, .. }) if data.len() == 1 => {
-            logical_from_number(field, data[0])
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            logical_from_number(field, tensor::tensor_values_f64(tensor)[0])
         }
         Value::String(s) => logical_from_text(field, s),
         Value::StringArray(sa) if sa.data.len() == 1 => logical_from_text(field, &sa.data[0]),
@@ -794,7 +794,7 @@ mod tests {
     use super::*;
     use crate::call_builtin_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     fn run_optimoptions(rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(optimoptions_builtin(rest))
@@ -1256,6 +1256,26 @@ mod tests {
             .expect("optimoptions"),
         );
         assert_eq!(num_field(&options, "MaxIter"), 5.0);
+    }
+
+    #[test]
+    fn optimoptions_logical_options_read_typed_integer_storage_exactly() {
+        let mut gradient = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
+            .expect("SpecifyObjectiveGradient");
+        gradient.data[0] = 0.0;
+
+        let options = struct_result(
+            run_optimoptions(vec![
+                Value::from("fminunc"),
+                Value::from("SpecifyObjectiveGradient"),
+                Value::Tensor(gradient),
+            ])
+            .expect("optimoptions"),
+        );
+        assert_eq!(
+            options.fields.get("SpecifyObjectiveGradient"),
+            Some(&Value::Bool(true))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

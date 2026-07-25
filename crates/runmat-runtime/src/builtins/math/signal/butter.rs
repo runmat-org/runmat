@@ -556,7 +556,7 @@ fn parse_order(value: Value) -> BuiltinResult<usize> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(&tensor)[0],
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             if logical.data[0] != 0 {
                 1.0
@@ -1083,7 +1083,7 @@ fn complex_is_finite(value: Complex64) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntValue};
+    use runmat_builtins::{builtin_function_by_name, IntValue, IntegerStorage};
 
     fn output_values(order: usize, cutoff: Value, rest: Vec<Value>, outputs: usize) -> Vec<Value> {
         let _guard = crate::output_count::push_output_count(Some(outputs));
@@ -1282,6 +1282,28 @@ mod tests {
     #[test]
     fn butter_first_order_lowpass_matches_closed_form() {
         let values = output_values(1, Value::Num(0.5), Vec::new(), 2);
+        assert_slice_close(&tensor_data(&values[0]), &[0.5, 0.5], 1e-12);
+        assert_slice_close(&tensor_data(&values[1]), &[1.0, 0.0], 1e-12);
+    }
+
+    #[test]
+    fn butter_order_reads_typed_integer_storage_exactly() {
+        let mut order =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("order");
+        order.data[0] = 4.0;
+        let _guard = crate::output_count::push_output_count(Some(2));
+
+        let values = match block_on(butter_builtin(
+            Value::Tensor(order),
+            Value::Num(0.5),
+            Vec::new(),
+        ))
+        .expect("butter")
+        {
+            Value::OutputList(values) => values,
+            other => panic!("expected output list, got {other:?}"),
+        };
+
         assert_slice_close(&tensor_data(&values[0]), &[0.5, 0.5], 1e-12);
         assert_slice_close(&tensor_data(&values[1]), &[1.0, 0.0], 1e-12);
     }
