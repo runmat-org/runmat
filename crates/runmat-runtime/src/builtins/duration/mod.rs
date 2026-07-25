@@ -365,7 +365,8 @@ fn tensor_from_numeric(value: Value, context: &str) -> BuiltinResult<Tensor> {
 }
 
 fn component_tensor(value: Value, context: &str) -> BuiltinResult<Tensor> {
-    let tensor = tensor_from_numeric(value, context)?;
+    let tensor = tensor::integer_tensor_to_f64(tensor_from_numeric(value, context)?)
+        .map_err(|err| duration_error(format!("duration: {err}")))?;
     Tensor::new(
         tensor.data.clone(),
         tensor::default_shape_for(&tensor.shape, tensor.data.len()),
@@ -768,8 +769,11 @@ async fn duration_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
         Value::Tensor(tensor) => tensor,
         Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
             .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
-        Value::Int(value) => Tensor::new(vec![value.to_f64()], vec![1, 1])
-            .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
+        Value::Int(value) => Tensor::new_integer(
+            runmat_builtins::IntegerStorage::from_scalar(value),
+            vec![1, 1],
+        )
+        .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
         Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
             .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
         other => {
@@ -778,9 +782,10 @@ async fn duration_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
             )))
         }
     };
-    let indexed = crate::perform_indexing(&Value::Tensor(days), &selector.data)
-        .await
-        .map_err(|err| duration_error(format!("duration.subsref: {}", err.message())))?;
+    let indexed =
+        crate::perform_indexing(&Value::Tensor(days), &tensor::tensor_values_f64(&selector))
+            .await
+            .map_err(|err| duration_error(format!("duration.subsref: {}", err.message())))?;
     let indexed_days = match indexed {
         Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
             .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
@@ -1076,6 +1081,10 @@ mod tests {
         futures::executor::block_on(duration_builtin(args)).expect("duration")
     }
 
+    fn integer_tensor(storage: runmat_builtins::IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+    }
+
     #[test]
     fn duration_descriptor_signatures_cover_constructor_and_methods() {
         let labels: Vec<&str> = DURATION_DESCRIPTOR
@@ -1115,6 +1124,25 @@ mod tests {
             .expect("duration text");
         assert!(rendered.contains("01:15:00"));
         assert!(rendered.contains("02:45:00"));
+    }
+
+    #[test]
+    fn duration_typed_integer_components_cross_double_boundary_exactly() {
+        let hours = integer_tensor(runmat_builtins::IntegerStorage::U8(vec![1, 2]), vec![1, 2]);
+        let minutes = integer_tensor(
+            runmat_builtins::IntegerStorage::U16(vec![15, 45]),
+            vec![1, 2],
+        );
+        let seconds = integer_tensor(
+            runmat_builtins::IntegerStorage::I16(vec![0, 30]),
+            vec![1, 2],
+        );
+        let value = run_duration(vec![hours, minutes, seconds]);
+        let rendered = duration_display_text(&value)
+            .expect("display")
+            .expect("duration text");
+        assert!(rendered.contains("01:15:00"));
+        assert!(rendered.contains("02:45:30"));
     }
 
     #[test]
@@ -1192,6 +1220,33 @@ mod tests {
         ]);
         let payload =
             Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(2.0)], 1, 1).unwrap());
+        let indexed =
+            futures::executor::block_on(duration_subsref(array, "()".to_string(), payload))
+                .expect("subsref");
+        let text = duration_display_text(&indexed)
+            .expect("display")
+            .expect("duration text");
+        assert_eq!(text, "02:00:00");
+    }
+
+    #[test]
+    fn duration_typed_integer_index_selectors_are_exact() {
+        let array = run_duration(vec![
+            integer_tensor(runmat_builtins::IntegerStorage::U8(vec![1, 2]), vec![1, 2]),
+            Value::Num(0.0),
+            Value::Num(0.0),
+        ]);
+        let payload = Value::Cell(
+            runmat_builtins::CellArray::new(
+                vec![integer_tensor(
+                    runmat_builtins::IntegerStorage::U64(vec![2]),
+                    vec![1, 1],
+                )],
+                1,
+                1,
+            )
+            .unwrap(),
+        );
         let indexed =
             futures::executor::block_on(duration_subsref(array, "()".to_string(), payload))
                 .expect("subsref");
