@@ -259,6 +259,26 @@ fn parse_order_tensor(builtin: &'static str, tensor: &Tensor) -> crate::BuiltinR
         ));
     }
     let mut order = Vec::with_capacity(tensor.data.len());
+    if let Some(storage) = tensor.integer_storage() {
+        for entry in storage.exact_values() {
+            let index = entry.try_to_usize().ok_or_else(|| {
+                permute_error(
+                    builtin,
+                    format!("{builtin}: order indices must be positive integers"),
+                )
+            })?;
+            if index < 1 {
+                return Err(permute_error(
+                    builtin,
+                    format!("{builtin}: order indices must be >= 1"),
+                ));
+            }
+            order.push(index);
+        }
+        validate_permutation(builtin, &order)?;
+        return Ok(order);
+    }
+
     for &entry in &tensor.data {
         if !entry.is_finite() {
             return Err(permute_error(
@@ -703,6 +723,34 @@ pub(crate) mod tests {
         let order = tensor(&[1.2, 2.0], &[1, 2]);
         let err = permute_builtin(Value::Tensor(t), Value::Tensor(order)).expect_err("should fail");
         assert!(err.to_string().contains("indices must be integers"));
+    }
+
+    #[test]
+    fn permute_order_parser_uses_exact_integer_tensor_storage() {
+        let exact_order = Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![1, 2])
+            .expect("integer order");
+        assert_eq!(
+            parse_order_argument("permute", Value::Tensor(exact_order)).expect("parse order"),
+            vec![2, 1]
+        );
+
+        let out_of_range = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2])
+            .expect("integer order");
+        let err = parse_order_argument("permute", Value::Tensor(out_of_range))
+            .expect_err("uint64 order must reject exactly");
+        assert!(
+            err.to_string().contains("between 1 and 2"),
+            "unexpected error: {err}"
+        );
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I8(vec![1, -1]), vec![1, 2]).expect("order");
+        let err = parse_order_argument("permute", Value::Tensor(negative))
+            .expect_err("negative order must reject");
+        assert!(
+            err.to_string().contains("positive integers"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
