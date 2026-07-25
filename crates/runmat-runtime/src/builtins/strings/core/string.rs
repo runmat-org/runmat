@@ -758,10 +758,22 @@ fn char_array_to_string_array(
 }
 
 fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
-    let mut strings = Vec::with_capacity(tensor.data.len());
-    for &value in &tensor.data {
-        strings.push(number_to_string(value));
-    }
+    let strings = if let Some(storage) = tensor.integer_storage() {
+        let mut strings = Vec::with_capacity(tensor.data.len());
+        for idx in 0..tensor.data.len() {
+            let value = storage
+                .value_at(idx)
+                .ok_or_else(|| string_flow("string: integer tensor storage is inconsistent"))?;
+            strings.push(int_value_to_string(&value));
+        }
+        strings
+    } else {
+        let mut strings = Vec::with_capacity(tensor.data.len());
+        for &value in &tensor.data {
+            strings.push(number_to_string(value));
+        }
+        strings
+    };
     StringArray::new(strings, tensor.shape).map_err(|e| string_flow(format!("string: {e}")))
 }
 
@@ -850,7 +862,11 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
         }
         Value::Tensor(t) => {
             if t.data.len() == 1 {
-                Ok(number_to_string(t.data[0]))
+                if let Some(value) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                    Ok(int_value_to_string(&value))
+                } else {
+                    Ok(number_to_string(t.data[0]))
+                }
             } else {
                 Err(string_flow("string: cell numeric values must be scalar"))
             }
@@ -913,7 +929,9 @@ fn int_value_to_string(value: &IntValue) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CellArray, IntValue, ResolveContext, StringArray, StructValue, Type};
+    use runmat_builtins::{
+        CellArray, IntValue, IntegerStorage, ResolveContext, StringArray, StructValue, Type,
+    };
 
     fn string_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::string_builtin(value, rest))
@@ -945,6 +963,42 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
                 assert_eq!(sa.data, vec!["1", "2", "3", "4"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_from_integer_tensor_preserves_exact_storage_values() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .expect("integer tensor");
+        let out = string_builtin(Value::Tensor(tensor), Vec::new()).expect("string");
+        match out {
+            Value::StringArray(sa) => {
+                assert_eq!(sa.shape, vec![1, 2]);
+                assert_eq!(sa.data, vec!["18446744073709551615", "9007199254740993"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_from_signed_integer_tensor_preserves_exact_storage_values() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, -9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .expect("integer tensor");
+        let out = string_builtin(Value::Tensor(tensor), Vec::new()).expect("string");
+        match out {
+            Value::StringArray(sa) => {
+                assert_eq!(sa.shape, vec![1, 2]);
+                assert_eq!(sa.data, vec!["-9223372036854775808", "-9007199254740993"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1012,6 +1066,24 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
                 assert_eq!(sa.data, vec!["1", "3", "2", "4"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_from_cell_scalar_integer_tensor_uses_exact_storage() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("integer tensor");
+        let cell = CellArray::new(vec![Value::Tensor(tensor)], 1, 1)
+            .expect("cell with scalar integer tensor");
+        let out = string_builtin(Value::Cell(cell), Vec::new()).expect("string");
+        match out {
+            Value::StringArray(sa) => {
+                assert_eq!(sa.shape, vec![1, 1]);
+                assert_eq!(sa.data, vec!["9007199254740993"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
