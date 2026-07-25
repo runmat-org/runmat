@@ -212,7 +212,16 @@ impl IntValue {
         }
     }
     pub fn is_zero(&self) -> bool {
-        self.to_i64() == 0
+        match self {
+            IntValue::I8(value) => *value == 0,
+            IntValue::I16(value) => *value == 0,
+            IntValue::I32(value) => *value == 0,
+            IntValue::I64(value) => *value == 0,
+            IntValue::U8(value) => *value == 0,
+            IntValue::U16(value) => *value == 0,
+            IntValue::U32(value) => *value == 0,
+            IntValue::U64(value) => *value == 0,
+        }
     }
     pub fn class_name(&self) -> &'static str {
         match self {
@@ -313,6 +322,43 @@ mod int_value_tests {
             Some(isize::MIN)
         );
         assert_eq!(IntValue::U64(u64::MAX).try_to_isize(), None);
+    }
+
+    #[test]
+    fn is_zero_checks_integer_storage_exactly() {
+        let zeroes = [
+            IntValue::I8(0),
+            IntValue::I16(0),
+            IntValue::I32(0),
+            IntValue::I64(0),
+            IntValue::U8(0),
+            IntValue::U16(0),
+            IntValue::U32(0),
+            IntValue::U64(0),
+        ];
+        for value in zeroes {
+            assert!(value.is_zero(), "{value:?} should be zero");
+        }
+
+        let nonzeroes = [
+            IntValue::I8(-1),
+            IntValue::I16(1),
+            IntValue::I32(-1),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(u64::MAX),
+        ];
+        for value in nonzeroes {
+            assert!(!value.is_zero(), "{value:?} should be nonzero");
+        }
+    }
+
+    #[test]
+    fn bool_conversion_uses_exact_integer_zero_test() {
+        assert!(!bool::try_from(&Value::Int(IntValue::U64(0))).expect("zero bool"));
+        assert!(bool::try_from(&Value::Int(IntValue::U64(u64::MAX))).expect("max bool"));
     }
 }
 
