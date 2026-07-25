@@ -349,6 +349,8 @@ fn parse_start(value: &Value) -> BuiltinResult<StartSpec> {
     }
     let tensor = tensor::value_into_tensor_for(NAME, value.clone())
         .map_err(|err| invalid(format!("kmeans: {err}")))?;
+    let tensor =
+        tensor::integer_tensor_to_f64(tensor).map_err(|err| invalid(format!("kmeans: {err}")))?;
     if tensor.shape.len() > 3 {
         return Err(invalid(
             "kmeans: numeric Start must be a matrix or 3-D array",
@@ -415,7 +417,9 @@ fn scalar_number(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Some(tensor::tensor_values_f64(tensor)[0])
+        }
         _ => None,
     }
 }
@@ -490,7 +494,9 @@ fn bool_option(value: &Value) -> BuiltinResult<bool> {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) => Ok(*value != 0.0),
         Value::Int(value) => Ok(value.to_f64() != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0] != 0.0),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_values_f64(tensor)[0] != 0.0)
+        }
         other => Err(invalid(format!(
             "kmeans: option value must be a logical scalar, got {other:?}"
         ))),
@@ -500,6 +506,8 @@ fn bool_option(value: &Value) -> BuiltinResult<bool> {
 fn prepare_data(value: Value, distance: Distance) -> BuiltinResult<PreparedData> {
     let tensor = tensor::value_into_tensor_for(NAME, value)
         .map_err(|err| invalid(format!("kmeans: {err}")))?;
+    let tensor =
+        tensor::integer_tensor_to_f64(tensor).map_err(|err| invalid(format!("kmeans: {err}")))?;
     if tensor.shape.len() > 2 {
         return Err(invalid("kmeans: X must be a numeric vector or 2-D matrix"));
     }
@@ -1144,11 +1152,17 @@ fn distance_output(result: &ReplicateResult, data: &PreparedData) -> BuiltinResu
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntegerStorage, Tensor};
 
     use super::*;
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn outputs(value: Value) -> Vec<Value> {
@@ -1199,6 +1213,47 @@ mod tests {
         match &out[3] {
             Value::Tensor(d) => assert_eq!(d.shape, vec![4, 2]),
             other => panic!("distances {other:?}"),
+        }
+    }
+
+    #[test]
+    fn kmeans_reads_typed_integer_inputs_start_and_options_exactly() {
+        let mut statset = StructValue::new();
+        statset.insert(
+            "MaxIter",
+            poisoned_int_tensor(IntegerStorage::U16(vec![20]), 1, 1),
+        );
+        statset.insert(
+            "TolFun",
+            poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+        );
+        statset.insert(
+            "UseParallel",
+            poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+        );
+
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let out = block_on(kmeans_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 0, 10, 10]), 4, 1),
+            poisoned_int_tensor(IntegerStorage::U8(vec![2]), 1, 1),
+            vec![
+                Value::from("Start"),
+                poisoned_int_tensor(IntegerStorage::I16(vec![0, 10]), 2, 1),
+                Value::from("Replicates"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+                Value::from("Options"),
+                Value::Struct(statset),
+            ],
+        ))
+        .unwrap();
+        let out = outputs(out);
+        match &out[0] {
+            Value::Tensor(idx) => assert_eq!(idx.data, vec![1.0, 1.0, 2.0, 2.0]),
+            other => panic!("idx {other:?}"),
+        }
+        match &out[1] {
+            Value::Tensor(centers) => assert_eq!(centers.data, vec![0.0, 10.0]),
+            other => panic!("centers {other:?}"),
         }
     }
 

@@ -1305,23 +1305,26 @@ fn predictors_for_prediction(
 }
 
 fn numeric_matrix_for_fit(value: Value) -> BuiltinResult<Tensor> {
-    match value {
+    let tensor = match value {
         Value::SparseTensor(sparse) => sparse
             .to_dense()
             .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}"))),
         other => tensor::value_into_tensor_for(FITCLINEAR_NAME, other)
             .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}"))),
-    }
+    }?;
+    tensor::integer_tensor_to_f64(tensor)
+        .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}")))
 }
 
 fn numeric_matrix_for_predict(value: Value) -> BuiltinResult<Tensor> {
-    match value {
+    let tensor = match value {
         Value::SparseTensor(sparse) => sparse
             .to_dense()
             .map_err(|err| predict_invalid(format!("predict: {err}"))),
         other => tensor::value_into_tensor_for(PREDICT_NAME, other)
             .map_err(|err| predict_invalid(format!("predict: {err}"))),
-    }
+    }?;
+    tensor::integer_tensor_to_f64(tensor).map_err(|err| predict_invalid(format!("predict: {err}")))
 }
 
 fn normalize_observation_matrix(x: Tensor, options: &FitOptions) -> BuiltinResult<Tensor> {
@@ -1667,13 +1670,16 @@ fn vector_values_predict(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>>
     if tensor.shape.len() > 2 || (tensor.rows != 1 && tensor.cols != 1) {
         return Err(predict_invalid(format!("predict: {name} must be a vector")));
     }
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Int(value) => Ok(value.to_f64()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_values_f64(tensor)[0])
+        }
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
         _ => Err(fitclinear_invalid(format!(
             "fitclinear: {name} must be a numeric scalar"
@@ -1686,10 +1692,15 @@ fn logical_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
         Value::Bool(value) => Ok(*value),
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor)
-            if tensor.data.len() == 1 && (tensor.data[0] == 0.0 || tensor.data[0] == 1.0) =>
-        {
-            Ok(tensor.data[0] != 0.0)
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            let raw = tensor::tensor_values_f64(tensor)[0];
+            if raw == 0.0 || raw == 1.0 {
+                Ok(raw != 0.0)
+            } else {
+                Err(fitclinear_invalid(format!(
+                    "fitclinear: {name} must be logical scalar"
+                )))
+            }
         }
         _ => Err(fitclinear_invalid(format!(
             "fitclinear: {name} must be logical scalar"
@@ -1837,9 +1848,16 @@ fn sigmoid(value: f64) -> f64 {
 mod tests {
     use super::*;
     use crate::builtins::table::table_from_columns;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     #[tokio::test]
@@ -1870,6 +1888,39 @@ mod tests {
         match &outputs[1] {
             Value::Tensor(score) => assert_eq!(score.shape, vec![2, 2]),
             other => panic!("expected score, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn fitclinear_and_predict_read_typed_integer_storage_exactly() {
+        let model = fitclinear_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), vec![4, 1]),
+            vec![
+                poisoned_int_tensor(IntegerStorage::U8(vec![0, 0, 1, 1]), vec![4, 1]),
+                Value::String("Lambda".into()),
+                Value::Num(0.0),
+                Value::String("FitBias".into()),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+                Value::String("IterationLimit".into()),
+                poisoned_int_tensor(IntegerStorage::U16(vec![25]), vec![1, 1]),
+                Value::String("Bias".into()),
+                poisoned_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
+            ],
+        )
+        .await
+        .unwrap();
+        let outputs = predict_classification_linear_object(
+            match model {
+                Value::Object(object) => object,
+                _ => panic!("expected object"),
+            },
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 3]), vec![2, 1]),
+            Vec::new(),
+        )
+        .unwrap();
+        match &outputs[0] {
+            Value::Tensor(labels) => assert_eq!(labels.data, vec![0.0, 1.0]),
+            other => panic!("expected labels, got {other:?}"),
         }
     }
 

@@ -225,6 +225,8 @@ pub(crate) async fn tsne_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Va
     let options = parse_options(rest)?;
     let tensor =
         tensor::value_into_tensor_for(NAME, x).map_err(|err| invalid(format!("tsne: {err}")))?;
+    let tensor =
+        tensor::integer_tensor_to_f64(tensor).map_err(|err| invalid(format!("tsne: {err}")))?;
     let result = compute_tsne(tensor, options)?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
@@ -327,6 +329,8 @@ fn parse_options(values: Vec<Value>) -> BuiltinResult<Options> {
             "standardize" => options.standardize = bool_scalar(value, "Standardize")?,
             "initialy" => {
                 let tensor = tensor::value_into_tensor_for(NAME, value.clone())
+                    .map_err(|err| invalid(format!("tsne: InitialY {err}")))?;
+                let tensor = tensor::integer_tensor_to_f64(tensor)
                     .map_err(|err| invalid(format!("tsne: InitialY {err}")))?;
                 options.initial_y = Some(tensor);
             }
@@ -1081,7 +1085,9 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(value.to_f64()),
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_values_f64(tensor)[0])
+        }
         _ => Err(invalid(format!("tsne: {name} must be a numeric scalar"))),
     }
 }
@@ -1090,10 +1096,13 @@ fn bool_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor)
-            if tensor.data.len() == 1 && (tensor.data[0] == 0.0 || tensor.data[0] == 1.0) =>
-        {
-            Ok(tensor.data[0] != 0.0)
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            let raw = tensor::tensor_values_f64(tensor)[0];
+            if raw == 0.0 || raw == 1.0 {
+                Ok(raw != 0.0)
+            } else {
+                Err(invalid(format!("tsne: {name} must be logical scalar")))
+            }
         }
         _ => Err(invalid(format!("tsne: {name} must be logical scalar"))),
     }
@@ -1107,10 +1116,16 @@ fn is_empty_numeric(value: &Value) -> bool {
 mod tests {
     use super::*;
     use crate::builtins::common::random;
-    use runmat_builtins::StructValue;
+    use runmat_builtins::{IntegerStorage, StructValue};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn reset_rng() -> std::sync::MutexGuard<'static, ()> {
@@ -1212,6 +1227,44 @@ mod tests {
                 {
                     let mut options = StructValue::new();
                     options.insert("MaxIter", Value::Num(5.0));
+                    Value::Struct(options)
+                },
+            ],
+        )
+        .await
+        .unwrap();
+        match value {
+            Value::Tensor(y) => assert_eq!(y.shape, vec![4, 2]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn tsne_reads_typed_integer_data_initial_y_and_options_exactly() {
+        let _guard = reset_rng();
+        let value = tsne_builtin(
+            poisoned_int_tensor(
+                IntegerStorage::I16(vec![0, 1, 5, 6, 0, 1, 5, 6]),
+                vec![4, 2],
+            ),
+            vec![
+                Value::String("NumDimensions".into()),
+                poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+                Value::String("NumPCAComponents".into()),
+                poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+                Value::String("Perplexity".into()),
+                poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+                Value::String("Standardize".into()),
+                poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+                Value::String("InitialY".into()),
+                poisoned_int_tensor(IntegerStorage::I16(vec![0; 8]), vec![4, 2]),
+                Value::String("Options".into()),
+                {
+                    let mut options = StructValue::new();
+                    options.insert(
+                        "MaxIter",
+                        poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
+                    );
                     Value::Struct(options)
                 },
             ],
