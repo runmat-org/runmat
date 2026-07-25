@@ -11,8 +11,9 @@ use std::sync::Mutex;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ClassDef, ComplexTensor, HandleRef, IntValue, LogicalArray, MethodDef,
-    ObjectInstance, PropertyDef, SparseTensor, StringArray, StructValue, Tensor, Value,
+    CellArray, CharArray, ClassDef, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
+    IntegerStorage, LogicalArray, MethodDef, ObjectInstance, PropertyDef, SparseTensor,
+    StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -950,31 +951,53 @@ fn ints_equal(a: &IntValue, b: &IntValue) -> bool {
 }
 
 fn tensors_equal(a: &Tensor, b: &Tensor) -> bool {
-    a.shape == b.shape
-        && a.dtype == b.dtype
-        && a.data
-            .iter()
-            .zip(b.data.iter())
-            .all(|(x, y)| floats_equal_nan(*x, *y))
+    if a.shape != b.shape || a.dtype != b.dtype || a.data.len() != b.data.len() {
+        return false;
+    }
+    match (a.integer_storage(), b.integer_storage()) {
+        (Some(a), Some(b)) => return a == b,
+        (Some(_), None) | (None, Some(_)) => return false,
+        (None, None) => {}
+    }
+    a.data
+        .iter()
+        .zip(b.data.iter())
+        .all(|(x, y)| floats_equal_nan(*x, *y))
 }
 
 fn sparse_tensors_equal(a: &SparseTensor, b: &SparseTensor) -> bool {
-    a.rows == b.rows
-        && a.cols == b.cols
-        && a.col_ptrs == b.col_ptrs
-        && a.row_indices == b.row_indices
-        && a.values
-            .iter()
-            .zip(b.values.iter())
-            .all(|(x, y)| floats_equal_nan(*x, *y))
+    if a.rows != b.rows
+        || a.cols != b.cols
+        || a.col_ptrs != b.col_ptrs
+        || a.row_indices != b.row_indices
+        || a.values.len() != b.values.len()
+    {
+        return false;
+    }
+    match (a.integer_storage(), b.integer_storage()) {
+        (Some(a), Some(b)) => return a == b,
+        (Some(_), None) | (None, Some(_)) => return false,
+        (None, None) => {}
+    }
+    a.values
+        .iter()
+        .zip(b.values.iter())
+        .all(|(x, y)| floats_equal_nan(*x, *y))
 }
 
 fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor) -> bool {
-    a.shape == b.shape
-        && a.data
-            .iter()
-            .zip(b.data.iter())
-            .all(|(x, y)| floats_equal_nan(x.0, y.0) && floats_equal_nan(x.1, y.1))
+    if a.shape != b.shape || a.data.len() != b.data.len() {
+        return false;
+    }
+    match (&a.integer_data, &b.integer_data) {
+        (Some(a), Some(b)) => return a == b,
+        (Some(_), None) | (None, Some(_)) => return false,
+        (None, None) => {}
+    }
+    a.data
+        .iter()
+        .zip(b.data.iter())
+        .all(|(x, y)| floats_equal_nan(x.0, y.0) && floats_equal_nan(x.1, y.1))
 }
 
 fn string_arrays_equal(a: &StringArray, b: &StringArray) -> bool {
@@ -1038,8 +1061,26 @@ fn values_fingerprint(values: &[Value]) -> String {
 fn value_fingerprint(value: &Value) -> String {
     match value {
         Value::Num(value) if value.is_nan() => "num:NaN".to_string(),
-        Value::Tensor(tensor) => format!("tensor:{:?}:{:?}", tensor.shape, tensor.data),
-        Value::ComplexTensor(tensor) => format!("complex:{:?}:{:?}", tensor.shape, tensor.data),
+        Value::Tensor(tensor) => format!(
+            "tensor:{:?}:{:?}:{:?}:{:?}",
+            tensor.dtype,
+            tensor.shape,
+            tensor.integer_storage(),
+            tensor.data
+        ),
+        Value::SparseTensor(tensor) => format!(
+            "sparse:{}x{}:{:?}:{:?}:{:?}:{:?}",
+            tensor.rows,
+            tensor.cols,
+            tensor.col_ptrs,
+            tensor.row_indices,
+            tensor.integer_storage(),
+            tensor.values
+        ),
+        Value::ComplexTensor(tensor) => format!(
+            "complex:{:?}:{:?}:{:?}",
+            tensor.shape, tensor.integer_data, tensor.data
+        ),
         Value::Cell(cell) => format!("cell:{:?}:{}", cell.shape, values_fingerprint(&cell.data)),
         Value::Struct(struct_value) => format!(
             "struct:{}",
@@ -1138,6 +1179,90 @@ mod tests {
         assert_eq!(
             numeric_counter(Some(&Value::Num(usize::MAX as f64 + 1.0))),
             None
+        );
+    }
+
+    #[test]
+    fn cache_value_equality_preserves_exact_integer_tensor_storage() {
+        let left = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+                vec![1, 2],
+            )
+            .expect("left integer tensor"),
+        );
+        let same = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+                vec![1, 2],
+            )
+            .expect("same integer tensor"),
+        );
+        let rounded_collision = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 53, u64::MAX]), vec![1, 2])
+                .expect("different integer tensor"),
+        );
+
+        assert!(value_equal_for_cache(&left, &same));
+        assert!(!value_equal_for_cache(&left, &rounded_collision));
+        assert_ne!(
+            value_fingerprint(&left),
+            value_fingerprint(&rounded_collision)
+        );
+    }
+
+    #[test]
+    fn cache_value_equality_preserves_exact_sparse_integer_storage() {
+        let left = Value::SparseTensor(
+            SparseTensor::new_integer(
+                2,
+                2,
+                vec![0, 1, 2],
+                vec![0, 1],
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            )
+            .expect("left sparse integer tensor"),
+        );
+        let rounded_collision = Value::SparseTensor(
+            SparseTensor::new_integer(
+                2,
+                2,
+                vec![0, 1, 2],
+                vec![0, 1],
+                IntegerStorage::U64(vec![1_u64 << 53, u64::MAX]),
+            )
+            .expect("different sparse integer tensor"),
+        );
+
+        assert!(!value_equal_for_cache(&left, &rounded_collision));
+        assert_ne!(
+            value_fingerprint(&left),
+            value_fingerprint(&rounded_collision)
+        );
+    }
+
+    #[test]
+    fn cache_value_equality_preserves_exact_complex_integer_storage() {
+        let complex = |real, imag| {
+            Value::ComplexTensor(
+                ComplexTensor::new_integer(
+                    IntegerComplexStorage::new(
+                        IntegerStorage::U64(real),
+                        IntegerStorage::U64(imag),
+                    )
+                    .expect("matching complex integer storage"),
+                    vec![1, 2],
+                )
+                .expect("complex integer tensor"),
+            )
+        };
+        let left = complex(vec![(1_u64 << 53) + 1, u64::MAX], vec![0, 1_u64 << 63]);
+        let rounded_collision = complex(vec![1_u64 << 53, u64::MAX], vec![0, 1_u64 << 63]);
+
+        assert!(!value_equal_for_cache(&left, &rounded_collision));
+        assert_ne!(
+            value_fingerprint(&left),
+            value_fingerprint(&rounded_collision)
         );
     }
 
