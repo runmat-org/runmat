@@ -185,7 +185,10 @@ async fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
-    if a.device_id == b.device_id {
+    if runmat_accelerate_api::handle_integer_type(&a).is_none()
+        && runmat_accelerate_api::handle_integer_type(&b).is_none()
+        && a.device_id == b.device_id
+    {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
             if a.shape == b.shape {
                 if let Ok(div) = provider.elem_div(&a, &b).await {
