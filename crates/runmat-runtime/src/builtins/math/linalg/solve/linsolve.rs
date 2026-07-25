@@ -8,7 +8,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexTensor, IntValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -484,7 +484,10 @@ fn parse_bool_field(name: &str, value: &Value) -> BuiltinResult<bool> {
         Value::Bool(b) => Ok(*b),
         Value::Int(i) => Ok(!i.is_zero()),
         Value::Num(n) => Ok(*n != 0.0),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(t.data[0] != 0.0),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(match scalar_tensor_integer(t) {
+            Some(value) => !value.is_zero(),
+            None => t.data[0] != 0.0,
+        }),
         Value::LogicalArray(arr) if arr.len() == 1 => Ok(arr.data[0] != 0),
         other => Err(argument_error(format!(
             "linsolve: option '{name}' must be logical or numeric, got {other:?}"
@@ -496,11 +499,20 @@ fn parse_scalar_f64(name: &str, value: &Value) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(t.data[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(match scalar_tensor_integer(t) {
+            Some(value) => value.to_f64(),
+            None => t.data[0],
+        }),
         other => Err(argument_error(format!(
             "linsolve: option '{name}' must be a scalar numeric value, got {other:?}"
         ))),
     }
+}
+
+fn scalar_tensor_integer(tensor: &Tensor) -> Option<IntValue> {
+    tensor
+        .integer_storage()
+        .and_then(|storage| storage.value_at(0))
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -1105,7 +1117,7 @@ pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, ResolveContext, StructValue, Type};
+    use runmat_builtins::{CharArray, IntegerStorage, ResolveContext, StructValue, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -1396,6 +1408,34 @@ pub(crate) mod tests {
             "unexpected error message: {err}"
         );
         assert_eq!(err.identifier(), LINSOLVE_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn linsolve_options_read_integer_tensor_storage() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
+        let a = Tensor::new(vec![2.0, 0.0, 1.0, 3.0], vec![2, 2]).unwrap();
+        let b = Tensor::new(vec![2.0, 7.0], vec![2, 1]).unwrap();
+        let mut upper = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        upper.data[0] = 0.0;
+        let mut rcond = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
+        rcond.data[0] = 1.0;
+        let mut opts = StructValue::new();
+        opts.fields.insert("UT".to_string(), Value::Tensor(upper));
+        opts.fields
+            .insert("RCOND".to_string(), Value::Tensor(rcond));
+        let result = linsolve_builtin(
+            Value::Tensor(a),
+            Value::Tensor(b),
+            vec![Value::Struct(opts)],
+        )
+        .expect("linsolve");
+        let Value::Tensor(out) = result else {
+            panic!("expected tensor output");
+        };
+        approx_eq(out.data[0], -1.0 / 6.0);
+        approx_eq(out.data[1], 7.0 / 3.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

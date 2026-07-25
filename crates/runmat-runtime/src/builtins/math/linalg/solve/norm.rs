@@ -598,7 +598,7 @@ fn parse_order_value(value: &Value) -> BuiltinResult<NormOrder> {
         Value::Bool(b) => parse_numeric(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(t) => {
             if tensor::is_scalar_tensor(t) {
-                parse_numeric(t.data[0])
+                parse_numeric(scalar_tensor_f64(t))
             } else {
                 Err(argument_error(format!(
                     "{NAME}: norm order must be a scalar."
@@ -631,6 +631,16 @@ fn parse_order_value(value: &Value) -> BuiltinResult<NormOrder> {
             }
         }
     }
+}
+
+fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
+    if let Some(storage) = tensor.integer_storage() {
+        return storage
+            .value_at(0)
+            .expect("one-element integer storage")
+            .to_f64();
+    }
+    tensor.data[0]
 }
 
 fn parse_numeric(raw: f64) -> BuiltinResult<NormOrder> {
@@ -745,7 +755,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, ResolveContext, Type};
+    use runmat_builtins::{CharArray, IntegerStorage, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -947,6 +957,20 @@ pub(crate) mod tests {
             norm_builtin(Value::Tensor(tensor), vec![Value::LogicalArray(logical)]).expect("norm");
         match value {
             Value::Num(v) => assert_close(v, 3.0),
+            other => panic!("expected scalar, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn norm_order_reads_integer_tensor_storage() {
+        let tensor = Tensor::new(vec![2.0, -3.0], vec![2, 1]).unwrap();
+        let mut order =
+            Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("order");
+        order.data[0] = 0.0;
+        let value = norm_builtin(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("norm");
+        match value {
+            Value::Num(v) => assert_close(v, 5.0),
             other => panic!("expected scalar, got {other:?}"),
         }
     }

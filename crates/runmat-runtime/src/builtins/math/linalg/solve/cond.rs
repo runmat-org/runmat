@@ -482,7 +482,7 @@ fn parse_norm_value(value: &Value) -> BuiltinResult<CondNorm> {
     match value {
         Value::Num(n) => parse_norm_numeric(*n),
         Value::Int(i) => parse_norm_numeric(i.to_f64()),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => parse_norm_numeric(t.data[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => parse_norm_numeric(scalar_tensor_f64(t)),
         Value::Bool(b) => {
             if *b {
                 Ok(CondNorm::One)
@@ -505,6 +505,16 @@ fn parse_norm_value(value: &Value) -> BuiltinResult<CondNorm> {
             "{NAME}: norm must be 1, 2, Inf, or 'fro'"
         ))),
     }
+}
+
+fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
+    if let Some(storage) = tensor.integer_storage() {
+        return storage
+            .value_at(0)
+            .expect("one-element integer storage")
+            .to_f64();
+    }
+    tensor.data[0]
 }
 
 fn parse_norm_numeric(raw: f64) -> BuiltinResult<CondNorm> {
@@ -589,7 +599,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -663,6 +673,20 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![4.0, 2.0, -1.0, 3.0], vec![2, 2]).unwrap();
         let result =
             cond_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(1))]).expect("cond");
+        match result {
+            Value::Num(value) => assert!((value - 2.142_857_142_857_143).abs() < 1e-9),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cond_norm_argument_reads_integer_tensor_storage() {
+        let tensor = Tensor::new(vec![4.0, 2.0, -1.0, 3.0], vec![2, 2]).unwrap();
+        let mut order =
+            Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("order");
+        order.data[0] = 0.0;
+        let result = cond_builtin(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("cond");
         match result {
             Value::Num(value) => assert!((value - 2.142_857_142_857_143).abs() < 1e-9),
             other => panic!("expected scalar result, got {other:?}"),

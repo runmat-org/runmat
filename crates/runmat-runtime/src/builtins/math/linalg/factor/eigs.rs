@@ -12,7 +12,7 @@ use num_complex::Complex64;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, StructValue, Tensor, Type, Value,
+    ComplexTensor, IntValue, ResolveContext, StructValue, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -467,8 +467,22 @@ fn parse_k(value: &Value) -> BuiltinResult<Option<usize>> {
 }
 
 fn parse_integer_scalar(value: &Value) -> BuiltinResult<Option<i64>> {
+    if let Some(value) = exact_integer_scalar(value) {
+        let Some(raw) = value.try_to_i64() else {
+            return Err(error_with_detail(
+                "eigs: k is too large for this platform",
+                &ERROR_INVALID_ARGUMENT,
+            ));
+        };
+        if raw <= 0 {
+            return Err(error_with_detail(
+                "eigs: k must be a positive integer scalar",
+                &ERROR_INVALID_ARGUMENT,
+            ));
+        }
+        return Ok(Some(raw));
+    }
     let raw = match value {
-        Value::Int(int) => int.to_f64(),
         Value::Num(n) => *n,
         Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
         Value::LogicalArray(logical) if logical.len() == 1 => {
@@ -510,9 +524,10 @@ fn parse_sigma(value: &Value) -> BuiltinResult<Option<Sigma>> {
         Value::Num(n) => Ok(Some(Sigma::Near(Complex64::new(*n, 0.0)))),
         Value::Int(i) => Ok(Some(Sigma::Near(Complex64::new(i.to_f64(), 0.0)))),
         Value::Complex(re, im) => Ok(Some(Sigma::Near(Complex64::new(*re, *im)))),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(Some(Sigma::Near(Complex64::new(tensor.data[0], 0.0))))
-        }
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Some(Sigma::Near(Complex64::new(
+            scalar_tensor_f64(tensor),
+            0.0,
+        )))),
         Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
             let (re, im) = tensor.data[0];
             Ok(Some(Sigma::Near(Complex64::new(re, im))))
@@ -1011,7 +1026,7 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(scalar_tensor_f64(tensor)),
         Value::LogicalArray(logical) if logical.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1040,10 +1055,19 @@ fn parse_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
         Value::LogicalArray(logical) if logical.len() == 1 => Ok(logical.data[0] != 0),
         Value::Num(n) if *n == 0.0 || *n == 1.0 => Ok(*n != 0.0),
         Value::Int(i) if i.to_i64() == 0 || i.to_i64() == 1 => Ok(i.to_i64() != 0),
-        Value::Tensor(tensor)
-            if tensor.data.len() == 1 && (tensor.data[0] == 0.0 || tensor.data[0] == 1.0) =>
-        {
-            Ok(tensor.data[0] != 0.0)
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            if let Some(value) = exact_integer_scalar(value) {
+                let raw = value.try_to_i64();
+                if raw == Some(0) || raw == Some(1) {
+                    return Ok(raw != Some(0));
+                }
+            } else if tensor.data[0] == 0.0 || tensor.data[0] == 1.0 {
+                return Ok(tensor.data[0] != 0.0);
+            }
+            Err(error_with_detail(
+                format!("eigs: {name} must be logical scalar true or false"),
+                &ERROR_INVALID_ARGUMENT,
+            ))
         }
         _ => Err(error_with_detail(
             format!("eigs: {name} must be logical scalar true or false"),
@@ -1177,13 +1201,31 @@ fn with_context(mut error: RuntimeError) -> RuntimeError {
     error
 }
 
+fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
+    if let Some(storage) = tensor.integer_storage() {
+        return storage
+            .value_at(0)
+            .expect("one-element integer storage")
+            .to_f64();
+    }
+    tensor.data[0]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        CharArray, IntValue, IntegerComplexStorage, IntegerStorage, SparseTensor,
-    };
+    use runmat_builtins::{CharArray, IntegerComplexStorage, IntegerStorage, SparseTensor};
 
     fn real_matrix(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new_2d(data, rows, cols).unwrap())
@@ -1271,6 +1313,17 @@ mod tests {
     }
 
     #[test]
+    fn eigs_reads_integer_tensor_k_and_sigma_storage() {
+        let a = real_matrix(vec![1.0, 0.0, 0.0, 8.0], 2, 2);
+        let mut k = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).unwrap();
+        k.data[0] = 0.0;
+        let mut sigma = Tensor::new_integer(IntegerStorage::I16(vec![7]), vec![1, 1]).unwrap();
+        sigma.data[0] = 1.0;
+        let out = tensor(call(a, vec![Value::Tensor(k), Value::Tensor(sigma)]).unwrap());
+        assert_eq!(out.data, vec![8.0]);
+    }
+
+    #[test]
     fn eigs_generalized_reuses_eig_path() {
         let a = real_matrix(vec![2.0, 0.0, 0.0, 9.0], 2, 2);
         let b = real_matrix(vec![1.0, 0.0, 0.0, 3.0], 2, 2);
@@ -1292,14 +1345,20 @@ mod tests {
     fn eigs_validates_options_without_affecting_exact_fallback() {
         let mut opts = StructValue::new();
         opts.insert("tol", Value::Num(1e-9));
-        opts.insert("maxit", Value::Int(IntValue::I32(100)));
-        opts.insert("p", Value::Int(IntValue::I32(4)));
+        let mut maxit = Tensor::new_integer(IntegerStorage::U16(vec![100]), vec![1, 1]).unwrap();
+        maxit.data[0] = 0.0;
+        opts.insert("maxit", Value::Tensor(maxit));
+        let mut p = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
+        p.data[0] = 0.0;
+        opts.insert("p", Value::Tensor(p));
         opts.insert(
             "v0",
             Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap()),
         );
         opts.insert("fail", Value::CharArray(CharArray::new_row("keep")));
-        opts.insert("disp", Value::Bool(false));
+        let mut disp = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
+        disp.data[0] = 1.0;
+        opts.insert("disp", Value::Tensor(disp));
         let a = real_matrix(vec![1.0, 0.0, 0.0, 3.0], 2, 2);
         let out = tensor(
             call(
