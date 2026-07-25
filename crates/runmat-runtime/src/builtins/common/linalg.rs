@@ -172,7 +172,7 @@ pub(crate) fn parse_tolerance_arg(name: &str, args: &[Value]) -> Result<Option<f
             let raw = match &args[0] {
                 Value::Num(n) => *n,
                 Value::Int(i) => i.to_f64(),
-                Value::Tensor(t) if tensor::is_scalar_tensor(t) => t.data[0],
+                Value::Tensor(t) if tensor::is_scalar_tensor(t) => scalar_tensor_f64(t),
                 Value::Bool(b) => {
                     if *b {
                         1.0
@@ -203,6 +203,16 @@ pub(crate) fn parse_tolerance_arg(name: &str, args: &[Value]) -> Result<Option<f
         }
         _ => Err(format!("{name}: too many input arguments")),
     }
+}
+
+fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
+    if let Some(storage) = tensor.integer_storage() {
+        return storage
+            .value_at(0)
+            .expect("one-element integer storage")
+            .to_f64();
+    }
+    tensor.data[0]
 }
 
 /// MATLAB-compatible default tolerance used by `pinv`, `rank`, and related routines.
@@ -257,5 +267,32 @@ pub(crate) fn singular_value_rcond(singular_values: &[f64]) -> f64 {
         0.0
     } else {
         min_sv / max_sv
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn parse_tolerance_arg_reads_typed_integer_tensor_storage() {
+        let mut tol =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed tolerance");
+        tol.data[0] = -1.0;
+        assert_eq!(
+            parse_tolerance_arg("rank", &[Value::Tensor(tol)]).expect("tolerance"),
+            Some(2.0)
+        );
+    }
+
+    #[test]
+    fn parse_tolerance_arg_rejects_negative_typed_integer_storage() {
+        let mut tol = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("typed tolerance");
+        tol.data[0] = 0.0;
+        let err = parse_tolerance_arg("pinv", &[Value::Tensor(tol)])
+            .expect_err("negative typed tolerance must reject");
+        assert!(err.contains("tolerance must be >= 0"), "{err}");
     }
 }
