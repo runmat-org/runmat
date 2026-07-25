@@ -1728,4 +1728,216 @@ mod tests {
             Some(IntegerElementType::U64)
         );
     }
+
+    #[test]
+    fn wgpu_native_integer_cumulative_scans_cover_all_classes_and_ties() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        macro_rules! check {
+            ($view:ident, $owned:ident, $ty:ty, $element_type:expr) => {{
+                let scan_values: [$ty; 4] = [1 as $ty, 2 as $ty, 3 as $ty, 4 as $ty];
+                let scan = provider
+                    .upload_integer_exec(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&scan_values),
+                        shape: &[2, 2],
+                    })
+                    .expect("upload scan values");
+                let cumsum = provider
+                    .integer_cumsum_scan(
+                        &scan,
+                        0,
+                        runmat_accelerate_api::ProviderScanDirection::Forward,
+                    )
+                    .expect("cumsum all-class");
+                let cumprod = provider
+                    .integer_cumprod_scan(
+                        &scan,
+                        1,
+                        runmat_accelerate_api::ProviderScanDirection::Reverse,
+                    )
+                    .expect("cumprod all-class");
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&cumsum))
+                        .expect("download cumsum")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![1 as $ty, 3 as $ty, 3 as $ty, 7 as $ty])
+                );
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&cumprod))
+                        .expect("download cumprod")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![3 as $ty, 8 as $ty, 3 as $ty, 4 as $ty])
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&cumsum),
+                    Some($element_type)
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&cumprod),
+                    Some($element_type)
+                );
+
+                let tie_values: [$ty; 4] = [5 as $ty, 5 as $ty, 4 as $ty, 6 as $ty];
+                let ties = provider
+                    .upload_integer_exec(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&tie_values),
+                        shape: &[2, 2],
+                    })
+                    .expect("upload tie values");
+                let cummax = provider
+                    .integer_cummax_scan(
+                        &ties,
+                        0,
+                        runmat_accelerate_api::ProviderScanDirection::Forward,
+                    )
+                    .expect("cummax ties");
+                let cummin = provider
+                    .integer_cummin_scan(
+                        &ties,
+                        1,
+                        runmat_accelerate_api::ProviderScanDirection::Reverse,
+                    )
+                    .expect("cummin ties");
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&cummax.values))
+                        .expect("download cummax values")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![5 as $ty, 5 as $ty, 4 as $ty, 6 as $ty])
+                );
+                assert_eq!(
+                    block_on(provider.download_exec(&cummax.indices))
+                        .expect("download cummax indices")
+                        .data,
+                    vec![1.0, 1.0, 1.0, 2.0]
+                );
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&cummin.values))
+                        .expect("download cummin values")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![4 as $ty, 5 as $ty, 4 as $ty, 6 as $ty])
+                );
+                assert_eq!(
+                    block_on(provider.download_exec(&cummin.indices))
+                        .expect("download cummin indices")
+                        .data,
+                    vec![2.0, 1.0, 2.0, 2.0]
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&cummax.values),
+                    Some($element_type)
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&cummin.values),
+                    Some($element_type)
+                );
+            }};
+        }
+
+        check!(I8, I8, i8, IntegerElementType::I8);
+        check!(I16, I16, i16, IntegerElementType::I16);
+        check!(I32, I32, i32, IntegerElementType::I32);
+        check!(I64, I64, i64, IntegerElementType::I64);
+        check!(U8, U8, u8, IntegerElementType::U8);
+        check!(U16, U16, u16, IntegerElementType::U16);
+        check!(U32, U32, u32, IntegerElementType::U32);
+        check!(U64, U64, u64, IntegerElementType::U64);
+    }
+
+    #[test]
+    fn wgpu_native_integer_cumulative_scans_cover_empty_all_classes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        macro_rules! check {
+            ($view:ident, $owned:ident, $ty:ty) => {{
+                let values: [$ty; 0] = [];
+                let input = provider
+                    .upload_integer_exec(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&values),
+                        shape: &[0, 2],
+                    })
+                    .expect("upload empty integer scan values");
+                let cumsum = provider
+                    .integer_cumsum_scan(
+                        &input,
+                        0,
+                        runmat_accelerate_api::ProviderScanDirection::Forward,
+                    )
+                    .expect("empty cumsum");
+                let cumprod = provider
+                    .integer_cumprod_scan(
+                        &input,
+                        0,
+                        runmat_accelerate_api::ProviderScanDirection::Reverse,
+                    )
+                    .expect("empty cumprod");
+                let cummin = provider
+                    .integer_cummin_scan(
+                        &input,
+                        0,
+                        runmat_accelerate_api::ProviderScanDirection::Forward,
+                    )
+                    .expect("empty cummin");
+                let cummax = provider
+                    .integer_cummax_scan(
+                        &input,
+                        0,
+                        runmat_accelerate_api::ProviderScanDirection::Reverse,
+                    )
+                    .expect("empty cummax");
+                assert_eq!(cumsum.shape, vec![0, 2]);
+                assert_eq!(cumprod.shape, vec![0, 2]);
+                assert_eq!(cummin.values.shape, vec![0, 2]);
+                assert_eq!(cummin.indices.shape, vec![0, 2]);
+                assert_eq!(cummax.values.shape, vec![0, 2]);
+                assert_eq!(cummax.indices.shape, vec![0, 2]);
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&cumsum))
+                        .expect("download empty cumsum")
+                        .data,
+                    HostIntegerDataOwned::$owned(Vec::<$ty>::new())
+                );
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&cumprod))
+                        .expect("download empty cumprod")
+                        .data,
+                    HostIntegerDataOwned::$owned(Vec::<$ty>::new())
+                );
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&cummin.values))
+                        .expect("download empty cummin")
+                        .data,
+                    HostIntegerDataOwned::$owned(Vec::<$ty>::new())
+                );
+                assert_eq!(
+                    block_on(provider.download_exec(&cummin.indices))
+                        .expect("download empty cummin indices")
+                        .data,
+                    Vec::<f64>::new()
+                );
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&cummax.values))
+                        .expect("download empty cummax")
+                        .data,
+                    HostIntegerDataOwned::$owned(Vec::<$ty>::new())
+                );
+                assert_eq!(
+                    block_on(provider.download_exec(&cummax.indices))
+                        .expect("download empty cummax indices")
+                        .data,
+                    Vec::<f64>::new()
+                );
+            }};
+        }
+
+        check!(I8, I8, i8);
+        check!(I16, I16, i16);
+        check!(I32, I32, i32);
+        check!(I64, I64, i64);
+        check!(U8, U8, u8);
+        check!(U16, U16, u16);
+        check!(U32, U32, u32);
+        check!(U64, U64, u64);
+    }
 }
