@@ -449,8 +449,7 @@ async fn parse_polynomial(context: &str, label: &str, value: Value) -> BuiltinRe
                 (vec![Complex64::new(0.0, 0.0)], orientation)
             } else {
                 (
-                    tensor
-                        .data
+                    tensor::tensor_values_f64(&tensor)
                         .into_iter()
                         .map(|re| Complex64::new(re, 0.0))
                         .collect(),
@@ -566,7 +565,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -618,6 +617,25 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn derivative_typed_integer_coefficients_cross_double_boundary_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![3, -2, 5, 7]), vec![1, 4]).unwrap();
+        let result = derivative_single(Value::Tensor(tensor)).expect("polyder");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 3]);
+                assert!(t
+                    .data
+                    .iter()
+                    .zip([9.0, -4.0, 5.0])
+                    .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
+                assert!(t.integer_storage().is_none());
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn derivative_of_product_matches_manual_rule() {
@@ -633,6 +651,26 @@ pub(crate) mod tests {
                     .iter()
                     .zip([3.0, 2.0, -2.0])
                     .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn product_typed_integer_coefficients_cross_double_boundary_exactly() {
+        let p = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, -2]), vec![1, 3]).unwrap();
+        let a = Tensor::new_integer(IntegerStorage::U16(vec![1, 1]), vec![1, 2]).unwrap();
+        let result =
+            derivative_product(Value::Tensor(p), Value::Tensor(a)).expect("polyder product");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 3]);
+                assert!(t
+                    .data
+                    .iter()
+                    .zip([3.0, 2.0, -2.0])
+                    .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
+                assert!(t.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -663,6 +701,37 @@ pub(crate) mod tests {
                     .iter()
                     .zip([1.0, -2.0, 1.0])
                     .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
+            }
+            other => panic!("expected tensor denominator, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quotient_typed_integer_coefficients_cross_double_boundary_exactly() {
+        let u = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, -4]), vec![1, 3]).unwrap();
+        let v = Tensor::new_integer(IntegerStorage::I16(vec![1, -1]), vec![1, 2]).unwrap();
+        let eval = evaluate_quotient(Value::Tensor(u), Value::Tensor(v)).expect("polyder quotient");
+        match eval.numerator() {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 3]);
+                assert!(t
+                    .data
+                    .iter()
+                    .zip([1.0, -2.0, 4.0])
+                    .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
+                assert!(t.integer_storage().is_none());
+            }
+            other => panic!("expected tensor numerator, got {other:?}"),
+        }
+        match eval.denominator() {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 3]);
+                assert!(t
+                    .data
+                    .iter()
+                    .zip([1.0, -2.0, 1.0])
+                    .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
+                assert!(t.integer_storage().is_none());
             }
             other => panic!("expected tensor denominator, got {other:?}"),
         }
