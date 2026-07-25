@@ -416,7 +416,8 @@ async fn value_to_matrix(name: &'static str, value: Value) -> BuiltinResult<Tens
             format!("{name}: input must be a numeric vector or 2-D matrix"),
         ));
     }
-    Ok(tensor)
+    tensor::integer_tensor_to_f64(tensor)
+        .map_err(|err| distance_error(name, format!("{name}: {err}")))
 }
 
 async fn gather_value(name: &'static str, value: Value) -> BuiltinResult<Value> {
@@ -545,7 +546,9 @@ async fn scalar_parameter(name: &'static str, value: &Value, label: &str) -> Bui
     match gathered {
         Value::Num(value) => Ok(value),
         Value::Int(value) => Ok(value.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+            Ok(tensor::tensor_values_f64(&tensor)[0])
+        }
         other => Err(distance_error(
             name,
             format!("{name}: {label} must be a numeric scalar, got {other:?}"),
@@ -631,7 +634,9 @@ fn parse_positive_integer(name: &'static str, value: &Value, label: &str) -> Bui
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_values_f64(tensor)[0]
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => f64::from(array.data[0] != 0),
         other => {
             return Err(distance_error(
@@ -766,10 +771,16 @@ fn parse_logical_scalar(value: &Value, label: &str) -> BuiltinResult<bool> {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
         Value::Int(value) if value.to_i64() == 0 || value.to_i64() == 1 => Ok(value.to_i64() != 0),
-        Value::Tensor(tensor)
-            if tensor.data.len() == 1 && (tensor.data[0] == 0.0 || tensor.data[0] == 1.0) =>
-        {
-            Ok(tensor.data[0] != 0.0)
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            let raw = tensor::tensor_values_f64(tensor)[0];
+            if raw == 0.0 || raw == 1.0 {
+                Ok(raw != 0.0)
+            } else {
+                Err(distance_error(
+                    KNNSEARCH_NAME,
+                    format!("knnsearch: {label} must be logical scalar, got {value:?}"),
+                ))
+            }
         }
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         other => Err(distance_error(
@@ -1589,9 +1600,20 @@ fn condensed_matrix_size(len: usize) -> Option<usize> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn tensor_out(value: Value) -> Tensor {
@@ -1644,6 +1666,40 @@ mod tests {
     }
 
     #[test]
+    fn distance_helpers_read_typed_integer_inputs_and_parameters_exactly() {
+        let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 3, 4, 0, 4, 0]), 3, 2);
+        let out = block_on(pdist_builtin(
+            x,
+            vec![
+                Value::from("minkowski"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+            ],
+        ))
+        .unwrap();
+        assert_eq!(tensor_out(out).data, vec![7.0, 4.0, 5.0]);
+
+        let out = block_on(pdist_builtin(
+            int_tensor(IntegerStorage::I16(vec![0, 3, 4, 0, 4, 0]), 3, 2),
+            vec![
+                Value::from("seuclidean"),
+                poisoned_int_tensor(IntegerStorage::U16(vec![1, 4]), 1, 2),
+            ],
+        ))
+        .unwrap();
+        assert!((tensor_out(out).data[0] - 10.0_f64.sqrt()).abs() < 1.0e-10);
+
+        let out = block_on(pdist_builtin(
+            int_tensor(IntegerStorage::I16(vec![0, 1, 0, 2]), 2, 2),
+            vec![
+                Value::from("mahalanobis"),
+                poisoned_int_tensor(IntegerStorage::U16(vec![1, 0, 0, 1]), 2, 2),
+            ],
+        ))
+        .unwrap();
+        assert!((tensor_out(out).data[0] - 5.0_f64.sqrt()).abs() < 1.0e-10);
+    }
+
+    #[test]
     fn nan_rows_propagate_and_invalid_covariance_is_rejected() {
         let x = tensor(vec![0.0, f64::NAN, 0.0, 1.0], 2, 2);
         let out = block_on(pdist_builtin(x, vec![Value::from("hamming")])).unwrap();
@@ -1679,6 +1735,23 @@ mod tests {
                 Value::from("euclidean"),
                 Value::from("Smallest"),
                 Value::Num(1.0),
+            ],
+        ))
+        .unwrap();
+        let tensor = tensor_out(out);
+        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.data, vec![1.0, 1.0]);
+    }
+
+    #[test]
+    fn pdist2_selection_reads_typed_integer_count_exactly() {
+        let out = block_on(pdist2_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 2, 0, 0]), 2, 2),
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 0, 0]), 2, 2),
+            vec![
+                Value::from("euclidean"),
+                Value::from("Smallest"),
+                poisoned_int_tensor(IntegerStorage::U64(vec![1]), 1, 1),
             ],
         ))
         .unwrap();
@@ -1748,6 +1821,30 @@ mod tests {
         };
         assert_eq!(tied.shape, vec![1, 3]);
         assert_eq!(tied.data, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn knnsearch_options_read_typed_integer_storage_exactly() {
+        let out = block_on(knnsearch_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 2, 5, 0, 0, 0]), 3, 2),
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 4, 0, 0]), 2, 2),
+            vec![
+                Value::from("K"),
+                poisoned_int_tensor(IntegerStorage::U16(vec![2]), 1, 1),
+                Value::from("IncludeTies"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+                Value::from("SortIndices"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+                Value::from("CacheSize"),
+                poisoned_int_tensor(IntegerStorage::U32(vec![16]), 1, 1),
+                Value::from("BucketSize"),
+                poisoned_int_tensor(IntegerStorage::U32(vec![8]), 1, 1),
+            ],
+        ))
+        .unwrap();
+        let idx = tensor_out(out);
+        assert_eq!(idx.shape, vec![2, 2]);
+        assert_eq!(idx.data, vec![1.0, 3.0, 2.0, 2.0]);
     }
 
     #[test]
