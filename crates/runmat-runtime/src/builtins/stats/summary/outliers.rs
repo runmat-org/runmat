@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, ResolveContext, Tensor, Type, Value,
+    IntValue, LogicalArray, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -347,8 +347,13 @@ async fn value_to_tensor(builtin: &'static str, value: Value) -> BuiltinResult<T
     let value = gather_if_needed_async(&value).await.map_err(|err| {
         invalid_argument(builtin, format!("{builtin}: failed to gather input: {err}"))
     })?;
-    tensor::value_into_tensor_for(builtin, value)
-        .map_err(|err| invalid_argument(builtin, format!("{builtin}: {err}")))
+    let tensor = tensor::value_into_tensor_for(builtin, value)
+        .map_err(|err| invalid_argument(builtin, format!("{builtin}: {err}")))?;
+    if tensor.integer_storage().is_some() {
+        return Tensor::new(tensor_values_f64(&tensor), tensor.shape.clone())
+            .map_err(|err| internal_error(builtin, format!("{builtin}: {err}")));
+    }
+    Ok(tensor)
 }
 
 async fn parse_detection_options(
@@ -1016,12 +1021,23 @@ fn logical_mask(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<u8>> 
             Ok(mask.data.iter().map(|flag| u8::from(*flag != 0)).collect())
         }
         Value::Tensor(tensor) => Ok(tensor
-            .data
-            .iter()
-            .map(|value| u8::from(*value != 0.0 && !value.is_nan()))
-            .collect()),
+            .integer_storage()
+            .map(|storage| {
+                storage
+                    .exact_values()
+                    .into_iter()
+                    .map(|value| u8::from(!value.is_zero()))
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                tensor
+                    .data
+                    .iter()
+                    .map(|value| u8::from(*value != 0.0 && !value.is_nan()))
+                    .collect()
+            })),
         Value::Num(value) => Ok(vec![u8::from(*value != 0.0 && !value.is_nan())]),
-        Value::Int(value) => Ok(vec![u8::from(value.to_f64() != 0.0)]),
+        Value::Int(value) => Ok(vec![u8::from(!value.is_zero())]),
         other => Err(invalid_argument(
             builtin,
             format!("OutlierLocations must be logical or numeric, got {other:?}"),
@@ -1032,10 +1048,15 @@ fn logical_mask(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<u8>> 
 fn numeric_vector(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_into_tensor_for(builtin, value.clone())
         .map_err(|err| invalid_argument(builtin, format!("{builtin}: {err}")))?;
-    Ok(tensor.data)
+    Ok(tensor_values_f64(&tensor))
 }
 
 fn scalar_usize(builtin: &'static str, value: &Value, label: &str) -> BuiltinResult<usize> {
+    if let Some(value) = integer_scalar(value) {
+        return value.try_to_usize().ok_or_else(|| {
+            invalid_argument(builtin, format!("{label} must be a nonnegative integer"))
+        });
+    }
     let number = scalar_number(value)
         .ok_or_else(|| invalid_argument(builtin, format!("{label} must be numeric")))?;
     if !(number.is_finite() && number >= 0.0 && number.fract() == 0.0) {
@@ -1048,21 +1069,118 @@ fn scalar_usize(builtin: &'static str, value: &Value, label: &str) -> BuiltinRes
 }
 
 fn scalar_number(value: &Value) -> Option<f64> {
+    if let Some(value) = integer_scalar(value) {
+        return Some(value.to_f64());
+    }
     match value {
         Value::Num(value) => Some(*value),
-        Value::Int(value) => Some(value.to_f64()),
         Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
         _ => None,
     }
+}
+
+fn integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn tensor_values_f64(tensor: &Tensor) -> Vec<f64> {
+    tensor
+        .integer_storage()
+        .map(|storage| {
+            storage
+                .exact_values()
+                .into_iter()
+                .map(|value| value.to_f64())
+                .collect()
+        })
+        .unwrap_or_else(|| tensor.data.clone())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
+    }
+
+    #[test]
+    fn outlier_numeric_parsers_read_typed_integer_storage_exactly() {
+        let wide = u64::MAX - 1;
+        assert_eq!(
+            numeric_vector(
+                ISOUTLIER_NAME,
+                &int_tensor(IntegerStorage::U64(vec![wide, wide - 1]), vec![1, 2]),
+            )
+            .unwrap(),
+            vec![
+                IntValue::U64(wide).to_f64(),
+                IntValue::U64(wide - 1).to_f64()
+            ]
+        );
+        assert_eq!(
+            scalar_number(&int_tensor(IntegerStorage::U64(vec![wide]), vec![1, 1])).unwrap(),
+            IntValue::U64(wide).to_f64()
+        );
+        assert_eq!(
+            scalar_usize(
+                ISOUTLIER_NAME,
+                &int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
+                "window",
+            )
+            .unwrap(),
+            4
+        );
+        assert_eq!(
+            logical_mask(
+                FILLOUTLIERS_NAME,
+                &int_tensor(IntegerStorage::I16(vec![0, -2, 3]), vec![3, 1]),
+            )
+            .unwrap(),
+            vec![0, 1, 1]
+        );
+    }
+
+    #[test]
+    fn outlier_scalar_usize_rejects_negative_typed_integer_storage() {
+        let err = scalar_usize(
+            ISOUTLIER_NAME,
+            &int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1]),
+            "window",
+        )
+        .unwrap_err();
+        assert!(
+            err.message().contains("nonnegative integer"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn filloutliers_accepts_typed_integer_input_fill_and_mask() {
+        let value = int_tensor(IntegerStorage::I16(vec![1, 2, 100, 4, 5]), vec![5, 1]);
+        let fill = int_tensor(IntegerStorage::I16(vec![-7]), vec![1, 1]);
+        let locations = int_tensor(IntegerStorage::U8(vec![0, 0, 1, 0, 0]), vec![5, 1]);
+        let out = block_on(filloutliers_builtin(
+            value,
+            vec![fill, Value::from("OutlierLocations"), locations],
+        ))
+        .unwrap();
+        assert!(
+            matches!(out, Value::Tensor(tensor) if tensor.data == vec![1.0, 2.0, -7.0, 4.0, 5.0])
+        );
     }
 
     #[test]
