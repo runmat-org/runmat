@@ -6,7 +6,8 @@ use std::collections::BTreeMap;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, IntValue, LogicalArray, ObjectInstance, SparseTensor, StringArray, Tensor, Value,
+    CellArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, SparseTensor, StringArray,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -1062,6 +1063,33 @@ fn accumarray_subscripts(subs: Value) -> BuiltinResult<Vec<Vec<usize>>> {
             if tensor.data.is_empty() {
                 return Ok(Vec::new());
             }
+            if let Some(storage) = tensor.integer_storage() {
+                if tensor.cols() <= 1 || tensor.rows() == 1 {
+                    return storage
+                        .exact_values()
+                        .into_iter()
+                        .map(|value| {
+                            Ok(vec![positive_integer_value(
+                                &value,
+                                "accumarray subscript",
+                            )?])
+                        })
+                        .collect();
+                }
+                let mut out = Vec::with_capacity(tensor.rows());
+                for row in 0..tensor.rows() {
+                    let mut subs = Vec::with_capacity(tensor.cols());
+                    for col in 0..tensor.cols() {
+                        let index = row + col * tensor.rows();
+                        let value = storage.value_at(index).ok_or_else(|| {
+                            grouping_error("accumarray: integer subscript index out of bounds")
+                        })?;
+                        subs.push(positive_integer_value(&value, "accumarray subscript")?);
+                    }
+                    out.push(subs);
+                }
+                return Ok(out);
+            }
             if tensor.cols() <= 1 || tensor.rows() == 1 {
                 tensor
                     .data
@@ -1120,6 +1148,17 @@ fn accumarray_data_values(data: Value, rows: usize) -> BuiltinResult<Vec<f64>> {
         Value::Int(value) => Ok(vec![value.to_f64(); rows]),
         Value::Bool(value) => Ok(vec![if value { 1.0 } else { 0.0 }; rows]),
         Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                let values = integer_storage_to_f64_vec(storage);
+                if values.len() == 1 {
+                    return Ok(vec![values[0]; rows]);
+                } else if values.len() == rows {
+                    return Ok(values);
+                }
+                return Err(grouping_error(
+                    "accumarray: data must be scalar or match subscript row count",
+                ));
+            }
             if tensor.data.len() == 1 {
                 Ok(vec![tensor.data[0]; rows])
             } else if tensor.data.len() == rows {
@@ -1666,7 +1705,12 @@ fn numeric_values(value: &Value, context: &str) -> BuiltinResult<Vec<f64>> {
         Value::Num(value) => Ok(vec![*value]),
         Value::Int(value) => Ok(vec![value.to_f64()]),
         Value::Bool(value) => Ok(vec![if *value { 1.0 } else { 0.0 }]),
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return Ok(integer_storage_to_f64_vec(storage));
+            }
+            Ok(tensor.data.clone())
+        }
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()
@@ -1694,11 +1738,27 @@ fn value_shape(value: &Value) -> Vec<usize> {
 }
 
 fn parse_size_vector(value: &Value, context: &str) -> BuiltinResult<Vec<usize>> {
-    let values = numeric_values(value, context)?;
-    let mut dims = Vec::with_capacity(values.len());
-    for value in values {
-        dims.push(nonnegative_integer(value, context)?);
-    }
+    let mut dims = match value {
+        Value::Int(value) => vec![nonnegative_integer_value(value, context)?],
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                storage
+                    .exact_values()
+                    .iter()
+                    .map(|value| nonnegative_integer_value(value, context))
+                    .collect::<BuiltinResult<Vec<_>>>()?
+            } else {
+                numeric_values(value, context)?
+                    .into_iter()
+                    .map(|value| nonnegative_integer(value, context))
+                    .collect::<BuiltinResult<Vec<_>>>()?
+            }
+        }
+        _ => numeric_values(value, context)?
+            .into_iter()
+            .map(|value| nonnegative_integer(value, context))
+            .collect::<BuiltinResult<Vec<_>>>()?,
+    };
     if dims.is_empty() {
         return Err(grouping_error(format!(
             "{context}: size vector must not be empty"
@@ -1826,6 +1886,13 @@ fn positive_integer(value: f64, context: &str) -> BuiltinResult<usize> {
     }
 }
 
+fn positive_integer_value(value: &IntValue, context: &str) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| grouping_error(format!("{context}: expected positive integer")))
+}
+
 fn nonnegative_integer(value: f64, context: &str) -> BuiltinResult<usize> {
     if let Some(value) = nonnegative_platform_usize(value) {
         Ok(value)
@@ -1834,6 +1901,20 @@ fn nonnegative_integer(value: f64, context: &str) -> BuiltinResult<usize> {
             "{context}: expected nonnegative integer"
         )))
     }
+}
+
+fn nonnegative_integer_value(value: &IntValue, context: &str) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .ok_or_else(|| grouping_error(format!("{context}: expected nonnegative integer")))
+}
+
+fn integer_storage_to_f64_vec(storage: &IntegerStorage) -> Vec<f64> {
+    storage
+        .exact_values()
+        .iter()
+        .map(IntValue::to_f64)
+        .collect()
 }
 
 fn is_positive_integer_f64(value: f64) -> bool {
@@ -1877,7 +1958,7 @@ fn is_missing_text(text: &str) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     #[test]
     fn discretize_typed_bin_count_preserves_exact_unsigned_values() {
@@ -1931,6 +2012,49 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn accumarray_accepts_exact_integer_subscripts_data_and_size_vectors() {
+        let subs = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 3, 4, 2]), vec![4, 1]).unwrap(),
+        );
+        let data = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![10, 20, 30, 40]), vec![4, 1]).unwrap(),
+        );
+        let size =
+            Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![4, 1]), vec![1, 2]).unwrap());
+
+        let out = block_on(accumarray_builtin(subs, data, vec![size])).unwrap();
+
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![4, 1]);
+                assert_eq!(tensor.data, vec![10.0, 40.0, 20.0, 30.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn accumarray_rejects_negative_exact_integer_subscripts_and_sizes() {
+        let subs = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![1, -1]), vec![2, 1]).unwrap(),
+        );
+        let data = Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap());
+        let err = block_on(accumarray_builtin(subs, data, Vec::new()))
+            .expect_err("negative subscript should fail");
+        assert!(err.message.contains("expected positive integer"));
+
+        let subs =
+            Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![2, 1]).unwrap());
+        let data = Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap());
+        let size = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]).unwrap(),
+        );
+        let err = block_on(accumarray_builtin(subs, data, vec![size]))
+            .expect_err("negative size should fail");
+        assert!(err.message.contains("expected nonnegative integer"));
     }
 
     #[test]
