@@ -364,6 +364,7 @@ fn parse_circshift_spec(shift: &Value, rest: &[Value]) -> crate::BuiltinResult<C
 fn dims_from_token(token: &ArgToken) -> Option<Vec<usize>> {
     match token {
         ArgToken::Number(value) => coerce_dim_value(*value).map(|dim| vec![dim]),
+        ArgToken::Integer(value) => coerce_integer_dim_value(value).map(|dim| vec![dim]),
         ArgToken::Vector(values) => {
             if values.is_empty() {
                 return None;
@@ -372,6 +373,7 @@ fn dims_from_token(token: &ArgToken) -> Option<Vec<usize>> {
             for value in values {
                 let dim = match value {
                     ArgToken::Number(num) => coerce_dim_value(*num)?,
+                    ArgToken::Integer(value) => coerce_integer_dim_value(value)?,
                     _ => return None,
                 };
                 dims.push(dim);
@@ -380,6 +382,10 @@ fn dims_from_token(token: &ArgToken) -> Option<Vec<usize>> {
         }
         _ => None,
     }
+}
+
+fn coerce_integer_dim_value(value: &IntValue) -> Option<usize> {
+    value.try_to_usize().filter(|&dim| dim >= 1)
 }
 
 fn coerce_dim_value(value: f64) -> Option<usize> {
@@ -1055,6 +1061,23 @@ pub(crate) mod tests {
             dims_err.identifier(),
             CIRCSHIFT_ERROR_INVALID_DIMS.identifier
         );
+    }
+
+    #[test]
+    fn circshift_integer_tokens_parse_exact_dimensions() {
+        assert_eq!(
+            dims_from_token(&ArgToken::Integer(IntValue::U16(2))),
+            Some(vec![2])
+        );
+        assert_eq!(
+            dims_from_token(&ArgToken::Vector(vec![
+                ArgToken::Integer(IntValue::U8(1)),
+                ArgToken::Integer(IntValue::U16(2)),
+            ])),
+            Some(vec![1, 2])
+        );
+        assert_eq!(dims_from_token(&ArgToken::Integer(IntValue::I8(0))), None);
+        assert_eq!(dims_from_token(&ArgToken::Integer(IntValue::I8(-1))), None);
     }
 
     #[test]

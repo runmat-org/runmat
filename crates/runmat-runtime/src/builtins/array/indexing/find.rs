@@ -293,6 +293,7 @@ fn token_to_direction(token: &ArgToken) -> crate::BuiltinResult<Option<FindDirec
 fn token_to_limit(token: &ArgToken) -> crate::BuiltinResult<usize> {
     match token {
         ArgToken::Number(value) => parse_limit_scalar(*value),
+        ArgToken::Integer(value) => parse_limit_integer(value),
         _ => Err(find_error_with_message(
             "find: second argument must be a scalar",
             &FIND_ERROR_INVALID_INPUT,
@@ -514,6 +515,15 @@ async fn parse_options(args: &[Value]) -> crate::BuiltinResult<FindOptions> {
     parse_find_tokens(&crate::builtins::common::arg_tokens::tokens_from_values(
         args,
     ))
+}
+
+fn parse_limit_integer(value: &IntValue) -> crate::BuiltinResult<usize> {
+    value.try_to_usize().ok_or_else(|| {
+        find_error_with_message(
+            "find: K must be a non-negative integer within the supported range",
+            &FIND_ERROR_INVALID_INPUT,
+        )
+    })
 }
 
 fn parse_limit_scalar(value: f64) -> crate::BuiltinResult<usize> {
@@ -1006,6 +1016,26 @@ pub(crate) mod tests {
                 shape: Some(vec![None, Some(1)])
             }
         );
+    }
+
+    #[test]
+    fn find_integer_tokens_parse_exact_limits() {
+        let options =
+            parse_find_tokens(&[ArgToken::Integer(IntValue::U64(2))]).expect("uint64 limit");
+        assert_eq!(options.limit, Some(2));
+        assert_eq!(options.direction, FindDirection::First);
+
+        let options = parse_find_tokens(&[
+            ArgToken::Integer(IntValue::U16(3)),
+            ArgToken::String("last".to_string()),
+        ])
+        .expect("integer limit with direction");
+        assert_eq!(options.limit, Some(3));
+        assert_eq!(options.direction, FindDirection::Last);
+
+        let err = parse_find_tokens(&[ArgToken::Integer(IntValue::I64(-1))])
+            .expect_err("negative integer limit must reject");
+        assert_eq!(err.identifier(), FIND_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

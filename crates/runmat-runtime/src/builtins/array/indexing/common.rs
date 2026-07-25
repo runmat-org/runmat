@@ -134,6 +134,7 @@ pub(crate) fn dims_from_tokens(tokens: &[ArgToken]) -> Option<Vec<usize>> {
     let value = tokens.first()?;
     match value {
         ArgToken::Number(num) => coerce_positive_literal(*num).map(|dim| vec![dim]),
+        ArgToken::Integer(value) => coerce_positive_integer_literal(value).map(|dim| vec![dim]),
         ArgToken::Vector(values) => {
             if values.is_empty() {
                 return None;
@@ -142,6 +143,7 @@ pub(crate) fn dims_from_tokens(tokens: &[ArgToken]) -> Option<Vec<usize>> {
             for value in values {
                 let dim = match value {
                     ArgToken::Number(num) => coerce_positive_literal(*num)?,
+                    ArgToken::Integer(value) => coerce_positive_integer_literal(value)?,
                     _ => return None,
                 };
                 dims.push(dim);
@@ -150,6 +152,10 @@ pub(crate) fn dims_from_tokens(tokens: &[ArgToken]) -> Option<Vec<usize>> {
         }
         _ => None,
     }
+}
+
+fn coerce_positive_integer_literal(value: &IntValue) -> Option<usize> {
+    value.try_to_usize().filter(|&dim| dim >= 1)
 }
 
 fn coerce_positive_literal(value: f64) -> Option<usize> {
@@ -262,5 +268,15 @@ mod tests {
     fn numeric_dimension_coercion_rejects_out_of_range_float_values() {
         assert!(coerce_positive_int(usize::MAX as f64, "zeros").is_err());
         assert!(dims_from_tokens(&[ArgToken::Number(usize::MAX as f64)]).is_none());
+        assert!(dims_from_tokens(&[ArgToken::Integer(IntValue::I64(-1))]).is_none());
+        #[cfg(target_pointer_width = "32")]
+        assert!(dims_from_tokens(&[ArgToken::Integer(IntValue::U64(u64::MAX))]).is_none());
+        assert_eq!(
+            dims_from_tokens(&[ArgToken::Vector(vec![
+                ArgToken::Integer(IntValue::U16(2)),
+                ArgToken::Integer(IntValue::U32(4)),
+            ])]),
+            Some(vec![2, 4])
+        );
     }
 }

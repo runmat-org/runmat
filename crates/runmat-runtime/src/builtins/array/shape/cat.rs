@@ -15,8 +15,8 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, ResolveContext,
-    StringArray, Tensor, Type, Value,
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray,
+    ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -207,6 +207,7 @@ struct ParsedCatTokens {
 fn parse_cat_tokens(tokens: &[ArgToken]) -> ParsedCatTokens {
     let dim = match tokens.first() {
         Some(ArgToken::Number(value)) => coerce_positive_dim(*value),
+        Some(ArgToken::Integer(value)) => coerce_positive_integer_dim(value),
         _ => None,
     };
     let like_index = if tokens.len() >= 3 {
@@ -218,6 +219,10 @@ fn parse_cat_tokens(tokens: &[ArgToken]) -> ParsedCatTokens {
         None
     };
     ParsedCatTokens { dim, like_index }
+}
+
+fn coerce_positive_integer_dim(value: &IntValue) -> Option<usize> {
+    value.try_to_usize().filter(|&dim| dim >= 1)
 }
 
 fn coerce_positive_dim(value: f64) -> Option<usize> {
@@ -1436,6 +1441,19 @@ pub(crate) mod tests {
             &ResolveContext::new(Vec::new()),
         );
         assert_eq!(out, Type::tensor());
+    }
+
+    #[test]
+    fn cat_integer_tokens_parse_exact_dimensions() {
+        let parsed = parse_cat_tokens(&[ArgToken::Integer(IntValue::U16(2))]);
+        assert_eq!(parsed.dim, Some(2));
+        assert_eq!(parsed.like_index, None);
+
+        let parsed = parse_cat_tokens(&[ArgToken::Integer(IntValue::I8(0))]);
+        assert_eq!(parsed.dim, None);
+
+        let parsed = parse_cat_tokens(&[ArgToken::Integer(IntValue::I8(-1))]);
+        assert_eq!(parsed.dim, None);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
