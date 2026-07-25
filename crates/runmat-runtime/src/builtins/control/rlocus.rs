@@ -9,9 +9,12 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+use crate::builtins::common::{
+    spec::{
+        BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+        ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    },
+    tensor,
 };
 use crate::builtins::control::tf_model::{poly_eval, polynomial_roots, scalar_f64, TfModel, EPS};
 use crate::builtins::control::type_resolvers::rlocus_type;
@@ -337,7 +340,7 @@ fn real_gain_vector(value: Value) -> BuiltinResult<Vec<f64>> {
         Value::Complex(re, im) if im.abs() <= EPS => vec![re],
         Value::Tensor(tensor) => {
             ensure_vector_shape(&tensor.shape)?;
-            tensor.data
+            tensor::tensor_values_f64(&tensor)
         }
         Value::ComplexTensor(tensor) => {
             ensure_vector_shape(&tensor.shape)?;
@@ -1200,6 +1203,7 @@ fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tf(num: Vec<f64>, den: Vec<f64>) -> Value {
         block_on(crate::call_builtin_async(
@@ -1270,6 +1274,28 @@ mod tests {
         let gains = tensor(&outputs[1]);
         assert_eq!(gains.shape, vec![1, 3]);
         assert_eq!(gains.data, vec![0.0, 1.0, 3.0]);
+    }
+
+    #[test]
+    fn explicit_typed_integer_gain_returns_closed_loop_roots_and_gains() {
+        let sys = tf(vec![1.0], vec![1.0, 1.0]);
+        let gains = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]).unwrap(),
+        );
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let result = run_rlocus(sys, vec![gains]).expect("rlocus");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list");
+        };
+
+        let roots = tensor(&outputs[0]);
+        assert_eq!(roots.shape, vec![1, 3]);
+        assert_eq!(roots.data, vec![-1.0, -2.0, -4.0]);
+
+        let gains = tensor(&outputs[1]);
+        assert_eq!(gains.shape, vec![1, 3]);
+        assert_eq!(gains.data, vec![0.0, 1.0, 3.0]);
+        assert!(gains.integer_storage().is_none());
     }
 
     #[test]

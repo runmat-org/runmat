@@ -7,9 +7,12 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+use crate::builtins::common::{
+    spec::{
+        BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+        ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    },
+    tensor,
 };
 use crate::builtins::control::tf_model::{control_error, scalar_f64, scalar_text, EPS};
 use crate::builtins::control::type_resolvers::stepinfo_type;
@@ -250,7 +253,7 @@ async fn numeric_vector(value: Value, label: &str) -> BuiltinResult<Vec<f64>> {
     match gathered {
         Value::Tensor(tensor) => {
             ensure_vector_shape(&tensor, label)?;
-            finite_vector(tensor.data, label)
+            finite_vector(tensor::tensor_values_f64(&tensor), label)
         }
         Value::Num(n) => finite_vector(vec![n], label),
         Value::Int(i) => finite_vector(vec![i.to_f64()], label),
@@ -485,6 +488,7 @@ fn stepinfo_error(message: impl Into<String>) -> RuntimeError {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     #[test]
     fn sampled_response_reports_basic_metrics() {
@@ -497,6 +501,25 @@ mod tests {
         };
         assert!(
             matches!(info.fields.get("RiseTime"), Some(Value::Num(v)) if (*v - 1.8).abs() < 1.0e-12)
+        );
+        assert!(matches!(info.fields.get("Overshoot"), Some(Value::Num(v)) if v.abs() < 1.0e-12));
+    }
+
+    #[test]
+    fn stepinfo_accepts_typed_integer_sampled_response_vectors() {
+        let y = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 1, 1]), vec![1, 4]).unwrap(),
+        );
+        let t = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![1, 4]).unwrap(),
+        );
+        let Value::Struct(info) =
+            block_on(stepinfo_builtin(y, vec![t, Value::Num(1.0)])).expect("stepinfo")
+        else {
+            panic!("expected struct");
+        };
+        assert!(
+            matches!(info.fields.get("SteadyStateValue"), Some(Value::Num(v)) if (*v - 1.0).abs() < 1.0e-12)
         );
         assert!(matches!(info.fields.get("Overshoot"), Some(Value::Num(v)) if v.abs() < 1.0e-12));
     }
