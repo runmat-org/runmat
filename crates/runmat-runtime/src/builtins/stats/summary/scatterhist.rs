@@ -4,7 +4,7 @@ use glam::Vec4;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ResolveContext, Tensor, Type, Value,
+    CellArray, IntValue, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{
@@ -292,7 +292,7 @@ fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
     if tensor.shape.iter().copied().filter(|dim| *dim > 1).count() > 1 {
         return Err(invalid(format!("scatterhist: {name} must be a vector")));
     }
-    Ok(tensor.data)
+    Ok(tensor_values_f64(&tensor))
 }
 
 fn parse_options(args: Vec<Value>, observation_count: usize) -> BuiltinResult<ScatterhistOptions> {
@@ -338,7 +338,17 @@ fn parse_options(args: Vec<Value>, observation_count: usize) -> BuiltinResult<Sc
 fn parse_bins(value: &Value) -> BuiltinResult<[usize; 2]> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| invalid("scatterhist: NBins must be numeric"))?;
-    match tensor.data.as_slice() {
+    if let Some(values) = integer_values(&tensor) {
+        return match values.as_slice() {
+            [n] => Ok([bin_count_integer(n)?, bin_count_integer(n)?]),
+            [nx, ny] => Ok([bin_count_integer(nx)?, bin_count_integer(ny)?]),
+            _ => Err(invalid(
+                "scatterhist: NBins must be a scalar or two-element vector",
+            )),
+        };
+    }
+    let values = tensor_values_f64(&tensor);
+    match values.as_slice() {
         [n] => Ok([bin_count(*n)?, bin_count(*n)?]),
         [nx, ny] => Ok([bin_count(*nx)?, bin_count(*ny)?]),
         _ => Err(invalid(
@@ -362,20 +372,40 @@ fn bin_count(value: f64) -> BuiltinResult<usize> {
     Ok(value)
 }
 
+fn bin_count_integer(value: &IntValue) -> BuiltinResult<usize> {
+    let Some(value) = value.try_to_usize() else {
+        return Err(invalid(
+            "scatterhist: NBins entries must be integers greater than or equal to 2",
+        ));
+    };
+    if value < 2 {
+        return Err(invalid(
+            "scatterhist: NBins entries must be integers greater than or equal to 2",
+        ));
+    }
+    if value > MAX_BINS {
+        return Err(invalid(format!(
+            "scatterhist: NBins entries must be no greater than {MAX_BINS}"
+        )));
+    }
+    Ok(value)
+}
+
 fn parse_bandwidth_cycle(value: &Value) -> BuiltinResult<Vec<[f64; 2]>> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| invalid("scatterhist: Bandwidth must be numeric"))?;
+    let values = tensor_values_f64(&tensor);
     if tensor.rows > 0 && tensor.cols == 2 {
         let mut bandwidths = Vec::with_capacity(tensor.rows);
         for row in 0..tensor.rows {
             bandwidths.push([
-                bandwidth_value(tensor.data[row])?,
-                bandwidth_value(tensor.data[tensor.rows + row])?,
+                bandwidth_value(values[row])?,
+                bandwidth_value(values[tensor.rows + row])?,
             ]);
         }
         return Ok(bandwidths);
     }
-    match tensor.data.as_slice() {
+    match values.as_slice() {
         [bw] => {
             let bw = bandwidth_value(*bw)?;
             Ok(vec![[bw, bw]])
@@ -397,9 +427,9 @@ fn bandwidth_value(value: f64) -> BuiltinResult<f64> {
 fn nonnegative_scalar_cycle(value: &Value, name: &str) -> BuiltinResult<Vec<f32>> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| invalid(format!("scatterhist: {name} must be numeric")))?;
-    if tensor.data.is_empty()
-        || tensor
-            .data
+    let values = tensor_values_f64(&tensor);
+    if values.is_empty()
+        || values
             .iter()
             .any(|value| !value.is_finite() || *value < 0.0)
     {
@@ -407,7 +437,7 @@ fn nonnegative_scalar_cycle(value: &Value, name: &str) -> BuiltinResult<Vec<f32>
             "scatterhist: {name} values must be nonnegative"
         )));
     }
-    Ok(tensor.data.iter().map(|value| *value as f32).collect())
+    Ok(values.iter().map(|value| *value as f32).collect())
 }
 
 fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
@@ -426,6 +456,16 @@ fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
         return Err(invalid(format!(
             "scatterhist: {name} must be a logical scalar"
         )));
+    }
+    if let Some(value) = tensor
+        .integer_storage()
+        .and_then(|storage| storage.value_at(0))
+    {
+        return match value.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(invalid(format!("scatterhist: {name} must be 0 or 1"))),
+        };
     }
     match tensor.data[0] {
         0.0 => Ok(false),
@@ -621,23 +661,20 @@ fn parse_color_cycle(value: &Value) -> BuiltinResult<Vec<Vec4>> {
         _ => {
             let tensor = tensor::value_to_tensor(value)
                 .map_err(|_| invalid("scatterhist: Color must be text or an RGB matrix"))?;
+            let values = tensor_values_f64(&tensor);
             if tensor.rows > 0 && tensor.cols == 3 {
                 let mut colors = Vec::with_capacity(tensor.rows);
                 for row in 0..tensor.rows {
                     colors.push(rgb_color(
-                        tensor.data[row],
-                        tensor.data[tensor.rows + row],
-                        tensor.data[2 * tensor.rows + row],
+                        values[row],
+                        values[tensor.rows + row],
+                        values[2 * tensor.rows + row],
                     )?);
                 }
                 return Ok(colors);
             }
-            if tensor.data.len() == 3 {
-                return Ok(vec![rgb_color(
-                    tensor.data[0],
-                    tensor.data[1],
-                    tensor.data[2],
-                )?]);
+            if values.len() == 3 {
+                return Ok(vec![rgb_color(values[0], values[1], values[2])?]);
             }
             Err(invalid(
                 "scatterhist: Color must be a color token, RGB triplet, or n-by-3 RGB matrix",
@@ -713,11 +750,20 @@ fn parse_parent(value: &Value) -> BuiltinResult<FigureHandle> {
 
 fn group_labels(value: &Value, expected_len: usize) -> BuiltinResult<Vec<Option<String>>> {
     match value {
-        Value::Tensor(tensor) if tensor.data.len() == expected_len => Ok(tensor
-            .data
-            .iter()
-            .map(|value| value.is_finite().then(|| number_label(*value)))
-            .collect()),
+        Value::Tensor(tensor) if tensor.data.len() == expected_len => {
+            if let Some(storage) = tensor.integer_storage() {
+                return Ok(storage
+                    .exact_values()
+                    .into_iter()
+                    .map(|value| Some(integer_label(&value)))
+                    .collect());
+            }
+            Ok(tensor
+                .data
+                .iter()
+                .map(|value| value.is_finite().then(|| number_label(*value)))
+                .collect())
+        }
         Value::StringArray(array) if array.data.len() == expected_len => {
             Ok(array.data.iter().map(|s| Some(s.clone())).collect())
         }
@@ -755,7 +801,7 @@ fn group_labels_from_cell(
         .iter()
         .map(|value| match value {
             Value::Num(value) => Ok(value.is_finite().then(|| number_label(*value))),
-            Value::Int(value) => Ok(Some(number_label(value.to_f64()))),
+            Value::Int(value) => Ok(Some(integer_label(value))),
             Value::String(value) => Ok(Some(value.clone())),
             Value::CharArray(chars) => Ok(Some(chars.data.iter().collect())),
             Value::StringArray(array) if array.data.len() == 1 => Ok(Some(array.data[0].clone())),
@@ -770,6 +816,38 @@ fn number_label(value: f64) -> String {
     } else {
         value.to_string()
     }
+}
+
+fn integer_label(value: &IntValue) -> String {
+    match value {
+        IntValue::I8(value) => value.to_string(),
+        IntValue::I16(value) => value.to_string(),
+        IntValue::I32(value) => value.to_string(),
+        IntValue::I64(value) => value.to_string(),
+        IntValue::U8(value) => value.to_string(),
+        IntValue::U16(value) => value.to_string(),
+        IntValue::U32(value) => value.to_string(),
+        IntValue::U64(value) => value.to_string(),
+    }
+}
+
+fn integer_values(tensor: &Tensor) -> Option<Vec<IntValue>> {
+    tensor
+        .integer_storage()
+        .map(|storage| storage.exact_values())
+}
+
+fn tensor_values_f64(tensor: &Tensor) -> Vec<f64> {
+    tensor
+        .integer_storage()
+        .map(|storage| {
+            storage
+                .exact_values()
+                .into_iter()
+                .map(|value| value.to_f64())
+                .collect()
+        })
+        .unwrap_or_else(|| tensor.data.clone())
 }
 
 fn grouped_series(
@@ -1329,11 +1407,114 @@ mod tests {
     use crate::builtins::plotting::state::{current_figure_handle, decode_axes_handle};
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clone_figure, reset_hold_state_for_run};
-    use runmat_builtins::{CellArray, StringArray};
+    use runmat_builtins::{CellArray, IntegerStorage, StringArray};
     use runmat_plot::plots::PlotElement;
 
     fn vec_tensor(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
+    }
+
+    #[test]
+    fn scatterhist_numeric_parsers_read_typed_integer_storage_exactly() {
+        let wide = u64::MAX - 1;
+        assert_eq!(
+            numeric_vector(
+                int_tensor(IntegerStorage::U64(vec![wide, wide - 1]), vec![2, 1]),
+                "x",
+            )
+            .unwrap(),
+            vec![
+                IntValue::U64(wide).to_f64(),
+                IntValue::U64(wide - 1).to_f64()
+            ]
+        );
+        assert_eq!(
+            parse_bins(&int_tensor(IntegerStorage::U16(vec![12, 8]), vec![1, 2])).unwrap(),
+            [12, 8]
+        );
+        assert!(option_bool(
+            &int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+            "Legend",
+        )
+        .unwrap());
+        assert_eq!(
+            nonnegative_scalar_cycle(
+                &int_tensor(IntegerStorage::U16(vec![4, 5]), vec![1, 2]),
+                "MarkerSize",
+            )
+            .unwrap(),
+            vec![4.0, 5.0]
+        );
+        assert_eq!(
+            group_labels(
+                &int_tensor(IntegerStorage::U64(vec![wide, wide - 1]), vec![2, 1]),
+                2,
+            )
+            .unwrap(),
+            vec![Some(wide.to_string()), Some((wide - 1).to_string())]
+        );
+    }
+
+    #[test]
+    fn scatterhist_rejects_invalid_typed_integer_options() {
+        let err = parse_bins(&int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1])).unwrap_err();
+        assert!(
+            err.message.contains("greater than or equal to 2"),
+            "{}",
+            err.message
+        );
+
+        let err = option_bool(
+            &int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+            "Legend",
+        )
+        .unwrap_err();
+        assert!(err.message.contains("0 or 1"), "{}", err.message);
+    }
+
+    #[test]
+    fn scatterhist_accepts_typed_integer_data_and_options() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+
+        let _ = futures::executor::block_on(scatterhist_builtin(vec![
+            int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), vec![4, 1]),
+            int_tensor(IntegerStorage::I16(vec![3, 2, 1, 0]), vec![4, 1]),
+            Value::String("NBins".into()),
+            int_tensor(IntegerStorage::U16(vec![2, 2]), vec![1, 2]),
+            Value::String("Group".into()),
+            int_tensor(IntegerStorage::U8(vec![1, 2, 1, 2]), vec![4, 1]),
+            Value::String("MarkerSize".into()),
+            int_tensor(IntegerStorage::U16(vec![4, 5]), vec![1, 2]),
+            Value::String("LineWidth".into()),
+            int_tensor(IntegerStorage::U16(vec![2, 3]), vec![1, 2]),
+            Value::String("Color".into()),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U8(vec![1, 0, 0, 0, 1, 0]), vec![2, 3])
+                    .unwrap(),
+            ),
+            Value::String("Legend".into()),
+            int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+        ]))
+        .unwrap();
+
+        let figure = clone_figure(current_figure_handle()).unwrap();
+        let scatter_plots = figure
+            .plots()
+            .filter_map(|plot| match plot {
+                PlotElement::Scatter(scatter) => Some(scatter),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(scatter_plots.len(), 2);
+        assert_eq!(scatter_plots[0].marker_size, 4.0);
+        assert_eq!(scatter_plots[1].marker_size, 5.0);
+        assert!(figure.axes_metadata(1).unwrap().legend_enabled);
     }
 
     #[test]
