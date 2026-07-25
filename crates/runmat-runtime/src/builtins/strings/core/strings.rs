@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, StringArray, Tensor, Value,
+    IntValue, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -382,9 +382,7 @@ fn parse_single_argument(value: Value) -> BuiltinResult<Vec<usize>> {
 
 fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(iv) => iv
-            .try_to_usize()
-            .ok_or_else(|| strings_error(&STRINGS_ERROR_INVALID_SIZE)),
+        Value::Int(iv) => parse_integer_dimension(iv),
         Value::Num(n) => parse_numeric_dimension(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
@@ -394,7 +392,10 @@ fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
                     &STRINGS_ERROR_INVALID_SIZE,
                 ));
             }
-            parse_numeric_dimension(t.data[0])
+            match t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                Some(value) => parse_integer_dimension(&value),
+                None => parse_numeric_dimension(t.data[0]),
+            }
         }
         Value::LogicalArray(arr) => {
             if arr.data.len() != 1 {
@@ -418,6 +419,16 @@ fn parse_size_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
             format!("{FN_NAME}: size vector must be a row or column vector"),
             &STRINGS_ERROR_INVALID_SIZE,
         ));
+    }
+    if let Some(storage) = tensor.integer_storage() {
+        return (0..storage.len())
+            .map(|index| {
+                let value = storage
+                    .value_at(index)
+                    .expect("integer tensor storage length matches tensor data");
+                parse_integer_dimension(&value)
+            })
+            .collect();
     }
     tensor
         .data
@@ -463,6 +474,12 @@ fn parse_numeric_dimension(value: f64) -> BuiltinResult<usize> {
     Ok(rounded as usize)
 }
 
+fn parse_integer_dimension(value: &IntValue) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .ok_or_else(|| strings_error(&STRINGS_ERROR_INVALID_SIZE))
+}
+
 fn normalize_dims(dims: Vec<usize>) -> Vec<usize> {
     match dims.len() {
         0 => vec![0, 0],
@@ -488,7 +505,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Type};
 
     fn strings_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strings_builtin(rest))
@@ -554,6 +571,50 @@ pub(crate) mod tests {
             }
             other => panic!("expected string array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn strings_typed_integer_size_vector_preserves_large_uint64_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let dims =
+            Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).expect("dims");
+        let result = strings_builtin(vec![Value::Tensor(dims)]).expect("strings");
+        match result {
+            Value::StringArray(array) => {
+                assert_eq!(array.shape, vec![large as usize, 0]);
+                assert!(array.data.is_empty());
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn strings_typed_integer_scalar_tensor_parser_is_exact() {
+        let large = 9_007_199_254_740_993_u64;
+        let scalar =
+            Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("scalar");
+        assert_eq!(
+            parse_size_scalar(&Value::Tensor(scalar)).expect("parse scalar"),
+            large as usize
+        );
+
+        let vector =
+            Tensor::new_integer(IntegerStorage::U64(vec![large, 1]), vec![1, 2]).expect("vector");
+        assert_eq!(
+            parse_size_tensor(&vector).expect("parse vector"),
+            vec![large as usize, 1]
+        );
+    }
+
+    #[test]
+    fn strings_typed_integer_tensor_dimensions_reject_negative_values() {
+        let scalar =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative");
+        assert!(parse_size_scalar(&Value::Tensor(scalar)).is_err());
+
+        let vector =
+            Tensor::new_integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]).expect("vector");
+        assert!(parse_size_tensor(&vector).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
