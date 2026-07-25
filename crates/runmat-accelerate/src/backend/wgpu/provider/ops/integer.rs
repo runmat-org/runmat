@@ -141,7 +141,7 @@ impl WgpuProvider {
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
         ensure!(
-            op <= 2,
+            op <= 3,
             "{operation_name}: unsupported integer arithmetic opcode"
         );
         let entry_a = self.get_entry_raw(a)?;

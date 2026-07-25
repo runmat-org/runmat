@@ -1297,6 +1297,9 @@ impl WgpuProvider {
                 crate::backend::wgpu::types::BinaryOpCode::Mul => {
                     self.integer_arithmetic_exec(2, "elem_mul", a, b)
                 }
+                crate::backend::wgpu::types::BinaryOpCode::Div => {
+                    self.integer_arithmetic_exec(3, "elem_div", a, b)
+                }
                 crate::backend::wgpu::types::BinaryOpCode::Min => {
                     self.integer_minmax_exec(true, "elem_min", a, b)
                 }
@@ -2294,7 +2297,7 @@ mod tests {
     use super::*;
     use runmat_accelerate_api::{
         AccelProvider, GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView,
-        HostIntegerTensorView, HostTensorView,
+        HostIntegerTensorView, HostTensorView, IntegerElementType,
     };
 
     async fn complex_pair(
@@ -2714,7 +2717,8 @@ mod tests {
                 .elem_mul(&lhs, &rhs)
                 .await
                 .expect("integer multiply");
-            for handle in [&add, &subtract, &multiply] {
+            let divide = provider.elem_div(&lhs, &rhs).await.expect("integer divide");
+            for handle in [&add, &subtract, &multiply, &divide] {
                 assert_eq!(
                     runmat_accelerate_api::handle_integer_type(handle),
                     Some(integer_type)
@@ -2744,7 +2748,33 @@ mod tests {
                     .data,
                 expected_multiply
             );
-            for handle in [&lhs, &rhs, &add, &subtract, &multiply] {
+            let expected_divide = match integer_type {
+                IntegerElementType::I8 => HostIntegerDataOwned::I8(vec![127, -128, 0, 0, 127]),
+                IntegerElementType::I16 => {
+                    HostIntegerDataOwned::I16(vec![i16::MAX, i16::MIN, 0, 0, i16::MAX])
+                }
+                IntegerElementType::I32 => {
+                    HostIntegerDataOwned::I32(vec![i32::MAX, i32::MIN, 0, 0, i32::MAX])
+                }
+                IntegerElementType::I64 => {
+                    HostIntegerDataOwned::I64(vec![i64::MAX, i64::MIN, 0, 0, i64::MAX])
+                }
+                IntegerElementType::U8 => HostIntegerDataOwned::U8(vec![u8::MAX, 0, 0, 0, 0]),
+                IntegerElementType::U16 => HostIntegerDataOwned::U16(vec![u16::MAX, 0, 0, 0, 0]),
+                IntegerElementType::U32 => HostIntegerDataOwned::U32(vec![u32::MAX, 0, 0, 0, 0]),
+                IntegerElementType::U64 => {
+                    HostIntegerDataOwned::U64(vec![u64::MAX, 0, 0, 0x0000_0000_8000_0001, 0])
+                }
+            };
+            assert_eq!(
+                provider
+                    .download_integer(&divide)
+                    .await
+                    .expect("download divide")
+                    .data,
+                expected_divide
+            );
+            for handle in [&lhs, &rhs, &add, &subtract, &multiply, &divide] {
                 provider.free(handle).expect("free arithmetic handle");
             }
         }
@@ -2775,6 +2805,64 @@ mod tests {
         assert!(error.to_string().contains("same class"));
         provider.free(&signed).expect("free signed handle");
         provider.free(&unsigned).expect("free unsigned handle");
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_division_rounds_and_saturates_boundaries() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [1, 4];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[3, -3, 5, i8::MIN]),
+                HostIntegerDataView::I8(&[2, 2, 0, -1]),
+                HostIntegerDataOwned::I8(vec![2, -2, i8::MAX, i8::MAX]),
+            ),
+            (
+                HostIntegerDataView::I64(&[3, -3, 5, i64::MIN]),
+                HostIntegerDataView::I64(&[2, 2, 0, -1]),
+                HostIntegerDataOwned::I64(vec![2, -2, i64::MAX, i64::MAX]),
+            ),
+            (
+                HostIntegerDataView::U8(&[3, 5, 0, u8::MAX]),
+                HostIntegerDataView::U8(&[2, 0, 0, 0]),
+                HostIntegerDataOwned::U8(vec![2, u8::MAX, 0, u8::MAX]),
+            ),
+            (
+                HostIntegerDataView::U64(&[3, 5, 0, u64::MAX]),
+                HostIntegerDataView::U64(&[2, 0, 0, 0]),
+                HostIntegerDataOwned::U64(vec![2, u64::MAX, 0, u64::MAX]),
+            ),
+        ];
+
+        for (left, right, expected) in cases {
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &shape,
+                })
+                .expect("upload lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &shape,
+                })
+                .expect("upload rhs");
+            let quotient = provider
+                .elem_div(&lhs, &rhs)
+                .await
+                .expect("integer division");
+            let downloaded = provider
+                .download_integer(&quotient)
+                .await
+                .expect("download integer division");
+            assert_eq!(downloaded.shape, vec![1, 4]);
+            assert_eq!(downloaded.data, expected);
+            for handle in [&lhs, &rhs, &quotient] {
+                provider.free(handle).expect("free division handle");
+            }
+        }
     }
 
     #[tokio::test]
@@ -2865,10 +2953,25 @@ mod tests {
                 .elem_mul(&lhs, &rhs)
                 .await
                 .expect("broadcast multiply");
+            let divide = provider
+                .elem_div(&lhs, &rhs)
+                .await
+                .expect("broadcast divide");
+            let expected_divide = match left.element_type() {
+                IntegerElementType::I8 => HostIntegerDataOwned::I8(vec![2, -2, 1, -1, 1, -1]),
+                IntegerElementType::I16 => HostIntegerDataOwned::I16(vec![2, -2, 1, -1, 1, -1]),
+                IntegerElementType::I32 => HostIntegerDataOwned::I32(vec![2, -2, 1, -1, 1, -1]),
+                IntegerElementType::I64 => HostIntegerDataOwned::I64(vec![2, -2, 1, -1, 1, -1]),
+                IntegerElementType::U8 => HostIntegerDataOwned::U8(vec![2, 4, 1, 2, 1, 1]),
+                IntegerElementType::U16 => HostIntegerDataOwned::U16(vec![2, 4, 1, 2, 1, 1]),
+                IntegerElementType::U32 => HostIntegerDataOwned::U32(vec![2, 4, 1, 2, 1, 1]),
+                IntegerElementType::U64 => HostIntegerDataOwned::U64(vec![2, 4, 1, 2, 1, 1]),
+            };
             for (handle, expected) in [
                 (&add, expected_add),
                 (&subtract, expected_subtract),
                 (&multiply, expected_multiply),
+                (&divide, expected_divide),
             ] {
                 let downloaded = provider
                     .download_integer(handle)
@@ -2877,7 +2980,7 @@ mod tests {
                 assert_eq!(downloaded.shape, vec![2, 3]);
                 assert_eq!(downloaded.data, expected);
             }
-            for handle in [&lhs, &rhs, &add, &subtract, &multiply] {
+            for handle in [&lhs, &rhs, &add, &subtract, &multiply, &divide] {
                 provider.free(handle).expect("free broadcast handle");
             }
         }

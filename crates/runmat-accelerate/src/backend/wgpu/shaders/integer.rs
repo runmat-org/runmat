@@ -351,6 +351,38 @@ fn multiply_signed32(a: i32, b: i32, min_bits: u32, max_bits: u32) -> u32 {
     if (hi != 0u || lo > limit) { return select(max_bits, min_bits, negative); }
     return select(lo, 0u - lo, negative);
 }
+fn divide_unsigned32(a: u32, b: u32, maxv: u32) -> u32 {
+    if (b == 0u) {
+        return select(0u, maxv, a != 0u);
+    }
+    var quotient = a / b;
+    let remainder = a % b;
+    if (remainder >= b - remainder) {
+        quotient = min(quotient + 1u, maxv);
+    }
+    return quotient;
+}
+fn divide_signed32(a: i32, b: i32, min_bits: u32, max_bits: u32) -> u32 {
+    if (b == 0) {
+        if (a < 0) { return min_bits; }
+        if (a > 0) { return max_bits; }
+        return 0u;
+    }
+    let negative = (a < 0) != (b < 0);
+    let a_bits = bitcast<u32>(a);
+    let b_bits = bitcast<u32>(b);
+    let a_abs = select(a_bits, 0u - a_bits, a < 0);
+    let b_abs = select(b_bits, 0u - b_bits, b < 0);
+    var quotient = a_abs / b_abs;
+    let remainder = a_abs % b_abs;
+    if (remainder >= b_abs - remainder) { quotient = quotient + 1u; }
+    if (negative) {
+        if (quotient > min_bits) { return min_bits; }
+        return 0u - quotient;
+    }
+    if (quotient > max_bits) { return max_bits; }
+    return quotient;
+}
 fn add_with_carry(a: u32, b: u32, carry: u32) -> vec2<u32> {
     let first = a + b;
     let second = first + carry;
@@ -374,6 +406,90 @@ fn multiply_unsigned64(a0: u32, a1: u32, b0: u32, b1: u32) -> vec4<u32> {
 fn negate64(lo: u32, hi: u32) -> vec2<u32> {
     let neg_lo = 0u - lo;
     return vec2<u32>(neg_lo, ~hi + select(0u, 1u, neg_lo == 0u));
+}
+fn ge64(a0: u32, a1: u32, b0: u32, b1: u32) -> bool {
+    return a1 > b1 || (a1 == b1 && a0 >= b0);
+}
+fn sub64(a0: u32, a1: u32, b0: u32, b1: u32) -> vec2<u32> {
+    let borrow = select(0u, 1u, a0 < b0);
+    return vec2<u32>(a0 - b0, a1 - b1 - borrow);
+}
+fn increment64(lo: u32, hi: u32) -> vec2<u32> {
+    let out_lo = lo + 1u;
+    return vec2<u32>(out_lo, hi + select(0u, 1u, out_lo == 0u));
+}
+fn divmod64(n0: u32, n1: u32, d0: u32, d1: u32) -> vec4<u32> {
+    var q0 = 0u;
+    var q1 = 0u;
+    var r0 = 0u;
+    var r1 = 0u;
+    var bit = 64u;
+    loop {
+        if (bit == 0u) { break; }
+        bit = bit - 1u;
+        var input_bit = 0u;
+        if (bit >= 32u) { input_bit = (n1 >> (bit - 32u)) & 1u; }
+        else { input_bit = (n0 >> bit) & 1u; }
+        let carry = r0 >> 31u;
+        r0 = (r0 << 1u) | input_bit;
+        r1 = (r1 << 1u) | carry;
+        if (ge64(r0, r1, d0, d1)) {
+            let remainder = sub64(r0, r1, d0, d1);
+            r0 = remainder.x;
+            r1 = remainder.y;
+            if (bit >= 32u) { q1 = q1 | (1u << (bit - 32u)); }
+            else { q0 = q0 | (1u << bit); }
+        }
+    }
+    return vec4<u32>(q0, q1, r0, r1);
+}
+fn should_round64(r0: u32, r1: u32, d0: u32, d1: u32) -> bool {
+    let complement = sub64(d0, d1, r0, r1);
+    return ge64(r0, r1, complement.x, complement.y);
+}
+fn write_divide64(lane: u32, a0: u32, a1: u32, b0: u32, b1: u32, is_signed: bool) {
+    if (b0 == 0u && b1 == 0u) {
+        if (!is_signed) {
+            let nonzero = a0 != 0u || a1 != 0u;
+            Out.data[lane] = select(0u, 0xffffffffu, nonzero);
+            Out.data[lane + 1u] = select(0u, 0xffffffffu, nonzero);
+            return;
+        }
+        let negative = bitcast<i32>(a1) < 0;
+        let nonzero = a0 != 0u || a1 != 0u;
+        if (negative) { Out.data[lane] = 0u; Out.data[lane + 1u] = 0x80000000u; }
+        else if (nonzero) { Out.data[lane] = 0xffffffffu; Out.data[lane + 1u] = 0x7fffffffu; }
+        else { Out.data[lane] = 0u; Out.data[lane + 1u] = 0u; }
+        return;
+    }
+    let a_negative = is_signed && bitcast<i32>(a1) < 0;
+    let b_negative = is_signed && bitcast<i32>(b1) < 0;
+    let negative = a_negative != b_negative;
+    let magnitude_a = select(vec2<u32>(a0, a1), negate64(a0, a1), a_negative);
+    let magnitude_b = select(vec2<u32>(b0, b1), negate64(b0, b1), b_negative);
+    var division = divmod64(magnitude_a.x, magnitude_a.y, magnitude_b.x, magnitude_b.y);
+    if (should_round64(division.z, division.w, magnitude_b.x, magnitude_b.y)) {
+        let incremented = increment64(division.x, division.y);
+        division.x = incremented.x;
+        division.y = incremented.y;
+    }
+    if (!is_signed) {
+        Out.data[lane] = division.x;
+        Out.data[lane + 1u] = division.y;
+        return;
+    }
+    if (negative) {
+        if (division.y > 0x80000000u || (division.y == 0x80000000u && division.x != 0u)) {
+            Out.data[lane] = 0u; Out.data[lane + 1u] = 0x80000000u;
+        } else {
+            let result = negate64(division.x, division.y);
+            Out.data[lane] = result.x; Out.data[lane + 1u] = result.y;
+        }
+    } else if (division.y > 0x7fffffffu) {
+        Out.data[lane] = 0xffffffffu; Out.data[lane + 1u] = 0x7fffffffu;
+    } else {
+        Out.data[lane] = division.x; Out.data[lane + 1u] = division.y;
+    }
 }
 fn multiply_signed64(a0: u32, a1: u32, b0: u32, b1: u32) -> vec2<u32> {
     let a_negative = bitcast<i32>(a1) < 0;
@@ -483,14 +599,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let b_lane = b_index * lanes;
     let a = A.data[a_lane]; let b = B.data[b_lane];
     switch params.integer_type {
-        case 0u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx8(a), sx8(b), 0x80u, 0x7fu); } else { Out.data[lane] = bitcast<u32>(signed_narrow(sx8(a), sx8(b), -128, 127)); } }
-        case 1u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx16(a), sx16(b), 0x8000u, 0x7fffu); } else { Out.data[lane] = bitcast<u32>(signed_narrow(sx16(a), sx16(b), -32768, 32767)); } }
-        case 2u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(bitcast<i32>(a), bitcast<i32>(b), 0x80000000u, 0x7fffffffu); } else { Out.data[lane] = bitcast<u32>(signed32(bitcast<i32>(a), bitcast<i32>(b), -2147483648, 2147483647)); } }
-        case 3u: { if (params.op == 2u) { write_multiply64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } else { write64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } }
-        case 4u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a & 0xffu, b & 0xffu, 0xffu); } else { Out.data[lane] = min(unsigned32(a & 0xffu, b & 0xffu, 0xffu), 0xffu); } }
-        case 5u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu); } else { Out.data[lane] = min(unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu), 0xffffu); } }
-        case 6u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a, b, 0xffffffffu); } else { Out.data[lane] = unsigned32(a, b, 0xffffffffu); } }
-        case 7u: { if (params.op == 2u) { write_multiply64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false); } else { write64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false); } }
+        case 0u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx8(a), sx8(b), 0x80u, 0x7fu); } else if (params.op == 3u) { Out.data[lane] = divide_signed32(sx8(a), sx8(b), 0x80u, 0x7fu); } else { Out.data[lane] = bitcast<u32>(signed_narrow(sx8(a), sx8(b), -128, 127)); } }
+        case 1u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx16(a), sx16(b), 0x8000u, 0x7fffu); } else if (params.op == 3u) { Out.data[lane] = divide_signed32(sx16(a), sx16(b), 0x8000u, 0x7fffu); } else { Out.data[lane] = bitcast<u32>(signed_narrow(sx16(a), sx16(b), -32768, 32767)); } }
+        case 2u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(bitcast<i32>(a), bitcast<i32>(b), 0x80000000u, 0x7fffffffu); } else if (params.op == 3u) { Out.data[lane] = divide_signed32(bitcast<i32>(a), bitcast<i32>(b), 0x80000000u, 0x7fffffffu); } else { Out.data[lane] = bitcast<u32>(signed32(bitcast<i32>(a), bitcast<i32>(b), -2147483648, 2147483647)); } }
+        case 3u: { if (params.op == 2u) { write_multiply64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } else if (params.op == 3u) { write_divide64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } else { write64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } }
+        case 4u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a & 0xffu, b & 0xffu, 0xffu); } else if (params.op == 3u) { Out.data[lane] = divide_unsigned32(a & 0xffu, b & 0xffu, 0xffu); } else { Out.data[lane] = min(unsigned32(a & 0xffu, b & 0xffu, 0xffu), 0xffu); } }
+        case 5u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu); } else if (params.op == 3u) { Out.data[lane] = divide_unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu); } else { Out.data[lane] = min(unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu), 0xffffu); } }
+        case 6u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a, b, 0xffffffffu); } else if (params.op == 3u) { Out.data[lane] = divide_unsigned32(a, b, 0xffffffffu); } else { Out.data[lane] = unsigned32(a, b, 0xffffffffu); } }
+        case 7u: { if (params.op == 2u) { write_multiply64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false); } else if (params.op == 3u) { write_divide64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false); } else { write64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false); } }
         default: {}
     }
 }
