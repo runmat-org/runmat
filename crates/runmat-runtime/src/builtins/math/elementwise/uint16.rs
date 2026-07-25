@@ -9,10 +9,9 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
-    gpu_helpers,
     spec::{
         BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-        ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+        ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
     },
     tensor,
 };
@@ -87,14 +86,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Elementwise,
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[],
+    provider_hooks: &[ProviderHook::Custom("cast_to_integer")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "No provider-native uint16 storage hook exists yet; gpuArray inputs gather and return an exact host uint16 tensor rather than silently re-uploading an f64 compatibility view.",
+    notes: "Real gpuArray inputs use the provider resident integer-cast hook and return native uint16 gpuArray storage. Complex gpuArray integer casts remain unsupported until typed complex integer provider storage exists.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::uint16")]
@@ -106,7 +105,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     reduction: None,
     emits_nan: false,
     notes:
-        "Runs outside fusion today because integer storage remains host-represented in f64 buffers.",
+        "Resident integer cast uses provider-native integer storage; fusion can target the provider hook when integer buffers are supported.",
 };
 
 fn uint16_error_with_detail(
@@ -218,14 +217,17 @@ fn uint16_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
 }
 
 async fn uint16_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let converted = uint16_tensor_to_host(
-        gpu_helpers::gather_tensor_async(&handle)
-            .await
-            .map_err(|e| uint16_error_with_detail(&UINT16_ERROR_INTERNAL, e))?,
-    )
-    .map_err(|e| uint16_error_with_detail(&UINT16_ERROR_INTERNAL, e))?;
-
-    Ok(uint16_value_from_tensor(converted))
+    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+        uint16_error_with_detail(
+            &UINT16_ERROR_INTERNAL,
+            "no acceleration provider registered",
+        )
+    })?;
+    provider
+        .cast_to_integer(&handle, runmat_accelerate_api::IntegerElementType::U16)
+        .await
+        .map(Value::GpuTensor)
+        .map_err(|e| uint16_error_with_detail(&UINT16_ERROR_INTERNAL, e))
 }
 
 fn uint16_tensor_to_host(tensor: Tensor) -> Result<Tensor, String> {
@@ -260,7 +262,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{HostIntegerDataOwned, HostTensorView, IntegerElementType};
     use runmat_builtins::{ResolveContext, SymbolicExpr, Type};
 
     fn uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -397,17 +399,20 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let result = uint16_builtin(Value::GpuTensor(handle), Vec::new()).expect("uint16");
-            match result {
-                Value::Tensor(tensor) => {
-                    assert_eq!(tensor.shape, vec![3, 1]);
-                    assert_eq!(tensor.data, vec![0.0, 4.0, u16::MAX as f64]);
-                    assert_eq!(
-                        tensor.integer_storage(),
-                        Some(&IntegerStorage::U16(vec![0, 4, u16::MAX]))
-                    );
-                }
-                other => panic!("expected exact host tensor, got {other:?}"),
-            }
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected resident gpuArray result");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(IntegerElementType::U16)
+            );
+            assert_eq!(handle.shape, vec![3, 1]);
+            assert_eq!(
+                block_on(provider.download_integer(&handle))
+                    .expect("download uint16 cast")
+                    .data,
+                HostIntegerDataOwned::U16(vec![0, 4, u16::MAX])
+            );
         });
     }
 }
