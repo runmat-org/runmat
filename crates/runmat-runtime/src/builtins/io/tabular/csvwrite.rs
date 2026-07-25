@@ -317,6 +317,15 @@ fn parse_offset(value: &Value, context: &str) -> BuiltinResult<usize> {
                     ),
                 ));
             }
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                return value.try_to_usize().ok_or_else(|| {
+                    csvwrite_error_with(
+                        &CSVWRITE_ERROR_OFFSETS,
+                        format!("csvwrite: {context} must be >= 0"),
+                    )
+                });
+            }
             coerce_offset_from_float(t.data[0], context)
         }
         Value::LogicalArray(logical) => {
@@ -555,7 +564,7 @@ pub(crate) mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LogicalArray};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray};
 
     use crate::builtins::common::fs as fs_helpers;
     use crate::builtins::common::test_support;
@@ -692,6 +701,29 @@ pub(crate) mod tests {
             message.contains("row offset"),
             "unexpected error message: {message}"
         );
+    }
+
+    #[test]
+    fn csvwrite_offset_parser_preserves_typed_integer_tensor_bounds() {
+        let offset =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed offset");
+        assert_eq!(
+            parse_offset(&Value::Tensor(offset), "row offset").unwrap(),
+            7
+        );
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative");
+        assert!(parse_offset(&Value::Tensor(negative), "row offset").is_err());
+
+        let too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("too large");
+        let parsed = parse_offset(&Value::Tensor(too_large), "row offset");
+        if usize::try_from(u64::MAX).is_ok() {
+            assert_eq!(parsed.unwrap(), usize::MAX);
+        } else {
+            assert!(parsed.is_err());
+        }
     }
 
     #[cfg(feature = "wgpu")]

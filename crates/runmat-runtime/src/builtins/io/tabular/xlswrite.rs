@@ -7,7 +7,8 @@ use calamine::{open_workbook_auto_from_rs, Data as SpreadsheetData, Reader as Sp
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, SparseTensor, StringArray, StructValue, Tensor, Value,
+    CellArray, CharArray, IntValue, LogicalArray, SparseTensor, StringArray, StructValue, Tensor,
+    Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -447,26 +448,18 @@ fn parse_sheet_selector(value: &Value) -> BuiltinResult<SheetSelector> {
     match value {
         Value::Num(n) => numeric_sheet_index(*n),
         Value::Int(i) => {
-            let index = i
-                .try_to_usize()
-                .and_then(|index| index.checked_sub(1))
-                .ok_or_else(|| {
-                    xlswrite_error_with(
-                        &XLSWRITE_ERROR_SHEET,
-                        "xlswrite: sheet index must be one-based",
-                    )
-                })?;
-            if index >= MAX_XLSWRITE_SHEETS {
-                return Err(xlswrite_error_with(
-                    &XLSWRITE_ERROR_SHEET,
-                    format!(
-                        "xlswrite: sheet index exceeds supported limit of {MAX_XLSWRITE_SHEETS}"
-                    ),
-                ));
-            }
+            let index = integer_sheet_index(i)?;
             Ok(SheetSelector::Index(index))
         }
-        Value::Tensor(t) if t.data.len() == 1 => numeric_sheet_index(t.data[0]),
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                let index = integer_sheet_index(&value)?;
+                Ok(SheetSelector::Index(index))
+            } else {
+                numeric_sheet_index(t.data[0])
+            }
+        }
         _ => {
             let text = value_to_string_scalar(value).map_err(|_| {
                 xlswrite_error_with(
@@ -477,6 +470,25 @@ fn parse_sheet_selector(value: &Value) -> BuiltinResult<SheetSelector> {
             Ok(SheetSelector::Name(nonempty_sheet_name(text.trim())?))
         }
     }
+}
+
+fn integer_sheet_index(value: &IntValue) -> BuiltinResult<usize> {
+    let index = value
+        .try_to_usize()
+        .and_then(|index| index.checked_sub(1))
+        .ok_or_else(|| {
+            xlswrite_error_with(
+                &XLSWRITE_ERROR_SHEET,
+                "xlswrite: sheet index must be one-based",
+            )
+        })?;
+    if index >= MAX_XLSWRITE_SHEETS {
+        return Err(xlswrite_error_with(
+            &XLSWRITE_ERROR_SHEET,
+            format!("xlswrite: sheet index exceeds supported limit of {MAX_XLSWRITE_SHEETS}"),
+        ));
+    }
+    Ok(index)
 }
 
 fn numeric_sheet_index(value: f64) -> BuiltinResult<SheetSelector> {
@@ -1546,7 +1558,7 @@ mod tests {
     use super::*;
     use calamine::{open_workbook_auto, open_workbook_auto_from_rs, Data, Reader};
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, SparseTensor};
+    use runmat_builtins::{IntValue, IntegerStorage, SparseTensor};
     use runmat_time::unix_timestamp_ms;
     use std::fs;
     use std::io::Cursor;
@@ -1868,6 +1880,23 @@ mod tests {
         ))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:xlswrite:Sheet"));
+    }
+
+    #[test]
+    fn xlswrite_sheet_selector_preserves_typed_integer_tensor_bounds() {
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+            .expect("typed sheet tensor");
+        assert!(matches!(
+            parse_sheet_selector(&Value::Tensor(tensor)),
+            Ok(SheetSelector::Index(6))
+        ));
+
+        let too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed sheet tensor");
+        assert!(parse_sheet_selector(&Value::Tensor(too_large)).is_err());
+        let negative =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative");
+        assert!(parse_sheet_selector(&Value::Tensor(negative)).is_err());
     }
 
     #[test]

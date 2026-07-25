@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    IntValue, Tensor, Value,
 };
 use runmat_filesystem::{self as vfs, File, OpenOptions};
 use runmat_macros::runtime_builtin;
@@ -547,6 +547,17 @@ fn is_numeric_scalar(value: &Value) -> bool {
 }
 
 fn parse_offset_value(value: &Value, context: &str) -> BuiltinResult<usize> {
+    match value {
+        Value::Int(value) => return integer_offset_value(value, context),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            if let Some(storage) = tensor.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                return integer_offset_value(&value, context);
+            }
+        }
+        _ => {}
+    }
+
     let scalar = extract_scalar(value).map_err(|e| {
         dlmwrite_error_with(&DLMWRITE_ERROR_OPTION, format!("dlmwrite: {context} {e}"))
     })?;
@@ -572,18 +583,18 @@ fn parse_offset_value(value: &Value, context: &str) -> BuiltinResult<usize> {
     Ok(rounded as usize)
 }
 
+fn integer_offset_value(value: &IntValue, context: &str) -> BuiltinResult<usize> {
+    value.try_to_usize().ok_or_else(|| {
+        dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
+            format!("dlmwrite: {context} must be >= 0"),
+        )
+    })
+}
+
 fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpec> {
     match value {
-        Value::Int(i) => {
-            let digits = i.to_i64();
-            if digits <= 0 {
-                return Err(dlmwrite_error_with(
-                    &DLMWRITE_ERROR_OPTION,
-                    "dlmwrite: precision must be a positive integer",
-                ));
-            }
-            Ok(PrecisionSpec::Significant(digits as u32))
-        }
+        Value::Int(i) => integer_precision_value(i),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(dlmwrite_error_with(
@@ -606,7 +617,14 @@ fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpec> {
             }
             Ok(PrecisionSpec::Significant(rounded as u32))
         }
-        Value::Tensor(t) if t.data.len() == 1 => parse_precision_value(&Value::Num(t.data[0])),
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                integer_precision_value(&value)
+            } else {
+                parse_precision_value(&Value::Num(t.data[0]))
+            }
+        }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             if logical.data[0] != 0 {
                 Ok(PrecisionSpec::Significant(1))
@@ -638,6 +656,22 @@ fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpec> {
             "dlmwrite: precision must be numeric or a format string",
         )),
     }
+}
+
+fn integer_precision_value(value: &IntValue) -> BuiltinResult<PrecisionSpec> {
+    let Some(digits) = value.try_to_u64() else {
+        return Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
+            "dlmwrite: precision must be a positive integer",
+        ));
+    };
+    if digits == 0 || digits > u32::MAX as u64 {
+        return Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
+            "dlmwrite: precision must be a positive integer",
+        ));
+    }
+    Ok(PrecisionSpec::Significant(digits as u32))
 }
 
 fn parse_precision_format(text: &str) -> BuiltinResult<PrecisionSpec> {
@@ -1384,7 +1418,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     use crate::builtins::common::fs as fs_helpers;
 
@@ -1712,6 +1746,32 @@ pub(crate) mod tests {
         );
         assert!(message.to_ascii_lowercase().contains("integer"));
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn dlmwrite_integer_tensor_options_preserve_exact_bounds() {
+        let offset = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("offset");
+        assert_eq!(
+            parse_offset_value(&Value::Tensor(offset), "row offset").unwrap(),
+            7
+        );
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative");
+        assert!(parse_offset_value(&Value::Tensor(negative), "row offset").is_err());
+
+        let precision =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("precision");
+        assert!(matches!(
+            parse_precision_value(&Value::Tensor(precision)),
+            Ok(PrecisionSpec::Significant(7))
+        ));
+        let zero =
+            Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).expect("precision");
+        assert!(parse_precision_value(&Value::Tensor(zero)).is_err());
+        let too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![u32::MAX as u64 + 1]), vec![1, 1])
+                .expect("precision");
+        assert!(parse_precision_value(&Value::Tensor(too_large)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

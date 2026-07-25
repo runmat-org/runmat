@@ -7,7 +7,7 @@ use calamine::{open_workbook_auto_from_rs, Data as SpreadsheetData, Reader as Sp
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    IntValue, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -402,22 +402,33 @@ fn parse_sheet_selector(value: &Value) -> BuiltinResult<SheetSelector> {
             Ok(SheetSelector::Name(trimmed.to_string()))
         }
         Value::Num(n) => numeric_sheet_index(*n),
-        Value::Int(i) => i
-            .try_to_usize()
-            .and_then(|index| index.checked_sub(1))
-            .map(SheetSelector::Index)
-            .ok_or_else(|| {
-                xlsread_error_with(
-                    &XLSREAD_ERROR_SHEET,
-                    "xlsread: sheet index must be one-based",
-                )
-            }),
-        Value::Tensor(t) if t.data.len() == 1 => numeric_sheet_index(t.data[0]),
+        Value::Int(i) => integer_sheet_index(i),
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                integer_sheet_index(&value)
+            } else {
+                numeric_sheet_index(t.data[0])
+            }
+        }
         _ => Err(xlsread_error_with(
             &XLSREAD_ERROR_SHEET,
             "xlsread: sheet must be a name or one-based numeric index",
         )),
     }
+}
+
+fn integer_sheet_index(value: &IntValue) -> BuiltinResult<SheetSelector> {
+    value
+        .try_to_usize()
+        .and_then(|index| index.checked_sub(1))
+        .map(SheetSelector::Index)
+        .ok_or_else(|| {
+            xlsread_error_with(
+                &XLSREAD_ERROR_SHEET,
+                "xlsread: sheet index must be one-based",
+            )
+        })
 }
 
 fn numeric_sheet_index(value: f64) -> BuiltinResult<SheetSelector> {
@@ -1423,7 +1434,7 @@ fn cell_to_raw(cell: &SpreadsheetData) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::IntegerStorage;
 
     #[test]
     fn typed_sheet_selector_does_not_clamp_uint64() {
@@ -1438,6 +1449,28 @@ mod tests {
             None => assert!(selected.is_err()),
         }
         assert!(parse_sheet_selector(&Value::Int(IntValue::I64(-1))).is_err());
+
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+            .expect("typed sheet tensor");
+        assert!(matches!(
+            parse_sheet_selector(&Value::Tensor(tensor)),
+            Ok(SheetSelector::Index(6))
+        ));
+        let too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed sheet tensor");
+        let selected = parse_sheet_selector(&Value::Tensor(too_large));
+        match usize::try_from(u64::MAX)
+            .ok()
+            .and_then(|value| value.checked_sub(1))
+        {
+            Some(index) => {
+                assert!(matches!(selected, Ok(SheetSelector::Index(actual)) if actual == index))
+            }
+            None => assert!(selected.is_err()),
+        }
+        let negative =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative");
+        assert!(parse_sheet_selector(&Value::Tensor(negative)).is_err());
     }
     use futures::executor::block_on;
     use std::fs;

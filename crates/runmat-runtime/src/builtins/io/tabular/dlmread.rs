@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    IntValue, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -572,22 +572,33 @@ fn parse_delimiter(value: &Value) -> BuiltinResult<DelimiterSpec> {
                 ))
             }
         }
-        Value::Int(i) => i.try_to_i64().map_or_else(
-            || {
-                Err(dlmread_error_with(
-                    &DLMREAD_ERROR_DELIMITER,
-                    "dlmread: delimiter code must be within Unicode range",
-                ))
-            },
-            delimiter_from_ascii,
-        ),
+        Value::Int(i) => delimiter_from_integer(i),
         Value::Num(n) => delimiter_from_numeric(*n),
-        Value::Tensor(t) if t.data.len() == 1 => delimiter_from_numeric(t.data[0]),
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                delimiter_from_integer(&value)
+            } else {
+                delimiter_from_numeric(t.data[0])
+            }
+        }
         _ => Err(dlmread_error_with(
             &DLMREAD_ERROR_DELIMITER,
             format!("dlmread: unsupported delimiter value {value:?}"),
         )),
     }
+}
+
+fn delimiter_from_integer(value: &IntValue) -> BuiltinResult<DelimiterSpec> {
+    value.try_to_i64().map_or_else(
+        || {
+            Err(dlmread_error_with(
+                &DLMREAD_ERROR_DELIMITER,
+                "dlmread: delimiter code must be within Unicode range",
+            ))
+        },
+        delimiter_from_ascii,
+    )
 }
 
 fn delimiter_from_numeric(value: f64) -> BuiltinResult<DelimiterSpec> {
@@ -658,7 +669,19 @@ fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<usize> {
                 )
             })
         }
-        Value::Tensor(t) if t.data.len() == 1 => value_to_start_index(&Value::Num(t.data[0]), name),
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                value.try_to_usize().ok_or_else(|| {
+                    dlmread_error_with(
+                        &DLMREAD_ERROR_INDEX,
+                        format!("dlmread: {name} must be a non-negative integer"),
+                    )
+                })
+            } else {
+                value_to_start_index(&Value::Num(t.data[0]), name)
+            }
+        }
         _ => Err(dlmread_error_with(
             &DLMREAD_ERROR_INDEX,
             format!("dlmread: expected numeric scalar for {name}, got {value:?}"),
@@ -1212,7 +1235,7 @@ pub(crate) mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use runmat_builtins::{CharArray, IntValue, Tensor as BuiltinTensor};
+    use runmat_builtins::{CharArray, IntegerStorage, Tensor as BuiltinTensor};
 
     fn dlmread_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::dlmread_builtin(path, rest))
@@ -1395,6 +1418,27 @@ pub(crate) mod tests {
             other => panic!("expected tensor, got {other:?}"),
         }
         fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn dlmread_integer_tensor_parsers_preserve_exact_bounds() {
+        let row = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("row");
+        assert_eq!(value_to_start_index(&Value::Tensor(row), "row").unwrap(), 7);
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative");
+        assert!(value_to_start_index(&Value::Tensor(negative), "row").is_err());
+
+        let comma =
+            Tensor::new_integer(IntegerStorage::U16(vec![44]), vec![1, 1]).expect("delimiter");
+        assert!(matches!(
+            parse_delimiter(&Value::Tensor(comma)),
+            Ok(DelimiterSpec::Char(','))
+        ));
+        let invalid_delimiter =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .expect("delimiter");
+        assert!(parse_delimiter(&Value::Tensor(invalid_delimiter)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
