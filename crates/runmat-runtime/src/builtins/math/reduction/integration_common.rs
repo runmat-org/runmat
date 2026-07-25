@@ -96,7 +96,7 @@ pub(crate) fn is_empty_value(value: &Value) -> bool {
 pub(crate) fn is_scalar_like(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => true,
-        Value::Tensor(t) => t.data.len() == 1,
+        Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(la) => la.data.len() == 1,
         Value::ComplexTensor(t) => t.data.len() == 1,
         Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
@@ -107,7 +107,7 @@ pub(crate) fn is_scalar_like(value: &Value) -> bool {
 pub(crate) fn is_dimension_candidate(value: &Value) -> bool {
     is_empty_value(value)
         || matches!(value, Value::Int(_) | Value::Num(_))
-        || matches!(value, Value::Tensor(t) if t.data.len() == 1)
+        || matches!(value, Value::Tensor(t) if tensor::is_scalar_tensor(t))
 }
 
 pub(crate) fn parse_optional_dim(name: &str, value: &Value) -> BuiltinResult<Option<usize>> {
@@ -118,7 +118,7 @@ pub(crate) fn parse_optional_dim(name: &str, value: &Value) -> BuiltinResult<Opt
         Value::Int(_) | Value::Num(_) => tensor::parse_dimension(value, name)
             .map(Some)
             .map_err(|err| integration_error(name, err)),
-        Value::Tensor(t) if t.data.len() == 1 => tensor::parse_dimension(value, name)
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::parse_dimension(value, name)
             .map(Some)
             .map_err(|err| integration_error(name, err)),
         other => Err(integration_error(
@@ -169,7 +169,8 @@ pub(crate) fn spacing_from_value(
 
     if is_vector_shape(&tensor_shape) {
         let expected = padded_y_shape[dim - 1];
-        if tensor_value.data.len() != expected {
+        let values = real_tensor_values(&tensor_value);
+        if values.len() != expected {
             return Err(integration_error(
                 name,
                 format!(
@@ -178,7 +179,7 @@ pub(crate) fn spacing_from_value(
                 ),
             ));
         }
-        return Ok(SpacingSpec::Vector(tensor_value.data));
+        return Ok(SpacingSpec::Vector(values));
     }
 
     Err(integration_error(
@@ -260,9 +261,10 @@ pub(crate) fn spacing_from_gpu_or_host_value(
                     format!("{name}: no acceleration provider"),
                 ));
             };
+            let data = real_tensor_values(&tensor);
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &tensor.data,
+                    data: &data,
                     shape: &tensor.shape,
                 })
                 .map_err(|err| integration_error(name, format!("{name}: {err}")))?;
@@ -276,8 +278,22 @@ pub(crate) fn interval_width(spacing: &SpacingSpec, idx0: usize, idx1: usize, k:
         SpacingSpec::Unit => 1.0,
         SpacingSpec::Scalar(step) => *step,
         SpacingSpec::Vector(values) => values[k + 1] - values[k],
-        SpacingSpec::Tensor(tensor) => tensor.data[idx1] - tensor.data[idx0],
+        SpacingSpec::Tensor(tensor) => {
+            real_tensor_value_at(tensor, idx1) - real_tensor_value_at(tensor, idx0)
+        }
     }
+}
+
+pub(crate) fn real_tensor_values(tensor: &Tensor) -> Vec<f64> {
+    tensor::tensor_values_f64(tensor)
+}
+
+fn real_tensor_value_at(tensor: &Tensor, index: usize) -> f64 {
+    tensor
+        .integer_storage()
+        .and_then(|storage| storage.value_at(index))
+        .map(|value| value.to_f64())
+        .unwrap_or(tensor.data[index])
 }
 
 pub(crate) fn value_into_complex_tensor(name: &str, value: Value) -> BuiltinResult<ComplexTensor> {
@@ -300,8 +316,9 @@ pub(crate) fn promote_real_value_to_gpu(name: &str, value: Value) -> BuiltinResu
 
     match value {
         Value::Tensor(tensor) => {
+            let data = real_tensor_values(&tensor);
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &data,
                 shape: &tensor.shape,
             };
             match provider.upload(&view) {
@@ -391,5 +408,15 @@ mod tests {
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative dim");
 
         assert!(parse_optional_dim("trapz", &Value::Tensor(dim)).is_err());
+    }
+
+    #[test]
+    fn tensor_spacing_width_reads_typed_integer_storage_exactly() {
+        let mut spacing =
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]).expect("spacing");
+        spacing.data = vec![0.0, 0.0, 0.0];
+        let spec = SpacingSpec::Tensor(spacing);
+
+        assert_eq!(interval_width(&spec, 1, 2, 1), 2.0);
     }
 }

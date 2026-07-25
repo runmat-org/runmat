@@ -15,8 +15,9 @@ use crate::builtins::common::spec::{
 use crate::builtins::math::reduction::integration_common::{
     canonical_shape_complex, canonical_shape_tensor, default_dimension_from_shape, dim_product,
     gather_host_value, interval_width, is_dimension_candidate, is_scalar_like, pad_shape_for_dim,
-    parse_optional_dim, promote_real_value_to_gpu, spacing_from_gpu_or_host_value,
-    spacing_from_value, value_has_gpu_tensor, value_into_complex_tensor, SpacingSpec,
+    parse_optional_dim, promote_real_value_to_gpu, real_tensor_values,
+    spacing_from_gpu_or_host_value, spacing_from_value, value_has_gpu_tensor,
+    value_into_complex_tensor, SpacingSpec,
 };
 use crate::builtins::math::reduction::type_resolvers::cumulative_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -368,7 +369,8 @@ fn cumtrapz_tensor(tensor: &Tensor, spacing: &SpacingSpec, dim: usize) -> Builti
     let stride_before = dim_product(&shape[..dim_index]);
     let stride_after = dim_product(&shape[dim..]);
     let block = stride_before * len_dim;
-    let mut output = vec![0.0f64; tensor.data.len()];
+    let values = real_tensor_values(tensor);
+    let mut output = vec![0.0f64; values.len()];
 
     if len_dim > 0 {
         for after in 0..stride_after {
@@ -381,7 +383,7 @@ fn cumtrapz_tensor(tensor: &Tensor, spacing: &SpacingSpec, dim: usize) -> Builti
                     let idx0 = base + before + k * stride_before;
                     let idx1 = idx0 + stride_before;
                     let width = interval_width(spacing, idx0, idx1, k);
-                    acc += 0.5 * width * (tensor.data[idx0] + tensor.data[idx1]);
+                    acc += 0.5 * width * (values[idx0] + values[idx1]);
                     output[idx1] = acc;
                 }
             }
@@ -443,7 +445,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     fn run_cumtrapz(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::cumtrapz_builtin(first, rest))
@@ -487,6 +489,21 @@ pub(crate) mod tests {
         let x = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
         let y = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
         let value = run_cumtrapz(Value::Tensor(x), vec![Value::Tensor(y)]).expect("cumtrapz");
+        let Value::Tensor(out) = value else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(out.data, vec![0.0, 0.5, 3.5]);
+    }
+
+    #[test]
+    fn cumtrapz_reads_typed_integer_values_and_spacing_exactly() {
+        let mut x = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]).expect("x");
+        x.data = vec![0.0, 0.0, 0.0];
+        let mut y = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 2]), vec![1, 3]).expect("y");
+        y.data = vec![0.0, 0.0, 0.0];
+
+        let value = run_cumtrapz(Value::Tensor(x), vec![Value::Tensor(y)]).expect("cumtrapz");
+
         let Value::Tensor(out) = value else {
             panic!("expected tensor result");
         };
