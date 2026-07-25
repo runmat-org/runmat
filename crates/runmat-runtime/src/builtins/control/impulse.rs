@@ -361,7 +361,7 @@ fn real_coefficients(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
             ensure_vector(label, &tensor.shape)?;
-            finite_values(label, tensor.data.clone())
+            finite_values(label, tensor::tensor_values_f64(tensor))
         }
         Value::Num(n) => finite_values(label, vec![*n]),
         Value::Int(i) => finite_values(label, vec![i.to_f64()]),
@@ -415,7 +415,10 @@ fn scalar_property(value: &Value, label: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+            .map_or(tensor.data[0], |value| value.to_f64())),
         other => Err(impulse_error_with_detail(
             &IMPULSE_ERROR_INVALID_MODEL,
             format!("{label} must be a real scalar, got {other:?}"),
@@ -464,7 +467,12 @@ fn scalar_time_from_value(value: &Value) -> BuiltinResult<Option<f64>> {
         Value::Num(n) => Ok(Some(*n)),
         Value::Int(i) => Ok(Some(i.to_f64())),
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Some(tensor.data[0])),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Some(
+            tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+                .map_or(tensor.data[0], |value| value.to_f64()),
+        )),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(Some(if logical.data[0] == 0 { 0.0 } else { 1.0 }))
         }
@@ -561,7 +569,7 @@ fn time_vector_from_value(value: Value) -> BuiltinResult<Vec<f64>> {
             "time vector cannot be empty",
         ));
     }
-    Ok(tensor.data)
+    Ok(tensor::tensor_values_f64(&tensor))
 }
 
 fn validate_time_vector(system: &TfSystem, values: &[f64]) -> BuiltinResult<()> {
@@ -819,7 +827,7 @@ async fn render_impulse_plot(_response: &ImpulseResponse) -> BuiltinResult<Value
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, ObjectInstance};
+    use runmat_builtins::{CharArray, IntegerStorage, ObjectInstance};
 
     fn tf_object(num: Vec<f64>, den: Vec<f64>, ts: f64) -> Value {
         tf_object_with_delays(num, den, ts, 0.0, 0.0)
@@ -864,6 +872,10 @@ mod tests {
             Value::Tensor(tensor) => tensor.data,
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
     }
 
     #[test]
@@ -958,6 +970,38 @@ mod tests {
         assert!((y[1] - 10.0).abs() < 1.0e-12);
         assert!((y[2] - 5.0).abs() < 1.0e-12);
         assert!((y[3] - 2.5).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn impulse_typed_integer_coefficients_and_time_cross_double_boundary_exactly() {
+        let mut object = ObjectInstance::new("tf".to_string());
+        object.properties.insert(
+            "Numerator".to_string(),
+            integer_tensor(IntegerStorage::U16(vec![20]), vec![1, 1]),
+        );
+        object.properties.insert(
+            "Denominator".to_string(),
+            integer_tensor(IntegerStorage::I16(vec![1, 5]), vec![1, 2]),
+        );
+        object.properties.insert(
+            "Variable".to_string(),
+            Value::CharArray(CharArray::new_row("s")),
+        );
+        object.properties.insert("Ts".to_string(), Value::Num(0.0));
+        object
+            .properties
+            .insert("InputDelay".to_string(), Value::Num(0.0));
+        object
+            .properties
+            .insert("OutputDelay".to_string(), Value::Num(0.0));
+
+        let t = integer_tensor(IntegerStorage::U64(vec![0, 1]), vec![1, 2]);
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let result = run_impulse(Value::Object(object), vec![t]).expect("impulse");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list");
+        };
+        assert_eq!(tensor_data(outputs[1].clone()), vec![0.0, 1.0]);
     }
 
     #[test]

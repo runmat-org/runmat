@@ -550,8 +550,7 @@ pub async fn parse_coefficients(
     let coeffs = match gathered {
         Value::Tensor(tensor) => {
             ensure_vector_shape(label, &tensor.shape, builtin)?;
-            tensor
-                .data
+            tensor::tensor_values_f64(&tensor)
                 .into_iter()
                 .map(|re| Complex64::new(re, 0.0))
                 .collect()
@@ -666,7 +665,10 @@ pub fn scalar_f64(value: &Value, context: &str, builtin: &'static str) -> Builti
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+            .map_or(tensor.data[0], |value| value.to_f64())),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] == 0 { 0.0 } else { 1.0 })
         }
@@ -684,7 +686,13 @@ pub fn scalar_complex(value: &Value, builtin: &'static str) -> BuiltinResult<Com
         Value::Int(i) => Ok(Complex64::new(i.to_f64(), 0.0)),
         Value::Bool(b) => Ok(Complex64::new(if *b { 1.0 } else { 0.0 }, 0.0)),
         Value::Complex(re, im) => Ok(Complex64::new(*re, *im)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Complex64::new(tensor.data[0], 0.0)),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Complex64::new(
+            tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+                .map_or(tensor.data[0], |value| value.to_f64()),
+            0.0,
+        )),
         Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
             let (re, im) = tensor.data[0];
             Ok(Complex64::new(re, im))
@@ -824,7 +832,13 @@ fn ss_state_matrix_property(
         )
     })?;
     let tensor = match value {
-        Value::Tensor(tensor) => tensor.clone(),
+        Value::Tensor(tensor) => tensor::integer_tensor_to_f64(tensor.clone()).map_err(|err| {
+            control_error(
+                builtin,
+                internal_identifier(builtin),
+                format!("{builtin}: failed to normalize ss {name}: {err}"),
+            )
+        })?,
         Value::Num(n) => Tensor::new(vec![*n], vec![1, 1]).map_err(|err| {
             control_error(
                 builtin,
@@ -942,10 +956,9 @@ fn coefficients_from_property(
     match value {
         Value::Tensor(tensor) => {
             ensure_vector_shape(name, &tensor.shape, builtin)?;
-            Ok(tensor
-                .data
-                .iter()
-                .map(|value| Complex64::new(*value, 0.0))
+            Ok(tensor::tensor_values_f64(tensor)
+                .into_iter()
+                .map(|value| Complex64::new(value, 0.0))
                 .collect())
         }
         Value::ComplexTensor(tensor) => {

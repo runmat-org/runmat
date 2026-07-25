@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::control::type_resolvers::step_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -429,7 +430,7 @@ fn property_coefficients(object: &ObjectInstance, name: &str) -> BuiltinResult<V
         )
     })?;
     match value {
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::Tensor(tensor) => Ok(tensor::tensor_values_f64(tensor)),
         Value::ComplexTensor(tensor) => real_complex_coefficients(tensor, name),
         Value::Num(n) => Ok(vec![*n]),
         Value::Int(i) => Ok(vec![i.to_f64()]),
@@ -488,10 +489,11 @@ impl TimeSpec {
             Value::Int(i) => Self::final_time(i.to_f64()),
             Value::Tensor(tensor) => {
                 ensure_time_vector_shape(&tensor.shape)?;
+                let data = tensor::tensor_values_f64(tensor);
                 if tensor.data.len() == 1 {
-                    return Self::final_time(tensor.data[0]);
+                    return Self::final_time(data[0]);
                 }
-                Self::vector(tensor.data.clone(), sample_time)
+                Self::vector(data, sample_time)
             }
             other => Err(step_error_with_detail(
                 &STEP_ERROR_INVALID_TIME,
@@ -894,7 +896,7 @@ fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, ObjectInstance};
+    use runmat_builtins::{CharArray, IntegerStorage, ObjectInstance};
 
     fn tf_object(num: Vec<f64>, den: Vec<f64>, sample_time: f64) -> Value {
         let mut object = ObjectInstance::new("tf".to_string());
@@ -929,6 +931,10 @@ mod tests {
             Value::Tensor(tensor) => tensor.data,
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
     }
 
     #[test]
@@ -1010,6 +1016,24 @@ mod tests {
         let time = Value::Tensor(Tensor::new(vec![0.0, 0.1, 0.2], vec![1, 3]).unwrap());
         let y = tensor_data(run_step(sys, vec![time]).expect("step"));
         assert_eq!(y, vec![0.0, 1.0, 1.5]);
+    }
+
+    #[test]
+    fn step_typed_integer_time_inputs_cross_double_boundary_exactly() {
+        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let result = run_step(
+            sys,
+            vec![integer_tensor(
+                IntegerStorage::U64(vec![0, 1, 2]),
+                vec![1, 3],
+            )],
+        )
+        .expect("step");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list");
+        };
+        assert_eq!(tensor_data(outputs[1].clone()), vec![0.0, 1.0, 2.0]);
     }
 
     #[test]

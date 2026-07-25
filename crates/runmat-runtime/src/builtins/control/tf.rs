@@ -608,7 +608,7 @@ async fn tf_mpower(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, Tensor};
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, Tensor};
 
     fn run_tf(numerator: Value, denominator: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let mut args = vec![numerator, denominator];
@@ -635,6 +635,10 @@ mod tests {
             Value::Tensor(tensor) => tensor.data.clone(),
             other => panic!("expected tensor property {name}, got {other:?}"),
         }
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
     }
 
     #[test]
@@ -775,6 +779,24 @@ mod tests {
             &Value::CharArray(CharArray::new_row("z"))
         );
         assert_eq!(property(&sys, "Ts"), &Value::Num(0.1));
+    }
+
+    #[test]
+    fn tf_typed_integer_coefficients_and_sample_time_cross_double_boundary_exactly() {
+        let sys = run_tf(
+            integer_tensor(IntegerStorage::U64(vec![1, 2]), vec![1, 2]),
+            integer_tensor(IntegerStorage::I16(vec![1, 3, 2]), vec![1, 3]),
+            vec![integer_tensor(IntegerStorage::U8(vec![1]), vec![1, 1])],
+        )
+        .expect("tf");
+
+        assert_eq!(tensor_property(&sys, "Numerator"), vec![1.0, 2.0]);
+        assert_eq!(tensor_property(&sys, "Denominator"), vec![1.0, 3.0, 2.0]);
+        assert_eq!(property(&sys, "Ts"), &Value::Num(1.0));
+        assert_eq!(
+            property(&sys, "Variable"),
+            &Value::CharArray(CharArray::new_row("z"))
+        );
     }
 
     #[test]
