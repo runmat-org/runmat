@@ -153,6 +153,14 @@ fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
         Value::Tensor(t) => {
             if t.data.len() == 1 {
+                if let Some(storage) = t.integer_storage() {
+                    return Ok(Some(
+                        storage
+                            .value_at(0)
+                            .expect("one-element integer storage")
+                            .to_f64(),
+                    ));
+                }
                 Ok(Some(t.data[0]))
             } else {
                 Err(format!(
@@ -200,8 +208,15 @@ pub async fn dimension_from_value_async(
     name: &str,
     allow_zero: bool,
 ) -> Result<Option<usize>, String> {
-    if let Value::Int(value) = value {
-        return parse_integer_dimension(value, name, allow_zero).map(Some);
+    match value {
+        Value::Int(value) => return parse_integer_dimension(value, name, allow_zero).map(Some),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            if let Some(storage) = tensor.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                return parse_integer_dimension(&value, name, allow_zero).map(Some);
+            }
+        }
+        _ => {}
     }
     let Some(raw) = scalar_f64_from_value_async(value).await? else {
         return Ok(None);
@@ -283,12 +298,38 @@ fn dims_from_tensor_values(values: &[f64], shape: &[usize]) -> Result<Option<Vec
     Ok(Some(dims))
 }
 
+fn dims_from_integer_tensor_values(
+    storage: &IntegerStorage,
+    shape: &[usize],
+) -> Result<Option<Vec<usize>>, String> {
+    let len = storage.len();
+    if len == 0 {
+        return Ok(Some(Vec::new()));
+    }
+    let is_scalar = len == 1;
+    let is_row = shape.len() >= 2 && shape[0] == 1;
+    let is_column = shape.len() >= 2 && shape[1] == 1;
+    if !(is_row || is_column || is_scalar || shape.len() == 1) {
+        return Ok(None);
+    }
+    let mut dims = Vec::with_capacity(len);
+    for index in 0..len {
+        dims.push(parse_integer_shape_dimension(
+            &storage.value_at(index).expect("integer storage index"),
+        )?);
+    }
+    Ok(Some(dims))
+}
+
 /// Attempt to parse a dimension vector from a runtime value asynchronously.
 pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, String> {
     match value {
         Value::Num(n) => parse_numeric_dimension(*n).map(|dim| Some(vec![dim])),
         Value::Int(i) => parse_integer_shape_dimension(i).map(|dim| Some(vec![dim])),
-        Value::Tensor(t) => dims_from_tensor_values(&t.data, &t.shape),
+        Value::Tensor(t) => match t.integer_storage() {
+            Some(storage) => dims_from_integer_tensor_values(storage, &t.shape),
+            None => dims_from_tensor_values(&t.data, &t.shape),
+        },
         Value::LogicalArray(la) => {
             let values: Vec<f64> = la
                 .data
@@ -315,7 +356,10 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
                         t.shape,
                         t.data
                     );
-                    let dims = dims_from_tensor_values(&t.data, &t.shape)?;
+                    let dims = match t.integer_storage() {
+                        Some(storage) => dims_from_integer_tensor_values(storage, &t.shape)?,
+                        None => dims_from_tensor_values(&t.data, &t.shape)?,
+                    };
                     if dims.is_none() {
                         tracing::debug!(
                             gpu_shape = ?handle.shape,
@@ -497,7 +541,7 @@ mod dtype_tests {
 mod dimension_tests {
     use super::{dimension_from_value_async, dims_from_value_async, parse_dimension};
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Value};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
     #[test]
     fn typed_dimension_parsers_preserve_representable_uint64_values() {
@@ -527,6 +571,62 @@ mod dimension_tests {
             Ok(Some(3))
         );
         assert!(block_on(dims_from_value_async(&Value::Int(IntValue::I64(-1)))).is_err());
+    }
+
+    #[test]
+    fn typed_integer_tensor_dimension_parsers_use_exact_storage() {
+        let dims =
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2]).expect("integer dims");
+        assert_eq!(
+            block_on(dims_from_value_async(&Value::Tensor(dims))),
+            Ok(Some(vec![2, 3]))
+        );
+
+        let scalar_dim = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1])
+            .expect("integer scalar dim");
+        assert_eq!(
+            block_on(dimension_from_value_async(
+                &Value::Tensor(scalar_dim),
+                "size",
+                false,
+            )),
+            Ok(Some(3))
+        );
+    }
+
+    #[test]
+    fn typed_integer_tensor_dimension_parsers_preserve_large_values_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1])
+            .expect("large integer dim");
+        assert_eq!(
+            block_on(dimension_from_value_async(
+                &Value::Tensor(scalar),
+                "size",
+                false,
+            )),
+            Ok(Some(large as usize))
+        );
+
+        let dims = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1])
+            .expect("large integer dims");
+        assert_eq!(
+            block_on(dims_from_value_async(&Value::Tensor(dims))),
+            Ok(Some(vec![large as usize]))
+        );
+    }
+
+    #[test]
+    fn typed_integer_tensor_dimension_parsers_reject_negative_values() {
+        let negative =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative dim");
+        assert!(block_on(dimension_from_value_async(
+            &Value::Tensor(negative.clone()),
+            "size",
+            false,
+        ))
+        .is_err());
+        assert!(block_on(dims_from_value_async(&Value::Tensor(negative))).is_err());
     }
 
     #[test]
