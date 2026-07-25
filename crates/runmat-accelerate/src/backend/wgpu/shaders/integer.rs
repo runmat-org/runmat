@@ -734,15 +734,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 const INTEGER_REDUCE_DIM_SHADER: &str = r#"
 struct Words { data: array<u32> };
+struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
+alias PackedArray = array<PackedValue, 128>;
 struct Params {
+    rank: u32,
+    kept_count: u32,
+    reduce_count: u32,
+    op: u32,
     rows: u32,
     cols: u32,
-    dim: u32,
-    op: u32,
     integer_type: u32,
     slice_offset: u32,
-    _pad0: u32,
-    _pad1: u32,
+    kept_sizes: PackedArray,
+    reduce_sizes: PackedArray,
+    kept_strides: PackedArray,
+    reduce_strides: PackedArray,
 };
 
 @group(0) @binding(0) var<storage, read> InBuf: Words;
@@ -925,11 +931,38 @@ fn combine_reduce(a0: u32, a1: u32, b0: u32, b1: u32) -> vec2<u32> {
     }
 }
 
-fn input_index(slice: u32, position: u32) -> u32 {
-    if (params.dim == 0u) {
-        return position + slice * params.rows;
+fn map_col_to_base(col: u32) -> u32 {
+    var rem = col;
+    var base = 0u;
+    var j = 0u;
+    loop {
+        if (j >= params.kept_count) { break; }
+        let size = params.kept_sizes[j].value;
+        if (size != 0u) {
+            let coord = rem % size;
+            rem = rem / size;
+            base = base + coord * params.kept_strides[j].value;
+        }
+        j = j + 1u;
     }
-    return slice + position * params.rows;
+    return base;
+}
+
+fn map_row_offset(row: u32) -> u32 {
+    var rem = row;
+    var offset = 0u;
+    var j = 0u;
+    loop {
+        if (j >= params.reduce_count) { break; }
+        let size = params.reduce_sizes[j].value;
+        if (size != 0u) {
+            let coord = rem % size;
+            rem = rem / size;
+            offset = offset + coord * params.reduce_strides[j].value;
+        }
+        j = j + 1u;
+    }
+    return offset;
 }
 
 fn identity_value() -> vec2<u32> {
@@ -942,13 +975,14 @@ fn identity_value() -> vec2<u32> {
 @compute @workgroup_size(@WG@)
 fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {
     let slice = params.slice_offset + wid.x;
-    let reduce_len = select(params.cols, params.rows, params.dim == 0u);
+    if (slice >= params.cols) { return; }
+    let base = map_col_to_base(slice);
     let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
     var acc = identity_value();
     var i = lid.x;
     loop {
-        if (i >= reduce_len) { break; }
-        let in_lane = input_index(slice, i) * lanes;
+        if (i >= params.rows) { break; }
+        let in_lane = (base + map_row_offset(i)) * lanes;
         var high_word = 0u;
         if (lanes == 2u) {
             high_word = InBuf.data[in_lane + 1u];

@@ -115,36 +115,6 @@ fn integer_data_len(data: &HostIntegerDataOwned) -> usize {
     }
 }
 
-macro_rules! reduce_integer_values {
-    ($values:expr, $rows:expr, $cols:expr, $dim:expr, $identity:expr, $method:ident) => {{
-        match $dim {
-            0 => {
-                let mut out = vec![$identity; $cols];
-                for c in 0..$cols {
-                    let mut acc = $identity;
-                    for r in 0..$rows {
-                        acc = acc.$method($values[r + c * $rows]);
-                    }
-                    out[c] = acc;
-                }
-                (out, vec![1, $cols])
-            }
-            1 => {
-                let mut out = vec![$identity; $rows];
-                for r in 0..$rows {
-                    let mut acc = $identity;
-                    for c in 0..$cols {
-                        acc = acc.$method($values[r + c * $rows]);
-                    }
-                    out[r] = acc;
-                }
-                (out, vec![$rows, 1])
-            }
-            _ => unreachable!("integer reduction dimension was checked"),
-        }
-    }};
-}
-
 fn reduce_integer_data_dim(
     data: &HostIntegerDataOwned,
     shape: &[usize],
@@ -152,30 +122,59 @@ fn reduce_integer_data_dim(
     is_product: bool,
 ) -> Result<(HostIntegerDataOwned, Vec<usize>)> {
     ensure!(
-        shape.len() == 2,
-        "native integer reduction: only 2D tensors are supported"
+        dim < shape.len(),
+        "native integer reduction: dimension out of bounds"
     );
+    let expected_len = shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer reduction: shape too large"))
+    })?;
     ensure!(
-        dim <= 1,
-        "native integer reduction: only dims 0 or 1 are supported"
-    );
-    let rows = shape[0];
-    let cols = shape[1];
-    ensure!(
-        integer_data_len(data) == rows.saturating_mul(cols),
+        integer_data_len(data) == expected_len,
         "native integer reduction: data length does not match shape"
     );
+    let mut output_shape = shape.to_vec();
+    output_shape[dim] = 1;
+    let output_len = output_shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer reduction: output shape too large"))
+    })?;
+    let mut output_strides = vec![1usize; output_shape.len()];
+    let mut stride = 1usize;
+    for (index, &extent) in output_shape.iter().enumerate() {
+        output_strides[index] = stride;
+        stride = stride
+            .checked_mul(extent.max(1))
+            .ok_or_else(|| anyhow!("native integer reduction: output strides too large"))?;
+    }
     macro_rules! reduce {
         ($values:expr, $owned:ident, $zero:expr, $one:expr) => {{
-            if is_product {
-                let (out, shape) =
-                    reduce_integer_values!($values, rows, cols, dim, $one, saturating_mul);
-                (HostIntegerDataOwned::$owned(out), shape)
-            } else {
-                let (out, shape) =
-                    reduce_integer_values!($values, rows, cols, dim, $zero, saturating_add);
-                (HostIntegerDataOwned::$owned(out), shape)
+            let identity = if is_product { $one } else { $zero };
+            let mut out = vec![identity; output_len];
+            let mut coords = vec![0usize; shape.len()];
+            for (linear, &value) in $values.iter().enumerate() {
+                let mut remainder = linear;
+                for (axis, &extent) in shape.iter().enumerate() {
+                    if extent == 0 {
+                        coords[axis] = 0;
+                    } else {
+                        coords[axis] = remainder % extent;
+                        remainder /= extent;
+                    }
+                }
+                let mut out_index = 0usize;
+                for (axis, &coord) in coords.iter().enumerate() {
+                    if axis != dim {
+                        out_index += coord * output_strides[axis];
+                    }
+                }
+                out[out_index] = if is_product {
+                    out[out_index].saturating_mul(value)
+                } else {
+                    out[out_index].saturating_add(value)
+                };
             }
+            (HostIntegerDataOwned::$owned(out), output_shape.clone())
         }};
     }
     Ok(match data {
@@ -7093,17 +7092,26 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let first = self.reduce_integer_sum_native_dim(a, 0).await?;
-            match self.reduce_integer_sum_native_dim(&first, 1).await {
-                Ok(out) => {
-                    let _ = self.free(&first);
-                    Ok(out)
-                }
-                Err(error) => {
-                    let _ = self.free(&first);
-                    Err(error)
+            let mut current = a.clone();
+            let mut owned = false;
+            for dim in 0..a.shape.len() {
+                match self.reduce_integer_sum_native_dim(&current, dim).await {
+                    Ok(next) => {
+                        if owned {
+                            let _ = self.free(&current);
+                        }
+                        current = next;
+                        owned = true;
+                    }
+                    Err(error) => {
+                        if owned {
+                            let _ = self.free(&current);
+                        }
+                        return Err(error);
+                    }
                 }
             }
+            Ok(current)
         })
     }
 
@@ -7204,17 +7212,26 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let first = self.reduce_integer_prod_native_dim(a, 0).await?;
-            match self.reduce_integer_prod_native_dim(&first, 1).await {
-                Ok(out) => {
-                    let _ = self.free(&first);
-                    Ok(out)
-                }
-                Err(error) => {
-                    let _ = self.free(&first);
-                    Err(error)
+            let mut current = a.clone();
+            let mut owned = false;
+            for dim in 0..a.shape.len() {
+                match self.reduce_integer_prod_native_dim(&current, dim).await {
+                    Ok(next) => {
+                        if owned {
+                            let _ = self.free(&current);
+                        }
+                        current = next;
+                        owned = true;
+                    }
+                    Err(error) => {
+                        if owned {
+                            let _ = self.free(&current);
+                        }
+                        return Err(error);
+                    }
                 }
             }
+            Ok(current)
         })
     }
 
@@ -8879,6 +8896,45 @@ mod tests {
             runmat_accelerate_api::handle_integer_type(&prod),
             Some(runmat_accelerate_api::IntegerElementType::I8)
         );
+    }
+
+    #[test]
+    fn inprocess_native_integer_sum_prod_hooks_reduce_nd_shapes() {
+        let provider = InProcessProvider::new();
+        let values: Vec<u16> = (1..=12).collect();
+        let handle = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U16(&values),
+                shape: &[2, 3, 2],
+            })
+            .expect("upload native integer ndarray");
+        let sum_pages = block_on(provider.reduce_integer_sum_native_dim(&handle, 2))
+            .expect("sum across third dimension");
+        let sum_all =
+            block_on(provider.reduce_integer_sum_native(&handle)).expect("sum across all dims");
+        let prod_all =
+            block_on(provider.reduce_integer_prod_native(&handle)).expect("prod across all dims");
+        assert_eq!(
+            block_on(provider.download_integer(&sum_pages))
+                .expect("download page sums")
+                .data,
+            HostIntegerDataOwned::U16(vec![8, 10, 12, 14, 16, 18])
+        );
+        assert_eq!(sum_pages.shape, vec![2, 3, 1]);
+        assert_eq!(
+            block_on(provider.download_integer(&sum_all))
+                .expect("download global sum")
+                .data,
+            HostIntegerDataOwned::U16(vec![78])
+        );
+        assert_eq!(sum_all.shape, vec![1, 1, 1]);
+        assert_eq!(
+            block_on(provider.download_integer(&prod_all))
+                .expect("download global product")
+                .data,
+            HostIntegerDataOwned::U16(vec![u16::MAX])
+        );
+        assert_eq!(prod_all.shape, vec![1, 1, 1]);
     }
 
     #[test]

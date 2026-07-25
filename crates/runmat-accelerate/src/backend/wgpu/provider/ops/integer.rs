@@ -218,22 +218,39 @@ impl WgpuProvider {
             entry.storage == GpuTensorStorage::Real,
             "{operation_name}: complex integer gpuArray reduction is not supported"
         );
+        let rank = entry.shape.len();
+        ensure!(rank > 0, "{operation_name}: rank must be greater than zero");
+        ensure!(dim < rank, "{operation_name}: dimension out of bounds");
         ensure!(
-            entry.shape.len() == 2,
-            "{operation_name}: only 2D tensors are supported"
+            rank <= crate::backend::wgpu::params::BCAST_MAX_RANK,
+            "{operation_name}: rank exceeds GPU kernel limit"
         );
-        let rows = entry.shape[0];
-        let cols = entry.shape[1];
-        let (out_len, out_shape, reduce_len) = match dim {
-            0 => (cols, vec![1, cols], rows),
-            1 => (rows, vec![rows, 1], cols),
-            _ => return Err(anyhow!("{operation_name}: only dims 0 or 1 are supported")),
-        };
+        let mut strides = vec![0usize; rank];
+        let mut stride = 1usize;
+        for (index, slot) in strides.iter_mut().enumerate() {
+            *slot = stride;
+            stride = stride
+                .checked_mul(entry.shape[index].max(1))
+                .ok_or_else(|| anyhow!("{operation_name}: shape strides overflow"))?;
+        }
+        let kept: Vec<usize> = (0..rank).filter(|&index| index != dim).collect();
+        let rows = entry.shape[dim];
+        let cols = kept.iter().try_fold(1usize, |product, &index| {
+            product
+                .checked_mul(entry.shape[index])
+                .ok_or_else(|| anyhow!("{operation_name}: output length overflow"))
+        })?;
+        let mut out_shape = entry.shape.clone();
+        out_shape[dim] = 1;
+        let out_len = cols;
         if rows > u32::MAX as usize || cols > u32::MAX as usize {
             return Err(gpu_dispatch_length_limit_error(
                 operation_name,
                 rows.max(cols),
             ));
+        }
+        if strides.iter().any(|&value| value > u32::MAX as usize) {
+            return Err(anyhow!("{operation_name}: strides exceed GPU kernel limit"));
         }
         let raw_words = integer_word_count(integer_type, out_len)?;
         let allocated_bytes = (raw_words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
@@ -246,7 +263,7 @@ impl WgpuProvider {
                 0,
             ));
         }
-        if reduce_len == 0 {
+        if rows == 0 {
             return identity_integer_buffer(self, integer_type, out_len, &out_shape, is_product);
         }
         let out = self.create_storage_buffer_checked(raw_words, "runmat-integer-reduce-out")?;
@@ -289,28 +306,66 @@ impl WgpuProvider {
         #[repr(C)]
         #[derive(Clone, Copy, Pod, Zeroable)]
         struct Params {
+            rank: u32,
+            kept_count: u32,
+            reduce_count: u32,
+            op: u32,
             rows: u32,
             cols: u32,
-            dim: u32,
-            op: u32,
             integer_type: u32,
             slice_offset: u32,
-            _pad0: u32,
-            _pad1: u32,
+            kept_sizes: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            reduce_sizes: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            kept_strides: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            reduce_strides: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
         }
+        let mut kept_sizes = [crate::backend::wgpu::params::AlignedU32::default();
+            crate::backend::wgpu::params::BCAST_MAX_RANK];
+        let mut reduce_sizes = [crate::backend::wgpu::params::AlignedU32::default();
+            crate::backend::wgpu::params::BCAST_MAX_RANK];
+        let mut kept_strides = [crate::backend::wgpu::params::AlignedU32::default();
+            crate::backend::wgpu::params::BCAST_MAX_RANK];
+        let mut reduce_strides = [crate::backend::wgpu::params::AlignedU32::default();
+            crate::backend::wgpu::params::BCAST_MAX_RANK];
+        for (position, &index) in kept.iter().enumerate() {
+            kept_sizes[position] = crate::backend::wgpu::params::AlignedU32::new(
+                u32::try_from(entry.shape[index])
+                    .map_err(|_| anyhow!("{operation_name}: shape exceeds GPU kernel limit"))?,
+            );
+            kept_strides[position] = crate::backend::wgpu::params::AlignedU32::new(
+                u32::try_from(strides[index])
+                    .map_err(|_| anyhow!("{operation_name}: stride exceeds GPU kernel limit"))?,
+            );
+        }
+        reduce_sizes[0] = crate::backend::wgpu::params::AlignedU32::new(
+            u32::try_from(rows)
+                .map_err(|_| anyhow!("{operation_name}: reduce size exceeds GPU kernel limit"))?,
+        );
+        reduce_strides[0] = crate::backend::wgpu::params::AlignedU32::new(
+            u32::try_from(strides[dim])
+                .map_err(|_| anyhow!("{operation_name}: reduce stride exceeds GPU kernel limit"))?,
+        );
         let max_groups = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
         let mut offset = 0usize;
         while offset < out_len {
             let chunk = (out_len - offset).min(max_groups);
             let params = Params {
+                rank: rank as u32,
+                kept_count: kept.len() as u32,
+                reduce_count: 1,
+                op: u32::from(is_product),
                 rows: rows as u32,
                 cols: cols as u32,
-                dim: dim as u32,
-                op: u32::from(is_product),
                 integer_type: integer_type_code(integer_type),
                 slice_offset: offset as u32,
-                _pad0: 0,
-                _pad1: 0,
+                kept_sizes,
+                reduce_sizes,
+                kept_strides,
+                reduce_strides,
             };
             let uniform = self.uniform_buffer(&params, "runmat-integer-reduce-dim-params");
             let group = self
@@ -351,17 +406,30 @@ impl WgpuProvider {
         operation_name: &str,
         a: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
-        let first = self.integer_reduce_sum_prod_dim_exec(is_product, 0, operation_name, a)?;
-        match self.integer_reduce_sum_prod_dim_exec(is_product, 1, operation_name, &first) {
-            Ok(handle) => {
-                let _ = self.free_exec(&first);
-                Ok(handle)
-            }
-            Err(error) => {
-                let _ = self.free_exec(&first);
-                Err(error)
+        let rank = a.shape.len();
+        if rank == 0 {
+            return Err(anyhow!("{operation_name}: rank must be greater than zero"));
+        }
+        let mut current = a.clone();
+        let mut owned = false;
+        for dim in 0..rank {
+            match self.integer_reduce_sum_prod_dim_exec(is_product, dim, operation_name, &current) {
+                Ok(next) => {
+                    if owned {
+                        let _ = self.free_exec(&current);
+                    }
+                    current = next;
+                    owned = true;
+                }
+                Err(error) => {
+                    if owned {
+                        let _ = self.free_exec(&current);
+                    }
+                    return Err(error);
+                }
             }
         }
+        Ok(current)
     }
 
     pub(crate) fn integer_reduce_extrema_dim_exec(
@@ -1288,5 +1356,54 @@ mod tests {
                 .data,
             HostIntegerDataOwned::U32(vec![1, 1, 1])
         );
+    }
+
+    #[test]
+    fn wgpu_native_integer_sum_prod_reduce_nd_shapes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let values: Vec<u16> = (1..=12).collect();
+        let input = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U16(&values),
+                shape: &[2, 3, 2],
+            })
+            .expect("upload native integer ndarray");
+        let sum_pages = block_on(provider.reduce_integer_sum_native_dim(&input, 2))
+            .expect("sum across third dimension");
+        let sum_cols = block_on(provider.reduce_integer_sum_native_dim(&input, 1))
+            .expect("sum across second dimension");
+        let sum_all = block_on(provider.reduce_integer_sum_native(&input)).expect("sum all dims");
+        let prod_all =
+            block_on(provider.reduce_integer_prod_native(&input)).expect("prod all dims");
+        assert_eq!(
+            block_on(provider.download_integer_exec(&sum_pages))
+                .expect("download page sum")
+                .data,
+            HostIntegerDataOwned::U16(vec![8, 10, 12, 14, 16, 18])
+        );
+        assert_eq!(sum_pages.shape, vec![2, 3, 1]);
+        assert_eq!(
+            block_on(provider.download_integer_exec(&sum_cols))
+                .expect("download column sum")
+                .data,
+            HostIntegerDataOwned::U16(vec![9, 12, 27, 30])
+        );
+        assert_eq!(sum_cols.shape, vec![2, 1, 2]);
+        assert_eq!(
+            block_on(provider.download_integer_exec(&sum_all))
+                .expect("download global sum")
+                .data,
+            HostIntegerDataOwned::U16(vec![78])
+        );
+        assert_eq!(sum_all.shape, vec![1, 1, 1]);
+        assert_eq!(
+            block_on(provider.download_integer_exec(&prod_all))
+                .expect("download global product")
+                .data,
+            HostIntegerDataOwned::U16(vec![u16::MAX])
+        );
+        assert_eq!(prod_all.shape, vec![1, 1, 1]);
     }
 }

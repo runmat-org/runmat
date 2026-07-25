@@ -1761,6 +1761,39 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn sum_native_integer_gpu_vecdim_nd_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let values: Vec<u16> = (1..=12).collect();
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U16(&values),
+                    shape: &[2, 3, 2],
+                })
+                .expect("upload native integer gpuArray");
+            let dims = Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap();
+            let result = sum_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::Tensor(dims), Value::from("native")],
+            )
+            .expect("sum native integer gpuArray vecdim");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected resident gpuArray result");
+            };
+            assert_eq!(out.shape, vec![1, 3, 1]);
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&out),
+                Some(IntegerElementType::U16)
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&out))
+                    .expect("download native vecdim sum")
+                    .data,
+                HostIntegerDataOwned::U16(vec![18, 26, 34])
+            );
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]

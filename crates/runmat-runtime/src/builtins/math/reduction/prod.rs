@@ -1537,6 +1537,58 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn prod_native_integer_gpu_vecdim_and_all_nd_stay_resident() {
+        test_support::with_test_provider(|provider| {
+            let values: Vec<u16> = (1..=12).collect();
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U16(&values),
+                    shape: &[2, 3, 2],
+                })
+                .expect("upload native integer gpuArray");
+            let dims = Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap();
+            let vecdim = prod_builtin(
+                Value::GpuTensor(handle.clone()),
+                vec![Value::Tensor(dims), Value::from("native")],
+            )
+            .expect("prod native integer gpuArray vecdim");
+            let all = prod_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::from("all"), Value::from("native")],
+            )
+            .expect("prod native integer gpuArray all");
+            let Value::GpuTensor(vecdim_out) = vecdim else {
+                panic!("expected resident vecdim gpuArray result");
+            };
+            let Value::GpuTensor(all_out) = all else {
+                panic!("expected resident all gpuArray result");
+            };
+            assert_eq!(vecdim_out.shape, vec![1, 3, 1]);
+            assert_eq!(all_out.shape, vec![1, 1, 1]);
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&vecdim_out),
+                Some(IntegerElementType::U16)
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&all_out),
+                Some(IntegerElementType::U16)
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&vecdim_out))
+                    .expect("download native vecdim prod")
+                    .data,
+                HostIntegerDataOwned::U16(vec![112, 1080, 3960])
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&all_out))
+                    .expect("download native all prod")
+                    .data,
+                HostIntegerDataOwned::U16(vec![u16::MAX])
+            );
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_gpu_omit_nan_falls_back_to_host() {
