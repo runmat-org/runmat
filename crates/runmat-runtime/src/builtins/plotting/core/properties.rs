@@ -1248,12 +1248,8 @@ pub(crate) fn data_aspect_ratio_from_value(
 ) -> BuiltinResult<[f64; 3]> {
     let tensor =
         Tensor::try_from(value).map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
-    if tensor.data.len() != 3
-        || tensor
-            .data
-            .iter()
-            .any(|value| !value.is_finite() || *value <= 0.0)
-    {
+    let data = tensor::tensor_values_f64(&tensor);
+    if data.len() != 3 || data.iter().any(|value| !value.is_finite() || *value <= 0.0) {
         return Err(plotting_error(
             builtin,
             format!(
@@ -1261,7 +1257,7 @@ pub(crate) fn data_aspect_ratio_from_value(
             ),
         ));
     }
-    Ok([tensor.data[0], tensor.data[1], tensor.data[2]])
+    Ok([data[0], data[1], data[2]])
 }
 
 pub(crate) fn data_aspect_ratio_mode_from_value(
@@ -1542,8 +1538,8 @@ fn apply_axes_property(
         "view" => {
             let tensor = runmat_builtins::Tensor::try_from(value)
                 .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
-            if tensor.data.len() != 2 || !tensor.data[0].is_finite() || !tensor.data[1].is_finite()
-            {
+            let data = tensor::tensor_values_f64(&tensor);
+            if data.len() != 2 || !data[0].is_finite() || !data[1].is_finite() {
                 return Err(plotting_error(
                     builtin,
                     format!("{builtin}: View must be a 2-element finite numeric vector"),
@@ -1552,8 +1548,8 @@ fn apply_axes_property(
             crate::builtins::plotting::state::set_view_for_axes(
                 handle,
                 axes_index,
-                tensor.data[0] as f32,
-                tensor.data[1] as f32,
+                data[0] as f32,
+                data[1] as f32,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
@@ -2617,7 +2613,9 @@ fn figure_position_value(position: [f64; 4]) -> Value {
 
 fn parse_figure_position(value: &Value, builtin: &'static str) -> BuiltinResult<[f64; 4]> {
     let values = match value {
-        Value::Tensor(t) if t.data.len() == 4 && is_figure_position_vector_shape(t) => &t.data,
+        Value::Tensor(t) if t.data.len() == 4 && is_figure_position_vector_shape(t) => {
+            tensor::tensor_values_f64(t)
+        }
         _ => {
             return Err(plotting_error(
                 builtin,
@@ -2626,7 +2624,7 @@ fn parse_figure_position(value: &Value, builtin: &'static str) -> BuiltinResult<
         }
     };
     let mut position = [0.0; 4];
-    position.copy_from_slice(values);
+    position.copy_from_slice(&values);
     if !position.iter().all(|value| value.is_finite()) {
         return Err(plotting_error(
             builtin,
@@ -2659,11 +2657,14 @@ fn text_position_value(position: glam::Vec3) -> Value {
 
 fn parse_text_position(value: &Value, builtin: &'static str) -> BuiltinResult<glam::Vec3> {
     match value {
-        Value::Tensor(t) if t.data.len() == 2 || t.data.len() == 3 => Ok(glam::Vec3::new(
-            t.data[0] as f32,
-            t.data[1] as f32,
-            t.data.get(2).copied().unwrap_or(0.0) as f32,
-        )),
+        Value::Tensor(t) if t.data.len() == 2 || t.data.len() == 3 => {
+            let data = tensor::tensor_values_f64(t);
+            Ok(glam::Vec3::new(
+                data[0] as f32,
+                data[1] as f32,
+                data.get(2).copied().unwrap_or(0.0) as f32,
+            ))
+        }
         _ => Err(plotting_error(
             builtin,
             format!("{builtin}: Position must be a 2-element or 3-element vector"),
@@ -5807,7 +5808,7 @@ fn binscatter_numeric_data(
 ) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
-    Ok(tensor.data)
+    Ok(tensor::tensor_values_f64(&tensor))
 }
 
 fn recompute_binscatter_chart(
@@ -6257,7 +6258,7 @@ fn apply_line_plot_properties(
 fn line_numeric_data(value: &Value, name: &str, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
-    Ok(tensor.data)
+    Ok(tensor::tensor_values_f64(&tensor))
 }
 
 fn line_xy_data_for_properties(
@@ -6312,7 +6313,7 @@ enum TickMode {
 fn ticks_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
     let tensor = runmat_builtins::Tensor::try_from(value)
         .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
-    let ticks = tensor.data;
+    let ticks = tensor::tensor_values_f64(&tensor);
     if ticks.iter().any(|value| !value.is_finite()) {
         return Err(plotting_error(
             builtin,
@@ -6377,7 +6378,9 @@ fn scalar_numeric_value(value: &Value) -> Option<f64> {
     match value {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Some(tensor::tensor_values_f64(tensor)[0])
+        }
         _ => None,
     }
 }
@@ -6657,7 +6660,7 @@ fn handle_scalar(value: &Value, builtin: &'static str) -> BuiltinResult<f64> {
     match value {
         Value::Num(v) => Ok(*v),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if t.data.len() == 1 => Ok(tensor::tensor_values_f64(t)[0]),
         _ => Err(plotting_error(
             builtin,
             format!("{builtin}: expected plotting handle"),
@@ -6740,7 +6743,10 @@ pub(crate) fn label_strings_from_value(
             .collect(),
         Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
         Value::String(text) => Ok(vec![text.clone()]),
-        Value::Tensor(tensor) => Ok(tensor.data.iter().map(|v| v.to_string()).collect()),
+        Value::Tensor(tensor) => Ok(tensor::tensor_values_f64(tensor)
+            .iter()
+            .map(|v| v.to_string())
+            .collect()),
         Value::Int(i) => Ok(vec![i.decimal_string()]),
         Value::Num(v) => Ok(vec![v.to_string()]),
         other => Err(plotting_error(
@@ -6812,7 +6818,8 @@ fn surface_coordinate_data_from_value(
 ) -> BuiltinResult<SurfaceCoordinateData> {
     let tensor = Tensor::try_from(value)
         .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
-    if tensor.data.is_empty() {
+    let data = tensor::tensor_values_f64(&tensor);
+    if data.is_empty() {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: {name} must be non-empty"),
@@ -6824,14 +6831,14 @@ fn surface_coordinate_data_from_value(
             format!("{builtin}: {name} must be a vector or 2-D matrix"),
         ));
     }
-    if tensor.data.iter().any(|value| !value.is_finite()) {
+    if data.iter().any(|value| !value.is_finite()) {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: {name} must contain finite coordinates"),
         ));
     }
     if tensor.rows == 1 || tensor.cols == 1 {
-        return Ok(SurfaceCoordinateData::Vector(tensor.data));
+        return Ok(SurfaceCoordinateData::Vector(data));
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
@@ -7341,6 +7348,7 @@ impl AxesMetadataExt for runmat_plot::plots::AxesMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::IntegerStorage;
 
     #[test]
     fn label_strings_preserve_exact_uint64_text() {
@@ -7351,5 +7359,30 @@ mod tests {
         )
         .expect("labels");
         assert_eq!(labels, vec!["18446744073709551615"]);
+    }
+
+    #[test]
+    fn numeric_property_helpers_read_typed_integer_storage() {
+        let aspect = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![1, 3]).expect("aspect"),
+        );
+        let position = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U32(vec![10, 20, 300, 200]), vec![1, 4])
+                .expect("position"),
+        );
+        let text = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![-2, 5, 9]), vec![1, 3]).expect("text"),
+        );
+
+        assert_eq!(
+            data_aspect_ratio_from_value(&aspect, "daspect").expect("aspect"),
+            [1.0, 2.0, 3.0]
+        );
+        assert_eq!(
+            parse_figure_position(&position, "figure").expect("position"),
+            [10.0, 20.0, 300.0, 200.0]
+        );
+        let parsed = parse_text_position(&text, "text").expect("text position");
+        assert_eq!(parsed, glam::Vec3::new(-2.0, 5.0, 9.0));
     }
 }

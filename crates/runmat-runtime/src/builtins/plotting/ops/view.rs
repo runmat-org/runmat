@@ -7,6 +7,7 @@ use runmat_macros::runtime_builtin;
 
 use super::op_common::current_axes_target;
 use super::state::{set_view_for_axes, FigureError};
+use crate::builtins::common::tensor;
 use crate::builtins::plotting::type_resolvers::get_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -210,14 +211,15 @@ fn parse_view_angles(args: &[Value]) -> crate::BuiltinResult<(f32, f32)> {
     match args.len() {
         1 => {
             let tensor = scalar_or_tensor(&args[0])?;
-            if tensor.data.len() == 1 {
-                match tensor.data[0] as i32 {
+            let data = tensor::tensor_values_f64(&tensor);
+            if data.len() == 1 {
+                match data[0] as i32 {
                     2 => Ok((0.0, 90.0)),
                     3 => Ok((-37.5, 30.0)),
                     _ => Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
                 }
-            } else if tensor.data.len() == 2 {
-                Ok((tensor.data[0] as f32, tensor.data[1] as f32))
+            } else if data.len() == 2 {
+                Ok((data[0] as f32, data[1] as f32))
             } else {
                 Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT))
             }
@@ -228,7 +230,10 @@ fn parse_view_angles(args: &[Value]) -> crate::BuiltinResult<(f32, f32)> {
             if az.data.len() != 1 || el.data.len() != 1 {
                 return Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT));
             }
-            Ok((az.data[0] as f32, el.data[0] as f32))
+            Ok((
+                tensor::tensor_values_f64(&az)[0] as f32,
+                tensor::tensor_values_f64(&el)[0] as f32,
+            ))
         }
         _ => Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
     }
@@ -304,6 +309,7 @@ mod tests {
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
     };
+    use runmat_builtins::IntegerStorage;
 
     #[test]
     fn view_sets_axes_local_angles() {
@@ -390,6 +396,22 @@ mod tests {
             fig.axes_metadata(0).unwrap().view_elevation_deg,
             Some(-30.0)
         );
+    }
+
+    #[test]
+    fn view_accepts_typed_integer_angle_vector() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+
+        let angles = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![45, 20]), vec![1, 2]).expect("angles"),
+        );
+        let value = view_builtin(vec![angles]).unwrap();
+        let t = Tensor::try_from(&value).unwrap();
+
+        assert_eq!(t.data, vec![45.0, 20.0]);
     }
 
     #[test]

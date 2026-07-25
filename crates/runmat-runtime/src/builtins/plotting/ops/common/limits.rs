@@ -1,5 +1,6 @@
 use runmat_builtins::{Tensor, Value};
 
+use crate::builtins::common::tensor;
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
 
@@ -38,14 +39,15 @@ pub fn parse_limit_command(builtin: &'static str, args: &[Value]) -> BuiltinResu
 pub fn limits_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<(f64, f64)> {
     let tensor =
         Tensor::try_from(value).map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
-    if tensor.data.len() != 2 {
+    let data = tensor::tensor_values_f64(&tensor);
+    if data.len() != 2 {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: expected a 2-element numeric vector"),
         ));
     }
-    let lo = tensor.data[0];
-    let hi = tensor.data[1];
+    let lo = data[0];
+    let hi = data[1];
     if !lo.is_finite() || !hi.is_finite() {
         return Err(plotting_error(
             builtin,
@@ -74,4 +76,22 @@ pub fn limit_value(limits: Option<(f64, f64)>) -> Value {
         integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn limits_read_typed_integer_storage() {
+        let value = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![10, 20]), vec![1, 2]).expect("limits"),
+        );
+
+        assert_eq!(
+            limits_from_value(&value, "xlim").expect("limits"),
+            (10.0, 20.0)
+        );
+    }
 }

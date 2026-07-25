@@ -5,7 +5,7 @@ use runmat_builtins::{Tensor, Value};
 use runmat_plot::plots::surface::ColorMap;
 use std::collections::VecDeque;
 
-use crate::builtins::common::map_control_flow_with_builtin;
+use crate::builtins::common::{map_control_flow_with_builtin, tensor};
 use crate::{gather_if_needed_async, BuiltinResult};
 
 use super::plotting_error;
@@ -290,19 +290,20 @@ pub(crate) async fn convert_size_vector_async(
 }
 
 fn convert_size_tensor(
-    mut tensor: Tensor,
+    tensor: Tensor,
     point_count: usize,
     context: &'static str,
 ) -> BuiltinResult<Vec<f32>> {
-    if tensor.data.is_empty() {
+    let mut data = tensor::tensor_values_f64(&tensor);
+    if data.is_empty() {
         return Err(plotting_error(
             context,
             format!("{context}: marker size array cannot be empty"),
         ));
     }
-    if tensor.data.len() == 1 && point_count > 1 {
-        tensor.data = vec![tensor.data[0]; point_count];
-    } else if point_count > 0 && tensor.data.len() != point_count {
+    if data.len() == 1 && point_count > 1 {
+        data = vec![data[0]; point_count];
+    } else if point_count > 0 && data.len() != point_count {
         return Err(plotting_error(
             context,
             format!(
@@ -311,8 +312,7 @@ fn convert_size_tensor(
             ),
         ));
     }
-    Ok(tensor
-        .data
+    Ok(data
         .into_iter()
         .map(marker_area_points2_to_diameter_px)
         .collect())
@@ -353,19 +353,20 @@ pub(crate) async fn convert_scalar_color_values_async(
 }
 
 fn convert_scalar_color_tensor(
-    mut tensor: Tensor,
+    tensor: Tensor,
     point_count: usize,
     context: &'static str,
 ) -> BuiltinResult<Vec<f64>> {
-    if tensor.data.is_empty() {
+    let mut data = tensor::tensor_values_f64(&tensor);
+    if data.is_empty() {
         return Err(plotting_error(
             context,
             format!("{context}: color array cannot be empty"),
         ));
     }
-    if tensor.data.len() == 1 && point_count > 1 {
-        tensor.data = vec![tensor.data[0]; point_count];
-    } else if point_count > 0 && tensor.data.len() != point_count {
+    if data.len() == 1 && point_count > 1 {
+        data = vec![data[0]; point_count];
+    } else if point_count > 0 && data.len() != point_count {
         return Err(plotting_error(
             context,
             format!(
@@ -374,7 +375,7 @@ fn convert_scalar_color_tensor(
             ),
         ));
     }
-    Ok(tensor.data)
+    Ok(data)
 }
 
 pub(crate) fn convert_rgb_color_matrix(
@@ -450,7 +451,10 @@ fn convert_rgb_color_tensor(
 fn tensor_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
     let rows = tensor.rows.max(1);
     let idx = col * rows + row.min(rows - 1);
-    tensor.data.get(idx).copied().unwrap_or(0.0)
+    tensor::tensor_values_f64(tensor)
+        .get(idx)
+        .copied()
+        .unwrap_or(0.0)
 }
 
 #[derive(Clone, Debug)]
@@ -554,4 +558,26 @@ pub fn validate_gpu_color_matrix(
         ));
     }
     Ok(components)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn point_size_and_color_vectors_read_typed_integer_storage() {
+        let sizes = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![4, 9]), vec![1, 2]).expect("sizes"),
+        );
+        let colors = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![7, 8]), vec![1, 2]).expect("colors"),
+        );
+
+        let size_px = convert_size_vector(&sizes, 2, "scatter").expect("sizes");
+        let color_values = convert_scalar_color_values(&colors, 2, "scatter").expect("colors");
+
+        assert_eq!(size_px.len(), 2);
+        assert_eq!(color_values, vec![7.0, 8.0]);
+    }
 }

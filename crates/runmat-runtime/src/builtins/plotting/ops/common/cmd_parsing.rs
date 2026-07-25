@@ -1,5 +1,6 @@
 use runmat_builtins::Value;
 
+use crate::builtins::common::tensor;
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
 
@@ -43,7 +44,7 @@ pub fn scalar_from_value(value: &Value, name: &str) -> BuiltinResult<usize> {
                     format!("{name}: expected scalar input"),
                 ));
             }
-            to_positive_index(tensor.data[0], name)
+            to_positive_index(tensor::tensor_values_f64(tensor)[0], name)
         }
         _ => Err(plotting_error(
             name,
@@ -87,7 +88,7 @@ pub fn parse_hold_mode(value: &Value) -> BuiltinResult<crate::builtins::plotting
             if tensor.data.len() != 1 {
                 return Err(plotting_error("hold", "hold: logical scalar expected"));
             }
-            Ok(if tensor.data[0] == 0.0 {
+            Ok(if tensor::tensor_values_f64(tensor)[0] == 0.0 {
                 HoldMode::Off
             } else {
                 HoldMode::On
@@ -106,5 +107,27 @@ pub fn parse_hold_mode_str(
         "off" => Ok(HoldMode::Off),
         "" => Ok(HoldMode::Toggle),
         _ => Err(plotting_error("hold", "hold: expected 'on' or 'off'")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
+
+    #[test]
+    fn scalar_and_hold_parsers_read_typed_integer_storage() {
+        let scalar = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![4]), vec![1, 1]).expect("scalar"),
+        );
+        let hold = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("hold"),
+        );
+
+        assert_eq!(scalar_from_value(&scalar, "subplot").expect("scalar"), 4);
+        assert!(matches!(
+            parse_hold_mode(&hold).expect("hold"),
+            crate::builtins::plotting::state::HoldMode::On
+        ));
     }
 }

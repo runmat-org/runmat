@@ -1,5 +1,6 @@
 use runmat_builtins::Value;
 
+use crate::builtins::common::tensor;
 use crate::builtins::plotting::plotting_error;
 use crate::builtins::plotting::state::FigureHandle;
 use crate::builtins::plotting::style::value_as_string;
@@ -10,17 +11,14 @@ pub fn handles_from_value(value: &Value, ctx: &str) -> BuiltinResult<Vec<FigureH
         Value::Num(v) => Ok(vec![handle_from_scalar(*v, ctx)?]),
         Value::Int(i) => Ok(vec![handle_from_scalar(i.to_f64(), ctx)?]),
         Value::Tensor(tensor) => {
-            if tensor.data.is_empty() {
+            let data = tensor::tensor_values_f64(tensor);
+            if data.is_empty() {
                 return Err(plotting_error(
                     ctx,
                     format!("{ctx}: handle array cannot be empty"),
                 ));
             }
-            tensor
-                .data
-                .iter()
-                .map(|v| handle_from_scalar(*v, ctx))
-                .collect()
+            data.iter().map(|v| handle_from_scalar(*v, ctx)).collect()
         }
         Value::CharArray(_) | Value::String(_) => {
             let text = parse_string(value).unwrap_or_default();
@@ -101,7 +99,8 @@ pub fn parse_optional_figure_handle(
             parse_string_handle_or_next(&text, ctx)
         }
         Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(Some(handle_from_scalar(tensor.data[0], ctx)?))
+            let value = tensor::tensor_values_f64(tensor)[0];
+            Ok(Some(handle_from_scalar(value, ctx)?))
         }
         Value::Num(v) => Ok(Some(handle_from_scalar(*v, ctx)?)),
         Value::Int(i) => Ok(Some(handle_from_scalar(i.to_f64(), ctx)?)),
@@ -117,5 +116,22 @@ pub fn parse_string_handle_or_next(text: &str, ctx: &str) -> BuiltinResult<Optio
         Ok(None)
     } else {
         Ok(Some(handle_from_string(text, ctx)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
+
+    #[test]
+    fn handles_read_typed_integer_storage() {
+        let value = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U32(vec![1, 2]), vec![1, 2]).expect("handles"),
+        );
+
+        let handles = handles_from_value(&value, "figure").expect("handles");
+
+        assert_eq!(handles, vec![FigureHandle::from(1), FigureHandle::from(2)]);
     }
 }

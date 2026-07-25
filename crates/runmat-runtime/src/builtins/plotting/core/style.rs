@@ -5,6 +5,7 @@ use runmat_plot::plots::{
     SurfacePlot,
 };
 
+use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 
 use super::plotting_error;
@@ -787,11 +788,11 @@ pub(crate) fn parse_color_value(
         ));
     }
     let tensor = Tensor::try_from(value).map_err(|e| ctx_err(opts, e))?;
-    if tensor.data.len() != 3 {
+    let data = tensor::tensor_values_f64(&tensor);
+    if data.len() != 3 {
         return Err(ctx_err(opts, "color vectors must contain three elements"));
     }
-    if tensor
-        .data
+    if data
         .iter()
         .any(|component| !component.is_finite() || !(0.0..=1.0).contains(component))
     {
@@ -801,9 +802,9 @@ pub(crate) fn parse_color_value(
         ));
     }
     Ok(Vec4::new(
-        tensor.data[0] as f32,
-        tensor.data[1] as f32,
-        tensor.data[2] as f32,
+        data[0] as f32,
+        data[1] as f32,
+        data[2] as f32,
         1.0,
     ))
 }
@@ -936,7 +937,7 @@ pub(crate) fn value_as_f64(value: &Value) -> Option<f64> {
     match value {
         Value::Num(v) => Some(*v),
         Value::Int(i) => Some(i.to_f64()),
-        Value::Tensor(tensor) => tensor.data.first().copied(),
+        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor).first().copied(),
         _ => None,
     }
 }
@@ -945,7 +946,9 @@ fn value_as_scalar_f64(value: &Value) -> Option<f64> {
     match value {
         Value::Num(v) => Some(*v),
         Value::Int(i) => Some(i.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            tensor::tensor_values_f64(tensor).first().copied()
+        }
         _ => None,
     }
 }
@@ -1383,6 +1386,7 @@ fn bar_ctx_err(builtin: &str, msg: impl Into<String>) -> crate::RuntimeError {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::IntegerStorage;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1531,5 +1535,26 @@ pub(crate) mod tests {
         let style = parse_bar_style_args("bar", &rest, defaults).expect("parsed");
         assert!(style.face_color_flat);
         assert!(style.requires_cpu_path());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn line_style_scalar_options_read_typed_integer_storage() {
+        let rest = vec![
+            Value::String("LineWidth".into()),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1]).expect("width"),
+            ),
+            Value::String("MarkerSize".into()),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U16(vec![9]), vec![1, 1]).expect("size"),
+            ),
+        ];
+        let parsed =
+            parse_line_style_args(&rest, &LineStyleParseOptions::plot()).expect("style parsed");
+
+        assert_eq!(parsed.appearance.line_width, 3.0);
+        assert!(parsed.appearance.marker.is_none());
+        assert_eq!(parsed.appearance.handle_visibility, "on");
     }
 }

@@ -3,7 +3,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_plot::plots::Figure;
 
-use crate::builtins::common::map_control_flow_with_builtin;
+use crate::builtins::common::{map_control_flow_with_builtin, tensor};
 use crate::BuiltinResult;
 
 use super::plotting_error;
@@ -16,7 +16,7 @@ pub const ERR_PLOTTING_UNAVAILABLE: &str =
     "Plotting is unavailable in this build (enable the `gui` or `plot-web` feature).";
 
 pub fn numeric_vector(tensor: Tensor) -> Vec<f64> {
-    tensor.data
+    tensor::tensor_values_f64(&tensor)
 }
 
 pub fn numeric_pair(
@@ -55,6 +55,7 @@ pub fn numeric_triplet(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::IntegerStorage;
 
     #[test]
     fn numeric_pair_accepts_matching_numel_vectors_with_different_shapes() {
@@ -66,6 +67,21 @@ mod tests {
         assert_eq!(x, vec![1.0, 2.0, 3.0, 4.0]);
         assert_eq!(y, vec![10.0, 20.0, 30.0, 40.0]);
     }
+
+    #[test]
+    fn numeric_triplet_reads_typed_integer_storage_at_plot_boundary() {
+        let large = 9_007_199_254_740_993_u64;
+        let x = Tensor::new_integer(IntegerStorage::U64(vec![large, large + 1]), vec![1, 2])
+            .expect("x");
+        let y = Tensor::new_integer(IntegerStorage::I64(vec![-3, 4]), vec![1, 2]).expect("y");
+        let z = Tensor::new_integer(IntegerStorage::U16(vec![5, 6]), vec![1, 2]).expect("z");
+
+        let (x, y, z) = numeric_triplet(x, y, z, "plot3").expect("triplet");
+
+        assert_eq!(x, vec![large as f64, (large + 1) as f64]);
+        assert_eq!(y, vec![-3.0, 4.0]);
+        assert_eq!(z, vec![5.0, 6.0]);
+    }
 }
 
 pub fn value_as_f64(value: &Value) -> Option<f64> {
@@ -73,7 +89,7 @@ pub fn value_as_f64(value: &Value) -> Option<f64> {
         Value::Num(v) => Some(*v),
         Value::Int(int_val) => Some(int_val.to_f64()),
         Value::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) => tensor.data.first().copied(),
+        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor).first().copied(),
         Value::CharArray(chars) => {
             // Treat character arrays as numeric strings when possible.
             let text: String = chars.data.iter().collect();
@@ -178,7 +194,8 @@ pub fn tensor_to_surface_grid(
     y_len: usize,
     context: &'static str,
 ) -> BuiltinResult<Vec<Vec<f64>>> {
-    if z.data.len() != x_len * y_len {
+    let z_data = tensor::tensor_values_f64(&z);
+    if z_data.len() != x_len * y_len {
         return Err(plotting_error(
             context,
             format!(
@@ -193,7 +210,7 @@ pub fn tensor_to_surface_grid(
     for (row, row_vec) in grid.iter_mut().enumerate() {
         for (col, cell) in row_vec.iter_mut().enumerate().take(y_len) {
             let idx = col * x_len + row; // column-major layout
-            *cell = z.data[idx];
+            *cell = z_data[idx];
         }
     }
     Ok(grid)
@@ -210,7 +227,8 @@ pub fn tensor_to_surface_grid_matlab_xy(
     let expected_len = rows
         .checked_mul(cols)
         .ok_or_else(|| plotting_error(context, format!("{context}: grid dimensions overflowed")))?;
-    if z.rows != rows || z.cols != cols || z.data.len() != expected_len {
+    let z_data = tensor::tensor_values_f64(&z);
+    if z.rows != rows || z.cols != cols || z_data.len() != expected_len {
         return Err(plotting_error(
             context,
             format!("{context}: Z must have shape {rows}x{cols} to match X({cols}) and Y({rows})"),
@@ -221,7 +239,7 @@ pub fn tensor_to_surface_grid_matlab_xy(
     for (x_col, x_col_values) in grid.iter_mut().enumerate() {
         for (y_row, cell) in x_col_values.iter_mut().enumerate() {
             let idx = y_row + rows * x_col;
-            *cell = z.data[idx];
+            *cell = z_data[idx];
         }
     }
     Ok(grid)

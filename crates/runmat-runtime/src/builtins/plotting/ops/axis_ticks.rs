@@ -7,6 +7,7 @@ use super::state::{
     axis_ticks_snapshot_for_axes, set_axis_ticks, set_axis_ticks_for_axes,
 };
 use super::{plotting_error, plotting_error_with_source};
+use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -229,7 +230,7 @@ fn clear_ticks(builtin: &'static str, axis: TickAxis, target: AxesTarget) -> Bui
 fn ticks_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
     let tensor =
         Tensor::try_from(value).map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
-    let ticks = tensor.data;
+    let ticks = tensor::tensor_values_f64(&tensor);
     if ticks.iter().any(|value| !value.is_finite()) {
         return Err(plotting_error(
             builtin,
