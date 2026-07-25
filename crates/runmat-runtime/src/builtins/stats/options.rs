@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const STATSET: &str = "statset";
@@ -675,10 +676,9 @@ fn positive_numeric_value(field: &str, value: &Value) -> BuiltinResult<Value> {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => positive_scalar_value(field, value),
         Value::Tensor(tensor) => {
-            if tensor
-                .data
-                .iter()
-                .all(|entry| entry.is_finite() && *entry > 0.0)
+            if tensor::tensor_values_f64(tensor)
+                .into_iter()
+                .all(|entry| entry.is_finite() && entry > 0.0)
             {
                 Ok(value.clone())
             } else {
@@ -705,10 +705,16 @@ fn bool_or_on_off_value(field: &str, value: &Value) -> BuiltinResult<Value> {
         Value::Int(i) if i.to_f64() == 0.0 || i.to_f64() == 1.0 => {
             Ok(Value::Bool(i.to_f64() != 0.0))
         }
-        Value::Tensor(tensor)
-            if tensor.data.len() == 1 && (tensor.data[0] == 0.0 || tensor.data[0] == 1.0) =>
-        {
-            Ok(Value::Bool(tensor.data[0] != 0.0))
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            let value = tensor::tensor_values_f64(tensor)[0];
+            if value == 0.0 || value == 1.0 {
+                Ok(Value::Bool(value != 0.0))
+            } else {
+                Err(statset_error(
+                    &STATSET_ERROR_INVALID_OPTION,
+                    format!("statset: {field} must be logical or 'on'/'off'"),
+                ))
+            }
         }
         _ => {
             let text = text_scalar(value)?;
@@ -735,7 +741,7 @@ fn numeric_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
         other => {
             return Err(statset_error(
                 &STATSET_ERROR_INVALID_OPTION,
@@ -832,6 +838,7 @@ fn statget_error(error: &'static BuiltinErrorDescriptor, detail: impl AsRef<str>
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn struct_value(value: Value) -> StructValue {
         let Value::Struct(st) = value else {
@@ -869,6 +876,49 @@ mod tests {
         assert!(
             matches!(options.fields.get("Streams"), Some(Value::Cell(cell)) if cell.data.is_empty())
         );
+    }
+
+    #[test]
+    fn statset_reads_typed_integer_tensor_options_exactly() {
+        let mut max_iter =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("MaxIter");
+        max_iter.data[0] = 1.5;
+        let mut tol_fun =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("TolFun");
+        tol_fun.data[0] = f64::NAN;
+        let mut deriv_step =
+            Tensor::new_integer(IntegerStorage::U16(vec![3, 4]), vec![1, 2]).expect("DerivStep");
+        deriv_step.data[0] = f64::NAN;
+        deriv_step.data[1] = -1.0;
+        let mut use_parallel =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("UseParallel");
+        use_parallel.data[0] = 0.0;
+
+        let options = struct_value(
+            block_on(statset_builtin(vec![
+                Value::from("MaxIter"),
+                Value::Tensor(max_iter),
+                Value::from("TolFun"),
+                Value::Tensor(tol_fun),
+                Value::from("DerivStep"),
+                Value::Tensor(deriv_step.clone()),
+                Value::from("UseParallel"),
+                Value::Tensor(use_parallel),
+            ]))
+            .expect("statset"),
+        );
+
+        assert_eq!(num_field(&options, "MaxIter"), 7.0);
+        assert_eq!(num_field(&options, "TolFun"), 2.0);
+        let Some(Value::Tensor(parsed_deriv_step)) = options.fields.get("DerivStep") else {
+            panic!("expected DerivStep tensor");
+        };
+        assert_eq!(parsed_deriv_step.shape, deriv_step.shape);
+        assert_eq!(
+            parsed_deriv_step.integer_storage(),
+            deriv_step.integer_storage()
+        );
+        assert_eq!(options.fields.get("UseParallel"), Some(&Value::Bool(true)));
     }
 
     #[test]
