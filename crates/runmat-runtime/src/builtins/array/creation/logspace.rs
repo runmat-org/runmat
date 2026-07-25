@@ -234,7 +234,7 @@ fn tensor_scalar(name: &str, tensor: &Tensor) -> crate::BuiltinResult<Scalar> {
     if !tensor::is_scalar_tensor(tensor) {
         return Err(builtin_error(format!("{name}: expected scalar input")));
     }
-    Ok(Scalar::Real(tensor.data[0]))
+    Ok(Scalar::Real(tensor::tensor_values_f64(tensor)[0]))
 }
 
 fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinResult<Scalar> {
@@ -646,6 +646,32 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
                 let expected = generate_real_log_sequence(2.0, 3.0, 3);
+                for (actual, exp) in t.data.iter().zip(expected.iter()) {
+                    assert!((actual - exp).abs() < 1e-12);
+                }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn logspace_typed_integer_tensor_endpoints_read_exact_storage() {
+        let mut start =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("start");
+        start.data[0] = 1.0;
+        let mut stop = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("stop");
+        stop.data[0] = 3.0;
+
+        let result = logspace_builtin(
+            Value::Tensor(start),
+            Value::Tensor(stop),
+            vec![Value::Int(IntValue::I32(3))],
+        )
+        .expect("logspace");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 3]);
+                let expected = generate_real_log_sequence(-1.0, 1.0, 3);
                 for (actual, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((actual - exp).abs() < 1e-12);
                 }

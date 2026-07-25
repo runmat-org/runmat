@@ -288,7 +288,7 @@ fn tensor_scalar(name: &str, tensor: &Tensor) -> crate::BuiltinResult<Scalar> {
     if !tensor::is_scalar_tensor(tensor) {
         return Err(builtin_error(format!("{name}: expected scalar input")));
     }
-    Ok(Scalar::Real(tensor.data[0]))
+    Ok(Scalar::Real(tensor::tensor_values_f64(tensor)[0]))
 }
 
 fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinResult<Scalar> {
@@ -738,6 +738,32 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
                 let expected = [2.0, 3.0, 4.0];
+                for (idx, expected_val) in expected.iter().enumerate() {
+                    assert!((t.data[idx] - expected_val).abs() < 1e-12);
+                }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn linspace_typed_integer_tensor_endpoints_read_exact_storage() {
+        let mut start =
+            Tensor::new_integer(IntegerStorage::I16(vec![-2]), vec![1, 1]).expect("start");
+        start.data[0] = 2.0;
+        let mut stop = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).expect("stop");
+        stop.data[0] = 8.0;
+
+        let result = linspace_builtin(
+            Value::Tensor(start),
+            Value::Tensor(stop),
+            vec![Value::Int(IntValue::I32(4))],
+        )
+        .expect("linspace");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 4]);
+                let expected = [-2.0, 0.0, 2.0, 4.0];
                 for (idx, expected_val) in expected.iter().enumerate() {
                     assert!((t.data[idx] - expected_val).abs() < 1e-12);
                 }
