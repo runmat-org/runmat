@@ -1,5 +1,6 @@
 use runmat_builtins::{CharArray, StructValue, Tensor, Value};
 
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(crate) fn optim_error(name: &str, message: impl Into<String>) -> RuntimeError {
@@ -27,8 +28,9 @@ pub(crate) fn value_to_scalar(name: &str, value: Value) -> BuiltinResult<f64> {
         Value::Int(i) => ensure_finite(name, i.to_f64()),
         Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
-                ensure_finite(name, tensor.data[0])
+            let values = tensor::tensor_values_f64(&tensor);
+            if values.len() == 1 {
+                ensure_finite(name, values[0])
             } else {
                 Err(optim_error(
                     name,
@@ -59,7 +61,7 @@ pub(crate) async fn value_to_real_vector(name: &str, value: Value) -> BuiltinRes
         Value::Num(n) => Ok(vec![ensure_finite(name, n)?]),
         Value::Int(i) => Ok(vec![ensure_finite(name, i.to_f64())?]),
         Value::Bool(b) => Ok(vec![if b { 1.0 } else { 0.0 }]),
-        Value::Tensor(tensor) => finite_vec(name, tensor.data),
+        Value::Tensor(tensor) => finite_vec(name, tensor::tensor_values_f64(&tensor)),
         Value::LogicalArray(logical) => Ok(logical
             .data
             .iter()
@@ -91,14 +93,15 @@ pub(crate) async fn initial_guess(name: &str, value: Value) -> BuiltinResult<Ini
             scalar: true,
         }),
         Value::Tensor(tensor) => {
-            if tensor.data.is_empty() {
+            let values = tensor::tensor_values_f64(&tensor);
+            if values.is_empty() {
                 return Err(optim_error(
                     name,
                     format!("{name}: initial guess cannot be empty"),
                 ));
             }
             Ok(InitialGuess {
-                values: finite_vec(name, tensor.data)?,
+                values: finite_vec(name, values)?,
                 shape: tensor.shape,
                 scalar: false,
             })
@@ -271,9 +274,46 @@ pub(crate) struct InitialGuess {
 
 #[cfg(test)]
 mod tests {
-    use super::canonicalize_callback_handle;
-    use runmat_builtins::{CharArray, Closure, StringArray, Value};
+    use super::{
+        canonicalize_callback_handle, initial_guess, value_to_real_vector, value_to_scalar,
+    };
+    use futures::executor::block_on;
+    use runmat_builtins::{CharArray, Closure, IntegerStorage, StringArray, Tensor, Value};
     use std::sync::Arc;
+
+    #[test]
+    fn value_to_scalar_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![-7]), vec![1, 1]).unwrap();
+        tensor.data = vec![0.0];
+
+        let parsed = value_to_scalar("optim_test", Value::Tensor(tensor)).unwrap();
+
+        assert_eq!(parsed, -7.0);
+    }
+
+    #[test]
+    fn value_to_real_vector_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![3, 5, 8]), vec![1, 3]).unwrap();
+        tensor.data = vec![0.0, 0.0, 0.0];
+
+        let parsed = block_on(value_to_real_vector("optim_test", Value::Tensor(tensor))).unwrap();
+
+        assert_eq!(parsed, vec![3.0, 5.0, 8.0]);
+    }
+
+    #[test]
+    fn initial_guess_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I32(vec![11, -13]), vec![2, 1]).unwrap();
+        tensor.data = vec![0.0, 0.0];
+
+        let guess = block_on(initial_guess("optim_test", Value::Tensor(tensor))).unwrap();
+
+        assert_eq!(guess.values, vec![11.0, -13.0]);
+        assert_eq!(guess.shape, vec![2, 1]);
+        assert!(!guess.scalar);
+    }
 
     #[test]
     fn callback_handle_canonicalizer_binds_function_handle_when_resolved() {

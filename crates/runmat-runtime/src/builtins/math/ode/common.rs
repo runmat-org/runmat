@@ -1,6 +1,7 @@
 use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{StructValue, Tensor, Value};
 
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{call_function, lookup_option, value_to_real_vector};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -148,10 +149,11 @@ pub(crate) async fn parse_ode_input(
         Value::Int(i) => (vec![i.to_f64()], vec![1, 1], true),
         Value::Bool(b) => (vec![if b { 1.0 } else { 0.0 }], vec![1, 1], true),
         Value::Tensor(tensor) => {
-            if tensor.data.is_empty() {
+            let values = tensor::tensor_values_f64(&tensor);
+            if values.is_empty() {
                 return Err(ode_error(name, format!("{name}: y0 cannot be empty")));
             }
-            (tensor.data, tensor.shape, false)
+            (values, tensor.shape, false)
         }
         Value::LogicalArray(logical) => {
             if logical.data.is_empty() {
@@ -848,7 +850,28 @@ fn rows_to_matrix_value(name: &str, rows: &[Vec<f64>]) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
     use std::sync::Arc;
+
+    #[test]
+    fn parse_ode_input_reads_typed_integer_storage_exactly() {
+        let mut tspan = Tensor::new_integer(IntegerStorage::U16(vec![0, 2]), vec![1, 2]).unwrap();
+        tspan.data = vec![0.0, 0.0];
+        let mut y0 = Tensor::new_integer(IntegerStorage::I16(vec![3, -4]), vec![2, 1]).unwrap();
+        y0.data = vec![0.0, 0.0];
+
+        let input = block_on(parse_ode_input(
+            "ode_test",
+            Value::Tensor(tspan),
+            Value::Tensor(y0),
+        ))
+        .unwrap();
+
+        assert_eq!(input.tspan, vec![0.0, 2.0]);
+        assert_eq!(input.y0, vec![3.0, -4.0]);
+        assert_eq!(input.y_shape, vec![2, 1]);
+        assert!(!input.scalar_state);
+    }
 
     #[test]
     fn step_scaling_uses_embedded_error_order_for_ode45() {
