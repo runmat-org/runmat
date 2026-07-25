@@ -5,7 +5,9 @@ use std::f64::consts::TAU;
 use runmat_accelerate_api::{
     GpuTensorHandle, ProviderBitModulationRequest, ProviderModulationRequest,
 };
-use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -287,6 +289,17 @@ impl SymbolInput {
     }
 
     fn from_tensor(tensor: Tensor, order: usize, input_type: InputType) -> BuiltinResult<Self> {
+        let shape = tensor.shape.clone();
+        if let Some(storage) = tensor.integer_storage() {
+            let symbols = integer_storage_to_symbols(storage, "X")?;
+            return match input_type {
+                InputType::Integer => Ok(Self {
+                    data: symbols,
+                    shape,
+                }),
+                InputType::Bit => bits_to_symbols(symbols_to_bits(symbols, "X")?, shape, order),
+            };
+        }
         match input_type {
             InputType::Integer => {
                 let data = tensor
@@ -459,6 +472,22 @@ fn parse_modulation_order(value: &Value) -> BuiltinResult<usize> {
         }
         return Ok(order);
     }
+    if let Value::Tensor(tensor) = value {
+        if tensor.data.len() == 1 {
+            if let Some(storage) = tensor.integer_storage() {
+                let integer = storage
+                    .value_at(0)
+                    .ok_or_else(|| pskmod_error("pskmod: M must be a scalar"))?;
+                let order = integer_to_symbol_with_name(&integer, "M")?;
+                if order < 2 || order > isize::MAX as usize {
+                    return Err(pskmod_error(
+                        "pskmod: M must be a positive integer greater than 1",
+                    ));
+                }
+                return Ok(order);
+            }
+        }
+    }
     let number = scalar_number(value, "M")?;
     let order = number_to_symbol_with_name(number, "M")?;
     if order < 2 || order > isize::MAX as usize {
@@ -531,11 +560,17 @@ fn invert_mapping(mapping: &[usize], order: usize) -> BuiltinResult<Vec<usize>> 
 
 fn vector_to_symbols(value: &Value, name: &str) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|&number| number_to_symbol_with_name(number, name))
-            .collect(),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                integer_storage_to_symbols(storage, name)
+            } else {
+                tensor
+                    .data
+                    .iter()
+                    .map(|&number| number_to_symbol_with_name(number, name))
+                    .collect()
+            }
+        }
         Value::LogicalArray(logical) => Ok(logical.data.iter().map(|&v| usize::from(v)).collect()),
         Value::Num(n) => Ok(vec![number_to_symbol_with_name(*n, name)?]),
         Value::Int(i) => Ok(vec![integer_to_symbol_with_name(i, name)?]),
@@ -551,7 +586,10 @@ fn scalar_number(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+            .map_or(tensor.data[0], |value| value.to_f64())),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -588,10 +626,15 @@ fn number_to_symbol_with_name(value: f64, name: &str) -> BuiltinResult<usize> {
     Ok(rounded as usize)
 }
 
-fn integer_to_symbol_with_name(
-    value: &runmat_builtins::IntValue,
-    name: &str,
-) -> BuiltinResult<usize> {
+fn integer_storage_to_symbols(storage: &IntegerStorage, name: &str) -> BuiltinResult<Vec<usize>> {
+    storage
+        .exact_values()
+        .iter()
+        .map(|value| integer_to_symbol_with_name(value, name))
+        .collect()
+}
+
+fn integer_to_symbol_with_name(value: &IntValue, name: &str) -> BuiltinResult<usize> {
     value.try_to_usize().ok_or_else(|| {
         pskmod_error(format!(
             "pskmod: {name} value is too large for this platform"
@@ -611,6 +654,13 @@ fn symbol_to_bit(symbol: usize, name: &str) -> BuiltinResult<u8> {
             "pskmod: {name} bit inputs must contain only 0 or 1"
         ))),
     }
+}
+
+fn symbols_to_bits(symbols: Vec<usize>, name: &str) -> BuiltinResult<Vec<u8>> {
+    symbols
+        .into_iter()
+        .map(|symbol| symbol_to_bit(symbol, name))
+        .collect()
 }
 
 fn value_as_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
@@ -667,6 +717,10 @@ mod tests {
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).expect("tensor"))
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
     }
 
     fn assert_complex_close(actual: &[(f64, f64)], expected: &[(f64, f64)]) {
@@ -992,5 +1046,35 @@ mod tests {
         ] {
             assert!(parse_modulation_order(&value).is_err());
         }
+    }
+
+    #[test]
+    fn pskmod_typed_integer_tensors_preserve_exact_symbol_values() {
+        assert_eq!(
+            parse_modulation_order(&integer_tensor(IntegerStorage::U64(vec![4]), vec![1, 1]))
+                .unwrap(),
+            4
+        );
+
+        let out = pskmod(
+            integer_tensor(IntegerStorage::U64(vec![0, 1, 2, 3]), vec![1, 4]),
+            4,
+            vec![],
+        );
+        assert_complex_close(
+            &out.data,
+            &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
+        );
+
+        let custom = integer_tensor(IntegerStorage::U16(vec![0, 3, 1, 2]), vec![1, 4]);
+        let out = pskmod(
+            integer_tensor(IntegerStorage::U8(vec![0, 1, 2, 3]), vec![1, 4]),
+            4,
+            vec![Value::Num(0.0), custom],
+        );
+        assert_complex_close(
+            &out.data,
+            &[(1.0, 0.0), (-1.0, 0.0), (0.0, -1.0), (0.0, 1.0)],
+        );
     }
 }
