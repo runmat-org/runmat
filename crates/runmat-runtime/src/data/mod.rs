@@ -1325,6 +1325,19 @@ fn parse_usize_vector(value: &Value) -> BuiltinResult<Vec<usize>> {
 }
 
 fn tensor_to_usize_vector(t: &Tensor) -> BuiltinResult<Vec<usize>> {
+    if let Some(storage) = t.integer_storage() {
+        let mut out = Vec::with_capacity(storage.len());
+        for index in 0..storage.len() {
+            let value = storage.value_at(index).ok_or_else(|| {
+                data_error("data schema dimensions must be non-negative integers")
+            })?;
+            out.push(value.try_to_usize().ok_or_else(|| {
+                data_error("data schema dimensions must be non-negative integers")
+            })?);
+        }
+        return Ok(out);
+    }
+
     let mut out = Vec::with_capacity(t.data.len());
     for value in &t.data {
         if !value.is_finite() || *value < 0.0 {
@@ -1507,6 +1520,31 @@ mod tests {
             None => assert!(parsed.is_err()),
         }
         assert!(parse_usize_vector(&Value::Int(IntValue::I64(-1))).is_err());
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn schema_dimension_tensors_preserve_exact_integer_storage() {
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![1_u64 << 53, (1_u64 << 53) + 1]),
+            vec![1, 2],
+        )
+        .expect("uint64 dimension tensor");
+        let parsed = parse_usize_vector(&Value::Tensor(input)).expect("typed dimensions");
+        assert_eq!(
+            parsed,
+            vec![
+                usize::try_from(1_u64 << 53).expect("representable first dimension"),
+                usize::try_from((1_u64 << 53) + 1).expect("representable second dimension"),
+            ]
+        );
+    }
+
+    #[test]
+    fn schema_dimension_tensors_reject_negative_integer_storage() {
+        let input =
+            Tensor::new_integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]).expect("int16 dims");
+        assert!(parse_usize_vector(&Value::Tensor(input)).is_err());
     }
 
     #[test]
