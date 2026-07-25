@@ -432,6 +432,20 @@ fn parse_integer_exponent(value: &Value) -> BuiltinResult<Option<i32>> {
             Ok(Some(*n as i32))
         }
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                let raw = value.try_to_i64().ok_or_else(|| {
+                    mpower_invalid_argument(
+                        "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
+                    )
+                })?;
+                if raw > i32::MAX as i64 || raw < i32::MIN as i64 {
+                    return Err(mpower_invalid_argument(
+                        "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
+                    ));
+                }
+                return Ok(Some(raw as i32));
+            }
             let scalar = t.data[0];
             if scalar.fract() != 0.0 || !scalar.is_finite() {
                 return Err(mpower_error(&MPOWER_ERROR_INVALID_ARGUMENT));
@@ -481,6 +495,21 @@ pub(crate) mod tests {
         let err = parse_integer_exponent(&Value::Int(IntValue::U64(u64::MAX)))
             .expect_err("unrepresentable typed exponent must not saturate");
         assert_eq!(err.identifier(), MPOWER_ERROR_INVALID_ARGUMENT.identifier);
+
+        let mut exponent =
+            Tensor::new_integer(IntegerStorage::I16(vec![2]), vec![1, 1]).expect("typed exponent");
+        exponent.data[0] = 1.0;
+        assert_eq!(
+            parse_integer_exponent(&Value::Tensor(exponent)).expect("typed tensor exponent"),
+            Some(2)
+        );
+
+        let mut wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("wide typed exponent");
+        wide.data[0] = 2.0;
+        let err = parse_integer_exponent(&Value::Tensor(wide))
+            .expect_err("unrepresentable typed tensor exponent must not use f64 mirror");
+        assert_eq!(err.identifier(), MPOWER_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -510,7 +539,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Int(IntValue::U64(u64::MAX)));
 
         let result = mpower_builtin(Value::Num(2.0), Value::Int(IntValue::U8(3))).expect("mpower");
-        assert_eq!(result, Value::Num(8.0));
+        assert_eq!(result, Value::Int(IntValue::U8(8)));
     }
 
     #[test]
