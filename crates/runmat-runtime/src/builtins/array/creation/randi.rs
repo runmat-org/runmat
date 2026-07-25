@@ -36,7 +36,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may offer integer RNG kernels via random_integer_range / random_integer_like; the runtime falls back to host sampling and upload when unavailable.",
+    notes: "Providers may offer integer RNG kernels via random_integer_range / random_integer_like; integer gpuArray prototypes stay provider-resident through random generation plus native integer cast when supported, with exact host upload retained for bounds outside the provider contract.",
 };
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
@@ -719,6 +719,11 @@ async fn randi_like_gpu(
         if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
             let target = integer_target_from_accelerator_type(integer_type);
             validate_integer_bounds(bounds, target)?;
+            if let Some(gpu) =
+                try_provider_integer_randi(provider, handle, bounds, shape, target).await
+            {
+                return Ok(Value::GpuTensor(gpu));
+            }
             let values = generate_integer_values(bounds, tensor::element_count(shape))?;
             let storage = integer_storage_from_values(target, values)?;
             let view = integer_tensor_view(&storage, shape);
@@ -766,6 +771,36 @@ async fn randi_like_gpu(
         .await
         .map_err(|e| builtin_error(format!("randi: {e}")))?;
     randi_like(&gathered, bounds, shape).await
+}
+
+async fn try_provider_integer_randi(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    handle: &GpuTensorHandle,
+    bounds: &Bounds,
+    shape: &[usize],
+    target: IntegerTarget,
+) -> Option<GpuTensorHandle> {
+    let lower = i64::try_from(bounds.lower).ok()?;
+    let upper = i64::try_from(bounds.upper).ok()?;
+    if target.uses_extended_scalar_precision()
+        && (!provider_integer_bound_is_exact(lower) || !provider_integer_bound_is_exact(upper))
+    {
+        return None;
+    }
+    let generated = if handle.shape == shape {
+        provider.random_integer_like(handle, lower, upper).ok()?
+    } else {
+        provider.random_integer_range(lower, upper, shape).ok()?
+    };
+    provider
+        .cast_to_integer(&generated, target.accelerator_type())
+        .await
+        .ok()
+}
+
+fn provider_integer_bound_is_exact(value: i64) -> bool {
+    const MAX_EXACT_INTEGER: i64 = 1_i64 << 53;
+    (-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&value)
 }
 
 fn integer_tensor(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Tensor> {
@@ -1421,6 +1456,47 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn randi_gpu_like_integer_prototype_uses_resident_provider_path() {
+        let _guard = random::test_lock().lock().unwrap();
+        random::reset_rng();
+        test_support::with_test_provider(|provider| {
+            let prototype_values = [-3_i16, 7_i16];
+            let prototype = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::I16(&prototype_values),
+                    shape: &[1, 2],
+                })
+                .expect("upload int16 prototype");
+
+            let result = block_on(randi_builtin(vec![
+                Value::Num(9.0),
+                Value::Num(3.0),
+                Value::from("like"),
+                Value::GpuTensor(prototype),
+            ]))
+            .expect("randi int16 gpu like");
+
+            let Value::GpuTensor(gpu) = result else {
+                panic!("expected resident gpuArray result");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&gpu),
+                Some(runmat_accelerate_api::IntegerElementType::I16)
+            );
+            assert_eq!(gpu.shape, vec![3, 3]);
+            let downloaded = block_on(provider.download_integer(&gpu))
+                .expect("download int16 randi")
+                .data;
+            let runmat_accelerate_api::HostIntegerDataOwned::I16(values) = downloaded else {
+                panic!("expected int16 storage");
+            };
+            assert_eq!(values.len(), 9);
+            assert!(values.iter().all(|value| (1..=9).contains(value)));
         });
     }
 
