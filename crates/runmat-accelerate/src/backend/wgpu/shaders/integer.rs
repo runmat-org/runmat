@@ -303,9 +303,19 @@ fn sx8(x: u32) -> i32 { return bitcast<i32>(x << 24u) >> 24; }
 fn sx16(x: u32) -> i32 { return bitcast<i32>(x << 16u) >> 16; }
 fn signed32(a: i32, b: i32, minv: i32, maxv: i32) -> i32 {
     let r = select(a + b, a - b, params.op == 1u);
-    let overflow = select((a < 0) != (b < 0) && (r < 0) != (a < 0), (a < 0) == (b < 0) && (r < 0) != (a < 0), params.op == 1u);
+    let overflow = select(
+        (a < 0) == (b < 0) && (r < 0) != (a < 0),
+        (a < 0) != (b < 0) && (r < 0) != (a < 0),
+        params.op == 1u,
+    );
     if (!overflow) { return r; }
     return select(maxv, minv, a < 0);
+}
+fn signed_narrow(a: i32, b: i32, minv: i32, maxv: i32) -> i32 {
+    let r = select(a + b, a - b, params.op == 1u);
+    if (r < minv) { return minv; }
+    if (r > maxv) { return maxv; }
+    return r;
 }
 fn unsigned32(a: u32, b: u32, maxv: u32) -> u32 {
     if (params.op == 1u) { return select(a - b, 0u, a < b); }
@@ -378,8 +388,8 @@ fn multiply_signed64(a0: u32, a1: u32, b0: u32, b1: u32) -> vec2<u32> {
     }
     return select(vec2<u32>(product.x, product.y), negate64(product.x, product.y), negative);
 }
-fn write_multiply64(lane: u32, a0: u32, a1: u32, b0: u32, b1: u32, signed: bool) {
-    if (signed) {
+fn write_multiply64(lane: u32, a0: u32, a1: u32, b0: u32, b1: u32, is_signed: bool) {
+    if (is_signed) {
         let result = multiply_signed64(a0, a1, b0, b1);
         Out.data[lane] = result.x; Out.data[lane + 1u] = result.y;
         return;
@@ -391,22 +401,57 @@ fn write_multiply64(lane: u32, a0: u32, a1: u32, b0: u32, b1: u32, signed: bool)
     }
     Out.data[lane] = product.x; Out.data[lane + 1u] = product.y;
 }
-fn write64(lane: u32, a0: u32, a1: u32, b0: u32, b1: u32, signed: bool) {
-    let sub = params.op == 1u;
-    let lo = select(a0 + b0, a0 - b0, sub);
-    let carry = select(select(0u, 1u, lo > a0), select(0u, 1u, a0 < b0), sub);
-    let hi = select(a1 + b1 + carry, a1 - b1 - carry, sub);
-    if (!signed) {
-        let overflow = select(hi < a1 || (carry != 0u && hi == a1), a1 < b1 || (a1 == b1 && a0 < b0), sub);
-        if (overflow) { Out.data[lane] = select(0xffffffffu, 0u, sub); Out.data[lane + 1u] = select(0xffffffffu, 0u, sub); return; }
-        Out.data[lane] = lo; Out.data[lane + 1u] = hi; return;
+fn write64(lane: u32, a0: u32, a1: u32, b0: u32, b1: u32, is_signed: bool) {
+    let subtract = params.op == 1u;
+    var lo: u32;
+    var hi: u32;
+    var unsigned_overflow = false;
+    if (subtract) {
+        let borrow = select(0u, 1u, a0 < b0);
+        lo = a0 - b0;
+        hi = a1 - b1 - borrow;
+        unsigned_overflow = a1 < b1 || (a1 == b1 && borrow != 0u);
+    } else {
+        let carry = select(0u, 1u, a0 + b0 < a0);
+        lo = a0 + b0;
+        hi = a1 + b1 + carry;
+        unsigned_overflow = hi < a1 || (carry != 0u && hi == a1);
     }
-    let sa = bitcast<i32>(a1) < 0;
-    let sb = bitcast<i32>(b1) < 0;
-    let sr = bitcast<i32>(hi) < 0;
-    let overflow = select(sa != sb && sr != sa, sa == sb && sr != sa, sub);
-    if (overflow) { let negative = sa; Out.data[lane] = select(0xffffffffu, 0u, negative); Out.data[lane + 1u] = select(0x7fffffffu, 0x80000000u, negative); return; }
-    Out.data[lane] = lo; Out.data[lane + 1u] = hi;
+    if (!is_signed) {
+        if (unsigned_overflow) {
+            if (subtract) {
+                Out.data[lane] = 0u;
+                Out.data[lane + 1u] = 0u;
+            } else {
+                Out.data[lane] = 0xffffffffu;
+                Out.data[lane + 1u] = 0xffffffffu;
+            }
+            return;
+        }
+        Out.data[lane] = lo;
+        Out.data[lane + 1u] = hi;
+        return;
+    }
+    let a_negative = bitcast<i32>(a1) < 0;
+    let b_negative = bitcast<i32>(b1) < 0;
+    let result_negative = bitcast<i32>(hi) < 0;
+    let overflow = select(
+        a_negative == b_negative && result_negative != a_negative,
+        a_negative != b_negative && result_negative != a_negative,
+        subtract,
+    );
+    if (overflow) {
+        if (a_negative) {
+            Out.data[lane] = 0u;
+            Out.data[lane + 1u] = 0x80000000u;
+        } else {
+            Out.data[lane] = 0xffffffffu;
+            Out.data[lane + 1u] = 0x7fffffffu;
+        }
+        return;
+    }
+    Out.data[lane] = lo;
+    Out.data[lane + 1u] = hi;
 }
 @compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -438,8 +483,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let b_lane = b_index * lanes;
     let a = A.data[a_lane]; let b = B.data[b_lane];
     switch params.integer_type {
-        case 0u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx8(a), sx8(b), 0x80u, 0x7fu); } else { Out.data[lane] = bitcast<u32>(signed32(sx8(a), sx8(b), -128, 127)); } }
-        case 1u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx16(a), sx16(b), 0x8000u, 0x7fffu); } else { Out.data[lane] = bitcast<u32>(signed32(sx16(a), sx16(b), -32768, 32767)); } }
+        case 0u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx8(a), sx8(b), 0x80u, 0x7fu); } else { Out.data[lane] = bitcast<u32>(signed_narrow(sx8(a), sx8(b), -128, 127)); } }
+        case 1u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx16(a), sx16(b), 0x8000u, 0x7fffu); } else { Out.data[lane] = bitcast<u32>(signed_narrow(sx16(a), sx16(b), -32768, 32767)); } }
         case 2u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(bitcast<i32>(a), bitcast<i32>(b), 0x80000000u, 0x7fffffffu); } else { Out.data[lane] = bitcast<u32>(signed32(bitcast<i32>(a), bitcast<i32>(b), -2147483648, 2147483647)); } }
         case 3u: { if (params.op == 2u) { write_multiply64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } else { write64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } }
         case 4u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a & 0xffu, b & 0xffu, 0xffu); } else { Out.data[lane] = min(unsigned32(a & 0xffu, b & 0xffu, 0xffu), 0xffu); } }
