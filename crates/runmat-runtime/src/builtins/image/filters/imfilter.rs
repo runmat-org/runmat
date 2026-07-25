@@ -418,7 +418,9 @@ fn parse_scalar(builtin: &str, value: &Value) -> BuiltinResult<f64> {
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(t) => {
             if t.data.len() == 1 {
-                Ok(t.data[0])
+                Ok(t.integer_storage()
+                    .and_then(|storage| storage.value_at(0))
+                    .map_or(t.data[0], |int| int.to_f64()))
             } else {
                 Err(filter_error(
                     builtin,
@@ -797,7 +799,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{Tensor, Value};
+    use runmat_builtins::{IntegerStorage, Tensor, Value};
 
     fn simple_tensor(data: &[f64], rows: usize, cols: usize) -> Tensor {
         Tensor::new(data.to_vec(), vec![rows, cols]).unwrap()
@@ -1008,6 +1010,20 @@ pub(crate) mod tests {
         for (a, b) in manual_res.data.iter().zip(via_tensor.data.iter()) {
             assert!((a - b).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn parse_scalar_reads_typed_integer_tensor_exactly() {
+        let scalar =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("scalar");
+        assert_eq!(
+            parse_scalar(IMFILTER_BUILTIN, &Value::Tensor(scalar)).unwrap(),
+            u64::MAX as f64
+        );
+
+        let vector =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("vector");
+        assert!(parse_scalar(IMFILTER_BUILTIN, &Value::Tensor(vector)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

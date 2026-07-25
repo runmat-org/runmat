@@ -8,7 +8,7 @@ use runmat_accelerate_api::{self, FspecialFilter, FspecialRequest};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    IntValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -936,22 +936,28 @@ fn parse_lengths_inner(
 ) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Int(i) => {
-            let len = i.to_i64();
-            if enforce_positive && len <= 0 {
+            let len = parse_integer_dimension(i)?;
+            if enforce_positive && len == 0 {
                 return Err(fspecial_error(err));
             }
-            if len < 0 {
-                return Err(fspecial_error(err));
-            }
-            Ok(vec![len as usize])
+            Ok(vec![len])
         }
         Value::Num(n) => parse_numeric_dimension(*n).map(|d| vec![d]),
         Value::Tensor(tensor) => {
-            let dims = tensor
-                .data
-                .iter()
-                .map(|&v| parse_numeric_dimension(v))
-                .collect::<Result<Vec<_>, _>>()?;
+            let dims = if let Some(storage) = tensor.integer_storage() {
+                (0..tensor.data.len())
+                    .map(|index| {
+                        let value = storage.value_at(index).ok_or_else(|| fspecial_error(err))?;
+                        parse_integer_dimension(&value)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                tensor
+                    .data
+                    .iter()
+                    .map(|&v| parse_numeric_dimension(v))
+                    .collect::<Result<Vec<_>, _>>()?
+            };
             if enforce_positive && dims.contains(&0) {
                 return Err(fspecial_error(err));
             }
@@ -973,6 +979,12 @@ fn parse_lengths_inner(
         }
         _ => Err(fspecial_error(err)),
     }
+}
+
+fn parse_integer_dimension(value: &IntValue) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .ok_or_else(|| fspecial_error("fspecial: dimensions must be non-negative"))
 }
 
 fn parse_numeric_dimension(n: f64) -> BuiltinResult<usize> {
@@ -1201,6 +1213,30 @@ pub(crate) mod tests {
         for value in tensor.data {
             assert_close(value, expected, 1e-12);
         }
+    }
+
+    #[test]
+    fn fspecial_lengths_preserve_typed_integer_tensor_bounds() {
+        let dims =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![2, 4]), vec![1, 2])
+                .expect("dims");
+        assert_eq!(
+            parse_lengths_strict(
+                &Value::Tensor(dims),
+                "fspecial: LENGTHS must be positive integers",
+            )
+            .unwrap(),
+            vec![2, 4]
+        );
+
+        let negative =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
+                .expect("negative");
+        assert!(parse_lengths_strict(
+            &Value::Tensor(negative),
+            "fspecial: LENGTHS must be positive integers",
+        )
+        .is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -382,7 +382,11 @@ fn parse_size_scalar(value: &Value, context: &str) -> BuiltinResult<usize> {
                     &CELL_ERROR_INVALID_SIZE,
                 ));
             }
-            parse_numeric(t.data[0], context)
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                parse_intvalue(&int, context)
+            } else {
+                parse_numeric(t.data[0], context)
+            }
         }
         Value::LogicalArray(arr) => {
             if arr.data.len() != 1 {
@@ -412,10 +416,26 @@ fn parse_size_tensor(t: &Tensor) -> BuiltinResult<Vec<usize>> {
         ));
     }
     let dims = t
-        .data
-        .iter()
-        .map(|&value| parse_numeric(value, "cell"))
-        .collect::<Result<Vec<_>, _>>()?;
+        .integer_storage()
+        .map(|storage| {
+            (0..t.data.len())
+                .map(|index| {
+                    storage.value_at(index).ok_or_else(|| {
+                        cell_error_with_message(
+                            "cell: size vector storage is inconsistent",
+                            &CELL_ERROR_INTERNAL,
+                        )
+                    })
+                })
+                .map(|value| value.and_then(|int| parse_intvalue(&int, "cell")))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .unwrap_or_else(|| {
+            t.data
+                .iter()
+                .map(|&value| parse_numeric(value, "cell"))
+                .collect::<Result<Vec<_>, _>>()
+        })?;
     if dims.len() == 1 {
         Ok(vec![dims[0], 1])
     } else {
@@ -640,6 +660,26 @@ pub(crate) mod tests {
     fn cell_no_arguments_returns_empty() {
         let result = cell_builtin(Vec::new()).expect("cell()");
         expect_cell(result, &[0, 0]);
+    }
+
+    #[test]
+    fn cell_size_tensor_preserves_typed_integer_bounds() {
+        let dims =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![2, 3]), vec![1, 2])
+                .expect("dims");
+        assert_eq!(parse_size_tensor(&dims).unwrap(), vec![2, 3]);
+
+        let scalar = Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![4]), vec![1, 1])
+            .expect("scalar");
+        assert_eq!(
+            parse_size_scalar(&Value::Tensor(scalar), "cell").unwrap(),
+            4
+        );
+
+        let negative =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
+                .expect("negative");
+        assert!(parse_size_tensor(&negative).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -461,7 +461,10 @@ fn numeric_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if t.data.len() == 1 => Ok(t
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+            .map_or(t.data[0], |int| int.to_f64())),
         Value::LogicalArray(a) if a.data.len() == 1 => Ok(if a.data[0] != 0 { 1.0 } else { 0.0 }),
         _ => Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_OPTION,
@@ -1227,6 +1230,24 @@ mod tests {
             .unwrap()
             .to_rgba8();
         assert_eq!(decoded.get_pixel(0, 0).0, [255, 0, 0, 128]);
+    }
+
+    #[test]
+    fn imwrite_numeric_scalar_reads_typed_integer_tensor_exactly() {
+        let scalar = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+            vec![1, 1],
+        )
+        .expect("scalar");
+        assert_eq!(
+            numeric_scalar(&Value::Tensor(scalar), "LoopCount").unwrap(),
+            u64::MAX as f64
+        );
+
+        let vector =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![1, 2]), vec![1, 2])
+                .expect("vector");
+        assert!(numeric_scalar(&Value::Tensor(vector), "LoopCount").is_err());
     }
 
     #[test]
