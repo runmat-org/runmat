@@ -222,6 +222,11 @@ fn tensors_equal(a: &Tensor, b: &Tensor, nan_equal: bool) -> bool {
     if a.data.len() != b.data.len() {
         return false;
     }
+    match (a.integer_storage(), b.integer_storage()) {
+        (Some(a), Some(b)) => return a == b,
+        (Some(_), None) | (None, Some(_)) => return false,
+        (None, None) => {}
+    }
     // NaN != NaN in isequal (use isequaln for NaN equality)
     a.data
         .iter()
@@ -523,6 +528,58 @@ pub(crate) mod tests {
         ])
         .expect("isequal");
         assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn isequal_integer_tensor_values_are_compared_exactly() {
+        let same_left = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("left integer tensor");
+        let same_right = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("right integer tensor");
+        let different = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 53), u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("different integer tensor");
+
+        assert_eq!(
+            run_isequal(vec![Value::Tensor(same_left), Value::Tensor(same_right)])
+                .expect("isequal same"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            run_isequal(vec![
+                Value::Tensor(different),
+                Value::Tensor(
+                    Tensor::new_integer(
+                        IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+                        vec![1, 2],
+                    )
+                    .expect("comparison tensor"),
+                ),
+            ])
+            .expect("isequal different"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn isequal_integer_tensor_class_must_match() {
+        let unsigned = Tensor::new_integer(IntegerStorage::U64(vec![255]), vec![1, 1])
+            .expect("unsigned integer tensor");
+        let signed = Tensor::new_integer(IntegerStorage::I64(vec![255]), vec![1, 1])
+            .expect("signed integer tensor");
+
+        assert_eq!(
+            run_isequal(vec![Value::Tensor(unsigned), Value::Tensor(signed)]).expect("isequal"),
+            Value::Bool(false)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
