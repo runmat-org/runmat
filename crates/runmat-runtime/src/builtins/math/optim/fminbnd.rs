@@ -24,6 +24,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::brent::{
     brent_min, BrentMinObserver, BrentMinResult, BrentParams, BrentStepKind,
 };
@@ -452,7 +453,7 @@ fn option_f64(field: &str, value: &Value) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(Tensor { data, .. }) if data.len() == 1 => data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
             if data[0] != 0 {
                 1.0
@@ -506,7 +507,7 @@ async fn scalar_bound(label: &str, value: Value) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if t.data.len() == 1 => tensor::tensor_values_f64(&t)[0],
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
             if data[0] != 0 {
                 1.0
@@ -741,6 +742,7 @@ mod tests {
     use super::*;
     use crate::builtins::math::optim::brent::brent_min_tolerance;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
     use runmat_builtins::Value as V;
 
     const FMINBND_HELPER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -949,6 +951,33 @@ mod tests {
         );
         match result {
             V::Num(x) => assert!((x - 2.0).abs() < 1.0e-6, "x = {x}"),
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bounds_and_options_read_typed_integer_tensor_storage_exactly() {
+        let mut lower =
+            Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("lower bound");
+        lower.data[0] = 5.0;
+        let mut upper =
+            Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("upper bound");
+        upper.data[0] = 0.0;
+        let mut max_iter =
+            Tensor::new_integer(IntegerStorage::U16(vec![1000]), vec![1, 1]).expect("MaxIter");
+        max_iter.data[0] = 1.5;
+
+        let mut opts = StructValue::new();
+        opts.insert("MaxIter", Value::Tensor(max_iter));
+        let result = block_on(fminbnd_builtin(
+            V::FunctionHandle("__fminbnd_quad_minus_two".into()),
+            V::Tensor(lower),
+            V::Tensor(upper),
+            vec![Value::Struct(opts)],
+        ))
+        .expect("fminbnd");
+        match result {
+            V::Num(x) => assert!((x - 2.0).abs() < 1.0e-3, "x = {x}"),
             other => panic!("unexpected value {other:?}"),
         }
     }

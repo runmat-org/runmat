@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{
     call_function, initial_guess, lookup_option, option_f64, option_string, value_to_real_vector,
     value_to_scalar, vector_to_value,
@@ -490,7 +491,9 @@ fn bool_value(field: &str, value: &Value) -> BuiltinResult<bool> {
         Value::Num(n) => bool_from_number(field, *n),
         Value::Int(i) => bool_from_number(field, i.to_f64()),
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => Ok(data[0] != 0),
-        Value::Tensor(Tensor { data, .. }) if data.len() == 1 => bool_from_number(field, data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            bool_from_number(field, tensor::tensor_values_f64(tensor)[0])
+        }
         Value::String(s) => bool_from_text(field, s),
         Value::StringArray(sa) if sa.data.len() == 1 => bool_from_text(field, &sa.data[0]),
         Value::CharArray(chars) if chars.rows == 1 => {
@@ -1138,7 +1141,7 @@ fn add_scaled(x: &[f64], direction: &[f64], alpha: f64) -> Vec<f64> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage};
     use std::sync::Arc;
 
     fn bound(id: usize) -> Value {
@@ -1390,6 +1393,23 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.message().contains("MaxFunEvals"));
+    }
+
+    #[test]
+    fn options_read_typed_integer_tensor_storage_exactly() {
+        let mut max_iter =
+            Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("MaxIter");
+        max_iter.data[0] = 1.5;
+        let mut gradient = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
+            .expect("SpecifyObjectiveGradient");
+        gradient.data[0] = 0.0;
+
+        let mut opts = StructValue::new();
+        opts.insert("MaxIter", Value::Tensor(max_iter));
+        opts.insert("SpecifyObjectiveGradient", Value::Tensor(gradient));
+        let parsed = FminuncOptions::from_struct(Some(&opts), 1).expect("options");
+        assert_eq!(parsed.max_iter, 5);
+        assert!(parsed.specify_objective_gradient);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

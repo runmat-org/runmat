@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::canonical_option_name;
 use crate::builtins::math::optim::type_resolvers::optim_options_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -652,7 +653,7 @@ fn numeric_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
     let parsed = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(Tensor { data, .. }) if data.len() == 1 => data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
             if data[0] == 0 {
                 0.0
@@ -793,7 +794,7 @@ mod tests {
     use super::*;
     use crate::call_builtin_async;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     fn run_optimoptions(rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(optimoptions_builtin(rest))
@@ -1238,6 +1239,23 @@ mod tests {
             err.identifier(),
             Some("RunMat:optimoptions:InvalidOptionValue")
         );
+    }
+
+    #[test]
+    fn optimoptions_numeric_options_read_typed_integer_storage_exactly() {
+        let mut max_iter =
+            Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("MaxIter");
+        max_iter.data[0] = 1.5;
+
+        let options = struct_result(
+            run_optimoptions(vec![
+                Value::from("fsolve"),
+                Value::from("MaxIter"),
+                Value::Tensor(max_iter),
+            ])
+            .expect("optimoptions"),
+        );
+        assert_eq!(num_field(&options, "MaxIter"), 5.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -430,7 +430,7 @@ fn numeric_option(name: &str, value: &Value) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(Tensor { data, .. }) if data.len() == 1 => data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
             if data[0] != 0 {
                 1.0
@@ -882,6 +882,22 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.message().contains("integer scalar"));
+    }
+
+    #[test]
+    fn max_fun_evals_option_reads_typed_integer_storage_exactly() {
+        let mut max_fun_evals =
+            Tensor::new_integer(IntegerStorage::U16(vec![50]), vec![1, 1]).expect("MaxFunEvals");
+        max_fun_evals.data[0] = 4.0;
+
+        let result = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("MaxFunEvals"), Value::Tensor(max_fun_evals)],
+        ))
+        .expect("integral");
+        assert!(matches!(result, Value::Num(_)));
     }
 
     #[test]

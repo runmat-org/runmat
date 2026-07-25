@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{call_function, value_to_scalar};
 use crate::builtins::math::optim::type_resolvers::numerical_integral_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -357,7 +358,7 @@ fn scalar_real_sync(
                 0.0
             }
         }
-        Value::Tensor(Tensor { data, .. }) if data.len() == 1 => data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(&tensor)[0],
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
             if data[0] != 0 {
                 1.0
@@ -562,6 +563,7 @@ fn finalize(result: QuadResult) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
     use std::sync::Arc;
 
     #[test]
@@ -656,6 +658,29 @@ mod tests {
         assert!(
             (first_row[2].parse::<f64>().unwrap() - std::f64::consts::PI).abs() < 1.0e-6,
             "{joined}"
+        );
+    }
+
+    #[test]
+    fn quad_tol_and_trace_read_typed_integer_storage_exactly() {
+        crate::console::reset_thread_buffer();
+        let mut tol = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("tol");
+        tol.data[0] = -1.0;
+        let mut trace =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("trace");
+        trace.data[0] = 0.0;
+
+        let result = block_on(quad_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::Tensor(tol), Value::Tensor(trace)],
+        ))
+        .expect("quad");
+        assert!(matches!(result, Value::Num(_)));
+        assert!(
+            !crate::console::take_thread_buffer().is_empty(),
+            "typed trace value should enable trace output"
         );
     }
 

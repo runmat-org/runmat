@@ -194,6 +194,9 @@ pub(crate) fn option_f64(
     let parsed = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            crate::builtins::common::tensor::tensor_values_f64(tensor)[0]
+        }
         other => {
             return Err(optim_error(
                 builtin,
