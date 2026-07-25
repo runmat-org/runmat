@@ -2,7 +2,9 @@
 //!
 //! The implementation mirrors the modern RunMat builtin blueprint with GPU-aware semantics.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{
+    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -629,11 +631,7 @@ fn fill_integer_like(
     shape: &[usize],
     prototype: &IntegerStorage,
 ) -> Result<Value, String> {
-    let value = match fill {
-        FillScalar::Integer(value) => prototype.cast_exact_assignment(value),
-        _ => prototype.cast_f64_assignment(fill.as_real()?),
-    };
-    let storage = prototype.from_same_class_values(vec![value; tensor::element_count(shape)])?;
+    let storage = exact_integer_fill_storage(fill, shape, prototype)?;
     Tensor::new_integer(storage, shape.to_vec())
         .map(tensor::tensor_into_value)
         .map_err(|e| format!("fill: {e}"))
@@ -651,6 +649,20 @@ fn fill_like_gpu(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
         }
+    }
+    if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(prototype) {
+        let prototype_storage = integer_storage_prototype(integer_type);
+        let storage = exact_integer_fill_storage(fill, shape, &prototype_storage)?;
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return fill_integer_like(fill, shape, &prototype_storage);
+        };
+        let view = integer_tensor_view(&storage, shape);
+        return provider
+            .upload_integer(&view)
+            .map(Value::GpuTensor)
+            .map_err(|e| {
+                format!("fill: provider cannot preserve native integer gpuArray output: {e}")
+            });
     }
     let value = fill.as_real()?;
     if let Some(provider) = runmat_accelerate_api::provider() {
@@ -707,6 +719,50 @@ fn make_logical_array(fill: &FillScalar, shape: &[usize]) -> Result<LogicalArray
         data.clear();
     }
     LogicalArray::new(data, shape.to_vec()).map_err(|e| format!("fill: {e}"))
+}
+
+fn exact_integer_fill_storage(
+    fill: &FillScalar,
+    shape: &[usize],
+    prototype: &IntegerStorage,
+) -> Result<IntegerStorage, String> {
+    let value = match fill {
+        FillScalar::Integer(value) => prototype.cast_exact_assignment(value),
+        _ => prototype.cast_f64_assignment(fill.as_real()?),
+    };
+    prototype.from_same_class_values(vec![value; tensor::element_count(shape)])
+}
+
+fn integer_storage_prototype(
+    element_type: runmat_accelerate_api::IntegerElementType,
+) -> IntegerStorage {
+    match element_type {
+        runmat_accelerate_api::IntegerElementType::I8 => IntegerStorage::I8(Vec::new()),
+        runmat_accelerate_api::IntegerElementType::I16 => IntegerStorage::I16(Vec::new()),
+        runmat_accelerate_api::IntegerElementType::I32 => IntegerStorage::I32(Vec::new()),
+        runmat_accelerate_api::IntegerElementType::I64 => IntegerStorage::I64(Vec::new()),
+        runmat_accelerate_api::IntegerElementType::U8 => IntegerStorage::U8(Vec::new()),
+        runmat_accelerate_api::IntegerElementType::U16 => IntegerStorage::U16(Vec::new()),
+        runmat_accelerate_api::IntegerElementType::U32 => IntegerStorage::U32(Vec::new()),
+        runmat_accelerate_api::IntegerElementType::U64 => IntegerStorage::U64(Vec::new()),
+    }
+}
+
+fn integer_tensor_view<'a>(
+    storage: &'a IntegerStorage,
+    shape: &'a [usize],
+) -> HostIntegerTensorView<'a> {
+    let data = match storage {
+        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+    };
+    HostIntegerTensorView { data, shape }
 }
 
 #[cfg(test)]
@@ -909,6 +965,46 @@ pub(crate) mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::U32(vec![0, 0, 0, 0]))
         );
+    }
+
+    #[test]
+    fn fill_gpu_integer_like_preserves_exact_wide_values_resident() {
+        test_support::with_test_provider(|provider| {
+            let wide = (1_u64 << 53) + 1;
+            let prototype_values = [0_u64, 1_u64];
+            let prototype = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&prototype_values),
+                    shape: &[1, 2],
+                })
+                .expect("upload uint64 prototype");
+
+            let result = block_on(fill_builtin(
+                Value::Int(runmat_builtins::IntValue::U64(wide)),
+                vec![
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::GpuTensor(prototype),
+                ],
+            ))
+            .expect("exact gpu uint64 fill");
+
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected resident gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            assert_eq!(handle.shape, vec![2, 2]);
+            let downloaded = block_on(provider.download_integer(&handle))
+                .expect("download uint64 fill")
+                .data;
+            let runmat_accelerate_api::HostIntegerDataOwned::U64(values) = downloaded else {
+                panic!("expected uint64 storage");
+            };
+            assert_eq!(values, vec![wide; 4]);
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
