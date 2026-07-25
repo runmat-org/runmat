@@ -192,7 +192,10 @@ fn char_row_value(text: &str) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::{builtins::common::test_support, make_cell};
-    use runmat_builtins::{CharArray, IntValue, ResolveContext, StringArray, Tensor, Type};
+    use runmat_builtins::{
+        CharArray, IntValue, IntegerComplexStorage, IntegerStorage, ResolveContext, StringArray,
+        Tensor, Type,
+    };
 
     fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::sprintf_builtin(format_spec, rest))
@@ -401,6 +404,27 @@ pub(crate) mod tests {
         )
         .expect("sprintf");
         assert_eq!(char_value_to_string(result), "1.5-2i");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn sprintf_complex_integer_tensor_s_conversion_preserves_exact_storage() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("matching complex integer storage");
+        let tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 2])
+            .expect("complex integer tensor");
+        let result = sprintf_builtin(
+            Value::String("%s ".to_string()),
+            vec![Value::ComplexTensor(tensor)],
+        )
+        .expect("sprintf");
+        assert_eq!(
+            char_value_to_string(result),
+            format!("{}+7i {} ", u64::MAX, 1_u64 << 63)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

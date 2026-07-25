@@ -1085,8 +1085,14 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
             }
         }
         Value::ComplexTensor(tensor) => {
-            for &(re, im) in &tensor.data {
-                output.push(Value::Complex(re, im));
+            if tensor.integer_data.is_some() {
+                for index in 0..tensor.data.len() {
+                    output.push(Value::String(tensor.format_element(index)));
+                }
+            } else {
+                for &(re, im) in &tensor.data {
+                    output.push(Value::Complex(re, im));
+                }
             }
         }
         Value::LogicalArray(LogicalArray { data, .. }) => {
@@ -1184,7 +1190,9 @@ fn int_value_to_decimal(value: &IntValue) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{get_display_format, set_display_format, FormatMode};
+    use runmat_builtins::{
+        get_display_format, set_display_format, FormatMode, IntegerComplexStorage,
+    };
 
     #[test]
     fn format_variadic_supports_thousands_grouping_flag() {
@@ -1236,6 +1244,27 @@ mod tests {
             )
             .expect("formatted integer values"),
             format!("{} ffffffffffffffff {}", u64::MAX, 1_u64 << 63)
+        );
+    }
+
+    #[test]
+    fn typed_complex_integer_tensors_keep_exact_values_through_string_formatting() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("matching complex integer storage");
+        let tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 2])
+            .expect("complex integer tensor");
+        let flattened = futures::executor::block_on(flatten_arguments(
+            &[Value::ComplexTensor(tensor)],
+            "sprintf",
+        ))
+        .expect("flattened arguments");
+
+        assert_eq!(
+            format_variadic("%s %s", &flattened).expect("formatted complex integer values"),
+            format!("{}+7i {}", u64::MAX, 1_u64 << 63)
         );
     }
 }
