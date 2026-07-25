@@ -11,6 +11,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::identifiers::is_valid_varname;
+use crate::builtins::common::tensor;
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::underlying_type::underlying_type_matches;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -795,7 +796,7 @@ fn numeric_values_all(value: &Value, pred: impl Fn(f64) -> bool) -> bool {
         Value::Int(v) => pred(v.to_f64()),
         Value::Bool(v) => pred(if *v { 1.0 } else { 0.0 }),
         Value::LogicalArray(a) => a.data.iter().map(|v| f64::from(*v != 0)).all(pred),
-        Value::Tensor(t) => t.data.iter().copied().all(pred),
+        Value::Tensor(t) => tensor::tensor_values_f64(t).into_iter().all(pred),
         Value::SparseTensor(t) => {
             let numel = t.rows.saturating_mul(t.cols);
             t.values.iter().copied().all(&pred) && (t.values.len() >= numel || pred(0.0))
@@ -810,7 +811,7 @@ fn numeric_arg(args: &[Value], index: usize) -> Result<f64, RuntimeError> {
     match args.get(index) {
         Some(Value::Num(v)) => Ok(*v),
         Some(Value::Int(v)) => Ok(v.to_f64()),
-        Some(Value::Tensor(t)) if t.data.len() == 1 => Ok(t.data[0]),
+        Some(Value::Tensor(t)) if t.data.len() == 1 => Ok(tensor::tensor_values_f64(t)[0]),
         Some(other) => Err(invalid_argument_error(
             "argumentValidation",
             format!(
@@ -1089,6 +1090,24 @@ mod tests {
 
         let bad = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
         assert!(dispatch_validator("mustBePositive", vec![Value::Tensor(bad)]).is_err());
+    }
+
+    #[test]
+    fn numeric_validators_read_typed_integer_storage_exactly() {
+        let mut positive =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("positive");
+        positive.data[0] = -1.0;
+        positive.data[1] = 0.0;
+        ok("mustBePositive", vec![Value::Tensor(positive)]);
+
+        let mut negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1, -2]), vec![1, 2]).expect("negative");
+        negative.data[0] = 1.0;
+        negative.data[1] = 0.0;
+        ok("mustBeNegative", vec![Value::Tensor(negative)]);
+
+        let zero = Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("zero");
+        err("mustBeNonzero", vec![Value::Tensor(zero)]);
     }
 
     #[test]
@@ -1415,6 +1434,40 @@ mod tests {
         err(
             "mustBeLessThanOrEqual",
             vec![Value::Num(2.0), Value::Num(1.0)],
+        );
+    }
+
+    #[test]
+    fn threshold_validators_read_typed_integer_storage_exactly() {
+        let mut lower =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("lower");
+        lower.data[0] = 10.0;
+        ok(
+            "mustBeGreaterThan",
+            vec![Value::Num(2.0), Value::Tensor(lower)],
+        );
+
+        let mut upper =
+            Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("upper");
+        upper.data[0] = 0.0;
+        ok(
+            "mustBeLessThan",
+            vec![Value::Num(2.0), Value::Tensor(upper)],
+        );
+
+        let mut range_lower =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("range lower");
+        range_lower.data[0] = 10.0;
+        let mut range_upper =
+            Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("range upper");
+        range_upper.data[0] = 0.0;
+        ok(
+            "mustBeInRange",
+            vec![
+                Value::Num(2.0),
+                Value::Tensor(range_lower),
+                Value::Tensor(range_upper),
+            ],
         );
     }
 
