@@ -574,7 +574,9 @@ fn kstest_scalar_number(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_values_f64(tensor).first().copied()
+        }
         _ => None,
     }
 }
@@ -833,7 +835,9 @@ fn scalar_number(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_values_f64(tensor).first().copied()
+        }
         _ => None,
     }
 }
@@ -1161,6 +1165,7 @@ fn interval_shape(out_shape: &[usize], dim: usize) -> Vec<usize> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn output_list(value: Value) -> Vec<Value> {
         match value {
@@ -1174,6 +1179,12 @@ mod tests {
             (actual - expected).abs() <= tol,
             "expected {expected}, got {actual}"
         );
+    }
+
+    fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+        tensor.data[0] = f64::NAN;
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -1330,6 +1341,35 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.message.contains("Dim"));
+    }
+
+    #[test]
+    fn ttest2_numeric_options_read_typed_integer_storage_exactly() {
+        let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
+        let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 4.0, 8.0], vec![4, 1]).unwrap());
+        let out = block_on(ttest2_builtin(
+            x,
+            y,
+            vec![
+                Value::from("Dim"),
+                poisoned_integer_scalar(IntegerStorage::U64(vec![1])),
+            ],
+        ))
+        .unwrap();
+        assert_eq!(out, Value::Bool(false));
+
+        let x = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+        let y = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+        let err = block_on(ttest2_builtin(
+            x,
+            y,
+            vec![
+                Value::from("Alpha"),
+                poisoned_integer_scalar(IntegerStorage::I64(vec![1])),
+            ],
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("Alpha"));
     }
 
     #[test]
@@ -1559,5 +1599,19 @@ mod tests {
         let _guard = crate::output_count::push_output_count(Some(5));
         let err = block_on(kstest_builtin(sample, Vec::new())).unwrap_err();
         assert!(err.message.contains("too many output arguments"));
+    }
+
+    #[test]
+    fn kstest_alpha_reads_typed_integer_storage_exactly() {
+        let sample = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap());
+        let err = block_on(kstest_builtin(
+            sample,
+            vec![
+                Value::from("Alpha"),
+                poisoned_integer_scalar(IntegerStorage::U64(vec![1])),
+            ],
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("Alpha"));
     }
 }
