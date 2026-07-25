@@ -679,13 +679,14 @@ async fn cov_host(args: CovArgs) -> BuiltinResult<Value> {
 }
 
 async fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
-    match value {
+    let tensor = match value {
         Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle).await,
         Value::LogicalArray(logical) => {
             tensor::logical_to_tensor(&logical).map_err(cov_internal_error)
         }
         other => tensor::value_into_tensor_for("cov", other).map_err(cov_internal_error),
-    }
+    }?;
+    normalize_integer_tensor(tensor)
 }
 
 async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinResult<Vec<f64>> {
@@ -696,6 +697,7 @@ async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinRe
         }
         other => tensor::value_into_tensor_for("cov", other).map_err(cov_internal_error)?,
     };
+    let tensor = normalize_integer_tensor(tensor)?;
 
     if tensor.shape.len() > 2 {
         return Err(cov_error_with_detail(
@@ -724,6 +726,18 @@ async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinRe
         ));
     }
     Ok(tensor.data)
+}
+
+fn normalize_integer_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+    let Some(storage) = tensor.integer_storage() else {
+        return Ok(tensor);
+    };
+    let data = storage
+        .exact_values()
+        .into_iter()
+        .map(|value| value.to_f64())
+        .collect::<Vec<_>>();
+    Tensor::new(data, tensor.shape.clone()).map_err(cov_internal_error)
 }
 
 fn parse_rows_option(value: &str) -> BuiltinResult<CovRows> {
@@ -1240,7 +1254,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Tensor, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Tensor, Type};
 
     fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
         let dim = (expected.len() as f64).sqrt() as usize;
@@ -1258,6 +1272,10 @@ pub(crate) mod tests {
                 );
             }
         }
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).unwrap()
     }
 
     #[test]
@@ -1376,6 +1394,48 @@ pub(crate) mod tests {
             0.006666666666666678,
         ];
         assert_tensor_close(&tensor, &expected, 1.0e-6);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cov_accepts_typed_integer_matrix_and_weights() {
+        let tensor = int_tensor(
+            IntegerStorage::I16(vec![
+                4, 4, 3, 4, 4, //
+                2, 2, 2, 2, 2,
+            ]),
+            vec![5, 2],
+        );
+        let weights = int_tensor(IntegerStorage::U16(vec![1, 1, 1, 2, 2]), vec![5, 1]);
+        let result = block_on(cov_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Tensor(weights)],
+        ))
+        .expect("cov");
+        let tensor = match result {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor result, got {other:?}"),
+        };
+        let expected = [
+            1.0 / 7.0,
+            0.0, //
+            0.0,
+            0.0,
+        ];
+        assert_tensor_close(&tensor, &expected, 1.0e-6);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cov_rejects_negative_typed_integer_weights() {
+        let tensor = int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]);
+        let weights = int_tensor(IntegerStorage::I16(vec![1, -1]), vec![2, 1]);
+        let err = block_on(cov_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Tensor(weights)],
+        ))
+        .expect_err("negative weights should fail");
+        assert_eq!(err.identifier(), COV_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
