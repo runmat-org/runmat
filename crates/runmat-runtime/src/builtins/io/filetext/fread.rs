@@ -785,6 +785,37 @@ fn parse_size_string(text: &str) -> Result<SizeSpec, String> {
 }
 
 fn parse_size_tensor(t: &Tensor) -> Result<SizeSpec, String> {
+    if let Some(storage) = t.integer_storage() {
+        return match storage.len() {
+            0 => Ok(SizeSpec::Count(0)),
+            1 => {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                Ok(SizeSpec::Count(value.try_to_usize().ok_or_else(|| {
+                    "size argument must be a non-negative integer".to_string()
+                })?))
+            }
+            2 => {
+                let rows_value = storage
+                    .value_at(0)
+                    .expect("integer storage length matches tensor length");
+                let cols_value = storage
+                    .value_at(1)
+                    .expect("integer storage length matches tensor length");
+                let rows = rows_value.try_to_usize().ok_or_else(|| {
+                    "size vector components must be non-negative integers or Inf".to_string()
+                })?;
+                let cols = cols_value.try_to_usize().ok_or_else(|| {
+                    "size vector components must be non-negative integers or Inf".to_string()
+                })?;
+                Ok(SizeSpec::Matrix {
+                    rows,
+                    cols: Some(cols),
+                })
+            }
+            _ => Err("size vector must contain at most two elements".to_string()),
+        };
+    }
+
     match t.data.len() {
         0 => Ok(SizeSpec::Count(0)),
         1 => scalar_to_size(t.data[0]),
@@ -1588,6 +1619,42 @@ pub(crate) mod tests {
         assert!(labels.contains(&"data = fread(fid, size, precision, skip, machinefmt)"));
         assert!(labels.contains(&"data = fread(fid, precision, machinefmt)"));
         assert!(labels.contains(&"data = fread(fid, ..., \"like\", prototype)"));
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn fread_size_tensor_parser_preserves_exact_integer_storage() {
+        let count = (1_u64 << 53) + 1;
+        let count_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![count]), vec![1, 1]).expect("count");
+        match parse_size(Some(&Value::Tensor(count_tensor))).expect("size") {
+            SizeSpec::Count(value) => assert_eq!(value, usize::try_from(count).unwrap()),
+            other => panic!("expected count size, got {other:?}"),
+        }
+
+        let matrix_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![count, 3]), vec![1, 2]).expect("matrix");
+        match parse_size(Some(&Value::Tensor(matrix_tensor))).expect("size") {
+            SizeSpec::Matrix {
+                rows,
+                cols: Some(cols),
+            } => {
+                assert_eq!(rows, usize::try_from(count).unwrap());
+                assert_eq!(cols, 3);
+            }
+            other => panic!("expected matrix size, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fread_size_tensor_parser_rejects_negative_integer_storage() {
+        let count_tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("count");
+        assert!(parse_size(Some(&Value::Tensor(count_tensor))).is_err());
+
+        let matrix_tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]).expect("matrix");
+        assert!(parse_size(Some(&Value::Tensor(matrix_tensor))).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

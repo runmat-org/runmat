@@ -249,6 +249,15 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
         }),
         Value::Tensor(t) => {
             if t.data.len() == 1 {
+                if let Some(storage) = t.integer_storage() {
+                    let value = storage.value_at(0).expect("one-element integer storage");
+                    return value.try_to_i32().ok_or_else(|| {
+                        feof_error_with_detail(
+                            &FEOF_ERROR_INVALID_INPUT,
+                            "file identifier is out of range",
+                        )
+                    });
+                }
                 parse_scalar_fid(t.data[0])
             } else {
                 Err(feof_error_with_detail(
@@ -303,7 +312,7 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::{fclose, fopen, fread, registry};
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor, Value};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
     use runmat_filesystem::File;
     use runmat_time::system_time_now;
     use std::io::Write;
@@ -349,6 +358,13 @@ pub(crate) mod tests {
     fn typed_file_identifier_parser_rejects_unrepresentable_uint64() {
         assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
         assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+
+        let fid_tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+            .expect("typed fid tensor");
+        assert_eq!(parse_fid(&Value::Tensor(fid_tensor)).unwrap(), 7);
+        let fid_too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed fid tensor");
+        assert!(parse_fid(&Value::Tensor(fid_too_large)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

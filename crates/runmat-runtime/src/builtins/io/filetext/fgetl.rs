@@ -280,6 +280,15 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
             )
         }),
         Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                return value.try_to_i32().ok_or_else(|| {
+                    fgetl_error_with_detail(
+                        &FGETL_ERROR_INVALID_INPUT,
+                        "file identifier is out of range",
+                    )
+                });
+            }
             let n = t.data[0];
             if !n.is_finite() {
                 return Err(fgetl_error_with_detail(
@@ -314,7 +323,7 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::{fopen, registry};
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
     use runmat_time::system_time_now;
     use std::path::{Path, PathBuf};
     use std::time::UNIX_EPOCH;
@@ -429,6 +438,22 @@ pub(crate) mod tests {
             unwrap_error_message(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).unwrap_err());
         assert_eq!(
             uint64_too_large,
+            format!(
+                "{}: file identifier is out of range",
+                FGETL_ERROR_INVALID_INPUT.message
+            )
+        );
+
+        let typed_tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed fid");
+        assert_eq!(parse_fid(&Value::Tensor(typed_tensor)).unwrap(), 7);
+        let typed_tensor_too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .expect("typed fid");
+        let typed_tensor_too_large =
+            unwrap_error_message(parse_fid(&Value::Tensor(typed_tensor_too_large)).unwrap_err());
+        assert_eq!(
+            typed_tensor_too_large,
             format!(
                 "{}: file identifier is out of range",
                 FGETL_ERROR_INVALID_INPUT.message

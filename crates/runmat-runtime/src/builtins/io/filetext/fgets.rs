@@ -339,6 +339,15 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
             )
         }),
         Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                return value.try_to_i32().ok_or_else(|| {
+                    fgets_error_with_detail(
+                        &FGETS_ERROR_INVALID_INPUT,
+                        "file identifier is out of range",
+                    )
+                });
+            }
             let n = t.data[0];
             if !n.is_finite() {
                 return Err(fgets_error_with_detail(
@@ -395,6 +404,15 @@ async fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
             fgets_error_with_detail(&FGETS_ERROR_INVALID_INPUT, NCHAR_NONNEGATIVE_INTEGER_DETAIL)
         }),
         Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                return value.try_to_usize().map(Some).ok_or_else(|| {
+                    fgets_error_with_detail(
+                        &FGETS_ERROR_INVALID_INPUT,
+                        NCHAR_NONNEGATIVE_INTEGER_DETAIL,
+                    )
+                });
+            }
             let n = t.data[0];
             if !n.is_finite() {
                 if n.is_sign_positive() {
@@ -442,7 +460,7 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::{fopen, registry};
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
     use runmat_time::system_time_now;
     use std::path::{Path, PathBuf};
     use std::time::UNIX_EPOCH;
@@ -481,9 +499,27 @@ pub(crate) mod tests {
         assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
         assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
 
+        let fid_tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+            .expect("typed fid tensor");
+        assert_eq!(parse_fid(&Value::Tensor(fid_tensor)).unwrap(), 7);
+        let fid_too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed fid tensor");
+        assert!(parse_fid(&Value::Tensor(fid_too_large)).is_err());
+
         let nchar =
             futures::executor::block_on(parse_nchar(&[Value::Int(IntValue::U16(64))])).unwrap();
         assert_eq!(nchar, Some(64));
+        let nchar_tensor = Tensor::new_integer(IntegerStorage::U16(vec![64]), vec![1, 1])
+            .expect("typed nchar tensor");
+        let nchar_from_tensor =
+            futures::executor::block_on(parse_nchar(&[Value::Tensor(nchar_tensor)])).unwrap();
+        assert_eq!(nchar_from_tensor, Some(64));
+        let negative_nchar_tensor = Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1])
+            .expect("typed nchar tensor");
+        assert!(
+            futures::executor::block_on(parse_nchar(&[Value::Tensor(negative_nchar_tensor)]))
+                .is_err()
+        );
         assert!(futures::executor::block_on(parse_nchar(&[Value::Int(IntValue::I8(-1))])).is_err());
     }
 
