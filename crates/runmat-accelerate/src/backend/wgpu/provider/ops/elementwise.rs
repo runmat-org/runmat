@@ -1300,6 +1300,9 @@ impl WgpuProvider {
                 crate::backend::wgpu::types::BinaryOpCode::Div => {
                     self.integer_arithmetic_exec(3, "elem_div", a, b)
                 }
+                crate::backend::wgpu::types::BinaryOpCode::Pow => {
+                    self.integer_arithmetic_exec(4, "elem_pow", a, b)
+                }
                 crate::backend::wgpu::types::BinaryOpCode::Min => {
                     self.integer_minmax_exec(true, "elem_min", a, b)
                 }
@@ -2861,6 +2864,82 @@ mod tests {
             assert_eq!(downloaded.data, expected);
             for handle in [&lhs, &rhs, &quotient] {
                 provider.free(handle).expect("free division handle");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_power_preserves_all_classes_and_matches_runtime_edges() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [1, 4];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[2, -2, 0, -1]),
+                HostIntegerDataView::I8(&[7, 7, -1, -3]),
+                HostIntegerDataOwned::I8(vec![i8::MAX, i8::MIN, i8::MAX, -1]),
+            ),
+            (
+                HostIntegerDataView::I16(&[2, -2, 0, -1]),
+                HostIntegerDataView::I16(&[15, 15, -1, -3]),
+                HostIntegerDataOwned::I16(vec![i16::MAX, i16::MIN, i16::MAX, -1]),
+            ),
+            (
+                HostIntegerDataView::I32(&[2, -2, 0, -1]),
+                HostIntegerDataView::I32(&[31, 31, -1, -3]),
+                HostIntegerDataOwned::I32(vec![i32::MAX, i32::MIN, i32::MAX, -1]),
+            ),
+            (
+                HostIntegerDataView::I64(&[2, -2, 0, -1]),
+                HostIntegerDataView::I64(&[63, 63, -1, -3]),
+                HostIntegerDataOwned::I64(vec![i64::MAX, i64::MIN, i64::MAX, -1]),
+            ),
+            (
+                HostIntegerDataView::U8(&[2, u8::MAX, 0, 1]),
+                HostIntegerDataView::U8(&[8, 2, 0, 7]),
+                HostIntegerDataOwned::U8(vec![u8::MAX, u8::MAX, 1, 1]),
+            ),
+            (
+                HostIntegerDataView::U16(&[2, u16::MAX, 0, 1]),
+                HostIntegerDataView::U16(&[16, 2, 0, 7]),
+                HostIntegerDataOwned::U16(vec![u16::MAX, u16::MAX, 1, 1]),
+            ),
+            (
+                HostIntegerDataView::U32(&[2, u32::MAX, 0, 1]),
+                HostIntegerDataView::U32(&[32, 2, 0, 7]),
+                HostIntegerDataOwned::U32(vec![u32::MAX, u32::MAX, 1, 1]),
+            ),
+            (
+                HostIntegerDataView::U64(&[2, u64::MAX, 0, 1]),
+                HostIntegerDataView::U64(&[64, 2, 0, 7]),
+                HostIntegerDataOwned::U64(vec![u64::MAX, u64::MAX, 1, 1]),
+            ),
+        ];
+        for (base, exponent, expected) in cases {
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: base,
+                    shape: &shape,
+                })
+                .expect("upload power base");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: exponent,
+                    shape: &shape,
+                })
+                .expect("upload power exponent");
+            let value = provider.elem_pow(&lhs, &rhs).await.expect("integer power");
+            assert_eq!(
+                provider
+                    .download_integer(&value)
+                    .await
+                    .expect("download integer power")
+                    .data,
+                expected
+            );
+            for handle in [&lhs, &rhs, &value] {
+                provider.free(handle).expect("free power handle");
             }
         }
     }
