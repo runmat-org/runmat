@@ -6,7 +6,7 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    IntValue, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -353,7 +353,8 @@ fn compute_indices(
     let mut has_non_scalar = false;
 
     for tensor in subscripts {
-        if tensor.data.len() != 1 {
+        let len = tensor_element_len(tensor);
+        if len != 1 {
             has_non_scalar = true;
             if let Some(shape) = &target_shape {
                 if &tensor.shape != shape {
@@ -361,7 +362,7 @@ fn compute_indices(
                 }
             } else {
                 target_shape = Some(tensor.shape.clone());
-                result_len = tensor.data.len();
+                result_len = len;
             }
         }
     }
@@ -383,7 +384,7 @@ fn compute_indices(
         let mut offset: usize = 0;
         for (dim_index, (&dim, tensor)) in dims.iter().zip(subscripts.iter()).enumerate() {
             let raw = subscript_value(tensor, idx);
-            let coerced = coerce_subscript(raw, dim_index + 1, dim)?;
+            let coerced = coerce_subscript_value(raw, dim_index + 1, dim)?;
             let term = coerced
                 .checked_sub(1)
                 .and_then(|v| v.checked_mul(strides[dim_index]))
@@ -398,12 +399,64 @@ fn compute_indices(
     Ok((output, target_shape))
 }
 
-fn subscript_value(tensor: &Tensor, idx: usize) -> f64 {
-    if tensor.data.len() == 1 {
-        tensor.data[0]
-    } else {
-        tensor.data[idx]
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map(|storage| storage.len())
+        .unwrap_or(tensor.data.len())
+}
+
+enum SubscriptValue {
+    Float(f64),
+    Integer(IntValue),
+}
+
+fn subscript_value(tensor: &Tensor, idx: usize) -> SubscriptValue {
+    if let Some(storage) = tensor.integer_storage() {
+        let index = if storage.len() == 1 { 0 } else { idx };
+        return SubscriptValue::Integer(
+            storage
+                .value_at(index)
+                .expect("subscript index is within integer storage bounds"),
+        );
     }
+    if tensor.data.len() == 1 {
+        SubscriptValue::Float(tensor.data[0])
+    } else {
+        SubscriptValue::Float(tensor.data[idx])
+    }
+}
+
+fn coerce_subscript_value(
+    value: SubscriptValue,
+    dim_number: usize,
+    dim_size: usize,
+) -> crate::BuiltinResult<usize> {
+    match value {
+        SubscriptValue::Float(value) => coerce_subscript(value, dim_number, dim_size),
+        SubscriptValue::Integer(value) => coerce_integer_subscript(&value, dim_number, dim_size),
+    }
+}
+
+fn coerce_integer_subscript(
+    value: &IntValue,
+    dim_number: usize,
+    dim_size: usize,
+) -> crate::BuiltinResult<usize> {
+    let Some(index) = value.try_to_usize() else {
+        return Err(sub2ind_error(
+            "Subscript indices must either be real positive integers or logicals.",
+        ));
+    };
+    if index < 1 {
+        return Err(sub2ind_error(
+            "Subscript indices must either be real positive integers or logicals.",
+        ));
+    }
+    if index > dim_size {
+        return Err(dimension_bounds_error(dim_number));
+    }
+    Ok(index)
 }
 
 fn coerce_subscript(value: f64, dim_number: usize, dim_size: usize) -> crate::BuiltinResult<usize> {
@@ -460,7 +513,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor, Type, Value};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Type, Value};
 
     fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::sub2ind_builtin(dims_val, rest))
@@ -516,6 +569,29 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
                 assert_eq!(t.data, vec![10.0, 11.0, 12.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sub2ind_typed_integer_subscripts_read_exact_storage() {
+        let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        let mut rows = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]).unwrap();
+        rows.data = vec![0.0, 0.0, 0.0];
+        let mut cols = Tensor::new_integer(IntegerStorage::I16(vec![4]), vec![1, 1]).unwrap();
+        cols.data = vec![0.0];
+
+        let result = sub2ind_builtin(
+            Value::Tensor(dims),
+            vec![Value::Tensor(rows), Value::Tensor(cols)],
+        )
+        .unwrap();
+
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![3, 1]);
+                assert_eq!(tensor.data, vec![10.0, 11.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

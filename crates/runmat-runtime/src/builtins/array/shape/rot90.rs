@@ -18,7 +18,8 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -251,20 +252,42 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
 fn parse_rotation_steps(arg: Option<&Value>) -> crate::BuiltinResult<usize> {
     match arg {
         None => Ok(1),
-        Some(Value::Int(value)) => {
-            if let Some(raw) = value.try_to_i64() {
-                return Ok(((raw % 4 + 4) % 4) as usize);
-            }
-            Ok((value
-                .try_to_u64()
-                .expect("only non-negative integer values miss the signed representation")
-                % 4) as usize)
+        Some(Value::Int(value)) => Ok(integer_rotation_steps(value)),
+        Some(Value::Tensor(tensor)) if tensor.integer_storage().is_some() => {
+            parse_integer_tensor_rotation_steps(tensor)
         }
         Some(value) => {
             let raw = parse_rotation_value(value)?;
             Ok(((raw % 4 + 4) % 4) as usize)
         }
     }
+}
+
+fn integer_rotation_steps(value: &IntValue) -> usize {
+    if let Some(raw) = value.try_to_i64() {
+        return ((raw % 4 + 4) % 4) as usize;
+    }
+    (value
+        .try_to_u64()
+        .expect("only non-negative integer values miss the signed representation")
+        % 4) as usize
+}
+
+fn parse_integer_tensor_rotation_steps(tensor: &Tensor) -> crate::BuiltinResult<usize> {
+    let storage = tensor
+        .integer_storage()
+        .expect("integer tensor storage is present");
+    if storage.len() != 1 {
+        return Err(rot90_error_with_message(
+            "rot90: K must be a scalar integer",
+            &ROT90_ERROR_INVALID_ROTATION,
+        ));
+    }
+    Ok(integer_rotation_steps(
+        &storage
+            .value_at(0)
+            .expect("one-element integer tensor has a value"),
+    ))
 }
 
 fn parse_rotation_value(value: &Value) -> crate::BuiltinResult<i64> {
@@ -663,6 +686,18 @@ pub(crate) mod tests {
             parse_rotation_steps(Some(&Value::Int(IntValue::I64(-1))))
                 .expect("negative signed rotation count"),
             3
+        );
+    }
+
+    #[test]
+    fn rot90_rotation_parser_reads_typed_integer_storage_exactly() {
+        let mut count =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
+        count.data = vec![0.0];
+
+        assert_eq!(
+            parse_rotation_steps(Some(&Value::Tensor(count))).expect("typed integer K"),
+            (u64::MAX % 4) as usize
         );
     }
 
