@@ -2,7 +2,7 @@ use crate::interpreter::stack::pop2;
 use crate::ops::integer_comparison::{
     scalar_order, tensor_element_equals_scalar, tensor_elements_equal,
 };
-use runmat_builtins::Value;
+use runmat_builtins::{IntValue, Value};
 use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use runmat_runtime::RuntimeError;
 use std::future::Future;
@@ -21,6 +21,27 @@ fn reject_typed_complex_integer_comparison(a: &Value, b: &Value) -> Result<(), R
         ));
     }
     Ok(())
+}
+
+fn logical_bit_equals_int(bit: u8, scalar: &IntValue) -> bool {
+    if bit != 0 {
+        int_value_is_one(scalar)
+    } else {
+        scalar.is_zero()
+    }
+}
+
+fn int_value_is_one(value: &IntValue) -> bool {
+    match value {
+        IntValue::I8(value) => *value == 1,
+        IntValue::I16(value) => *value == 1,
+        IntValue::I32(value) => *value == 1,
+        IntValue::I64(value) => *value == 1,
+        IntValue::U8(value) => *value == 1,
+        IntValue::U16(value) => *value == 1,
+        IntValue::U32(value) => *value == 1,
+        IntValue::U64(value) => *value == 1,
+    }
 }
 
 fn scalar_relation(
@@ -244,6 +265,20 @@ where
         }
         push_logical(out, array.shape.clone(), stack)
     };
+    let logical_eq_int_scalar = |array: &runmat_builtins::LogicalArray,
+                                 scalar: &IntValue,
+                                 stack: &mut Vec<Value>|
+     -> Result<(), RuntimeError> {
+        let mut out = Vec::with_capacity(array.data.len());
+        for &bit in &array.data {
+            out.push(if logical_bit_equals_int(bit, scalar) {
+                1
+            } else {
+                0
+            });
+        }
+        push_logical(out, array.shape.clone(), stack)
+    };
     let logical_eq_tensor = |array: &runmat_builtins::LogicalArray,
                              tensor: &runmat_builtins::Tensor,
                              stack: &mut Vec<Value>|
@@ -314,12 +349,12 @@ where
             push_logical(out, la.shape.clone(), stack)?;
         }
         (Value::LogicalArray(la), Value::Num(n)) => logical_eq_scalar(la, *n, stack)?,
-        (Value::LogicalArray(la), Value::Int(i)) => logical_eq_scalar(la, i.to_f64(), stack)?,
+        (Value::LogicalArray(la), Value::Int(i)) => logical_eq_int_scalar(la, i, stack)?,
         (Value::LogicalArray(la), Value::Bool(flag)) => {
             logical_eq_scalar(la, if *flag { 1.0 } else { 0.0 }, stack)?
         }
         (Value::Num(n), Value::LogicalArray(lb)) => logical_eq_scalar(lb, *n, stack)?,
-        (Value::Int(i), Value::LogicalArray(lb)) => logical_eq_scalar(lb, i.to_f64(), stack)?,
+        (Value::Int(i), Value::LogicalArray(lb)) => logical_eq_int_scalar(lb, i, stack)?,
         (Value::Bool(flag), Value::LogicalArray(lb)) => {
             logical_eq_scalar(lb, if *flag { 1.0 } else { 0.0 }, stack)?
         }
@@ -607,4 +642,107 @@ where
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+    use runmat_builtins::LogicalArray;
+
+    async fn unreachable_call_method(
+        _receiver: Value,
+        _name: &'static str,
+        _arg: Value,
+    ) -> Result<Value, RuntimeError> {
+        panic!("method dispatch should not be used by this test")
+    }
+
+    async fn unreachable_call_builtin(
+        _name: &'static str,
+        _lhs: Value,
+        _rhs: Value,
+    ) -> Result<Value, RuntimeError> {
+        panic!("builtin dispatch should not be used by this test")
+    }
+
+    async fn unreachable_logical_truth(
+        _value: Value,
+        _context: String,
+    ) -> Result<bool, RuntimeError> {
+        panic!("logical truth should not be used by this test")
+    }
+
+    fn logical_array(data: Vec<u8>) -> Value {
+        Value::LogicalArray(LogicalArray::new(data, vec![1, 3]).expect("logical array"))
+    }
+
+    fn assert_logical_result(value: &Value, expected: &[u8]) {
+        let Value::LogicalArray(array) = value else {
+            panic!("expected logical array, got {value:?}");
+        };
+        assert_eq!(array.shape, vec![1, 3]);
+        assert_eq!(array.data, expected);
+    }
+
+    #[test]
+    fn logical_array_eq_integer_scalar_is_exact_for_large_uint64_rhs() {
+        let mut stack = vec![
+            logical_array(vec![0, 1, 1]),
+            Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+        ];
+
+        block_on(equal(
+            &mut stack,
+            unreachable_call_method,
+            unreachable_call_builtin,
+            unreachable_logical_truth,
+        ))
+        .expect("eq");
+
+        assert_eq!(stack.len(), 1);
+        assert_logical_result(&stack[0], &[0, 0, 0]);
+    }
+
+    #[test]
+    fn logical_array_eq_integer_scalar_is_exact_for_large_uint64_lhs() {
+        let mut stack = vec![
+            Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+            logical_array(vec![0, 1, 0]),
+        ];
+
+        block_on(equal(
+            &mut stack,
+            unreachable_call_method,
+            unreachable_call_builtin,
+            unreachable_logical_truth,
+        ))
+        .expect("eq");
+
+        assert_eq!(stack.len(), 1);
+        assert_logical_result(&stack[0], &[0, 0, 0]);
+    }
+
+    #[test]
+    fn logical_array_eq_integer_scalar_matches_zero_and_one_exactly() {
+        let mut zero_stack = vec![logical_array(vec![0, 1, 0]), Value::Int(IntValue::U64(0))];
+        block_on(equal(
+            &mut zero_stack,
+            unreachable_call_method,
+            unreachable_call_builtin,
+            unreachable_logical_truth,
+        ))
+        .expect("eq zero");
+        assert_logical_result(&zero_stack[0], &[1, 0, 1]);
+
+        let mut one_stack = vec![Value::Int(IntValue::I64(1)), logical_array(vec![0, 1, 1])];
+        block_on(equal(
+            &mut one_stack,
+            unreachable_call_method,
+            unreachable_call_builtin,
+            unreachable_logical_truth,
+        ))
+        .expect("eq one");
+        assert_logical_result(&one_stack[0], &[0, 1, 1]);
+    }
 }
