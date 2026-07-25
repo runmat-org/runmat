@@ -425,11 +425,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
 fn parse_normalization(value: &Value) -> BuiltinResult<NormParse> {
     match value {
         Value::Tensor(tensor) => {
-            if tensor.data.is_empty() {
+            let values = tensor::tensor_values_f64(tensor);
+            if values.is_empty() {
                 return Ok(NormParse::Placeholder);
             }
-            if tensor.data.len() == 1 {
-                return parse_normalization_scalar(tensor.data[0]);
+            if values.len() == 1 {
+                return parse_normalization_scalar(values[0]);
             }
             Ok(NormParse::Weighted)
         }
@@ -527,7 +528,7 @@ fn var_tensor(
 ) -> BuiltinResult<Tensor> {
     let (dims, had_request) = resolve_axes(&tensor.shape, axes)?;
     if dims.is_empty() {
-        if had_request && tensor.data.len() == 1 {
+        if had_request && tensor::is_scalar_tensor(&tensor) {
             return var_scalar_tensor(&tensor, nan_mode);
         }
         return Ok(tensor);
@@ -536,7 +537,10 @@ fn var_tensor(
 }
 
 fn var_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Tensor> {
-    let value = tensor.data.first().copied().unwrap_or(f64::NAN);
+    let value = tensor::tensor_values_f64(tensor)
+        .into_iter()
+        .next()
+        .unwrap_or(f64::NAN);
     let result = if value.is_nan() {
         f64::NAN
     } else {
@@ -562,7 +566,8 @@ fn var_tensor_reduce(
 
     let output_shape = reduced_shape(&tensor.shape, &dims_sorted);
     let out_len = tensor::element_count(&output_shape);
-    if tensor.data.is_empty() {
+    let values = tensor::tensor_values_f64(tensor);
+    if values.is_empty() {
         let fill = vec![f64::NAN; out_len];
         return Tensor::new(fill, output_shape)
             .map_err(|e| var_internal_error(format!("var: {e}")));
@@ -581,7 +586,7 @@ fn var_tensor_reduce(
         }
     }
 
-    for (linear, &value) in tensor.data.iter().enumerate() {
+    for (linear, value) in values.into_iter().enumerate() {
         linear_to_multi(linear, &tensor.shape, &mut coords);
         for (i, coord) in coords.iter().enumerate() {
             out_coords[i] = if reduce_mask[i] { 0 } else { *coord };
@@ -837,7 +842,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor, Value};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
     fn var_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::var_builtin(value, rest))
@@ -855,6 +860,18 @@ pub(crate) mod tests {
         ));
         assert!(parse_normalization(&Value::Int(IntValue::U64(u64::MAX))).is_err());
         assert!(parse_normalization(&Value::Int(IntValue::I64(-1))).is_err());
+    }
+
+    #[test]
+    fn var_typed_integer_tensor_normalization_reads_exact_storage() {
+        let mut normalization =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("normalization");
+        normalization.data = vec![0.0];
+
+        assert!(matches!(
+            parse_normalization(&Value::Tensor(normalization)),
+            Ok(NormParse::Value(VarNormalization::Population))
+        ));
     }
 
     #[test]
@@ -933,6 +950,35 @@ pub(crate) mod tests {
                 assert_eq!(out.data, vec![1.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn var_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![0, 2, 4]), vec![1, 3]).expect("tensor");
+        tensor.data = vec![0.0, 0.0, 0.0];
+
+        let result = var_builtin(Value::Tensor(tensor), Vec::new()).expect("var");
+
+        assert_eq!(result, Value::Num(4.0));
+    }
+
+    #[test]
+    fn var_reads_typed_integer_population_flag_tensor_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![0, 2, 4]), vec![1, 3]).expect("tensor");
+        tensor.data = vec![0.0, 0.0, 0.0];
+        let mut normalization =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("normalization");
+        normalization.data = vec![0.0];
+
+        let result =
+            var_builtin(Value::Tensor(tensor), vec![Value::Tensor(normalization)]).expect("var");
+
+        match result {
+            Value::Num(value) => assert!((value - (8.0 / 3.0)).abs() < 1e-12),
+            other => panic!("expected numeric result, got {other:?}"),
         }
     }
 
