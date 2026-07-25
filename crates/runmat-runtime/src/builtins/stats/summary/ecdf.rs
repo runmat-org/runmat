@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, StructValue, Tensor, Type, Value,
+    IntValue, ResolveContext, StructValue, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LinePlot, LineStyle};
@@ -1078,11 +1078,15 @@ fn numeric_vector(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<f64
             ),
         ));
     }
-    Ok(tensor.data)
+    Ok(tensor_values_f64(&tensor))
 }
 
 fn tensor_from_value(value: Value, builtin: &'static str) -> BuiltinResult<Tensor> {
     match value {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            Tensor::new(tensor_values_f64(&tensor), tensor.shape.clone())
+                .map_err(|err| internal_error(builtin, format!("{builtin}: {err}")))
+        }
         Value::Tensor(tensor) => Ok(tensor),
         Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
             .map_err(|err| internal_error(builtin, format!("{builtin}: {err}"))),
@@ -1096,12 +1100,37 @@ fn tensor_from_value(value: Value, builtin: &'static str) -> BuiltinResult<Tenso
 }
 
 fn scalar_number(value: &Value) -> Option<f64> {
+    if let Some(value) = integer_scalar(value) {
+        return Some(value.to_f64());
+    }
     match value {
         Value::Num(value) => Some(*value),
-        Value::Int(value) => Some(value.to_f64()),
         Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
         _ => None,
     }
+}
+
+fn integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn tensor_values_f64(tensor: &Tensor) -> Vec<f64> {
+    tensor
+        .integer_storage()
+        .map(|storage| {
+            storage
+                .exact_values()
+                .into_iter()
+                .map(|value| value.to_f64())
+                .collect()
+        })
+        .unwrap_or_else(|| tensor.data.clone())
 }
 
 fn column_tensor(data: Vec<f64>) -> BuiltinResult<Tensor> {
@@ -1113,9 +1142,14 @@ fn column_tensor(data: Vec<f64>) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>) -> Value {
         Value::Tensor(Tensor::new(data.clone(), vec![data.len(), 1]).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, len: usize) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, vec![len, 1]).unwrap())
     }
 
     fn output_tensors(value: Value) -> Vec<Tensor> {
@@ -1133,6 +1167,55 @@ mod tests {
 
     fn matrix(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    #[test]
+    fn ecdf_numeric_parsers_read_typed_integer_storage_exactly() {
+        let wide = u64::MAX - 1;
+        assert_eq!(
+            numeric_vector(
+                &int_tensor(IntegerStorage::U64(vec![wide, wide - 1]), 2),
+                ECDF_NAME,
+            )
+            .unwrap(),
+            vec![
+                IntValue::U64(wide).to_f64(),
+                IntValue::U64(wide - 1).to_f64()
+            ]
+        );
+        assert_eq!(
+            scalar_number(&int_tensor(IntegerStorage::U64(vec![wide]), 1)).unwrap(),
+            IntValue::U64(wide).to_f64()
+        );
+    }
+
+    #[test]
+    fn ecdf_accepts_typed_integer_data_frequency_and_censoring() {
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let value = block_on(ecdf_builtin(vec![
+            int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), 4),
+            Value::from("Frequency"),
+            int_tensor(IntegerStorage::U16(vec![2, 1, 1, 1]), 4),
+            Value::from("Censoring"),
+            int_tensor(IntegerStorage::I8(vec![0, 1, 0, 0]), 4),
+        ]))
+        .unwrap();
+        let outputs = output_tensors(value);
+        assert_eq!(outputs[1].data, vec![1.0, 1.0, 3.0, 4.0]);
+        assert!((outputs[0].data[1] - 0.4).abs() < 1.0e-12);
+        assert!((outputs[0].data[2] - 0.7).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn ecdf_alpha_rejects_typed_integer_boundary_value() {
+        let err = block_on(ecdf_builtin(vec![
+            int_tensor(IntegerStorage::I16(vec![1, 2, 3]), 3),
+            Value::from("Alpha"),
+            int_tensor(IntegerStorage::U8(vec![1]), 1),
+        ]))
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:ecdf:InvalidArgument"));
+        assert!(err.message().contains("open interval"), "{}", err.message());
     }
 
     #[test]
