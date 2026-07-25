@@ -300,6 +300,8 @@ fn build_matrix_fit_spec(
 ) -> BuiltinResult<FitSpec> {
     let x = tensor::value_into_tensor_for(FITCTREE_NAME, x_value)
         .map_err(|err| fitctree_invalid(format!("fitctree: {err}")))?;
+    let x = tensor::integer_tensor_to_f64(x)
+        .map_err(|err| fitctree_invalid(format!("fitctree: {err}")))?;
     if x.shape.len() > 2 {
         return Err(fitctree_invalid("fitctree: X must be a 2-D numeric matrix"));
     }
@@ -427,6 +429,11 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
             ))
         })?;
         let tensor = tensor::value_into_tensor_for(FITCTREE_NAME, value.clone()).map_err(|_| {
+            fitctree_invalid(format!(
+                "fitctree: predictor variable '{name}' must be numeric"
+            ))
+        })?;
+        let tensor = tensor::integer_tensor_to_f64(tensor).map_err(|_| {
             fitctree_invalid(format!(
                 "fitctree: predictor variable '{name}' must be numeric"
             ))
@@ -1113,12 +1120,17 @@ fn predictors_for_prediction(value: Value, predictor_names: &[String]) -> Builti
                     tensor::value_into_tensor_for(PREDICT_NAME, raw.clone()).map_err(|_| {
                         predict_invalid(format!("predict: predictor '{name}' must be numeric"))
                     })?;
+                let tensor = tensor::integer_tensor_to_f64(tensor).map_err(|_| {
+                    predict_invalid(format!("predict: predictor '{name}' must be numeric"))
+                })?;
                 columns.push(vector_values_predict(&tensor, name)?);
             }
             return columns_to_tensor_predict(columns);
         }
     }
     let tensor = tensor::value_into_tensor_for(PREDICT_NAME, value)
+        .map_err(|err| predict_invalid(format!("predict: {err}")))?;
+    let tensor = tensor::integer_tensor_to_f64(tensor)
         .map_err(|err| predict_invalid(format!("predict: {err}")))?;
     if tensor.shape.len() > 2 || tensor.cols != predictor_names.len() {
         return Err(predict_invalid(format!(
@@ -1144,6 +1156,10 @@ fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
         }),
         Value::Num(value) => Ok(LabelVector {
             labels: vec![ClassLabel::Numeric(value)],
+            kind: LabelKind::Numeric,
+        }),
+        Value::Int(value) => Ok(LabelVector {
+            labels: vec![ClassLabel::Numeric(value.to_f64())],
             kind: LabelKind::Numeric,
         }),
         Value::String(text) => Ok(LabelVector {
@@ -1374,6 +1390,7 @@ fn char_rows(array: &CharArray) -> Vec<String> {
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(value) => Ok(vec![*value]),
+        Value::Int(value) => Ok(vec![value.to_f64()]),
         Value::Tensor(tensor) => vector_values(tensor, name),
         Value::LogicalArray(array) => Ok(array
             .data
@@ -1395,7 +1412,7 @@ fn vector_values_predict(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>>
     if tensor.shape.len() > 2 || (tensor.rows != 1 && tensor.cols != 1) {
         return Err(predict_invalid(format!("predict: {name} must be a vector")));
     }
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn nonnegative_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
@@ -1421,7 +1438,10 @@ fn positive_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
 fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Int(value) => Ok(value.to_f64()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_values_f64(tensor)[0])
+        }
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
         _ => Err(fitctree_invalid(format!(
             "fitctree: {name} must be a numeric scalar"
@@ -1517,7 +1537,7 @@ fn string_column(values: &[String]) -> BuiltinResult<Value> {
 
 fn numeric_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f64>> {
     match object.properties.get(name) {
-        Some(Value::Tensor(tensor)) => Ok(tensor.data.clone()),
+        Some(Value::Tensor(tensor)) => Ok(tensor::tensor_values_f64(tensor)),
         _ => Err(predict_invalid(format!("predict: tree is missing {name}"))),
     }
 }
@@ -1602,9 +1622,16 @@ fn tree_prob_tensor(nodes: &[Node], class_count: usize) -> BuiltinResult<Value> 
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn object(value: Value) -> ObjectInstance {
@@ -1651,6 +1678,34 @@ mod tests {
         assert_eq!(tensor(&values[1]).shape, vec![2, 2]);
         assert_eq!(tensor(&values[2]).shape, vec![2, 1]);
         assert_eq!(tensor(&values[3]).data, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn fitctree_and_predict_read_typed_integer_storage_exactly() {
+        let model = block_on(fitctree_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1),
+            vec![
+                poisoned_int_tensor(IntegerStorage::U8(vec![0, 0, 1, 1]), 4, 1),
+                Value::from("ClassNames"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![0, 1]), 2, 1),
+                Value::from("Weights"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1]), 4, 1),
+                Value::from("MaxNumSplits"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+                Value::from("MinLeafSize"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+                Value::from("MinParentSize"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![2]), 1, 1),
+            ],
+        ))
+        .unwrap();
+        let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+            model,
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 3]), 2, 1),
+            Vec::new(),
+        ))
+        .unwrap();
+        assert_eq!(tensor(&predicted).data, vec![0.0, 1.0]);
     }
 
     #[test]

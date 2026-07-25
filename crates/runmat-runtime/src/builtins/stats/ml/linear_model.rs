@@ -505,10 +505,14 @@ fn build_matrix_fit_spec(
 ) -> BuiltinResult<FitSpec> {
     let x = tensor::value_into_tensor_for(FITLM_NAME, x_value)
         .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
+    let x =
+        tensor::integer_tensor_to_f64(x).map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
     if x.shape.len() > 2 {
         return Err(fitlm_invalid("fitlm: X must be a 2-D numeric matrix"));
     }
     let y_tensor = tensor::value_into_tensor_for(FITLM_NAME, y_value)
+        .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
+    let y_tensor = tensor::integer_tensor_to_f64(y_tensor)
         .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
     let y = vector_values(&y_tensor, "y")?;
     if y.len() != x.rows {
@@ -659,6 +663,8 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
         .ok_or_else(|| fitlm_invalid("fitlm: response variable missing from table"))?;
     let y_tensor = tensor::value_into_tensor_for(FITLM_NAME, y_value.clone())
         .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
+    let y_tensor = tensor::integer_tensor_to_f64(y_tensor)
+        .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
     let y = vector_values(&y_tensor, &response_name)?;
     let x = if predictor_names.is_empty() {
         Tensor::new(Vec::new(), vec![y.len(), 0])
@@ -671,6 +677,8 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
                 .get(name)
                 .ok_or_else(|| fitlm_invalid(format!("fitlm: predictor '{name}' missing")))?;
             let tensor = tensor::value_into_tensor_for(FITLM_NAME, value.clone())
+                .map_err(|_| fitlm_invalid(format!("fitlm: predictor '{name}' must be numeric")))?;
+            let tensor = tensor::integer_tensor_to_f64(tensor)
                 .map_err(|_| fitlm_invalid(format!("fitlm: predictor '{name}' must be numeric")))?;
             let values = vector_values(&tensor, name)?;
             if values.len() != y.len() {
@@ -1450,6 +1458,9 @@ fn predictors_for_prediction(value: Value, predictor_names: &[String]) -> Builti
                     tensor::value_into_tensor_for(PREDICT_NAME, raw.clone()).map_err(|_| {
                         predict_invalid(format!("predict: predictor '{name}' must be numeric"))
                     })?;
+                let tensor = tensor::integer_tensor_to_f64(tensor).map_err(|_| {
+                    predict_invalid(format!("predict: predictor '{name}' must be numeric"))
+                })?;
                 let values = vector_values_predict(&tensor, name)?;
                 if let Some(expected) = height {
                     if values.len() != expected {
@@ -1466,6 +1477,8 @@ fn predictors_for_prediction(value: Value, predictor_names: &[String]) -> Builti
         }
     }
     let tensor = tensor::value_into_tensor_for(PREDICT_NAME, value)
+        .map_err(|err| predict_invalid(format!("predict: {err}")))?;
+    let tensor = tensor::integer_tensor_to_f64(tensor)
         .map_err(|err| predict_invalid(format!("predict: {err}")))?;
     if tensor.shape.len() > 2 || tensor.cols != predictor_names.len() {
         return Err(predict_invalid(format!(
@@ -1521,7 +1534,7 @@ fn terms_from_object(object: &ObjectInstance) -> BuiltinResult<Vec<Vec<u32>>> {
 
 fn numeric_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f64>> {
     match object.properties.get(name) {
-        Some(Value::Tensor(tensor)) => Ok(tensor.data.clone()),
+        Some(Value::Tensor(tensor)) => Ok(tensor::tensor_values_f64(tensor)),
         Some(Value::Num(value)) => Ok(vec![*value]),
         _ => Err(predict_invalid(format!(
             "predict: model is missing numeric property '{name}'"
@@ -1531,7 +1544,9 @@ fn numeric_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f6
 
 fn matrix_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f64>> {
     match object.properties.get(name) {
-        Some(Value::Tensor(tensor)) if tensor.rows == tensor.cols => Ok(tensor.data.clone()),
+        Some(Value::Tensor(tensor)) if tensor.rows == tensor.cols => {
+            Ok(tensor::tensor_values_f64(tensor))
+        }
         _ => Err(predict_invalid(format!(
             "predict: model is missing matrix property '{name}'"
         ))),
@@ -1541,7 +1556,9 @@ fn matrix_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f64
 fn numeric_scalar_property(object: &ObjectInstance, name: &str) -> BuiltinResult<f64> {
     match object.properties.get(name) {
         Some(Value::Num(value)) => Ok(*value),
-        Some(Value::Tensor(tensor)) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Some(Value::Tensor(tensor)) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_values_f64(tensor)[0])
+        }
         _ => Err(predict_invalid(format!(
             "predict: model is missing scalar property '{name}'"
         ))),
@@ -1570,7 +1587,7 @@ fn vector_values(tensor: &Tensor, label: &str) -> BuiltinResult<Vec<f64>> {
     if tensor.shape.len() > 2 || !(tensor.rows == 1 || tensor.cols == 1) {
         return Err(fitlm_invalid(format!("fitlm: {label} must be a vector")));
     }
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn vector_values_predict(tensor: &Tensor, label: &str) -> BuiltinResult<Vec<f64>> {
@@ -1579,12 +1596,13 @@ fn vector_values_predict(tensor: &Tensor, label: &str) -> BuiltinResult<Vec<f64>
             "predict: {label} must be a vector"
         )));
     }
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(value) => Ok(vec![*value]),
+        Value::Int(value) => Ok(vec![value.to_f64()]),
         Value::Tensor(tensor) => vector_values(tensor, name),
         _ => Err(fitlm_invalid(format!("fitlm: {name} must be numeric"))),
     }
@@ -1593,7 +1611,10 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
 fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Int(value) => Ok(value.to_f64()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_values_f64(tensor)[0])
+        }
         _ => Err(fitlm_invalid(format!("fitlm: {name} must be a scalar"))),
     }
 }
@@ -1605,14 +1626,15 @@ fn exclude_spec(value: &Value) -> BuiltinResult<ExcludeSpec> {
             array.data.iter().map(|value| *value != 0).collect(),
         )),
         Value::Tensor(tensor) => {
-            let mut indices = Vec::with_capacity(tensor.data.len());
-            for value in &tensor.data {
-                if *value < 1.0 || value.fract().abs() > EPS {
+            let values = tensor::tensor_values_f64(tensor);
+            let mut indices = Vec::with_capacity(values.len());
+            for value in values {
+                if value < 1.0 || value.fract().abs() > EPS {
                     return Err(fitlm_invalid(
                         "fitlm: Exclude indices must be positive integers",
                     ));
                 }
-                indices.push(*value as usize);
+                indices.push(value as usize);
             }
             Ok(ExcludeSpec::Indices(indices))
         }
@@ -1655,7 +1677,10 @@ fn bool_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0] != 0.0),
+        Value::Int(value) => Ok(value.to_f64() != 0.0),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_values_f64(tensor)[0] != 0.0)
+        }
         _ => Err(fitlm_invalid(format!(
             "fitlm: {name} must be logical scalar"
         ))),
@@ -1794,9 +1819,16 @@ fn has_intercept(terms: &[Vec<u32>]) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn object(value: Value) -> ObjectInstance {
@@ -1840,6 +1872,33 @@ mod tests {
         assert_eq!(ypred.shape, vec![2, 1]);
         assert!((ypred.data[0] - 9.0).abs() < 1.0e-10);
         assert!((ypred.data[1] - 11.0).abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn fitlm_and_predict_read_typed_integer_storage_exactly() {
+        let model = block_on(fitlm_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 99]), 4, 1),
+            vec![
+                poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 999]), 4, 1),
+                Value::from("Weights"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1]), 4, 1),
+                Value::from("Exclude"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![4]), 1, 1),
+                Value::from("Intercept"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+            ],
+        ))
+        .unwrap();
+        let predicted = block_on(predict_builtin(
+            model,
+            poisoned_int_tensor(IntegerStorage::I16(vec![3, 4]), 2, 1),
+            Vec::new(),
+        ))
+        .unwrap();
+        let ypred = tensor(&predicted);
+        assert_eq!(ypred.shape, vec![2, 1]);
+        assert!((ypred.data[0] - 7.0).abs() < 1.0e-10);
+        assert!((ypred.data[1] - 9.0).abs() < 1.0e-10);
     }
 
     #[test]
