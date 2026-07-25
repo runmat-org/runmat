@@ -490,7 +490,9 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
             }
             Ok(rounded as usize)
         }
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => parse_degree(&Value::Num(t.data[0])),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            parse_degree(&Value::Num(tensor::tensor_values_f64(t)[0]))
+        }
         Value::LogicalArray(l) if l.len() == 1 => {
             parse_degree(&Value::Num(if l.data[0] != 0 { 1.0 } else { 0.0 }))
         }
@@ -503,9 +505,9 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
 #[async_recursion::async_recursion(?Send)]
 async fn real_vector(context: &str, label: &str, value: Value) -> BuiltinResult<Vec<f64>> {
     match value {
-        Value::Tensor(mut tensor) => {
+        Value::Tensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
-            Ok(tensor.data.drain(..).collect())
+            Ok(tensor::tensor_values_f64(&tensor))
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyfit_error)?;
@@ -536,12 +538,11 @@ async fn complex_vector(
     value: Value,
 ) -> BuiltinResult<(Vec<Complex64>, bool)> {
     match value {
-        Value::Tensor(mut tensor) => {
+        Value::Tensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
             let all_real = true;
-            let data = tensor
-                .data
-                .drain(..)
+            let data = tensor::tensor_values_f64(&tensor)
+                .into_iter()
                 .map(|x| Complex64::new(x, 0.0))
                 .collect();
             Ok((data, all_real))
@@ -1116,6 +1117,31 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![1, 2]);
                 assert!((t.data[0] - 1.5).abs() < 1e-10);
                 assert!((t.data[1] - 2.0).abs() < 1e-10);
+            }
+            other => panic!("expected tensor coefficients, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn polyfit_typed_integer_vectors_degree_and_weights_cross_double_boundary_exactly() {
+        let x = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![4, 1]).unwrap();
+        let y = Tensor::new_integer(IntegerStorage::I16(vec![2, 4, 6, 8]), vec![4, 1]).unwrap();
+        let degree = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        let weights =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 1, 1, 1]), vec![1, 4]).unwrap();
+        let eval = evaluate(
+            Value::Tensor(x),
+            Value::Tensor(y),
+            Value::Tensor(degree),
+            &[Value::Tensor(weights)],
+        )
+        .expect("polyfit");
+        match eval.coefficients() {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 2]);
+                assert!((t.data[0] - 2.0).abs() < 1e-10);
+                assert!((t.data[1] - 2.0).abs() < 1e-10);
+                assert!(t.integer_storage().is_none());
             }
             other => panic!("expected tensor coefficients, got {other:?}"),
         }

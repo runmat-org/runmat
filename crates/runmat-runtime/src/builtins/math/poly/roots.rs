@@ -173,8 +173,7 @@ async fn coefficients_to_complex(value: Value) -> BuiltinResult<Vec<Complex64>> 
 
 fn tensor_to_complex(tensor: Tensor) -> BuiltinResult<Vec<Complex64>> {
     ensure_vector_shape("roots", &tensor.shape)?;
-    Ok(tensor
-        .data
+    Ok(tensor::tensor_values_f64(&tensor)
         .into_iter()
         .map(|value| Complex64::new(value, 0.0))
         .collect())
@@ -345,7 +344,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ComplexTensor, LogicalArray, Tensor};
+    use runmat_builtins::{ComplexTensor, IntegerStorage, LogicalArray, Tensor};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -380,6 +379,22 @@ pub(crate) mod tests {
     #[test]
     fn roots_quadratic_real() {
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![3, 1]).unwrap();
+        let result = roots_builtin(Value::Tensor(coeffs)).expect("roots");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 1]);
+                let mut roots = t.data;
+                roots.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                assert!((roots[0] - 1.0).abs() < 1e-10);
+                assert!((roots[1] - 2.0).abs() < 1e-10);
+            }
+            other => panic!("expected real tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn roots_typed_integer_coefficients_cross_double_boundary_exactly() {
+        let coeffs = Tensor::new_integer(IntegerStorage::I16(vec![1, -3, 2]), vec![3, 1]).unwrap();
         let result = roots_builtin(Value::Tensor(coeffs)).expect("roots");
         match result {
             Value::Tensor(t) => {

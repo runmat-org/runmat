@@ -337,10 +337,9 @@ fn parse_tensor_coeffs(tensor: &Tensor) -> BuiltinResult<Polynomial> {
     ensure_vector_shape(&tensor.shape)?;
     let orientation = orientation_from_shape(&tensor.shape);
     Ok(Polynomial {
-        coeffs: tensor
-            .data
-            .iter()
-            .map(|&v| Complex64::new(v, 0.0))
+        coeffs: tensor::tensor_values_f64(tensor)
+            .into_iter()
+            .map(|v| Complex64::new(v, 0.0))
             .collect(),
         orientation,
     })
@@ -368,7 +367,7 @@ async fn parse_constant(value: Value) -> BuiltinResult<Complex64> {
                     "polyint: constant of integration must be a scalar",
                 ));
             }
-            Ok(Complex64::new(tensor.data[0], 0.0))
+            Ok(Complex64::new(tensor::tensor_values_f64(&tensor)[0], 0.0))
         }
         Value::ComplexTensor(tensor) => {
             if tensor.data.len() != 1 {
@@ -454,7 +453,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{IntegerStorage, LogicalArray};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -521,6 +520,27 @@ pub(crate) mod tests {
                     .iter()
                     .zip(expected.iter())
                     .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn polyint_typed_integer_coefficients_and_constant_cross_double_boundary_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![4, 0, -8]), vec![1, 3]).unwrap();
+        let constant = Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).unwrap();
+        let result =
+            polyint_builtin(Value::Tensor(tensor), vec![Value::Tensor(constant)]).expect("polyint");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 4]);
+                let expected = [4.0 / 3.0, 0.0, -8.0, 3.0];
+                assert!(t
+                    .data
+                    .iter()
+                    .zip(expected.iter())
+                    .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
+                assert!(t.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

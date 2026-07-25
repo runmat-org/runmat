@@ -566,11 +566,10 @@ async fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bo
                 gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
             convert_coefficients(gathered).await
         }
-        Value::Tensor(mut tensor) => {
+        Value::Tensor(tensor) => {
             ensure_vector_shape("polyval", &tensor.shape)?;
-            let data = tensor
-                .data
-                .drain(..)
+            let data = tensor::tensor_values_f64(&tensor)
+                .into_iter()
                 .map(|re| Complex64::new(re, 0.0))
                 .collect();
             Ok((data, true))
@@ -612,10 +611,9 @@ async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             let array = NumericArray {
-                data: tensor
-                    .data
-                    .iter()
-                    .map(|&re| Complex64::new(re, 0.0))
+                data: tensor::tensor_values_f64(&tensor)
+                    .into_iter()
+                    .map(|re| Complex64::new(re, 0.0))
                     .collect(),
                 shape: tensor.shape.clone(),
                 all_real: true,
@@ -624,10 +622,9 @@ async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
         }
         Value::Tensor(tensor) => Ok((
             NumericArray {
-                data: tensor
-                    .data
-                    .iter()
-                    .map(|&re| Complex64::new(re, 0.0))
+                data: tensor::tensor_values_f64(&tensor)
+                    .into_iter()
+                    .map(|re| Complex64::new(re, 0.0))
                     .collect(),
                 shape: tensor.shape.clone(),
                 all_real: true,
@@ -709,7 +706,8 @@ async fn parse_mu(value: Value) -> BuiltinResult<Mu> {
                     "polyval: mu must contain at least two elements",
                 ));
             }
-            Mu::new(tensor.data[0], tensor.data[1])
+            let values = tensor::tensor_values_f64(&tensor);
+            Mu::new(values[0], values[1])
         }
         Value::LogicalArray(array) => {
             if array.data.len() < 2 {
@@ -864,7 +862,7 @@ async fn scalar_to_f64(value: Value, context: &str) -> BuiltinResult<f64> {
             if tensor.data.len() != 1 {
                 return Err(polyval_error(format!("{context} must be a scalar")));
             }
-            Ok(tensor.data[0])
+            Ok(tensor::tensor_values_f64(&tensor)[0])
         }
         Value::LogicalArray(array) => {
             if array.data.len() != 1 {
@@ -1058,7 +1056,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::StructValue;
+    use runmat_builtins::{IntegerStorage, StructValue};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -1166,6 +1164,30 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.data, vec![0.25, 0.0, 0.25]);
+            }
+            other => panic!("expected tensor output, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn polyval_typed_integer_coefficients_points_and_mu_cross_double_boundary_exactly() {
+        let coeffs = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0]), vec![1, 3]).unwrap();
+        let points = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2]), vec![1, 3]).unwrap();
+        let mu = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).unwrap();
+        let value = polyval_builtin(
+            Value::Tensor(coeffs),
+            Value::Tensor(points),
+            vec![
+                Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap()),
+                Value::Tensor(mu),
+            ],
+        )
+        .expect("polyval");
+        match value {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.data, vec![0.25, 0.0, 0.25]);
+                assert!(tensor.integer_storage().is_none());
             }
             other => panic!("expected tensor output, got {other:?}"),
         }
