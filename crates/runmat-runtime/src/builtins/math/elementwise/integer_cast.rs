@@ -517,6 +517,43 @@ mod tests {
     }
 
     #[test]
+    fn integer_cast_builtins_dispatch_exact_typed_tensor_inputs() {
+        let cases = [
+            (
+                "int32",
+                IntegerStorage::U64(vec![u64::MAX, 1]),
+                IntegerStorage::I32(vec![i32::MAX, 1]),
+            ),
+            (
+                "uint8",
+                IntegerStorage::I64(vec![-1, 300]),
+                IntegerStorage::U8(vec![0, u8::MAX]),
+            ),
+            (
+                "uint16",
+                IntegerStorage::I64(vec![-1, 70_000]),
+                IntegerStorage::U16(vec![0, u16::MAX]),
+            ),
+            (
+                "uint32",
+                IntegerStorage::U64(vec![u64::MAX, 1]),
+                IntegerStorage::U32(vec![u32::MAX, 1]),
+            ),
+        ];
+
+        for (builtin, input_storage, expected_storage) in cases {
+            let input = Tensor::new_integer(input_storage, vec![1, 2]).expect("typed input");
+            let Value::Tensor(output) =
+                crate::dispatcher::call_builtin(builtin, &[Value::Tensor(input)])
+                    .expect("integer cast dispatch")
+            else {
+                panic!("{builtin} must return a typed tensor");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected_storage));
+        }
+    }
+
+    #[test]
     fn complex_float_arrays_convert_every_integer_class_and_remain_complex() {
         for target in [
             IntegerTarget::I8,

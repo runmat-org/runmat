@@ -1,28 +1,20 @@
 //! MATLAB-compatible `uint16` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, IntegerStorage, Tensor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::{
-    spec::{
-        BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-        ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-    },
-    tensor,
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::math::elementwise::integer_cast::{
-    cast_complex_value, cast_sparse_value, CastError, IntegerTarget,
-};
+use crate::builtins::math::elementwise::integer_cast::{cast_value, CastError, IntegerTarget};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "uint16";
-const UINT16_MAX_F64: f64 = u16::MAX as f64;
 
 const UINT16_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -150,111 +142,12 @@ async fn uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             "too many input arguments",
         ));
     }
-    match value {
-        Value::Num(n) => Ok(Value::Int(IntValue::U16(cast_scalar_to_uint16(n)))),
-        Value::Int(i) => Ok(Value::Int(IntValue::U16(cast_scalar_to_uint16(i.to_f64())))),
-        Value::Bool(flag) => Ok(Value::Int(IntValue::U16(if flag { 1 } else { 0 }))),
-        Value::Tensor(tensor) => Ok(uint16_value_from_tensor(
-            uint16_tensor_to_host(tensor)
-                .map_err(|e| uint16_error_with_detail(&UINT16_ERROR_INTERNAL, e))?,
-        )),
-        Value::SparseTensor(sparse) => {
-            cast_sparse_value(IntegerTarget::U16, sparse).map_err(|cause| match cause {
-                CastError::Unsupported(type_name) => conversion_error(&type_name),
-                CastError::Internal(detail) => {
-                    uint16_error_with_detail(&UINT16_ERROR_INTERNAL, detail)
-                }
-            })
-        }
-        Value::LogicalArray(array) => {
-            let tensor = tensor::logical_to_tensor(&array)
-                .map_err(|e| uint16_error_with_detail(&UINT16_ERROR_INTERNAL, e))?;
-            Ok(uint16_value_from_tensor(
-                uint16_tensor_to_host(tensor)
-                    .map_err(|e| uint16_error_with_detail(&UINT16_ERROR_INTERNAL, e))?,
-            ))
-        }
-        Value::CharArray(chars) => uint16_from_char_array(chars),
-        Value::GpuTensor(handle) => uint16_from_gpu(handle).await,
-        value @ (Value::Complex(_, _) | Value::ComplexTensor(_)) => {
-            cast_complex_value(value, IntegerTarget::U16).map_err(|cause| match cause {
-                CastError::Unsupported(type_name) => conversion_error(&type_name),
-                CastError::Internal(detail) => {
-                    uint16_error_with_detail(&UINT16_ERROR_INTERNAL, detail)
-                }
-            })
-        }
-        Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
-        Value::Symbolic(expr) => expr
-            .numeric_constant_value()
-            .map(|value| Value::Int(IntValue::U16(cast_scalar_to_uint16(value))))
-            .ok_or_else(|| conversion_error("sym")),
-        Value::Cell(_) => Err(conversion_error("cell")),
-        Value::Struct(_) => Err(conversion_error("struct")),
-        Value::Object(obj) => Err(conversion_error(&obj.class_name)),
-        Value::HandleObject(handle) => Err(conversion_error(&handle.class_name)),
-        Value::Listener(_) => Err(conversion_error("event.listener")),
-        Value::FunctionHandle(_)
-        | Value::ExternalFunctionHandle(_)
-        | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
-        | Value::Closure(_) => Err(conversion_error("function_handle")),
-        Value::ClassRef(_) => Err(conversion_error("meta.class")),
-        Value::MException(_) => Err(conversion_error("MException")),
-        Value::OutputList(_) => Err(conversion_error("OutputList")),
-    }
-}
-
-fn uint16_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
-    let data: Vec<u16> = chars
-        .data
-        .iter()
-        .map(|&ch| cast_scalar_to_uint16(ch as u32 as f64))
-        .collect();
-    let tensor = Tensor::new_integer(IntegerStorage::U16(data), vec![chars.rows, chars.cols])
-        .map_err(|e| uint16_error_with_detail(&UINT16_ERROR_INTERNAL, e))?;
-    Ok(uint16_value_from_tensor(tensor))
-}
-
-async fn uint16_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        uint16_error_with_detail(
-            &UINT16_ERROR_INTERNAL,
-            "no acceleration provider registered",
-        )
-    })?;
-    provider
-        .cast_to_integer(&handle, runmat_accelerate_api::IntegerElementType::U16)
+    cast_value(value, IntegerTarget::U16)
         .await
-        .map(Value::GpuTensor)
-        .map_err(|e| uint16_error_with_detail(&UINT16_ERROR_INTERNAL, e))
-}
-
-fn uint16_tensor_to_host(tensor: Tensor) -> Result<Tensor, String> {
-    let data = tensor.data.into_iter().map(cast_scalar_to_uint16).collect();
-    Tensor::new_integer(IntegerStorage::U16(data), tensor.shape)
-}
-
-fn uint16_value_from_tensor(tensor: Tensor) -> Value {
-    if tensor.data.len() == 1 {
-        Value::Int(IntValue::U16(cast_scalar_to_uint16(tensor.data[0])))
-    } else {
-        Value::Tensor(tensor)
-    }
-}
-
-fn cast_scalar_to_uint16(value: f64) -> u16 {
-    if value.is_nan() {
-        return 0;
-    }
-    if value.is_infinite() {
-        return if value.is_sign_negative() {
-            0
-        } else {
-            u16::MAX
-        };
-    }
-    value.round().clamp(0.0, UINT16_MAX_F64) as u16
+        .map_err(|cause| match cause {
+            CastError::Unsupported(type_name) => conversion_error(&type_name),
+            CastError::Internal(detail) => uint16_error_with_detail(&UINT16_ERROR_INTERNAL, detail),
+        })
 }
 
 #[cfg(test)]
@@ -263,7 +156,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostIntegerDataOwned, HostTensorView, IntegerElementType};
-    use runmat_builtins::{ResolveContext, SymbolicExpr, Type};
+    use runmat_builtins::{
+        CharArray, IntValue, IntegerStorage, ResolveContext, SymbolicExpr, Tensor, Type,
+    };
 
     fn uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::uint16_builtin(value, rest))
