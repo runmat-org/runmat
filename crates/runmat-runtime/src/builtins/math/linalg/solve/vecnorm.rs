@@ -463,7 +463,7 @@ fn parse_order(value: &Value) -> BuiltinResult<NormOrder> {
         Value::Int(value) => parse_numeric_order(value.to_f64()),
         Value::Tensor(tensor) => {
             if tensor::is_scalar_tensor(tensor) {
-                parse_numeric_order(tensor.data[0])
+                parse_numeric_order(tensor::tensor_values_f64(tensor)[0])
             } else {
                 Err(argument_error(format!(
                     "{NAME}: p must be a positive scalar or Inf."
@@ -515,7 +515,9 @@ fn parse_dim(value: &Value) -> BuiltinResult<usize> {
     let raw = match value {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_values_f64(tensor)[0]
+        }
         Value::Bool(_) | Value::LogicalArray(_) => {
             return Err(argument_error(format!(
                 "{NAME}: dim must be a positive integer numeric scalar."
@@ -834,6 +836,64 @@ mod tests {
         let err = call(
             Value::Tensor(tensor),
             vec![Value::Num(2.0), Value::Bool(true)],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), VECNORM_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(err.message().contains("positive integer numeric scalar"));
+    }
+
+    #[test]
+    fn vecnorm_order_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
+        let mut order =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("typed order");
+        order.data[0] = 2.0;
+
+        let result = call(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("vecnorm");
+        match result {
+            Value::Num(value) => assert_close(value, 7.0),
+            other => panic!("expected scalar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn vecnorm_dim_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let mut dim =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed dim");
+        dim.data[0] = 1.0;
+
+        let result = call(
+            Value::Tensor(tensor),
+            vec![Value::Num(2.0), Value::Tensor(dim)],
+        )
+        .expect("vecnorm");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 1]);
+                assert_close(out.data[0], 10.0f64.sqrt());
+                assert_close(out.data[1], 20.0f64.sqrt());
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn vecnorm_rejects_negative_typed_integer_tensor_order_and_dim() {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let mut order =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed order");
+        order.data[0] = 1.0;
+        let err = call(Value::Tensor(tensor.clone()), vec![Value::Tensor(order)]).unwrap_err();
+        assert_eq!(err.identifier(), VECNORM_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(err.message().contains("positive numeric scalar"));
+
+        let mut dim =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed dim");
+        dim.data[0] = 1.0;
+        let err = call(
+            Value::Tensor(tensor),
+            vec![Value::Num(2.0), Value::Tensor(dim)],
         )
         .unwrap_err();
         assert_eq!(err.identifier(), VECNORM_ERROR_INVALID_ARGUMENT.identifier);
