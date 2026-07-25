@@ -364,7 +364,12 @@ fn is_local_token(value: &Value) -> BuiltinResult<bool> {
 fn try_extract_precision(value: &Value) -> BuiltinResult<Option<usize>> {
     match value {
         Value::Int(i) => {
-            let digits = i.to_i64();
+            let digits = i.try_to_i64().ok_or_else(|| {
+                num2str_error_with_message(
+                    format!("num2str: precision must satisfy 0 <= p <= {MAX_PRECISION}"),
+                    &NUM2STR_ERROR_INVALID_PRECISION,
+                )
+            })?;
             validate_precision(digits)?;
             Ok(Some(digits as usize))
         }
@@ -386,6 +391,16 @@ fn try_extract_precision(value: &Value) -> BuiltinResult<Option<usize>> {
             Ok(Some(rounded as usize))
         }
         Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                let digits = int.try_to_i64().ok_or_else(|| {
+                    num2str_error_with_message(
+                        format!("num2str: precision must satisfy 0 <= p <= {MAX_PRECISION}"),
+                        &NUM2STR_ERROR_INVALID_PRECISION,
+                    )
+                })?;
+                validate_precision(digits)?;
+                return Ok(Some(digits as usize));
+            }
             let value = t.data[0];
             if !value.is_finite() {
                 return Err(num2str_error_with_message(
@@ -1235,7 +1250,7 @@ pub(crate) mod tests {
     fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::num2str_builtin(value, rest))
     }
-    use runmat_builtins::{IntValue, LogicalArray, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Tensor};
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -1268,6 +1283,26 @@ pub(crate) mod tests {
             }
             other => panic!("expected char array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn num2str_precision_parser_preserves_typed_integer_tensor_bounds() {
+        let precision =
+            Tensor::new_integer(IntegerStorage::U64(vec![52]), vec![1, 1]).expect("precision");
+        assert_eq!(
+            try_extract_precision(&Value::Tensor(precision)).unwrap(),
+            Some(52)
+        );
+
+        let too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![53]), vec![1, 1]).expect("precision");
+        assert!(try_extract_precision(&Value::Tensor(too_large)).is_err());
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("precision");
+        assert!(try_extract_precision(&Value::Tensor(negative)).is_err());
+
+        assert!(try_extract_precision(&Value::Int(IntValue::U64(u64::MAX))).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
