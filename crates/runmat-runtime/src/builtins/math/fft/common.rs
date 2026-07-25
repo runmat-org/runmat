@@ -65,6 +65,16 @@ pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>
                     format!("{builtin}: length must be a scalar"),
                 ));
             }
+            if let Some(storage) = t.integer_storage() {
+                return storage
+                    .value_at(0)
+                    .expect("one-element integer storage")
+                    .try_to_usize()
+                    .map(Some)
+                    .ok_or_else(|| {
+                        builtin_error(builtin, format!("{builtin}: length must be non-negative"))
+                    });
+            }
             parse_length_scalar(t.data[0], builtin).map(Some)
         }
         Value::ComplexTensor(t) => {
@@ -611,14 +621,7 @@ pub fn build_shift_plan(shape: &[usize], dims: &[usize], kind: ShiftKind) -> Shi
         };
     }
 
-    let mut ext_shape = shape.to_vec();
-    if dims.iter().copied().max().unwrap_or(0) >= ext_shape.len() {
-        let needed = dims.iter().copied().max().unwrap_or(0) + 1;
-        while ext_shape.len() < needed {
-            ext_shape.push(1);
-        }
-    }
-
+    let ext_shape = shape.to_vec();
     let mut positive = vec![0usize; ext_shape.len()];
     for &axis in dims {
         if axis >= ext_shape.len() {
@@ -786,6 +789,14 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
                     format!("{builtin}: dimension vectors must be row or column vectors"),
                 ));
             }
+            if let Some(parsed) = tensor::integer_tensor_dimension_vector(tensor, builtin, false) {
+                return parsed.map_err(|_| {
+                    builtin_error(
+                        builtin,
+                        format!("{builtin}: dimension indices must be >= 1"),
+                    )
+                });
+            }
             let mut dims = Vec::with_capacity(tensor.data.len());
             for &val in &tensor.data {
                 if !val.is_finite() {
@@ -867,6 +878,28 @@ mod tests {
     use runmat_builtins::IntegerStorage;
 
     #[test]
+    fn fft_length_preserves_typed_integer_scalar_tensors() {
+        #[cfg(target_pointer_width = "64")]
+        {
+            let exact_value = 9_007_199_254_740_993_u64;
+            let exact =
+                Tensor::new_integer(IntegerStorage::U64(vec![exact_value]), vec![1, 1]).unwrap();
+            assert_eq!(
+                parse_length(&Value::Tensor(exact), "fft").unwrap(),
+                Some(exact_value as usize)
+            );
+        }
+
+        let err = parse_length(
+            &Value::Tensor(Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap()),
+            "fft",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("non-negative"), "unexpected error: {err}");
+    }
+
+    #[test]
     fn nd_sizes_preserve_typed_integer_values_and_bounds() {
         let sizes = Tensor::new_integer(
             IntegerStorage::U64(vec![1, 9_007_199_254_740_993]),
@@ -890,5 +923,33 @@ mod tests {
             err.contains("maximum supported size"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn shift_dims_preserve_typed_integer_vectors_without_rank_extension() {
+        #[cfg(target_pointer_width = "64")]
+        {
+            let exact_dim = 9_007_199_254_740_993_u64;
+            let dims =
+                Tensor::new_integer(IntegerStorage::U64(vec![1, exact_dim]), vec![1, 2]).unwrap();
+            assert_eq!(
+                compute_shift_dims(&[2, 2], Some(&Value::Tensor(dims)), "fftshift").unwrap(),
+                vec![0, exact_dim as usize - 1]
+            );
+
+            let plan = build_shift_plan(&[2, 2], &[exact_dim as usize - 1], ShiftKind::Fft);
+            assert_eq!(plan.ext_shape, vec![2, 2]);
+            assert_eq!(plan.positive, vec![0, 0]);
+            assert_eq!(
+                apply_shift(
+                    "fftshift",
+                    &[1.0, 2.0, 3.0, 4.0],
+                    &plan.ext_shape,
+                    &plan.positive
+                )
+                .unwrap(),
+                vec![1.0, 2.0, 3.0, 4.0]
+            );
+        }
     }
 }
