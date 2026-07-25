@@ -568,7 +568,10 @@ fn compact_complete_cases(
 fn response_outcomes(value: Value, rows: usize) -> BuiltinResult<ResponseOutcomes> {
     match value {
         Value::Tensor(tensor) if tensor.cols() >= 2 && tensor.rows() == rows => count_outcomes(&tensor),
-        Value::Tensor(tensor) => numeric_outcomes(tensor.data, tensor.shape, rows),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            numeric_outcomes(tensor::tensor_values_f64(&tensor), shape, rows)
+        }
         Value::LogicalArray(logical) => categorical_outcomes(
             logical.data.iter().map(|value| f64::from(*value != 0)).collect(),
             logical.shape,
@@ -598,6 +601,7 @@ fn response_outcomes(value: Value, rows: usize) -> BuiltinResult<ResponseOutcome
 fn count_outcomes(tensor: &Tensor) -> BuiltinResult<ResponseOutcomes> {
     let rows = tensor.rows();
     let cols = tensor.cols();
+    let data = tensor::tensor_values_f64(tensor);
     let logits = cols - 1;
     let mut outcomes = vec![vec![0.0; rows]; logits];
     let mut weights = Vec::with_capacity(rows);
@@ -606,7 +610,7 @@ fn count_outcomes(tensor: &Tensor) -> BuiltinResult<ResponseOutcomes> {
         let mut total = 0.0;
         let mut missing = false;
         for col in 0..cols {
-            let count = tensor.data[row + col * rows];
+            let count = data[row + col * rows];
             if count.is_nan() {
                 missing = true;
                 break;
@@ -622,7 +626,7 @@ fn count_outcomes(tensor: &Tensor) -> BuiltinResult<ResponseOutcomes> {
             weights.push(0.0);
         } else {
             for (col, outcome) in outcomes.iter_mut().enumerate().take(logits) {
-                outcome[row] = tensor.data[row + col * rows] / total;
+                outcome[row] = data[row + col * rows] / total;
             }
             weights.push(total);
             observations += total;
@@ -882,8 +886,9 @@ fn scalar_text(value: &Value) -> Option<String> {
 }
 
 fn numeric_tensor(label: &str, value: Value) -> BuiltinResult<Tensor> {
-    tensor::value_into_tensor_for(label, value)
-        .map_err(|_| invalid(format!("mnrfit: {label} must be numeric")))
+    let tensor = tensor::value_into_tensor_for(label, value)
+        .map_err(|_| invalid(format!("mnrfit: {label} must be numeric")))?;
+    tensor::integer_tensor_to_f64(tensor).map_err(|err| invalid(format!("mnrfit: {label}: {err}")))
 }
 
 fn numeric_vector(value: Value, label: &str) -> BuiltinResult<Vec<f64>> {
@@ -896,14 +901,17 @@ fn numeric_vector(value: Value, label: &str) -> BuiltinResult<Vec<f64>> {
             "mnrfit: {label} must contain finite values"
         )));
     }
-    Ok(tensor.data)
+    Ok(tensor::tensor_values_f64(&tensor))
 }
 
 fn numeric_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
+        Value::Int(value) => Ok(value.to_f64()),
         Value::Bool(value) => Ok(f64::from(*value)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_values_f64(tensor)[0])
+        }
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
             Ok(f64::from(data[0] != 0))
         }
@@ -1066,9 +1074,16 @@ fn invert_matrix(a: Vec<f64>, n: usize) -> BuiltinResult<Vec<f64>> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn output_list(value: Value) -> Vec<Value> {
@@ -1234,5 +1249,55 @@ mod tests {
         ))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:mnrfit:InvalidArgument"));
+    }
+
+    #[test]
+    fn mnrfit_reads_typed_integer_class_vectors_exactly() {
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let out = block_on(mnrfit_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3, 4]), 5, 1),
+            poisoned_int_tensor(IntegerStorage::U8(vec![1, 1, 2, 2, 2]), 5, 1),
+            vec![
+                Value::String("Weights".into()),
+                poisoned_int_tensor(IntegerStorage::U16(vec![1, 1, 2, 2, 1]), 5, 1),
+                Value::String("IterationLimit".into()),
+                poisoned_int_tensor(IntegerStorage::U16(vec![200]), 1, 1),
+                Value::String("Options".into()),
+                Value::Struct({
+                    let mut st = StructValue::new();
+                    st.insert(
+                        "Tolerance",
+                        poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+                    );
+                    st
+                }),
+            ],
+        ))
+        .unwrap();
+        let values = output_list(out);
+        let Value::Tensor(b) = &values[0] else {
+            panic!("expected B tensor");
+        };
+        assert_eq!(b.shape, vec![2, 1]);
+        assert!(b.data.iter().all(|value| value.is_finite()));
+        assert!(matches!(&values[1], Value::Num(value) if value.is_finite()));
+    }
+
+    #[test]
+    fn mnrfit_reads_typed_integer_grouped_counts_exactly() {
+        let out = block_on(mnrfit_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1),
+            poisoned_int_tensor(IntegerStorage::U16(vec![0, 1, 3, 5, 5, 4, 2, 1]), 4, 2),
+            vec![
+                Value::String("MaxIter".into()),
+                poisoned_int_tensor(IntegerStorage::U16(vec![200]), 1, 1),
+            ],
+        ))
+        .unwrap();
+        let Value::Tensor(b) = out else {
+            panic!("expected B tensor");
+        };
+        assert_eq!(b.shape, vec![2, 1]);
+        assert!(b.data.iter().all(|value| value.is_finite()));
     }
 }

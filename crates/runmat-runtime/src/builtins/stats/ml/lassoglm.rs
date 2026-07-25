@@ -530,7 +530,8 @@ fn canonical_name(name: &str) -> String {
 
 fn value_to_real_tensor(label: &str, value: Value) -> BuiltinResult<Tensor> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor),
+        Value::Tensor(tensor) => tensor::integer_tensor_to_f64(tensor)
+            .map_err(|err| invalid(format!("lassoglm: {label}: {err}"))),
         Value::LogicalArray(array) => {
             let shape = tensor::default_shape_for(&array.shape, array.data.len());
             Tensor::new(
@@ -655,7 +656,9 @@ fn scalar_f64(value: &Value, label: &str) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_values_f64(tensor)[0]
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             if array.data[0] == 0 {
                 0.0
@@ -733,7 +736,7 @@ fn numeric_vector(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
                     "lassoglm: {label} must be a numeric vector"
                 )));
             }
-            tensor.data.clone()
+            tensor::tensor_values_f64(tensor)
         }
         Value::LogicalArray(array) => {
             let shape = tensor::default_shape_for(&array.shape, array.data.len());
@@ -1556,10 +1559,16 @@ fn predictor_names_value(options: &Options) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::StringArray;
+    use runmat_builtins::{IntegerStorage, StringArray};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn output_pair(value: Value) -> (Value, Value) {
@@ -1756,5 +1765,57 @@ mod tests {
         ))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:lassoglm:InvalidArgument"));
+    }
+
+    #[test]
+    fn lassoglm_reads_typed_integer_storage_exactly() {
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let out = block_on(lassoglm_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3, 4]), 5, 1),
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7, 9]), 5, 1),
+            Value::String("normal".to_string()),
+            vec![
+                Value::CharArray(CharArray::new_row("Lambda")),
+                poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+                Value::CharArray(CharArray::new_row("Weights")),
+                poisoned_int_tensor(IntegerStorage::U16(vec![1, 1, 2, 2, 1]), 5, 1),
+                Value::CharArray(CharArray::new_row("MaxIter")),
+                poisoned_int_tensor(IntegerStorage::U16(vec![300]), 1, 1),
+                Value::CharArray(CharArray::new_row("Standardize")),
+                Value::Bool(false),
+            ],
+        ))
+        .unwrap();
+        let (b, fit_info) = output_pair(out);
+        let Value::Tensor(coeffs) = b else {
+            panic!("expected B tensor");
+        };
+        assert_eq!(coeffs.shape, vec![1, 1]);
+        assert!((coeffs.data[0] - 2.0).abs() < 1.0e-3);
+        let Value::Struct(info) = fit_info else {
+            panic!("expected FitInfo");
+        };
+        assert!(info.fields.contains_key("Lambda"));
+    }
+
+    #[test]
+    fn lassoglm_reads_typed_integer_binomial_counts_exactly() {
+        let out = block_on(lassoglm_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1),
+            poisoned_int_tensor(IntegerStorage::U16(vec![0, 1, 3, 5, 5, 4, 3, 6]), 4, 2),
+            Value::String("binomial".to_string()),
+            vec![
+                Value::CharArray(CharArray::new_row("Lambda")),
+                poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+                Value::CharArray(CharArray::new_row("CV")),
+                poisoned_int_tensor(IntegerStorage::U8(vec![2]), 1, 1),
+            ],
+        ))
+        .unwrap();
+        let Value::Tensor(coeffs) = out else {
+            panic!("expected B tensor");
+        };
+        assert_eq!(coeffs.shape, vec![1, 1]);
+        assert!(coeffs.data[0].is_finite());
     }
 }
