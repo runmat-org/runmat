@@ -6,7 +6,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -356,9 +356,10 @@ enum OutputTemplate {
     Like(Value),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum FillScalar {
     Real(f64),
+    Integer(IntValue),
     Complex(f64, f64),
     Logical(bool),
 }
@@ -367,7 +368,7 @@ impl FillScalar {
     fn from_value(value: &Value) -> Result<Self, String> {
         match value {
             Value::Num(n) => Ok(FillScalar::Real(*n)),
-            Value::Int(i) => Ok(FillScalar::Real(i.to_f64())),
+            Value::Int(i) => Ok(FillScalar::Integer(i.clone())),
             Value::Bool(b) => Ok(FillScalar::Logical(*b)),
             Value::LogicalArray(logical) => {
                 if logical.data.len() != 1 {
@@ -379,7 +380,14 @@ impl FillScalar {
                 if tensor.data.len() != 1 {
                     return Err("fill: fill value must be a scalar".to_string());
                 }
-                Ok(FillScalar::Real(tensor.data[0]))
+                if let Some(storage) = tensor.integer_storage() {
+                    let value = storage
+                        .value_at(0)
+                        .ok_or_else(|| "fill: fill value must be a scalar".to_string())?;
+                    Ok(FillScalar::Integer(value))
+                } else {
+                    Ok(FillScalar::Real(tensor.data[0]))
+                }
             }
             Value::Complex(re, im) => Ok(FillScalar::Complex(*re, *im)),
             Value::ComplexTensor(tensor) => {
@@ -411,6 +419,7 @@ impl FillScalar {
     fn as_real(&self) -> Result<f64, String> {
         match self {
             FillScalar::Real(v) => Ok(*v),
+            FillScalar::Integer(i) => Ok(i.to_f64()),
             FillScalar::Logical(b) => Ok(if *b { 1.0 } else { 0.0 }),
             FillScalar::Complex(re, im) => {
                 if im.abs() > f64::EPSILON {
@@ -425,6 +434,7 @@ impl FillScalar {
     fn as_complex(&self) -> (f64, f64) {
         match self {
             FillScalar::Real(v) => (*v, 0.0),
+            FillScalar::Integer(i) => (i.to_f64(), 0.0),
             FillScalar::Logical(b) => (if *b { 1.0 } else { 0.0 }, 0.0),
             FillScalar::Complex(re, im) => (*re, *im),
         }
@@ -433,6 +443,7 @@ impl FillScalar {
     fn as_bool(&self) -> bool {
         match self {
             FillScalar::Real(v) => *v != 0.0,
+            FillScalar::Integer(i) => i.to_i64() != 0,
             FillScalar::Logical(b) => *b,
             FillScalar::Complex(re, im) => *re != 0.0 || *im != 0.0,
         }
@@ -542,10 +553,10 @@ impl ParsedFill {
             vec![1, 1]
         };
 
-        let default_template = match fill {
+        let default_template = match &fill {
             FillScalar::Logical(_) => OutputTemplate::Logical,
             FillScalar::Complex(_, _) => OutputTemplate::Complex,
-            FillScalar::Real(_) => OutputTemplate::Double,
+            FillScalar::Real(_) | FillScalar::Integer(_) => OutputTemplate::Double,
         };
 
         let template = if let Some(proto) = like_proto {
@@ -618,13 +629,14 @@ fn fill_integer_like(
     shape: &[usize],
     prototype: &IntegerStorage,
 ) -> Result<Value, String> {
-    let value = fill.as_real()?;
-    let tensor = tensor::integer_tensor_from_f64_like(
-        prototype,
-        vec![value; tensor::element_count(shape)],
-        shape,
-    )?;
-    Ok(tensor::tensor_into_value(tensor))
+    let value = match fill {
+        FillScalar::Integer(value) => prototype.cast_exact_assignment(value),
+        _ => prototype.cast_f64_assignment(fill.as_real()?),
+    };
+    let storage = prototype.from_same_class_values(vec![value; tensor::element_count(shape)])?;
+    Tensor::new_integer(storage, shape.to_vec())
+        .map(tensor::tensor_into_value)
+        .map_err(|e| format!("fill: {e}"))
 }
 
 fn fill_like_gpu(
@@ -854,6 +866,48 @@ pub(crate) mod tests {
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![1, 1, 1, 1]))
+        );
+    }
+
+    #[test]
+    fn fill_integer_like_preserves_exact_wide_fill_values() {
+        let wide = (1_u64 << 53) + 1;
+        let prototype = Tensor::new_integer(IntegerStorage::U64(vec![0]), vec![1, 1])
+            .expect("uint64 prototype");
+        let result = block_on(fill_builtin(
+            Value::Int(runmat_builtins::IntValue::U64(wide)),
+            vec![
+                Value::Num(1.0),
+                Value::Num(3.0),
+                Value::from("like"),
+                Value::Tensor(prototype),
+            ],
+        ))
+        .expect("exact uint64 fill");
+        let output = test_support::gather(result).expect("gather");
+        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide, wide, wide]))
+        );
+
+        let fill_value = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1])
+            .expect("typed fill scalar");
+        let prototype = Tensor::new_integer(IntegerStorage::U32(vec![0]), vec![1, 1])
+            .expect("uint32 prototype");
+        let result = block_on(fill_builtin(
+            Value::Tensor(fill_value),
+            vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::Tensor(prototype),
+            ],
+        ))
+        .expect("exact typed tensor fill");
+        let output = test_support::gather(result).expect("gather");
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U32(vec![0, 0, 0, 0]))
         );
     }
 
