@@ -132,7 +132,8 @@ const ZEROS_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("\"double\""),
-        description: "Class name override (double|single|logical|gpuArray).",
+        description:
+            "Class name override (double|single|logical|int8|int16|int32|int64|uint8|uint16|uint32|uint64|gpuArray).",
     },
 ];
 
@@ -290,6 +291,7 @@ enum OutputTemplate {
     /// single precision when allocating on GPU via 'like' or provider hooks.
     Single,
     Logical,
+    Integer(IntegerStorage),
     /// GPU-resident zeros array request via 'gpuArray' keyword or gpuArray.zeros() static method
     GpuArray,
     Like(Value),
@@ -356,6 +358,21 @@ impl ParsedZeros {
                             ));
                         }
                         class_override = Some(OutputTemplate::Single);
+                        idx += 1;
+                        continue;
+                    }
+                    "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32"
+                    | "uint64" => {
+                        if like_proto.is_some() {
+                            return Err(zeros_error_with_detail(
+                                &ZEROS_ERROR_CLASS_CONFLICT,
+                                format!("{keyword} class override"),
+                            ));
+                        }
+                        class_override = Some(OutputTemplate::Integer(
+                            integer_storage_prototype_from_keyword(keyword.as_str())
+                                .expect("matched integer class keyword"),
+                        ));
                         idx += 1;
                         continue;
                     }
@@ -448,9 +465,24 @@ async fn build_output(parsed: ParsedZeros) -> crate::BuiltinResult<Value> {
         OutputTemplate::Double => zeros_double(&parsed.shape),
         OutputTemplate::Single => zeros_single(&parsed.shape),
         OutputTemplate::Logical => zeros_logical(&parsed.shape),
+        OutputTemplate::Integer(storage) => zeros_integer_like(&storage, &parsed.shape),
         OutputTemplate::GpuArray => zeros_gpu(&parsed.shape).await,
         OutputTemplate::Like(proto) => zeros_like(&proto, &parsed.shape).await,
     }
+}
+
+fn integer_storage_prototype_from_keyword(keyword: &str) -> Option<IntegerStorage> {
+    Some(match keyword {
+        "int8" => IntegerStorage::I8(Vec::new()),
+        "int16" => IntegerStorage::I16(Vec::new()),
+        "int32" => IntegerStorage::I32(Vec::new()),
+        "int64" => IntegerStorage::I64(Vec::new()),
+        "uint8" => IntegerStorage::U8(Vec::new()),
+        "uint16" => IntegerStorage::U16(Vec::new()),
+        "uint32" => IntegerStorage::U32(Vec::new()),
+        "uint64" => IntegerStorage::U64(Vec::new()),
+        _ => return None,
+    })
 }
 
 fn value_tag(value: &Value) -> &'static str {
@@ -955,6 +987,35 @@ pub(crate) mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::I64(vec![0; 4]))
         );
+    }
+
+    #[test]
+    fn zeros_class_strings_create_exact_integer_storage() {
+        let _guard = clear_accel_provider_state();
+        let cases = [
+            ("int8", IntegerStorage::I8(vec![0; 6])),
+            ("int16", IntegerStorage::I16(vec![0; 6])),
+            ("int32", IntegerStorage::I32(vec![0; 6])),
+            ("int64", IntegerStorage::I64(vec![0; 6])),
+            ("uint8", IntegerStorage::U8(vec![0; 6])),
+            ("uint16", IntegerStorage::U16(vec![0; 6])),
+            ("uint32", IntegerStorage::U32(vec![0; 6])),
+            ("uint64", IntegerStorage::U64(vec![0; 6])),
+        ];
+
+        for (class_name, expected) in cases {
+            let result = block_on(zeros_builtin(vec![
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::from(class_name),
+            ]))
+            .expect("zeros integer class");
+            let Value::Tensor(output) = result else {
+                panic!("expected integer tensor for {class_name}");
+            };
+            assert_eq!(output.shape, vec![2, 3]);
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

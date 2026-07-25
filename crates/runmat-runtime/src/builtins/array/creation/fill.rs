@@ -194,7 +194,8 @@ const FILL_SIG_VALUE_CLASS_INPUTS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("\"double\""),
-        description: "Class override ('double'|'logical'|'complex').",
+        description:
+            "Class override ('double'|'logical'|'complex'|'int8'|'int16'|'int32'|'int64'|'uint8'|'uint16'|'uint32'|'uint64').",
     },
 ];
 
@@ -355,6 +356,7 @@ enum OutputTemplate {
     Double,
     Logical,
     Complex,
+    Integer(IntegerStorage),
     Like(Value),
 }
 
@@ -510,6 +512,18 @@ impl ParsedFill {
                         idx += 1;
                         continue;
                     }
+                    "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32"
+                    | "uint64" => {
+                        if like_proto.is_some() {
+                            return Err(format!("fill: cannot combine 'like' with '{keyword}'"));
+                        }
+                        class_override = Some(OutputTemplate::Integer(
+                            integer_storage_prototype_from_keyword(keyword.as_str())
+                                .expect("matched integer class keyword"),
+                        ));
+                        idx += 1;
+                        continue;
+                    }
                     "single" => {
                         return Err(
                             "fill: single precision output is not implemented yet".to_string()
@@ -584,8 +598,25 @@ fn build_output(parsed: ParsedFill) -> Result<Value, String> {
         OutputTemplate::Double => fill_double(&parsed.fill, &parsed.shape),
         OutputTemplate::Logical => fill_logical(&parsed.fill, &parsed.shape),
         OutputTemplate::Complex => fill_complex(&parsed.fill, &parsed.shape),
+        OutputTemplate::Integer(storage) => {
+            fill_integer_like(&parsed.fill, &parsed.shape, &storage)
+        }
         OutputTemplate::Like(proto) => fill_like(&parsed.fill, &parsed.shape, &proto),
     }
+}
+
+fn integer_storage_prototype_from_keyword(keyword: &str) -> Option<IntegerStorage> {
+    Some(match keyword {
+        "int8" => IntegerStorage::I8(Vec::new()),
+        "int16" => IntegerStorage::I16(Vec::new()),
+        "int32" => IntegerStorage::I32(Vec::new()),
+        "int64" => IntegerStorage::I64(Vec::new()),
+        "uint8" => IntegerStorage::U8(Vec::new()),
+        "uint16" => IntegerStorage::U16(Vec::new()),
+        "uint32" => IntegerStorage::U32(Vec::new()),
+        "uint64" => IntegerStorage::U64(Vec::new()),
+        _ => return None,
+    })
 }
 
 fn fill_double(fill: &FillScalar, shape: &[usize]) -> Result<Value, String> {
@@ -922,6 +953,47 @@ pub(crate) mod tests {
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![1, 1, 1, 1]))
+        );
+    }
+
+    #[test]
+    fn fill_class_strings_create_exact_integer_storage() {
+        let cases = [
+            ("int8", IntegerStorage::I8(vec![3; 6])),
+            ("int16", IntegerStorage::I16(vec![3; 6])),
+            ("int32", IntegerStorage::I32(vec![3; 6])),
+            ("int64", IntegerStorage::I64(vec![3; 6])),
+            ("uint8", IntegerStorage::U8(vec![3; 6])),
+            ("uint16", IntegerStorage::U16(vec![3; 6])),
+            ("uint32", IntegerStorage::U32(vec![3; 6])),
+            ("uint64", IntegerStorage::U64(vec![3; 6])),
+        ];
+
+        for (class_name, expected) in cases {
+            let result = block_on(fill_builtin(
+                Value::Int(runmat_builtins::IntValue::I32(3)),
+                vec![Value::Num(2.0), Value::Num(3.0), Value::from(class_name)],
+            ))
+            .expect("fill integer class");
+            let output = test_support::gather(result).expect("gather");
+            assert_eq!(output.shape, vec![2, 3]);
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn fill_uint64_class_string_preserves_wide_integer_fill_value() {
+        let wide = (1_u64 << 53) + 1;
+        let result = block_on(fill_builtin(
+            Value::Int(runmat_builtins::IntValue::U64(wide)),
+            vec![Value::Num(1.0), Value::Num(3.0), Value::from("uint64")],
+        ))
+        .expect("fill uint64");
+        let output = test_support::gather(result).expect("gather");
+        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide, wide, wide]))
         );
     }
 

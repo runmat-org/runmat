@@ -32116,7 +32116,7 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "\"double\"",
-              "description": "Class override ('double'|'logical'|'complex')."
+              "description": "Class override ('double'|'logical'|'complex'|'int8'|'int16'|'int32'|'int64'|'uint8'|'uint16'|'uint32'|'uint64')."
             }
           ],
           "outputs": [
@@ -72480,7 +72480,7 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "\"double\"",
-              "description": "Class name override (double|single|logical)."
+              "description": "Class name override (double|single|logical|int8|int16|int32|int64|uint8|uint16|uint32|uint64)."
             }
           ],
           "outputs": [
@@ -116118,7 +116118,7 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "\"double\"",
-              "description": "Class name override (double|single|logical|gpuArray)."
+              "description": "Class name override (double|single|logical|int8|int16|int32|int64|uint8|uint16|uint32|uint64|gpuArray)."
             }
           ],
           "outputs": [
