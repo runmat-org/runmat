@@ -1,6 +1,8 @@
 //! MATLAB-compatible `randi` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{
+    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -714,6 +716,22 @@ async fn randi_like_gpu(
     shape: &[usize],
 ) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
+        if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
+            let target = integer_target_from_accelerator_type(integer_type);
+            validate_integer_bounds(bounds, target)?;
+            let values = generate_integer_values(bounds, tensor::element_count(shape))?;
+            let storage = integer_storage_from_values(target, values)?;
+            let view = integer_tensor_view(&storage, shape);
+            return provider
+                .upload_integer(&view)
+                .map(Value::GpuTensor)
+                .map_err(|e| {
+                    builtin_error(format!(
+                        "randi: provider cannot preserve native integer gpuArray output: {e}"
+                    ))
+                });
+        }
+
         let lower = i64::try_from(bounds.lower).map_err(|_| {
             builtin_error(
                 "randi: GPU integer generation currently requires int64-representable bounds",
@@ -821,6 +839,38 @@ fn integer_storage_from_values(
         IntegerTarget::U64 => IntegerStorage::U64(values.into_iter().map(|v| v as u64).collect()),
     };
     Ok(storage)
+}
+
+fn integer_target_from_accelerator_type(
+    element_type: runmat_accelerate_api::IntegerElementType,
+) -> IntegerTarget {
+    match element_type {
+        runmat_accelerate_api::IntegerElementType::I8 => IntegerTarget::I8,
+        runmat_accelerate_api::IntegerElementType::I16 => IntegerTarget::I16,
+        runmat_accelerate_api::IntegerElementType::I32 => IntegerTarget::I32,
+        runmat_accelerate_api::IntegerElementType::I64 => IntegerTarget::I64,
+        runmat_accelerate_api::IntegerElementType::U8 => IntegerTarget::U8,
+        runmat_accelerate_api::IntegerElementType::U16 => IntegerTarget::U16,
+        runmat_accelerate_api::IntegerElementType::U32 => IntegerTarget::U32,
+        runmat_accelerate_api::IntegerElementType::U64 => IntegerTarget::U64,
+    }
+}
+
+fn integer_tensor_view<'a>(
+    storage: &'a IntegerStorage,
+    shape: &'a [usize],
+) -> HostIntegerTensorView<'a> {
+    let data = match storage {
+        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+    };
+    HostIntegerTensorView { data, shape }
 }
 
 async fn parse_bounds(value: Value) -> crate::BuiltinResult<Bounds> {
@@ -1371,6 +1421,50 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn randi_gpu_like_preserves_native_uint64_storage() {
+        let _guard = random::test_lock().lock().unwrap();
+        random::reset_rng();
+        test_support::with_test_provider(|provider| {
+            let prototype_values = [1_u64 << 53, u64::MAX];
+            let prototype = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&prototype_values),
+                    shape: &[1, 2],
+                })
+                .expect("upload uint64 prototype");
+            let lower = (1_u64 << 53) + 1;
+            let upper = lower + 3;
+            let bounds = Tensor::new_integer(IntegerStorage::U64(vec![lower, upper]), vec![1, 2])
+                .expect("uint64 bounds");
+
+            let result = block_on(randi_builtin(vec![
+                Value::Tensor(bounds),
+                Value::from("like"),
+                Value::GpuTensor(prototype),
+            ]))
+            .expect("randi uint64 gpu like");
+
+            let Value::GpuTensor(gpu) = result else {
+                panic!("expected resident gpuArray result");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&gpu),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            assert_eq!(gpu.shape, vec![1, 2]);
+            let downloaded = block_on(provider.download_integer(&gpu))
+                .expect("download uint64 randi")
+                .data;
+            let runmat_accelerate_api::HostIntegerDataOwned::U64(values) = downloaded else {
+                panic!("expected uint64 storage");
+            };
+            assert_eq!(values.len(), 2);
+            assert!(values.iter().all(|value| (lower..=upper).contains(value)));
         });
     }
 
