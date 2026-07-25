@@ -779,8 +779,8 @@ fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
 
 fn complex_tensor_to_string_array(tensor: ComplexTensor) -> BuiltinResult<StringArray> {
     let mut strings = Vec::with_capacity(tensor.data.len());
-    for &(re, im) in &tensor.data {
-        strings.push(complex_to_string(re, im));
+    for idx in 0..tensor.data.len() {
+        strings.push(tensor.format_element(idx));
     }
     StringArray::new(strings, tensor.shape).map_err(|e| string_flow(format!("string: {e}")))
 }
@@ -874,8 +874,7 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
         Value::Complex(re, im) => Ok(complex_to_string(*re, *im)),
         Value::ComplexTensor(t) => {
             if t.data.len() == 1 {
-                let (re, im) = t.data[0];
-                Ok(complex_to_string(re, im))
+                Ok(t.format_element(0))
             } else {
                 Err(string_flow("string: cell complex values must be scalar"))
             }
@@ -930,7 +929,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{
-        CellArray, IntValue, IntegerStorage, ResolveContext, StringArray, StructValue, Type,
+        CellArray, IntValue, IntegerComplexStorage, IntegerStorage, ResolveContext, StringArray,
+        StructValue, Type,
     };
 
     fn string_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -999,6 +999,25 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 2]);
                 assert_eq!(sa.data, vec!["-9223372036854775808", "-9007199254740993"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_from_complex_integer_tensor_preserves_exact_storage_values() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("matching integer complex storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("complex integer");
+        let out = string_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("string");
+        match out {
+            Value::StringArray(sa) => {
+                assert_eq!(sa.shape, vec![1, 2]);
+                assert_eq!(sa.data, vec!["18446744073709551615+7i", "9007199254740993"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1084,6 +1103,27 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
                 assert_eq!(sa.data, vec!["9007199254740993"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_from_cell_scalar_complex_integer_tensor_uses_exact_storage() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::I64(vec![i64::MIN]),
+        )
+        .expect("matching integer complex storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex integer");
+        let cell = CellArray::new(vec![Value::ComplexTensor(tensor)], 1, 1)
+            .expect("cell with scalar complex integer tensor");
+        let out = string_builtin(Value::Cell(cell), Vec::new()).expect("string");
+        match out {
+            Value::StringArray(sa) => {
+                assert_eq!(sa.shape, vec![1, 1]);
+                assert_eq!(sa.data, vec![format!("1-{}i", i64::MIN.unsigned_abs())]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
