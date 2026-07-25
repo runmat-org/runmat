@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::registry;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
@@ -650,7 +651,7 @@ fn numeric_scalar(value: &Value, err: &str) -> Result<f64, String> {
         Value::Num(n) => Ok(*n),
         Value::Int(int) => Ok(int.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if t.data.len() == 1 => Ok(tensor::tensor_values_f64(t)[0]),
         Value::LogicalArray(la) if la.data.len() == 1 => {
             Ok(if la.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1115,6 +1116,17 @@ pub(crate) mod tests {
         assert_eq!(
             integer_signed(&wide_unsigned, i32::MIN as i64, i32::MAX as i64),
             Some(i32::MAX as i64)
+        );
+    }
+
+    #[test]
+    fn fwrite_scalar_parser_reads_typed_integer_storage_exactly() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
+        scalar.data[0] = 1.5;
+        assert_eq!(
+            numeric_scalar(&Value::Tensor(scalar), "scalar").expect("scalar"),
+            7.0
         );
     }
 

@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::{helpers::extract_scalar_string, registry};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
@@ -1117,7 +1118,7 @@ fn value_to_scalar(value: &Value, err: &str) -> Result<f64, String> {
         Value::Num(n) => Ok(*n),
         Value::Int(int) => Ok(int.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if t.data.len() == 1 => Ok(tensor::tensor_values_f64(t)[0]),
         Value::LogicalArray(la) if la.data.len() == 1 => {
             Ok(if la.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1655,6 +1656,17 @@ pub(crate) mod tests {
         let matrix_tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]).expect("matrix");
         assert!(parse_size(Some(&Value::Tensor(matrix_tensor))).is_err());
+    }
+
+    #[test]
+    fn fread_scalar_parser_reads_typed_integer_storage_exactly() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
+        scalar.data[0] = 1.5;
+        assert_eq!(
+            value_to_scalar(&Value::Tensor(scalar), "scalar").expect("scalar"),
+            7.0
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

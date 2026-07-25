@@ -737,7 +737,7 @@ fn extract_scalar(value: &Value) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if t.data.len() == 1 => Ok(tensor::tensor_values_f64(t)[0]),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1750,7 +1750,9 @@ pub(crate) mod tests {
 
     #[test]
     fn dlmwrite_integer_tensor_options_preserve_exact_bounds() {
-        let offset = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("offset");
+        let mut offset =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("offset");
+        offset.data[0] = 1.5;
         assert_eq!(
             parse_offset_value(&Value::Tensor(offset), "row offset").unwrap(),
             7
@@ -1759,8 +1761,9 @@ pub(crate) mod tests {
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative");
         assert!(parse_offset_value(&Value::Tensor(negative), "row offset").is_err());
 
-        let precision =
+        let mut precision =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("precision");
+        precision.data[0] = 1.5;
         assert!(matches!(
             parse_precision_value(&Value::Tensor(precision)),
             Ok(PrecisionSpec::Significant(7))
