@@ -149,7 +149,7 @@ pub(in crate::builtins::table) fn dictionary_keys_equal(left: &Value, right: &Va
             b.data.iter().collect::<String>() == *a
         }
         (Value::Num(a), Value::Num(b)) => a == b,
-        (Value::Int(a), Value::Int(b)) => a.to_i64() == b.to_i64(),
+        (Value::Int(a), Value::Int(b)) => a == b,
         (Value::Bool(a), Value::Bool(b)) => a == b,
         _ => left == right,
     }
@@ -159,7 +159,12 @@ pub(in crate::builtins::table) fn value_elements(value: &Value) -> BuiltinResult
     match value {
         Value::Cell(cell) => Ok(cell.data.clone()),
         Value::StringArray(array) => Ok(array.data.iter().cloned().map(Value::String).collect()),
-        Value::Tensor(tensor) => Ok(tensor.data.iter().copied().map(Value::Num).collect()),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return Ok(storage.exact_values().into_iter().map(Value::Int).collect());
+            }
+            Ok(tensor.data.iter().copied().map(Value::Num).collect())
+        }
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()
@@ -167,5 +172,67 @@ pub(in crate::builtins::table) fn value_elements(value: &Value) -> BuiltinResult
             .collect()),
         Value::CharArray(array) => Ok(char_rows(array).into_iter().map(Value::String).collect()),
         other => Ok(vec![other.clone()]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntValue, IntegerStorage};
+
+    #[test]
+    fn dictionary_exact_integer_keys_do_not_saturate_wide_uint64_values() {
+        let first = Value::Int(IntValue::U64(i64::MAX as u64 + 1));
+        let second = Value::Int(IntValue::U64(i64::MAX as u64 + 2));
+        let repeated = Value::Int(IntValue::U64(i64::MAX as u64 + 1));
+
+        assert!(dictionary_keys_equal(&first, &repeated));
+        assert!(!dictionary_keys_equal(&first, &second));
+    }
+
+    #[test]
+    fn dictionary_value_elements_preserve_exact_integer_tensor_keys() {
+        let wide = i64::MAX as u64 + 1;
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide, u64::MAX]), vec![1, 2])
+            .expect("integer tensor");
+
+        let elements = value_elements(&Value::Tensor(tensor)).expect("elements");
+
+        assert_eq!(
+            elements,
+            vec![
+                Value::Int(IntValue::U64(wide)),
+                Value::Int(IntValue::U64(u64::MAX))
+            ]
+        );
+    }
+
+    #[test]
+    fn dictionary_lookup_distinguishes_wide_uint64_tensor_keys() {
+        let first = i64::MAX as u64 + 1;
+        let second = i64::MAX as u64 + 2;
+        let keys = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![first, second]), vec![1, 2])
+                .expect("integer keys"),
+        );
+        let values = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::String("first".to_string()),
+                    Value::String("second".to_string()),
+                ],
+                1,
+                2,
+            )
+            .expect("values"),
+        );
+        let dictionary = dictionary_from_args(vec![keys, values]).expect("dictionary");
+        let Value::Object(object) = dictionary else {
+            panic!("expected dictionary object");
+        };
+
+        let found = dictionary_lookup(&object, &Value::Int(IntValue::U64(second))).expect("lookup");
+
+        assert_eq!(found, Value::String("second".to_string()));
     }
 }
