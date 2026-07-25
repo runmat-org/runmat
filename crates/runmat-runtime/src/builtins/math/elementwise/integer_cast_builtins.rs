@@ -91,7 +91,7 @@ macro_rules! define_integer_cast_builtin {
                 two_pass_threshold: None,
                 workgroup_size: None,
                 accepts_nan_mode: false,
-                notes: "Providers do not yet expose exact integer buffers; gpuArray inputs gather and return an exact host integer tensor.",
+                notes: "Exact native integer buffers are available, but integer conversion kernels are not yet provider-resident; gpuArray inputs gather and return an exact host integer tensor.",
             };
 
             #[runmat_macros::register_fusion_spec(builtin_path = $path)]
@@ -102,7 +102,7 @@ macro_rules! define_integer_cast_builtin {
                 elementwise: None,
                 reduction: None,
                 emits_nan: false,
-                notes: "Integer casts are host-side until providers support exact integer buffers.",
+                notes: "Integer casts remain host-side until providers support exact integer conversion kernels.",
             };
 
             #[runtime_builtin(
