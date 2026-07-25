@@ -12,6 +12,12 @@ pub fn arithmetic_shader(workgroup_size: u32) -> String {
     INTEGER_ARITHMETIC_SHADER.replace("@WG@", &workgroup_size.to_string())
 }
 
+pub fn extrema_dim_shader(scalar_type: &str, workgroup_size: u32) -> String {
+    INTEGER_EXTREMA_DIM_SHADER
+        .replace("$SCALAR", scalar_type)
+        .replace("@WG@", &workgroup_size.to_string())
+}
+
 const INTEGER_COMPARISON_SHADER: &str = r#"
 struct Words { data: array<u32> };
 struct Output { data: array<$SCALAR> };
@@ -722,9 +728,119 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+const INTEGER_EXTREMA_DIM_SHADER: &str = r#"
+struct Words { data: array<u32> };
+struct Indices { data: array<$SCALAR> };
+
+struct Params {
+    rows: u32,
+    cols: u32,
+    dim: u32,
+    select_min: u32,
+    integer_type: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> InBuf: Words;
+@group(0) @binding(1) var<storage, read_write> OutVals: Words;
+@group(0) @binding(2) var<storage, read_write> OutIdx: Indices;
+@group(0) @binding(3) var<uniform> params: Params;
+
+fn signed8_extrema(word: u32) -> i32 { return bitcast<i32>(word << 24u) >> 24; }
+fn signed16_extrema(word: u32) -> i32 { return bitcast<i32>(word << 16u) >> 16; }
+
+// Returns negative when the left value is smaller, positive when larger, and
+// zero when equal. The high word is compared first for 64-bit values.
+fn compare_extrema(left_lane: u32, right_lane: u32) -> i32 {
+    let left_low = InBuf.data[left_lane];
+    let right_low = InBuf.data[right_lane];
+    switch params.integer_type {
+        case 0u: {
+            let left = signed8_extrema(left_low); let right = signed8_extrema(right_low);
+            if (left < right) { return -1; } if (left > right) { return 1; }
+        }
+        case 1u: {
+            let left = signed16_extrema(left_low); let right = signed16_extrema(right_low);
+            if (left < right) { return -1; } if (left > right) { return 1; }
+        }
+        case 2u: {
+            let left = bitcast<i32>(left_low); let right = bitcast<i32>(right_low);
+            if (left < right) { return -1; } if (left > right) { return 1; }
+        }
+        case 3u: {
+            let left_high = bitcast<i32>(InBuf.data[left_lane + 1u]);
+            let right_high = bitcast<i32>(InBuf.data[right_lane + 1u]);
+            if (left_high < right_high) { return -1; } if (left_high > right_high) { return 1; }
+            if (left_low < right_low) { return -1; } if (left_low > right_low) { return 1; }
+        }
+        case 4u: {
+            let left = left_low & 0xffu; let right = right_low & 0xffu;
+            if (left < right) { return -1; } if (left > right) { return 1; }
+        }
+        case 5u: {
+            let left = left_low & 0xffffu; let right = right_low & 0xffffu;
+            if (left < right) { return -1; } if (left > right) { return 1; }
+        }
+        case 6u: {
+            if (left_low < right_low) { return -1; } if (left_low > right_low) { return 1; }
+        }
+        case 7u: {
+            let left_high = InBuf.data[left_lane + 1u]; let right_high = InBuf.data[right_lane + 1u];
+            if (left_high < right_high) { return -1; } if (left_high > right_high) { return 1; }
+            if (left_low < right_low) { return -1; } if (left_low > right_low) { return 1; }
+        }
+        default: {}
+    }
+    return 0;
+}
+
+fn write_extrema(out_index: u32, input_index: u32) {
+    let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
+    let source_lane = input_index * lanes;
+    let target_lane = out_index * lanes;
+    OutVals.data[target_lane] = InBuf.data[source_lane];
+    if (lanes == 2u) { OutVals.data[target_lane + 1u] = InBuf.data[source_lane + 1u]; }
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let out_index = gid.x;
+    let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
+    if (params.dim == 0u) {
+        if (out_index >= params.cols || params.rows == 0u) { return; }
+        var best = out_index * params.rows;
+        var row = 1u;
+        loop {
+            if (row >= params.rows) { break; }
+            let candidate = row + out_index * params.rows;
+            let order = compare_extrema(candidate * lanes, best * lanes);
+            if (select(order > 0, order < 0, params.select_min == 1u)) { best = candidate; }
+            row = row + 1u;
+        }
+        write_extrema(out_index, best);
+        OutIdx.data[out_index] = $SCALAR((best % params.rows) + 1u);
+    } else {
+        if (out_index >= params.rows || params.cols == 0u) { return; }
+        var best = out_index;
+        var col = 1u;
+        loop {
+            if (col >= params.cols) { break; }
+            let candidate = out_index + col * params.rows;
+            let order = compare_extrema(candidate * lanes, best * lanes);
+            if (select(order > 0, order < 0, params.select_min == 1u)) { best = candidate; }
+            col = col + 1u;
+        }
+        write_extrema(out_index, best);
+        OutIdx.data[out_index] = $SCALAR((best / params.rows) + 1u);
+    }
+}
+"#;
+
 #[cfg(test)]
 mod tests {
-    use super::{arithmetic_shader, comparison_shader, minmax_shader};
+    use super::{arithmetic_shader, comparison_shader, extrema_dim_shader, minmax_shader};
 
     #[test]
     fn comparison_shader_substitutes_precision_and_workgroup_size() {
@@ -746,6 +862,15 @@ mod tests {
     fn arithmetic_shader_substitutes_workgroup_size() {
         let shader = arithmetic_shader(128);
         assert!(shader.contains("@workgroup_size(128)"));
+        assert!(!shader.contains("@WG@"));
+    }
+
+    #[test]
+    fn extrema_dim_shader_substitutes_precision_and_workgroup_size() {
+        let shader = extrema_dim_shader("f64", 128);
+        assert!(shader.contains("array<f64>"));
+        assert!(shader.contains("@workgroup_size(128)"));
+        assert!(!shader.contains("$SCALAR"));
         assert!(!shader.contains("@WG@"));
     }
 }

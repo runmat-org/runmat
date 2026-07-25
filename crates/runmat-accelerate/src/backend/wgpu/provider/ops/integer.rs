@@ -133,6 +133,159 @@ pub(crate) fn integer_broadcast_plan(
 }
 
 impl WgpuProvider {
+    pub(crate) fn integer_reduce_extrema_dim_exec(
+        &self,
+        select_min: bool,
+        dim: usize,
+        operation_name: &str,
+        a: &GpuTensorHandle,
+    ) -> Result<runmat_accelerate_api::ReduceDimResult> {
+        let entry = self.get_entry_raw(a)?;
+        let integer_type = entry
+            .integer_type
+            .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
+        ensure!(
+            entry.storage == GpuTensorStorage::Real,
+            "{operation_name}: complex integer gpuArray reduction is not supported"
+        );
+        ensure!(
+            entry.shape.len() == 2,
+            "{operation_name}: only 2D tensors are supported"
+        );
+        let rows = entry.shape[0];
+        let cols = entry.shape[1];
+        let (out_len, out_shape) = match dim {
+            0 => (cols, vec![1, cols]),
+            1 => (rows, vec![rows, 1]),
+            _ => return Err(anyhow!("{operation_name}: only dims 0 or 1 are supported")),
+        };
+        if rows == 0 || cols == 0 {
+            return Err(anyhow!(
+                "{operation_name}: empty native integer extrema requires host empty-shape handling"
+            ));
+        }
+        if rows > u32::MAX as usize || cols > u32::MAX as usize {
+            return Err(gpu_dispatch_length_limit_error(
+                operation_name,
+                rows.max(cols),
+            ));
+        }
+        let words = integer_word_count(integer_type, out_len)?;
+        let value_bytes = (words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
+        let values_buffer =
+            self.create_storage_buffer_checked(words, "runmat-integer-reduce-dim-extrema-values")?;
+        let indices_buffer = self
+            .create_storage_buffer_checked(out_len, "runmat-integer-reduce-dim-extrema-indices")?;
+        let scalar_type = match self.precision {
+            crate::backend::wgpu::types::NumericPrecision::F64 => "f64",
+            crate::backend::wgpu::types::NumericPrecision::F32 => "f32",
+        };
+        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+        let shader =
+            crate::backend::wgpu::shaders::integer::extrema_dim_shader(scalar_type, workgroup_size);
+        let layout = self
+            .device_ref()
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("runmat-integer-reduce-dim-extrema-bgl"),
+                entries: &[
+                    crate::backend::wgpu::bindings::storage_read_entry(0),
+                    crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                    crate::backend::wgpu::bindings::storage_read_write_entry(2),
+                    crate::backend::wgpu::bindings::uniform_entry(3),
+                ],
+            });
+        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+            self.device_ref(),
+            "runmat-integer-reduce-dim-extrema-pl",
+            &layout,
+        );
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-integer-reduce-dim-extrema-module",
+            &shader,
+        );
+        let key = self.compute_pipeline_hash_bytes(
+            shader.as_bytes(),
+            "runmat-integer-reduce-dim-extrema-bgl",
+            Some(workgroup_size),
+        );
+        let pipeline = self.get_or_create_pipeline(
+            key,
+            &pipeline_layout,
+            &module,
+            "runmat-integer-reduce-dim-extrema",
+            Some(shader.as_bytes()),
+            Some("runmat-integer-reduce-dim-extrema-bgl"),
+            Some(workgroup_size),
+        );
+        #[repr(C)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
+        struct Params {
+            rows: u32,
+            cols: u32,
+            dim: u32,
+            select_min: u32,
+            integer_type: u32,
+            _pad0: u32,
+            _pad1: u32,
+            _pad2: u32,
+        }
+        let params = Params {
+            rows: rows as u32,
+            cols: cols as u32,
+            dim: dim as u32,
+            select_min: u32::from(select_min),
+            integer_type: integer_type_code(integer_type),
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
+        };
+        let uniform = self.uniform_buffer(&params, "runmat-integer-reduce-dim-extrema-params");
+        let group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-integer-reduce-dim-extrema-bg"),
+                layout: &layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: values_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: indices_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: uniform.as_entire_binding(),
+                    },
+                ],
+            });
+        let groups =
+            crate::backend::wgpu::dispatch::common::dispatch_size(out_len as u32, workgroup_size);
+        crate::backend::wgpu::dispatch::elementwise::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &pipeline,
+            &group,
+            groups,
+        );
+        Ok(runmat_accelerate_api::ReduceDimResult {
+            values: self.register_integer_buffer(
+                values_buffer,
+                out_shape.clone(),
+                out_len,
+                integer_type,
+                value_bytes,
+            ),
+            indices: self.register_existing_buffer(indices_buffer, out_shape, out_len),
+        })
+    }
+
     pub(crate) fn integer_arithmetic_exec(
         &self,
         op: u32,
@@ -461,5 +614,222 @@ impl WgpuProvider {
             integer_type,
             allocated_bytes,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+    use runmat_accelerate_api::{
+        AccelProvider, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView,
+        IntegerElementType,
+    };
+
+    fn register_wgpu_provider_for_test() -> Option<&'static WgpuProvider> {
+        match crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) {
+            Ok(provider) => Some(provider),
+            Err(error) if error.to_string() == "wgpu: no compatible adapter found" => None,
+            Err(error) => panic!("register wgpu provider failed: {error:?}"),
+        }
+    }
+
+    #[test]
+    fn wgpu_native_integer_extrema_preserve_all_classes_and_indices() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        macro_rules! check {
+            ($view:ident, $owned:ident, $values:expr, $min_dim0:expr, $max_dim0:expr, $min_dim1:expr, $max_dim1:expr) => {{
+                let values = $values;
+                let input = provider
+                    .upload_integer_exec(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&values),
+                        shape: &[3, 2],
+                    })
+                    .expect("upload exact integer extrema input");
+                let min_dim0 = provider
+                    .integer_reduce_extrema_dim_exec(true, 0, "min", &input)
+                    .expect("min along rows");
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&min_dim0.values))
+                        .expect("download native min dim 0")
+                        .data,
+                    HostIntegerDataOwned::$owned($min_dim0.to_vec())
+                );
+                assert_eq!(
+                    block_on(provider.download_exec(&min_dim0.indices))
+                        .expect("download min indices dim 0")
+                        .data,
+                    vec![2.0, 2.0]
+                );
+                let max_dim0 = provider
+                    .integer_reduce_extrema_dim_exec(false, 0, "max", &input)
+                    .expect("max along rows");
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&max_dim0.values))
+                        .expect("download native max dim 0")
+                        .data,
+                    HostIntegerDataOwned::$owned($max_dim0.to_vec())
+                );
+                assert_eq!(
+                    block_on(provider.download_exec(&max_dim0.indices))
+                        .expect("download max indices dim 0")
+                        .data,
+                    vec![1.0, 1.0]
+                );
+                let min_dim1 = provider
+                    .integer_reduce_extrema_dim_exec(true, 1, "min", &input)
+                    .expect("min along columns");
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&min_dim1.values))
+                        .expect("download native min dim 1")
+                        .data,
+                    HostIntegerDataOwned::$owned($min_dim1.to_vec())
+                );
+                assert_eq!(
+                    block_on(provider.download_exec(&min_dim1.indices))
+                        .expect("download min indices dim 1")
+                        .data,
+                    vec![1.0, 2.0, 2.0]
+                );
+                let max_dim1 = provider
+                    .integer_reduce_extrema_dim_exec(false, 1, "max", &input)
+                    .expect("max along columns");
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&max_dim1.values))
+                        .expect("download native max dim 1")
+                        .data,
+                    HostIntegerDataOwned::$owned($max_dim1.to_vec())
+                );
+                assert_eq!(
+                    block_on(provider.download_exec(&max_dim1.indices))
+                        .expect("download max indices dim 1")
+                        .data,
+                    vec![2.0, 1.0, 1.0]
+                );
+            }};
+        }
+        check!(
+            I8,
+            I8,
+            [3_i8, 2, 2, 5, 1, 1],
+            [2, 1],
+            [3, 5],
+            [3, 1, 1],
+            [5, 2, 2]
+        );
+        check!(
+            I16,
+            I16,
+            [3_i16, 2, 2, 5, 1, 1],
+            [2, 1],
+            [3, 5],
+            [3, 1, 1],
+            [5, 2, 2]
+        );
+        check!(
+            I32,
+            I32,
+            [3_i32, 2, 2, 5, 1, 1],
+            [2, 1],
+            [3, 5],
+            [3, 1, 1],
+            [5, 2, 2]
+        );
+        check!(
+            I64,
+            I64,
+            [3_i64, 2, 2, 5, 1, 1],
+            [2, 1],
+            [3, 5],
+            [3, 1, 1],
+            [5, 2, 2]
+        );
+        check!(
+            U8,
+            U8,
+            [3_u8, 2, 2, 5, 1, 1],
+            [2, 1],
+            [3, 5],
+            [3, 1, 1],
+            [5, 2, 2]
+        );
+        check!(
+            U16,
+            U16,
+            [3_u16, 2, 2, 5, 1, 1],
+            [2, 1],
+            [3, 5],
+            [3, 1, 1],
+            [5, 2, 2]
+        );
+        check!(
+            U32,
+            U32,
+            [3_u32, 2, 2, 5, 1, 1],
+            [2, 1],
+            [3, 5],
+            [3, 1, 1],
+            [5, 2, 2]
+        );
+        check!(
+            U64,
+            U64,
+            [3_u64, 2, 2, 5, 1, 1],
+            [2, 1],
+            [3, 5],
+            [3, 1, 1],
+            [5, 2, 2]
+        );
+    }
+
+    #[test]
+    fn wgpu_native_integer_extrema_public_hooks_keep_values_resident() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let input = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[1_u64 << 63, u64::MAX, 5, 4]),
+                shape: &[2, 2],
+            })
+            .expect("upload packed u64 extrema input");
+        let min = block_on(provider.reduce_min_dim(&input, 0)).expect("public min hook");
+        let max = block_on(provider.reduce_max_dim(&input, 1)).expect("public max hook");
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&min.values),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&max.values),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&min.values))
+                .expect("download min values")
+                .data,
+            HostIntegerDataOwned::U64(vec![1_u64 << 63, 4])
+        );
+        assert_eq!(
+            block_on(provider.download_exec(&min.indices))
+                .expect("download min indices")
+                .data,
+            vec![1.0, 2.0]
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&max.values))
+                .expect("download max values")
+                .data,
+            HostIntegerDataOwned::U64(vec![1_u64 << 63, u64::MAX])
+        );
+        assert_eq!(
+            block_on(provider.download_exec(&max.indices))
+                .expect("download max indices")
+                .data,
+            vec![1.0, 1.0]
+        );
     }
 }
