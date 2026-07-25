@@ -2,11 +2,11 @@
 
 use std::path::Path;
 
-use runmat_accelerate_api::handle_is_logical;
+use runmat_accelerate_api::{handle_integer_type, handle_is_logical};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, NumericDType, SparseTensor, Value,
+    CellArray, CharArray, ComplexTensor, IntValue, NumericDType, SparseTensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -52,6 +52,7 @@ pub fn reject_typed_complex_integer_tensor(
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidationAtom {
     Number(f64),
+    Integer(IntValue),
     Text(String),
     Bool(bool),
 }
@@ -466,10 +467,13 @@ pub fn value_is_numeric(value: &Value) -> bool {
 
 pub fn value_is_float(value: &Value) -> bool {
     match value {
-        Value::Num(_) | Value::Complex(_, _) | Value::ComplexTensor(_) => true,
+        Value::Num(_) | Value::Complex(_, _) => true,
+        Value::ComplexTensor(tensor) => tensor.integer_data.is_none(),
         Value::Tensor(t) => matches!(t.dtype, NumericDType::F64 | NumericDType::F32),
-        Value::SparseTensor(_) => true,
-        Value::GpuTensor(handle) => !handle_is_logical(handle),
+        Value::SparseTensor(tensor) => tensor.integer_storage().is_none(),
+        Value::GpuTensor(handle) => {
+            !handle_is_logical(handle) && handle_integer_type(handle).is_none()
+        }
         _ => false,
     }
 }
@@ -536,6 +540,9 @@ pub fn value_is_integer(value: &Value) -> bool {
             .data
             .iter()
             .all(|(re, im)| *im == 0.0 && re.is_finite() && re.fract() == 0.0),
+        Value::GpuTensor(handle) => {
+            handle_is_logical(handle) || handle_integer_type(handle).is_some()
+        }
         _ => false,
     }
 }
@@ -638,7 +645,7 @@ pub fn value_matches_class(value: &Value, class_name: &str) -> bool {
     match requested.to_ascii_lowercase().as_str() {
         "numeric" => value_is_numeric(value),
         "float" => value_is_float(value),
-        "integer" => matches!(value, Value::Int(_)),
+        "integer" => value_has_native_integer_class(value),
         "logical" => matches!(value, Value::Bool(_) | Value::LogicalArray(_)),
         "char" => matches!(value, Value::CharArray(_)),
         "string" => matches!(value, Value::String(_) | Value::StringArray(_)),
@@ -646,15 +653,25 @@ pub fn value_matches_class(value: &Value, class_name: &str) -> bool {
         "struct" => matches!(value, Value::Struct(_)),
         "sparse" => matches!(value, Value::SparseTensor(_)),
         "double" => {
-            matches!(
-                value,
-                Value::Num(_) | Value::Complex(_, _) | Value::SparseTensor(_)
-            ) || matches!(value, Value::Tensor(t) if t.dtype == NumericDType::F64)
-                || matches!(value, Value::ComplexTensor(_))
+            matches!(value, Value::Num(_) | Value::Complex(_, _))
+                || matches!(value, Value::Tensor(t) if t.dtype == NumericDType::F64)
+                || matches!(value, Value::SparseTensor(t) if t.integer_storage().is_none())
+                || matches!(value, Value::ComplexTensor(t) if t.integer_data.is_none())
         }
         "single" => matches!(value, Value::Tensor(t) if t.dtype == NumericDType::F32),
         "gpuarray" => matches!(value, Value::GpuTensor(_)),
         _ => class_name_for_value(value).eq_ignore_ascii_case(requested),
+    }
+}
+
+fn value_has_native_integer_class(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::SparseTensor(tensor) => tensor.integer_storage().is_some(),
+        Value::ComplexTensor(tensor) => tensor.integer_data.is_some(),
+        Value::GpuTensor(handle) => handle_integer_type(handle).is_some(),
+        _ => false,
     }
 }
 
@@ -699,11 +716,20 @@ fn value_is_member_atoms_inner(
 pub fn atoms(value: &Value) -> Result<Vec<ValidationAtom>, RuntimeError> {
     match value {
         Value::Num(v) => Ok(vec![ValidationAtom::Number(*v)]),
-        Value::Int(v) => Ok(vec![ValidationAtom::Number(v.to_f64())]),
+        Value::Int(v) => Ok(vec![ValidationAtom::Integer(v.clone())]),
         Value::Bool(v) => Ok(vec![ValidationAtom::Bool(*v)]),
         Value::String(s) => Ok(vec![ValidationAtom::Text(s.clone())]),
         Value::CharArray(c) if c.rows == 1 => Ok(vec![ValidationAtom::Text(chars_to_string(c))]),
-        Value::Tensor(t) => Ok(t.data.iter().copied().map(ValidationAtom::Number).collect()),
+        Value::Tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                return Ok(storage
+                    .exact_values()
+                    .into_iter()
+                    .map(ValidationAtom::Integer)
+                    .collect());
+            }
+            Ok(t.data.iter().copied().map(ValidationAtom::Number).collect())
+        }
         Value::SparseTensor(t) => sparse_atoms(t),
         Value::LogicalArray(a) => Ok(a
             .data
@@ -728,6 +754,22 @@ pub fn atoms(value: &Value) -> Result<Vec<ValidationAtom>, RuntimeError> {
 fn sparse_atoms(t: &SparseTensor) -> Result<Vec<ValidationAtom>, RuntimeError> {
     let numel = t.rows.saturating_mul(t.cols);
     let mut out = Vec::with_capacity(numel.min(t.values.len().saturating_add(1)));
+    if let Some(storage) = t.integer_storage() {
+        out.extend(
+            storage
+                .exact_values()
+                .into_iter()
+                .map(ValidationAtom::Integer),
+        );
+        if storage.len() < numel {
+            let zero = storage
+                .zeros_like(1)
+                .value_at(0)
+                .expect("one-element zero storage");
+            out.push(ValidationAtom::Integer(zero));
+        }
+        return Ok(out);
+    }
     out.extend(t.values.iter().copied().map(ValidationAtom::Number));
     if t.values.len() < numel {
         out.push(ValidationAtom::Number(0.0));
@@ -738,6 +780,9 @@ fn sparse_atoms(t: &SparseTensor) -> Result<Vec<ValidationAtom>, RuntimeError> {
 fn atom_eq(left: &ValidationAtom, right: &ValidationAtom) -> bool {
     match (left, right) {
         (ValidationAtom::Number(a), ValidationAtom::Number(b)) => a == b,
+        (ValidationAtom::Integer(a), ValidationAtom::Integer(b)) => a == b,
+        (ValidationAtom::Integer(a), ValidationAtom::Number(b))
+        | (ValidationAtom::Number(b), ValidationAtom::Integer(a)) => a.to_f64() == *b,
         (ValidationAtom::Text(a), ValidationAtom::Text(b)) => a == b,
         (ValidationAtom::Bool(a), ValidationAtom::Bool(b)) => a == b,
         _ => false,
@@ -1007,7 +1052,10 @@ validator_builtin!(
 mod tests {
     use super::*;
     use crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX;
-    use runmat_builtins::{IntValue, LogicalArray, StringArray, StructValue, Tensor};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
+        StructValue, Tensor,
+    };
 
     fn ok(builtin: &str, args: Vec<Value>) {
         dispatch_validator(builtin, args).unwrap_or_else(|err| {
@@ -1028,6 +1076,10 @@ mod tests {
 
     fn sparse(values: Vec<f64>) -> Value {
         Value::SparseTensor(SparseTensor::new(2, 2, vec![0, 1, 1], vec![0], values).unwrap())
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
     }
 
     #[test]
@@ -1054,6 +1106,116 @@ mod tests {
             vec![Value::String("on".into()), Value::StringArray(allowed)]
         )
         .is_ok());
+    }
+
+    #[test]
+    fn class_validators_use_native_integer_storage_metadata() {
+        let dense = integer_tensor(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![1, 2],
+        );
+        ok(
+            "mustBeA",
+            vec![dense.clone(), Value::String("integer".into())],
+        );
+        err("mustBeFloat", vec![dense.clone()]);
+        err("mustBeA", vec![dense, Value::String("double".into())]);
+
+        let sparse = Value::SparseTensor(
+            SparseTensor::new_integer(
+                2,
+                2,
+                vec![0, 1, 1],
+                vec![1],
+                IntegerStorage::I64(vec![i64::MIN]),
+            )
+            .unwrap(),
+        );
+        ok(
+            "mustBeA",
+            vec![sparse.clone(), Value::String("integer".into())],
+        );
+        err("mustBeFloat", vec![sparse.clone()]);
+        err("mustBeA", vec![sparse, Value::String("double".into())]);
+
+        let typed_complex = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I16(vec![1]),
+                    IntegerStorage::I16(vec![2]),
+                )
+                .unwrap(),
+                vec![1, 1],
+            )
+            .unwrap(),
+        );
+        ok(
+            "mustBeA",
+            vec![typed_complex.clone(), Value::String("integer".into())],
+        );
+        err("mustBeFloat", vec![typed_complex]);
+    }
+
+    #[test]
+    fn class_validators_use_gpu_integer_metadata_without_gather() {
+        use crate::builtins::common::test_support;
+        use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
+
+        test_support::with_test_provider(|provider| {
+            let values = [u64::MAX, 9_007_199_254_740_993];
+            let shape = [1usize, 2usize];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &shape,
+                })
+                .expect("upload integer gpu tensor");
+            let gpu = Value::GpuTensor(handle);
+
+            ok(
+                "mustBeA",
+                vec![gpu.clone(), Value::String("integer".into())],
+            );
+            ok("mustBeInteger", vec![gpu.clone()]);
+            err("mustBeFloat", vec![gpu.clone()]);
+            err("mustBeA", vec![gpu, Value::String("double".into())]);
+        });
+    }
+
+    #[test]
+    fn member_validator_compares_native_integers_exactly() {
+        let wide = 9_007_199_254_740_993_u64;
+        let adjacent = wide - 1;
+        assert_eq!(wide as f64, adjacent as f64);
+
+        let allowed = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
+        ok(
+            "mustBeMember",
+            vec![
+                Value::Int(IntValue::U64(wide)),
+                Value::Tensor(allowed.clone()),
+            ],
+        );
+        err(
+            "mustBeMember",
+            vec![Value::Int(IntValue::U64(adjacent)), Value::Tensor(allowed)],
+        );
+
+        let sparse_allowed = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 1],
+            vec![1],
+            IntegerStorage::U64(vec![wide]),
+        )
+        .unwrap();
+        ok(
+            "mustBeMember",
+            vec![
+                Value::Int(IntValue::U64(0)),
+                Value::SparseTensor(sparse_allowed),
+            ],
+        );
     }
 
     #[test]
