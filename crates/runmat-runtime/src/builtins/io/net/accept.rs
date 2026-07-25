@@ -504,7 +504,10 @@ pub(crate) fn parse_timeout_value(value: &Value) -> Result<f64, TimeoutParseErro
     let timeout = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if t.data.len() == 1 => t
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+            .map_or(t.data[0], |int| int.to_f64()),
         Value::Tensor(_) => {
             return Err(TimeoutParseError::NonScalar);
         }
@@ -673,7 +676,7 @@ pub(crate) mod tests {
         remove_server_for_test, tcpserver_builtin, HANDLE_ID_FIELD as SERVER_FIELD,
     };
     use super::*;
-    use runmat_builtins::Value;
+    use runmat_builtins::{IntegerStorage, Tensor, Value};
     use std::net::TcpStream;
     use std::thread;
     use std::time::Duration;
@@ -725,6 +728,17 @@ pub(crate) mod tests {
         assert!(labels.contains(&"client = accept(server)"));
         assert!(labels.contains(&"client = accept(server, \"Timeout\", timeout)"));
         assert!(labels.contains(&"client = accept(server, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn typed_timeout_parser_accepts_integer_tensor_scalars() {
+        let typed =
+            Tensor::new_integer(IntegerStorage::U16(vec![30]), vec![1, 1]).expect("timeout");
+        assert_eq!(parse_timeout_value(&Value::Tensor(typed)).unwrap(), 30.0);
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("timeout");
+        assert!(parse_timeout_value(&Value::Tensor(negative)).is_err());
     }
 
     fn run_tcpserver(address: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

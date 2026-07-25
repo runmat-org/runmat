@@ -716,7 +716,25 @@ fn parse_count(value: &Value) -> BuiltinResult<usize> {
 
     let numeric = match value {
         Value::Num(n) => *n,
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                return int.try_to_usize().ok_or_else(|| {
+                    let (error, detail) = if int.try_to_u64().is_some() {
+                        (
+                            &READ_ERROR_INVALID_COUNT,
+                            "read: count exceeds the maximum supported size",
+                        )
+                    } else {
+                        (
+                            &READ_ERROR_INVALID_COUNT,
+                            "read: count must be a non-negative finite value",
+                        )
+                    };
+                    read_flow(error, detail)
+                });
+            }
+            t.data[0]
+        }
         _ => {
             return Err(read_flow(
                 &READ_ERROR_INVALID_COUNT,
@@ -843,7 +861,7 @@ pub(crate) mod tests {
     use crate::builtins::io::net::accept::{
         configure_stream, insert_client, remove_client_for_test,
     };
-    use runmat_builtins::{IntValue, StructValue, Value};
+    use runmat_builtins::{IntValue, IntegerStorage, StructValue, Tensor, Value};
     use std::io::Write;
     use std::net::{TcpListener, TcpStream};
     use std::thread;
@@ -881,6 +899,23 @@ pub(crate) mod tests {
         assert_eq!(parse_count(&Value::Int(IntValue::U64(42))).unwrap(), 42);
         assert!(parse_count(&Value::Int(IntValue::I8(-1))).is_err());
         let maximum = parse_count(&Value::Int(IntValue::U64(u64::MAX)));
+        if usize::BITS == 64 {
+            assert_eq!(maximum.unwrap(), usize::MAX);
+        } else {
+            assert!(maximum.is_err());
+        }
+
+        let typed_count =
+            Tensor::new_integer(IntegerStorage::U64(vec![42]), vec![1, 1]).expect("count");
+        assert_eq!(parse_count(&Value::Tensor(typed_count)).unwrap(), 42);
+
+        let typed_negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("count");
+        assert!(parse_count(&Value::Tensor(typed_negative)).is_err());
+
+        let typed_max =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("count");
+        let maximum = parse_count(&Value::Tensor(typed_max));
         if usize::BITS == 64 {
             assert_eq!(maximum.unwrap(), usize::MAX);
         } else {
