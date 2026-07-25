@@ -1988,6 +1988,22 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("elem_div not supported by provider")
     }
+    /// Compute an exact MATLAB-style remainder for compatible native integer tensors.
+    fn elem_rem<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_rem not supported by provider")
+    }
+    /// Compute an exact MATLAB-style modulus for compatible native integer tensors.
+    fn elem_mod<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_mod not supported by provider")
+    }
     fn elem_pow<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,

@@ -179,10 +179,16 @@ async fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
-    if runmat_accelerate_api::handle_integer_type(&a).is_none()
-        && runmat_accelerate_api::handle_integer_type(&b).is_none()
+    if runmat_accelerate_api::handle_integer_type(&a).is_some()
+        && runmat_accelerate_api::handle_integer_type(&b).is_some()
         && a.device_id == b.device_id
     {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
+            if let Ok(out) = provider.elem_rem(&a, &b).await {
+                return Ok(gpu_helpers::resident_gpu_value(out));
+            }
+        }
+    } else if a.device_id == b.device_id {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
             if a.shape == b.shape {
                 if let Ok(div) = provider.elem_div(&a, &b).await {

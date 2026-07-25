@@ -416,6 +416,16 @@ fn divide_signed32(a: i32, b: i32, min_bits: u32, max_bits: u32) -> u32 {
     if (quotient > max_bits) { return max_bits; }
     return quotient;
 }
+fn remainder_unsigned32(a: u32, b: u32, is_modulus: bool) -> u32 {
+    if (b == 0u) { return select(0u, a, is_modulus); }
+    return a % b;
+}
+fn remainder_signed32(a: i32, b: i32, is_modulus: bool) -> u32 {
+    if (b == 0) { return select(0u, bitcast<u32>(a), is_modulus); }
+    var remainder = a % b;
+    if (is_modulus && remainder != 0 && (remainder < 0) != (b < 0)) { remainder = remainder + b; }
+    return bitcast<u32>(remainder);
+}
 fn add_with_carry(a: u32, b: u32, carry: u32) -> vec2<u32> {
     let first = a + b;
     let second = first + carry;
@@ -523,6 +533,33 @@ fn write_divide64(lane: u32, a0: u32, a1: u32, b0: u32, b1: u32, is_signed: bool
     } else {
         Out.data[lane] = division.x; Out.data[lane + 1u] = division.y;
     }
+}
+fn write_remainder64(lane: u32, a0: u32, a1: u32, b0: u32, b1: u32, is_signed: bool, is_modulus: bool) {
+    if (b0 == 0u && b1 == 0u) {
+        Out.data[lane] = select(0u, a0, is_modulus);
+        Out.data[lane + 1u] = select(0u, a1, is_modulus);
+        return;
+    }
+    if (!is_signed) {
+        let division = divmod64(a0, a1, b0, b1);
+        Out.data[lane] = division.z; Out.data[lane + 1u] = division.w;
+        return;
+    }
+    let a_negative = bitcast<i32>(a1) < 0;
+    let b_negative = bitcast<i32>(b1) < 0;
+    let abs_a = select(vec2<u32>(a0, a1), negate64(a0, a1), a_negative);
+    let abs_b = select(vec2<u32>(b0, b1), negate64(b0, b1), b_negative);
+    let division = divmod64(abs_a.x, abs_a.y, abs_b.x, abs_b.y);
+    var remainder = vec2<u32>(division.z, division.w);
+    if (remainder.x != 0u || remainder.y != 0u) {
+        var negative = a_negative;
+        if (is_modulus && a_negative != b_negative) {
+            remainder = sub64(abs_b.x, abs_b.y, remainder.x, remainder.y);
+            negative = b_negative;
+        }
+        if (negative) { remainder = negate64(remainder.x, remainder.y); }
+    }
+    Out.data[lane] = remainder.x; Out.data[lane + 1u] = remainder.y;
 }
 fn multiply_signed64(a0: u32, a1: u32, b0: u32, b1: u32) -> vec2<u32> {
     let a_negative = bitcast<i32>(a1) < 0;
@@ -672,14 +709,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let b_lane = b_index * lanes;
     let a = A.data[a_lane]; let b = B.data[b_lane];
     switch params.integer_type {
-        case 0u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx8(a), sx8(b), 0x80u, 0x7fu); } else if (params.op == 3u) { Out.data[lane] = divide_signed32(sx8(a), sx8(b), 0x80u, 0x7fu); } else if (params.op == 4u) { Out.data[lane] = power_signed32(sx8(a), sx8(b), 0x80u, 0x7fu); } else { Out.data[lane] = bitcast<u32>(signed_narrow(sx8(a), sx8(b), -128, 127)); } }
-        case 1u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx16(a), sx16(b), 0x8000u, 0x7fffu); } else if (params.op == 3u) { Out.data[lane] = divide_signed32(sx16(a), sx16(b), 0x8000u, 0x7fffu); } else if (params.op == 4u) { Out.data[lane] = power_signed32(sx16(a), sx16(b), 0x8000u, 0x7fffu); } else { Out.data[lane] = bitcast<u32>(signed_narrow(sx16(a), sx16(b), -32768, 32767)); } }
-        case 2u: { if (params.op == 2u) { Out.data[lane] = multiply_signed32(bitcast<i32>(a), bitcast<i32>(b), 0x80000000u, 0x7fffffffu); } else if (params.op == 3u) { Out.data[lane] = divide_signed32(bitcast<i32>(a), bitcast<i32>(b), 0x80000000u, 0x7fffffffu); } else if (params.op == 4u) { Out.data[lane] = power_signed32(bitcast<i32>(a), bitcast<i32>(b), 0x80000000u, 0x7fffffffu); } else { Out.data[lane] = bitcast<u32>(signed32(bitcast<i32>(a), bitcast<i32>(b), -2147483648, 2147483647)); } }
-        case 3u: { if (params.op == 2u) { write_multiply64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } else if (params.op == 3u) { write_divide64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } else if (params.op == 4u) { let value = power_signed64(a, A.data[a_lane + 1u], b, B.data[b_lane + 1u]); Out.data[lane] = value.x; Out.data[lane + 1u] = value.y; } else { write64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } }
-        case 4u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a & 0xffu, b & 0xffu, 0xffu); } else if (params.op == 3u) { Out.data[lane] = divide_unsigned32(a & 0xffu, b & 0xffu, 0xffu); } else if (params.op == 4u) { Out.data[lane] = power_unsigned32(a & 0xffu, b & 0xffu, 0xffu); } else { Out.data[lane] = min(unsigned32(a & 0xffu, b & 0xffu, 0xffu), 0xffu); } }
-        case 5u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu); } else if (params.op == 3u) { Out.data[lane] = divide_unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu); } else if (params.op == 4u) { Out.data[lane] = power_unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu); } else { Out.data[lane] = min(unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu), 0xffffu); } }
-        case 6u: { if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a, b, 0xffffffffu); } else if (params.op == 3u) { Out.data[lane] = divide_unsigned32(a, b, 0xffffffffu); } else if (params.op == 4u) { Out.data[lane] = power_unsigned32(a, b, 0xffffffffu); } else { Out.data[lane] = unsigned32(a, b, 0xffffffffu); } }
-        case 7u: { if (params.op == 2u) { write_multiply64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false); } else if (params.op == 3u) { write_divide64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false); } else if (params.op == 4u) { let value = power_unsigned64(a, A.data[a_lane + 1u], b, B.data[b_lane + 1u]); Out.data[lane] = value.x; Out.data[lane + 1u] = value.y; } else { write64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false); } }
+        case 0u: { if (params.op >= 5u) { Out.data[lane] = remainder_signed32(sx8(a), sx8(b), params.op == 6u); } else if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx8(a), sx8(b), 0x80u, 0x7fu); } else if (params.op == 3u) { Out.data[lane] = divide_signed32(sx8(a), sx8(b), 0x80u, 0x7fu); } else if (params.op == 4u) { Out.data[lane] = power_signed32(sx8(a), sx8(b), 0x80u, 0x7fu); } else { Out.data[lane] = bitcast<u32>(signed_narrow(sx8(a), sx8(b), -128, 127)); } }
+        case 1u: { if (params.op >= 5u) { Out.data[lane] = remainder_signed32(sx16(a), sx16(b), params.op == 6u); } else if (params.op == 2u) { Out.data[lane] = multiply_signed32(sx16(a), sx16(b), 0x8000u, 0x7fffu); } else if (params.op == 3u) { Out.data[lane] = divide_signed32(sx16(a), sx16(b), 0x8000u, 0x7fffu); } else if (params.op == 4u) { Out.data[lane] = power_signed32(sx16(a), sx16(b), 0x8000u, 0x7fffu); } else { Out.data[lane] = bitcast<u32>(signed_narrow(sx16(a), sx16(b), -32768, 32767)); } }
+        case 2u: { if (params.op >= 5u) { Out.data[lane] = remainder_signed32(bitcast<i32>(a), bitcast<i32>(b), params.op == 6u); } else if (params.op == 2u) { Out.data[lane] = multiply_signed32(bitcast<i32>(a), bitcast<i32>(b), 0x80000000u, 0x7fffffffu); } else if (params.op == 3u) { Out.data[lane] = divide_signed32(bitcast<i32>(a), bitcast<i32>(b), 0x80000000u, 0x7fffffffu); } else if (params.op == 4u) { Out.data[lane] = power_signed32(bitcast<i32>(a), bitcast<i32>(b), 0x80000000u, 0x7fffffffu); } else { Out.data[lane] = bitcast<u32>(signed32(bitcast<i32>(a), bitcast<i32>(b), -2147483648, 2147483647)); } }
+        case 3u: { if (params.op >= 5u) { write_remainder64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true, params.op == 6u); } else if (params.op == 2u) { write_multiply64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } else if (params.op == 3u) { write_divide64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } else if (params.op == 4u) { let value = power_signed64(a, A.data[a_lane + 1u], b, B.data[b_lane + 1u]); Out.data[lane] = value.x; Out.data[lane + 1u] = value.y; } else { write64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], true); } }
+        case 4u: { if (params.op >= 5u) { Out.data[lane] = remainder_unsigned32(a & 0xffu, b & 0xffu, params.op == 6u); } else if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a & 0xffu, b & 0xffu, 0xffu); } else if (params.op == 3u) { Out.data[lane] = divide_unsigned32(a & 0xffu, b & 0xffu, 0xffu); } else if (params.op == 4u) { Out.data[lane] = power_unsigned32(a & 0xffu, b & 0xffu, 0xffu); } else { Out.data[lane] = min(unsigned32(a & 0xffu, b & 0xffu, 0xffu), 0xffu); } }
+        case 5u: { if (params.op >= 5u) { Out.data[lane] = remainder_unsigned32(a & 0xffffu, b & 0xffffu, params.op == 6u); } else if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu); } else if (params.op == 3u) { Out.data[lane] = divide_unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu); } else if (params.op == 4u) { Out.data[lane] = power_unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu); } else { Out.data[lane] = min(unsigned32(a & 0xffffu, b & 0xffffu, 0xffffu), 0xffffu); } }
+        case 6u: { if (params.op >= 5u) { Out.data[lane] = remainder_unsigned32(a, b, params.op == 6u); } else if (params.op == 2u) { Out.data[lane] = multiply_unsigned32(a, b, 0xffffffffu); } else if (params.op == 3u) { Out.data[lane] = divide_unsigned32(a, b, 0xffffffffu); } else if (params.op == 4u) { Out.data[lane] = power_unsigned32(a, b, 0xffffffffu); } else { Out.data[lane] = unsigned32(a, b, 0xffffffffu); } }
+        case 7u: { if (params.op >= 5u) { write_remainder64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false, params.op == 6u); } else if (params.op == 2u) { write_multiply64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false); } else if (params.op == 3u) { write_divide64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false); } else if (params.op == 4u) { let value = power_unsigned64(a, A.data[a_lane + 1u], b, B.data[b_lane + 1u]); Out.data[lane] = value.x; Out.data[lane + 1u] = value.y; } else { write64(lane, a, A.data[a_lane + 1u], b, B.data[b_lane + 1u], false); } }
         default: {}
     }
 }

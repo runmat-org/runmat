@@ -358,6 +358,22 @@ impl AccelProvider for WgpuProvider {
         })
     }
 
+    fn elem_rem<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_arithmetic_exec(5, "elem_rem", a, b) })
+    }
+
+    fn elem_mod<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_arithmetic_exec(6, "elem_mod", a, b) })
+    }
+
     fn elem_pow<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

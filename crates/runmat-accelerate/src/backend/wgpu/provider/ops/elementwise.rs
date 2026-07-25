@@ -2945,6 +2945,141 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wgpu_native_integer_remainder_and_modulus_preserve_all_classes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [1, 4];
+        let signed = [
+            (
+                HostIntegerDataView::I8(&[-7, 7, -7, 5]),
+                HostIntegerDataView::I8(&[4, -4, 0, 0]),
+                HostIntegerDataOwned::I8(vec![-3, 3, 0, 0]),
+                HostIntegerDataOwned::I8(vec![1, -1, -7, 5]),
+            ),
+            (
+                HostIntegerDataView::I16(&[-7, 7, -7, 5]),
+                HostIntegerDataView::I16(&[4, -4, 0, 0]),
+                HostIntegerDataOwned::I16(vec![-3, 3, 0, 0]),
+                HostIntegerDataOwned::I16(vec![1, -1, -7, 5]),
+            ),
+            (
+                HostIntegerDataView::I32(&[-7, 7, -7, 5]),
+                HostIntegerDataView::I32(&[4, -4, 0, 0]),
+                HostIntegerDataOwned::I32(vec![-3, 3, 0, 0]),
+                HostIntegerDataOwned::I32(vec![1, -1, -7, 5]),
+            ),
+            (
+                HostIntegerDataView::I64(&[-7, 7, -7, 5]),
+                HostIntegerDataView::I64(&[4, -4, 0, 0]),
+                HostIntegerDataOwned::I64(vec![-3, 3, 0, 0]),
+                HostIntegerDataOwned::I64(vec![1, -1, -7, 5]),
+            ),
+        ];
+        let unsigned = [
+            (
+                HostIntegerDataView::U8(&[7, 8, 7, 0]),
+                HostIntegerDataView::U8(&[4, 3, 0, 0]),
+                HostIntegerDataOwned::U8(vec![3, 2, 0, 0]),
+                HostIntegerDataOwned::U8(vec![3, 2, 7, 0]),
+            ),
+            (
+                HostIntegerDataView::U16(&[7, 8, 7, 0]),
+                HostIntegerDataView::U16(&[4, 3, 0, 0]),
+                HostIntegerDataOwned::U16(vec![3, 2, 0, 0]),
+                HostIntegerDataOwned::U16(vec![3, 2, 7, 0]),
+            ),
+            (
+                HostIntegerDataView::U32(&[7, 8, 7, 0]),
+                HostIntegerDataView::U32(&[4, 3, 0, 0]),
+                HostIntegerDataOwned::U32(vec![3, 2, 0, 0]),
+                HostIntegerDataOwned::U32(vec![3, 2, 7, 0]),
+            ),
+            (
+                HostIntegerDataView::U64(&[7, 8, 7, 0]),
+                HostIntegerDataView::U64(&[4, 3, 0, 0]),
+                HostIntegerDataOwned::U64(vec![3, 2, 0, 0]),
+                HostIntegerDataOwned::U64(vec![3, 2, 7, 0]),
+            ),
+        ];
+        for (left, right, expected_rem, expected_mod) in signed.into_iter().chain(unsigned) {
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &shape,
+                })
+                .expect("upload remainder lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &shape,
+                })
+                .expect("upload remainder rhs");
+            let remainder = provider.elem_rem(&lhs, &rhs).await.expect("integer rem");
+            let modulus = provider.elem_mod(&lhs, &rhs).await.expect("integer mod");
+            assert_eq!(
+                provider
+                    .download_integer(&remainder)
+                    .await
+                    .expect("download rem")
+                    .data,
+                expected_rem
+            );
+            assert_eq!(
+                provider
+                    .download_integer(&modulus)
+                    .await
+                    .expect("download mod")
+                    .data,
+                expected_mod
+            );
+            for handle in [&lhs, &rhs, &remainder, &modulus] {
+                provider.free(handle).expect("free remainder handle");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_remainder_and_modulus_broadcast_column_major() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let lhs = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[-7, 7]),
+                shape: &[2, 1],
+            })
+            .expect("upload lhs");
+        let rhs = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[4, -4, 3]),
+                shape: &[1, 3],
+            })
+            .expect("upload rhs");
+        let rem = provider.elem_rem(&lhs, &rhs).await.expect("broadcast rem");
+        let modulus = provider.elem_mod(&lhs, &rhs).await.expect("broadcast mod");
+        assert_eq!(
+            provider
+                .download_integer(&rem)
+                .await
+                .expect("download rem")
+                .data,
+            HostIntegerDataOwned::I64(vec![-3, 3, -3, 3, -1, 1])
+        );
+        assert_eq!(
+            provider
+                .download_integer(&modulus)
+                .await
+                .expect("download mod")
+                .data,
+            HostIntegerDataOwned::I64(vec![1, 3, -3, -1, 2, 1])
+        );
+        for handle in [&lhs, &rhs, &rem, &modulus] {
+            provider.free(handle).expect("free handle");
+        }
+    }
+
+    #[tokio::test]
     async fn wgpu_native_integer_arithmetic_broadcasts_all_classes_column_major() {
         let Some(provider) = register_wgpu_provider_for_test() else {
             return;
