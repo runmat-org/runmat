@@ -617,6 +617,7 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
     match storage {
         DataStorage::Real(tensor) => {
             let mut indices = Vec::new();
+            let typed_storage = tensor.integer_storage();
 
             if matches!(limit, Some(0)) {
                 return FindResult::new(shape, indices, find_values_for_tensor(tensor, &[]));
@@ -626,8 +627,16 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
             match options.direction {
                 FindDirection::First => {
                     for idx in 0..len {
-                        let value = tensor.data[idx];
-                        if value != 0.0 {
+                        let nonzero = typed_storage.map_or_else(
+                            || tensor.data[idx] != 0.0,
+                            |storage| {
+                                storage
+                                    .value_at(idx)
+                                    .map(|value| !value.is_zero())
+                                    .expect("typed integer storage is structurally valid")
+                            },
+                        );
+                        if nonzero {
                             indices.push(idx + 1);
                             if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
@@ -637,8 +646,16 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                 }
                 FindDirection::Last => {
                     for idx in (0..len).rev() {
-                        let value = tensor.data[idx];
-                        if value != 0.0 {
+                        let nonzero = typed_storage.map_or_else(
+                            || tensor.data[idx] != 0.0,
+                            |storage| {
+                                storage
+                                    .value_at(idx)
+                                    .map(|value| !value.is_zero())
+                                    .expect("typed integer storage is structurally valid")
+                            },
+                        );
+                        if nonzero {
                             indices.push(idx + 1);
                             if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
@@ -1153,6 +1170,38 @@ pub(crate) mod tests {
             values.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))
         );
+    }
+
+    #[test]
+    fn find_indices_read_typed_integer_storage_exactly() {
+        let mut input = Tensor::new_integer(IntegerStorage::I16(vec![0, -7, 0, 9]), vec![2, 2])
+            .expect("integer tensor");
+        input.data = vec![0.0, 0.0, 0.0, 0.0];
+
+        let value = find_builtin(Value::Tensor(input), Vec::new()).expect("find");
+
+        match value {
+            Value::Tensor(indices) => {
+                assert_eq!(indices.shape, vec![2, 1]);
+                assert_eq!(indices.data, vec![2.0, 4.0]);
+            }
+            other => panic!("expected index tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn find_last_indices_read_typed_integer_storage_exactly() {
+        let mut input = Tensor::new_integer(IntegerStorage::U16(vec![5, 0, 3, 0]), vec![2, 2])
+            .expect("integer tensor");
+        input.data = vec![0.0, 0.0, 0.0, 0.0];
+
+        let value = find_builtin(
+            Value::Tensor(input),
+            vec![Value::Int(IntValue::I32(1)), Value::from("last")],
+        )
+        .expect("find");
+
+        assert_eq!(value, Value::Num(3.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
