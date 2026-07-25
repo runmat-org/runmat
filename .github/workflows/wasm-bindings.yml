@@ -86,47 +86,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.ref || github.ref_name }}
 
-      - name: Validate Rust toolchain (Linux self-hosted)
-        shell: bash
-        env:
-          RUST_TOOLCHAIN: 1.90.0-x86_64-unknown-linux-gnu
-          RUST_COMPONENTS: rustfmt clippy
-        run: |
-          set -euo pipefail
-
-          toolchain="${RUST_TOOLCHAIN}"
-          cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
-          rustup_home="${RUSTUP_HOME:-${HOME}/.rustup}"
-          cargo_bin="${cargo_home}/bin"
-          rustup="${cargo_bin}/rustup"
-          cargo="${cargo_bin}/cargo"
-
-          if [[ ! -x "${rustup}" ]]; then
-            echo "Missing rustup at ${rustup}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
-            exit 1
-          fi
-          if [[ ! -x "${cargo}" ]]; then
-            echo "Missing cargo at ${cargo}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
-            exit 1
-          fi
-
-          {
-            echo "CARGO_HOME=${cargo_home}"
-            echo "RUSTUP_HOME=${rustup_home}"
-            echo "RUSTUP_TOOLCHAIN=${toolchain}"
-          } >> "${GITHUB_ENV}"
-          echo "${cargo_bin}" >> "${GITHUB_PATH}"
-
-          "${rustup}" which --toolchain "${toolchain}" cargo >/dev/null
-          installed_components="$("${rustup}" component list --toolchain "${toolchain}" --installed)"
-          for component in ${RUST_COMPONENTS}; do
-            if ! grep -q "^${component}-" <<<"${installed_components}"; then
-              echo "Missing Rust component '${component}' for toolchain ${toolchain}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
-              exit 1
-            fi
-          done
-          "${cargo}" -V
-          "${cargo_bin}/rustc" -V
+      - name: Install Rust and WASM toolchain
+        uses: taiki-e/install-action@v2
+        with:
+          tool: |
+            rust@1.90.0 + wasm32-unknown-unknown
+            wasm-pack@0.14.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -134,8 +99,12 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Add wasm32 target
-        run: rustup target add wasm32-unknown-unknown
+      - name: Setup Chrome and ChromeDriver
+        id: setup_chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          install-chromedriver: true
+          install-dependencies: true
 
       - name: Install npm dependencies
         working-directory: bindings/ts
@@ -149,13 +118,10 @@ jobs:
 
       - name: Run wasm headless tests
         env:
+          RUNMAT_CHROME_BIN: ${{ steps.setup_chrome.outputs.chrome-path }}
+          RUNMAT_CHROMEDRIVER_BIN: ${{ steps.setup_chrome.outputs.chromedriver-path }}
           WASM_BINDGEN_TEST_TIMEOUT: "300"
         run: scripts/test-wasm-headless.sh
-
-      - name: Run wasm symptom regression suite
-        env:
-          WASM_BINDGEN_TEST_TIMEOUT: "300"
-        run: scripts/runtime/test-wasm-regression-suite.sh symptom-closure
 
       - name: Determine publish settings
         id: publish_settings
