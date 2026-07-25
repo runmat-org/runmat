@@ -1,4 +1,7 @@
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostIntegerDataView, HostIntegerTensorView,
+    HostTensorView, IntegerElementType,
+};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 
 use crate::build_runtime_error;
@@ -75,6 +78,61 @@ pub fn upload_complex_tensor(
     runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
     runmat_accelerate_api::set_handle_precision(&handle, provider.precision());
     Ok(handle)
+}
+
+/// Upload a finite integral scalar in the native integer class of `prototype`.
+/// Returns `None` when preserving MATLAB's typed-integer scalar semantics would
+/// require the host extended-precision path instead.
+pub fn upload_exact_integer_scalar_like(
+    provider: &dyn AccelProvider,
+    prototype: &GpuTensorHandle,
+    scalar: f64,
+) -> Option<GpuTensorHandle> {
+    if !scalar.is_finite() || scalar.fract() != 0.0 {
+        return None;
+    }
+    let element_type = runmat_accelerate_api::handle_integer_type(prototype)?;
+    let shape = [1usize, 1usize];
+    macro_rules! upload {
+        ($value:expr, $variant:ident) => {{
+            let values = [$value];
+            provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::$variant(&values),
+                    shape: &shape,
+                })
+                .ok()
+        }};
+    }
+    match element_type {
+        IntegerElementType::I8 if scalar >= i8::MIN as f64 && scalar <= i8::MAX as f64 => {
+            upload!(scalar as i8, I8)
+        }
+        IntegerElementType::I16 if scalar >= i16::MIN as f64 && scalar <= i16::MAX as f64 => {
+            upload!(scalar as i16, I16)
+        }
+        IntegerElementType::I32 if scalar >= i32::MIN as f64 && scalar <= i32::MAX as f64 => {
+            upload!(scalar as i32, I32)
+        }
+        IntegerElementType::I64
+            if scalar >= i64::MIN as f64 && scalar < 9_223_372_036_854_775_808.0 =>
+        {
+            upload!(scalar as i64, I64)
+        }
+        IntegerElementType::U8 if scalar >= 0.0 && scalar <= u8::MAX as f64 => {
+            upload!(scalar as u8, U8)
+        }
+        IntegerElementType::U16 if scalar >= 0.0 && scalar <= u16::MAX as f64 => {
+            upload!(scalar as u16, U16)
+        }
+        IntegerElementType::U32 if scalar >= 0.0 && scalar <= u32::MAX as f64 => {
+            upload!(scalar as u32, U32)
+        }
+        IntegerElementType::U64 if scalar >= 0.0 && scalar < 18_446_744_073_709_551_616.0 => {
+            upload!(scalar as u64, U64)
+        }
+        _ => None,
+    }
 }
 
 /// Wrap a GPU tensor handle, marking it as resident for downstream fusion-aware

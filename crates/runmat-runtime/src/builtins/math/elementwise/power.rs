@@ -570,6 +570,15 @@ async fn power_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<
     }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&rhs)? {
+            if let Some(uploaded) =
+                gpu_helpers::upload_exact_integer_scalar_like(provider, &lhs, scalar)
+            {
+                let result = provider.elem_pow(&lhs, &uploaded).await;
+                let _ = provider.free(&uploaded);
+                if let Ok(handle) = result {
+                    return Ok(Value::GpuTensor(handle));
+                }
+            }
             if let Ok(filled) = provider.fill_like(&lhs, scalar) {
                 if let Ok(handle) = provider.elem_pow(&lhs, &filled).await {
                     let _ = provider.free(&filled);
@@ -610,6 +619,15 @@ async fn power_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult
     }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&lhs)? {
+            if let Some(uploaded) =
+                gpu_helpers::upload_exact_integer_scalar_like(provider, &rhs, scalar)
+            {
+                let result = provider.elem_pow(&uploaded, &rhs).await;
+                let _ = provider.free(&uploaded);
+                if let Ok(handle) = result {
+                    return Ok(Value::GpuTensor(handle));
+                }
+            }
             if let Ok(filled) = provider.fill_like(&rhs, scalar) {
                 if let Ok(handle) = provider.elem_pow(&filled, &rhs).await {
                     let _ = provider.free(&filled);

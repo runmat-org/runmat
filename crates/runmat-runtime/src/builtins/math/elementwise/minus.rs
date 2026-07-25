@@ -595,6 +595,15 @@ fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, V
 async fn minus_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&rhs)? {
+            if let Some(uploaded) =
+                gpu_helpers::upload_exact_integer_scalar_like(provider, &lhs, scalar)
+            {
+                let result = provider.elem_sub(&lhs, &uploaded).await;
+                let _ = provider.free(&uploaded);
+                if let Ok(handle) = result {
+                    return Ok(Value::GpuTensor(handle));
+                }
+            }
             if let Ok(handle) = provider.scalar_sub(&lhs, scalar) {
                 return Ok(Value::GpuTensor(handle));
             }
@@ -607,6 +616,15 @@ async fn minus_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<
 async fn minus_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&lhs)? {
+            if let Some(uploaded) =
+                gpu_helpers::upload_exact_integer_scalar_like(provider, &rhs, scalar)
+            {
+                let result = provider.elem_sub(&uploaded, &rhs).await;
+                let _ = provider.free(&uploaded);
+                if let Ok(handle) = result {
+                    return Ok(Value::GpuTensor(handle));
+                }
+            }
             if let Ok(handle) = provider.scalar_rsub(&rhs, scalar) {
                 return Ok(Value::GpuTensor(handle));
             }

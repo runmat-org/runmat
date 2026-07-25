@@ -580,6 +580,15 @@ fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, V
 async fn ldivide_gpu_host_left(divisor: GpuTensorHandle, numerator: Value) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&numerator)? {
+            if let Some(uploaded) =
+                gpu_helpers::upload_exact_integer_scalar_like(provider, &divisor, scalar)
+            {
+                let result = provider.elem_div(&uploaded, &divisor).await;
+                let _ = provider.free(&uploaded);
+                if let Ok(handle) = result {
+                    return Ok(Value::GpuTensor(handle));
+                }
+            }
             if let Ok(handle) = provider.scalar_rdiv(&divisor, scalar) {
                 return Ok(Value::GpuTensor(handle));
             }
@@ -597,6 +606,15 @@ async fn ldivide_gpu_host_right(
 ) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&divisor)? {
+            if let Some(uploaded) =
+                gpu_helpers::upload_exact_integer_scalar_like(provider, &numerator, scalar)
+            {
+                let result = provider.elem_div(&numerator, &uploaded).await;
+                let _ = provider.free(&uploaded);
+                if let Ok(handle) = result {
+                    return Ok(Value::GpuTensor(handle));
+                }
+            }
             if let Ok(handle) = provider.scalar_div(&numerator, scalar) {
                 return Ok(Value::GpuTensor(handle));
             }
