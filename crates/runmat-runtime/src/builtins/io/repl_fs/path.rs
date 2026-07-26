@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::io::repl_fs::tensor_char_codes_to_string;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::path")]
@@ -221,25 +222,7 @@ fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
         return Err(path_error(PATH_ERROR_INVALID_INPUT.message));
     }
 
-    let mut text = String::with_capacity(tensor.data.len());
-    for &code in &tensor.data {
-        if !code.is_finite() {
-            return Err(path_error(PATH_ERROR_INVALID_INPUT.message));
-        }
-        let rounded = code.round();
-        if (code - rounded).abs() > 1e-6 {
-            return Err(path_error(PATH_ERROR_INVALID_INPUT.message));
-        }
-        let int_code = rounded as i64;
-        if !(0..=0x10FFFF).contains(&int_code) {
-            return Err(path_error(PATH_ERROR_INVALID_INPUT.message));
-        }
-        let ch = char::from_u32(int_code as u32)
-            .ok_or_else(|| path_error(PATH_ERROR_INVALID_INPUT.message))?;
-        text.push(ch);
-    }
-
-    Ok(text)
+    tensor_char_codes_to_string(tensor).ok_or_else(|| path_error(PATH_ERROR_INVALID_INPUT.message))
 }
 
 async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {

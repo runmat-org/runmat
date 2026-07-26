@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::io::repl_fs::tensor_char_codes_to_string;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::fullfile")]
@@ -193,25 +194,7 @@ fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
         return Err(fullfile_error(&FULLFILE_ERROR_ARG_TYPE));
     }
 
-    let mut text = String::with_capacity(tensor.data.len());
-    for &code in &tensor.data {
-        if !code.is_finite() {
-            return Err(fullfile_error(&FULLFILE_ERROR_ARG_TYPE));
-        }
-        let rounded = code.round();
-        if (code - rounded).abs() > 1e-6 {
-            return Err(fullfile_error(&FULLFILE_ERROR_ARG_TYPE));
-        }
-        let int_code = rounded as i64;
-        if !(0..=0x10FFFF).contains(&int_code) {
-            return Err(fullfile_error(&FULLFILE_ERROR_ARG_TYPE));
-        }
-        let ch = char::from_u32(int_code as u32)
-            .ok_or_else(|| fullfile_error(&FULLFILE_ERROR_ARG_TYPE))?;
-        text.push(ch);
-    }
-
-    Ok(text)
+    tensor_char_codes_to_string(tensor).ok_or_else(|| fullfile_error(&FULLFILE_ERROR_ARG_TYPE))
 }
 
 fn join_parts(parts: &[String]) -> String {
