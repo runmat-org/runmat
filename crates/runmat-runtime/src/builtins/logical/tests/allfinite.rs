@@ -186,6 +186,9 @@ fn sparse_all_finite(sparse: &SparseTensor) -> bool {
 }
 
 fn complex_tensor_all_finite(tensor: &ComplexTensor) -> bool {
+    if tensor.integer_data.is_some() {
+        return true;
+    }
     tensor
         .data
         .iter()
@@ -217,7 +220,8 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CharArray, IntValue, IntegerStorage, LogicalArray, ResolveContext, StringArray,
+        CharArray, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext,
+        StringArray,
     };
 
     fn call(value: Value) -> BuiltinResult<Value> {
@@ -349,6 +353,26 @@ mod tests {
         assert_eq!(
             call(Value::ComplexTensor(nonfinite)).unwrap(),
             Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn typed_complex_integer_storage_exactly_counts_as_finite() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            IntegerStorage::U64(vec![0, 7]),
+        )
+        .unwrap();
+        let tensor = ComplexTensor {
+            data: vec![(f64::NAN, f64::INFINITY), (f64::NEG_INFINITY, f64::NAN)],
+            integer_data: Some(storage),
+            shape: vec![1, 2],
+            rows: 1,
+            cols: 2,
+        };
+        assert_eq!(
+            call(Value::ComplexTensor(tensor)).unwrap(),
+            Value::Bool(true)
         );
     }
 

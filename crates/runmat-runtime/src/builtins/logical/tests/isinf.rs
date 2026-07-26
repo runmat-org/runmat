@@ -190,6 +190,9 @@ fn isinf_tensor(name: &str, tensor: Tensor) -> BuiltinResult<Value> {
 }
 
 fn isinf_complex_tensor(name: &str, tensor: ComplexTensor) -> BuiltinResult<Value> {
+    if tensor.integer_data.is_some() {
+        return logical_zeros(name, tensor.shape);
+    }
     let data = tensor
         .data
         .iter()
@@ -249,7 +252,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, ResolveContext, Type};
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, ResolveContext, Type};
 
     #[test]
     fn isinf_type_returns_logical() {
@@ -378,6 +381,31 @@ pub(crate) mod tests {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![3, 1]);
                 assert_eq!(mask.data, vec![0, 1, 1]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn isinf_typed_complex_integer_storage_exactly_ignores_f64_mirror() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            IntegerStorage::U64(vec![0, 7]),
+        )
+        .unwrap();
+        let tensor = ComplexTensor {
+            data: vec![(f64::NAN, f64::INFINITY), (f64::NEG_INFINITY, f64::NAN)],
+            integer_data: Some(storage),
+            shape: vec![1, 2],
+            rows: 1,
+            cols: 2,
+        };
+        let result = run_isinf(Value::ComplexTensor(tensor)).expect("isinf");
+        match result {
+            Value::LogicalArray(mask) => {
+                assert_eq!(mask.shape, vec![1, 2]);
+                assert_eq!(mask.data, vec![0, 0]);
             }
             other => panic!("expected logical array, got {other:?}"),
         }
