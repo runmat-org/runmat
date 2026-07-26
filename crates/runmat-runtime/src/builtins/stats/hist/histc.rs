@@ -235,28 +235,30 @@ struct EdgeSets {
 
 impl EdgeSets {
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        if is_vector_shape(&tensor.shape) {
-            validate_edges(&tensor.data)?;
+        let shape = tensor.shape.clone();
+        let data = tensor::tensor_into_values_f64(tensor);
+        if is_vector_shape(&shape) {
+            validate_edges(&data)?;
             return Ok(Self {
-                rows: tensor.data.len(),
+                rows: data.len(),
                 cols: 1,
-                data: tensor.data,
-                vector_shape: Some(tensor.shape),
+                data,
+                vector_shape: Some(shape),
             });
         }
-        if tensor.shape.len() > 2 {
+        if shape.len() > 2 {
             return Err(invalid_argument(
                 "histc: matrix binranges must be two-dimensional",
             ));
         }
-        let rows = tensor.shape.first().copied().unwrap_or(tensor.data.len());
-        let cols = tensor.shape.get(1).copied().unwrap_or(1);
+        let rows = shape.first().copied().unwrap_or(data.len());
+        let cols = shape.get(1).copied().unwrap_or(1);
         for col in 0..cols {
             let start = col * rows;
-            validate_edges(&tensor.data[start..start + rows])?;
+            validate_edges(&data[start..start + rows])?;
         }
         Ok(Self {
-            data: tensor.data,
+            data,
             rows,
             cols,
             vector_shape: None,
@@ -281,6 +283,7 @@ fn histc_from_tensors(
     edges: EdgeSets,
     dim: Option<usize>,
 ) -> BuiltinResult<HistcResult> {
+    let x_values = tensor::tensor_values_f64(&x);
     let x_shape = canonical_shape(&x.shape);
     let vector_call = dim.is_none() && is_vector_shape(&x_shape);
     let dim_index = match dim {
@@ -314,7 +317,7 @@ fn histc_from_tensors(
     let mut indices = if empty_edges {
         Vec::new()
     } else {
-        vec![0.0; x.data.len()]
+        vec![0.0; x_values.len()]
     };
 
     let out_stride = if vector_call {
@@ -330,10 +333,10 @@ fn histc_from_tensors(
             let edge_slice = edges.edge_slice(slice);
             for pos in 0..dim_len {
                 let input_index = low + pos * stride + high * stride * dim_len;
-                if input_index >= x.data.len() {
+                if input_index >= x_values.len() {
                     continue;
                 }
-                if let Some(bin) = classify_bin(x.data[input_index], edge_slice) {
+                if let Some(bin) = classify_bin(x_values[input_index], edge_slice) {
                     if !empty_edges {
                         indices[input_index] = (bin + 1) as f64;
                     }
@@ -407,6 +410,16 @@ fn host_to_real_tensor(value: Value) -> BuiltinResult<Tensor> {
 }
 
 fn complex_real_tensor(tensor: ComplexTensor) -> BuiltinResult<Tensor> {
+    if let Some(storage) = tensor.integer_data {
+        let data = storage
+            .real
+            .exact_values()
+            .into_iter()
+            .map(|value| value.to_f64())
+            .collect();
+        return Tensor::new(data, tensor.shape)
+            .map_err(|err| internal_error(format!("histc: {err}")));
+    }
     let data = tensor.data.into_iter().map(|(re, _)| re).collect();
     Tensor::new(data, tensor.shape).map_err(|err| internal_error(format!("histc: {err}")))
 }
@@ -520,7 +533,7 @@ fn descriptor_error(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, ResolveContext};
+    use runmat_builtins::{ComplexTensor, IntegerComplexStorage, IntegerStorage, ResolveContext};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -528,6 +541,12 @@ mod tests {
 
     fn values(value: Tensor) -> Vec<f64> {
         value.data
+    }
+
+    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -608,6 +627,48 @@ mod tests {
         let result = block_on(evaluate(x, edges, None)).expect("histc");
         assert_eq!(values(result.counts), vec![0.0, 0.0, 2.0, 0.0]);
         assert_eq!(values(result.indices), vec![3.0, 3.0]);
+    }
+
+    #[test]
+    fn histc_reads_typed_integer_inputs_and_edges_exactly() {
+        let x = typed_tensor(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![1, 4]);
+        let edges = typed_tensor(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]);
+
+        let result = block_on(evaluate(x, edges, None)).expect("histc");
+
+        assert_eq!(result.counts.shape, vec![1, 3]);
+        assert_eq!(values(result.counts), vec![1.0, 2.0, 1.0]);
+        assert_eq!(values(result.indices), vec![1.0, 2.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn histc_reads_typed_integer_matrix_edge_columns_exactly() {
+        let x = typed_tensor(IntegerStorage::I16(vec![0, 2, 10, 20]), vec![2, 2]);
+        let edges = typed_tensor(IntegerStorage::I16(vec![0, 1, 3, 0, 15, 30]), vec![3, 2]);
+
+        let result = block_on(evaluate(x, edges, None)).expect("histc");
+
+        assert_eq!(result.counts.shape, vec![3, 2]);
+        assert_eq!(values(result.counts), vec![1.0, 1.0, 0.0, 1.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn histc_reads_typed_complex_integer_real_storage_exactly() {
+        let complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I16(vec![0, 1, 2]),
+                IntegerStorage::I16(vec![99, 99, 99]),
+            )
+            .unwrap(),
+            vec![1, 3],
+        )
+        .unwrap();
+        let edges = typed_tensor(IntegerStorage::I16(vec![0, 1, 2]), vec![1, 3]);
+
+        let result = block_on(evaluate(Value::ComplexTensor(complex), edges, None)).expect("histc");
+
+        assert_eq!(values(result.counts), vec![1.0, 1.0, 1.0]);
+        assert_eq!(values(result.indices), vec![1.0, 2.0, 3.0]);
     }
 
     #[test]
