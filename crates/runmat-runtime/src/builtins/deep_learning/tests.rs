@@ -1219,12 +1219,58 @@ fn combvec_matches_neural_network_column_order() {
 }
 
 #[test]
+fn combvec_reads_typed_integer_storage_exactly() {
+    let out = block_on(combvec_builtin(vec![
+        poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2], 99.0),
+        poisoned_int_tensor(IntegerStorage::U16(vec![10, 20]), vec![1, 2], 99.0),
+    ]))
+    .unwrap();
+    let Value::Tensor(t) = out else {
+        panic!("expected tensor");
+    };
+    assert_eq!(t.shape, vec![3, 4]);
+    assert_eq!(
+        t.data,
+        vec![1.0, 2.0, 10.0, 3.0, 4.0, 10.0, 1.0, 2.0, 20.0, 3.0, 4.0, 20.0]
+    );
+}
+
+#[test]
 fn padsequences_defaults_to_uniform_right_padding() {
     let seqs = Value::Cell(
         CellArray::new(
             vec![
                 Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
                 Value::Tensor(Tensor::new(vec![3.0], vec![1, 1]).unwrap()),
+            ],
+            1,
+            2,
+        )
+        .unwrap(),
+    );
+    let out = block_on(padsequences_builtin(
+        seqs,
+        vec![
+            Value::Num(2.0),
+            Value::String("PaddingValue".into()),
+            Value::Num(-1.0),
+        ],
+    ))
+    .unwrap();
+    let Value::Tensor(tensor) = out else {
+        panic!("expected tensor");
+    };
+    assert_eq!(tensor.shape, vec![1, 2, 1, 2]);
+    assert_eq!(tensor.data, vec![1.0, 2.0, 3.0, -1.0]);
+}
+
+#[test]
+fn padsequences_reads_typed_integer_storage_exactly() {
+    let seqs = Value::Cell(
+        CellArray::new(
+            vec![
+                poisoned_int_tensor(IntegerStorage::I16(vec![1, 2]), vec![1, 2], 99.0),
+                poisoned_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1], 99.0),
             ],
             1,
             2,

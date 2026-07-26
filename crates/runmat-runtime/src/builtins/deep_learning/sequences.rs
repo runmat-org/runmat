@@ -1,7 +1,7 @@
 use runmat_builtins::{CellArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{gather_if_needed_async, BuiltinResult};
+use crate::{builtins::common::tensor, gather_if_needed_async, BuiltinResult};
 
 use super::{
     any_type, deep_learning_error, gather_args, numeric_scalar, parse_name_values, positive_usize,
@@ -281,7 +281,8 @@ impl CombvecInput {
                         format!("combvec: input {index} must have at least one column"),
                     ));
                 }
-                for value in &t.data {
+                let data = tensor::tensor_values_f64(t);
+                for value in &data {
                     if !value.is_finite() {
                         return Err(deep_learning_error(
                             "combvec",
@@ -290,7 +291,7 @@ impl CombvecInput {
                     }
                 }
                 Ok(Self {
-                    data: t.data.clone(),
+                    data,
                     rows: t.rows,
                     cols: t.cols,
                 })
@@ -314,7 +315,8 @@ impl SequenceInput {
             Value::Num(n) if n.is_finite() => (vec![*n], vec![1, 1]),
             Value::Int(i) => (vec![i.to_f64()], vec![1, 1]),
             Value::Tensor(t) => {
-                for item in &t.data {
+                let data = tensor::tensor_values_f64(t);
+                for item in &data {
                     if !item.is_finite() {
                         return Err(deep_learning_error(
                             "padsequences",
@@ -322,7 +324,7 @@ impl SequenceInput {
                         ));
                     }
                 }
-                (t.data.clone(), t.shape.clone())
+                (data, t.shape.clone())
             }
             other => {
                 return Err(deep_learning_error(
