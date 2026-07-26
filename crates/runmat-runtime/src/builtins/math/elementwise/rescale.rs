@@ -16,6 +16,7 @@ use crate::builtins::common::{
         BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ProviderHook,
         ReductionNaN, ResidencyPolicy, ScalarType,
     },
+    tensor,
 };
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -424,14 +425,19 @@ fn compute_rescale(
     let upper_bc = OperandBroadcast::new(&upper.tensor.shape, output_shape.len());
     let input_min_bc = OperandBroadcast::new(&input_min.tensor.shape, output_shape.len());
     let input_max_bc = OperandBroadcast::new(&input_max.tensor.shape, output_shape.len());
+    let input_values = tensor::tensor_values_f64_cow(&input.tensor);
+    let lower_values = tensor::tensor_values_f64_cow(&lower.tensor);
+    let upper_values = tensor::tensor_values_f64_cow(&upper.tensor);
+    let input_min_values = tensor::tensor_values_f64_cow(&input_min.tensor);
+    let input_max_values = tensor::tensor_values_f64_cow(&input_max.tensor);
 
     let mut out = Vec::with_capacity(len);
     for linear in 0..len {
-        let a = input.tensor.data[input_bc.index(linear, &output_shape)];
-        let lo = lower.tensor.data[lower_bc.index(linear, &output_shape)];
-        let hi = upper.tensor.data[upper_bc.index(linear, &output_shape)];
-        let in_min = input_min.tensor.data[input_min_bc.index(linear, &output_shape)];
-        let in_max = input_max.tensor.data[input_max_bc.index(linear, &output_shape)];
+        let a = input_values[input_bc.index(linear, &output_shape)];
+        let lo = lower_values[lower_bc.index(linear, &output_shape)];
+        let hi = upper_values[upper_bc.index(linear, &output_shape)];
+        let in_min = input_min_values[input_min_bc.index(linear, &output_shape)];
+        let in_max = input_max_values[input_max_bc.index(linear, &output_shape)];
 
         if lo >= hi && !lo.is_nan() && !hi.is_nan() {
             return Err(rescale_invalid_argument(
@@ -514,7 +520,8 @@ fn scale_one(value: f64, lower: f64, upper: f64, input_min: f64, input_max: f64)
 
 fn default_input_min(tensor: &Tensor) -> f64 {
     let mut min = f64::NAN;
-    for &value in &tensor.data {
+    let values = tensor::tensor_values_f64_cow(tensor);
+    for &value in values.iter() {
         if value.is_nan() {
             continue;
         }
@@ -527,7 +534,8 @@ fn default_input_min(tensor: &Tensor) -> f64 {
 
 fn default_input_max(tensor: &Tensor) -> f64 {
     let mut max = f64::NAN;
-    for &value in &tensor.data {
+    let values = tensor::tensor_values_f64_cow(tensor);
+    for &value in values.iter() {
         if value.is_nan() {
             continue;
         }
@@ -644,7 +652,7 @@ fn rescale_internal(detail: impl AsRef<str>) -> RuntimeError {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{IntegerStorage, LogicalArray};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -652,6 +660,12 @@ mod tests {
 
     fn single_tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new_with_dtype(data, shape, NumericDType::F32).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(poison);
+        Value::Tensor(tensor)
     }
 
     fn values(value: Value) -> (Vec<f64>, Vec<usize>, NumericDType) {
@@ -882,6 +896,38 @@ mod tests {
         let (data, shape, _) = values(result);
         assert_eq!(shape, vec![1, 1]);
         assert_close(&data, &[0.5]);
+    }
+
+    #[tokio::test]
+    async fn rescale_read_typed_integer_storage_exactly() {
+        let result = rescale_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3], f64::NAN),
+            vec![],
+        )
+        .await
+        .unwrap();
+        let (data, shape, dtype) = values(result);
+        assert_eq!(shape, vec![1, 3]);
+        assert_eq!(dtype, NumericDType::F64);
+        assert_close(&data, &[0.0, 0.5, 1.0]);
+
+        let result = rescale_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3], f64::NAN),
+            vec![
+                poisoned_int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1], f64::NAN),
+                poisoned_int_tensor(IntegerStorage::I16(vec![1]), vec![1, 1], f64::NAN),
+                Value::from("InputMin"),
+                poisoned_int_tensor(IntegerStorage::I16(vec![1]), vec![1, 1], f64::NAN),
+                Value::from("InputMax"),
+                poisoned_int_tensor(IntegerStorage::I16(vec![3]), vec![1, 1], f64::NAN),
+            ],
+        )
+        .await
+        .unwrap();
+        let (data, shape, dtype) = values(result);
+        assert_eq!(shape, vec![1, 3]);
+        assert_eq!(dtype, NumericDType::F64);
+        assert_close(&data, &[-1.0, 0.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

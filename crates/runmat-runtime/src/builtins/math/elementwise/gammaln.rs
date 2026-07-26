@@ -216,14 +216,14 @@ fn gammaln_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn gammaln_tensor(tensor: Tensor) -> BuiltinResult<Value> {
-    ensure_nonnegative(&tensor.data)?;
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    ensure_nonnegative(&values)?;
     let dtype = if tensor.dtype == NumericDType::F32 {
         NumericDType::F32
     } else {
         NumericDType::F64
     };
-    let data = tensor
-        .data
+    let data = values
         .iter()
         .map(|&value| cast_output(gammaln_nonnegative_scalar(value), dtype))
         .collect::<Vec<_>>();
@@ -326,7 +326,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        ComplexTensor, IntValue, LogicalArray, ResolveContext, SparseTensor, Type,
+        ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, SparseTensor, Type,
     };
 
     fn call(value: Value) -> BuiltinResult<Value> {
@@ -452,6 +452,31 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 assert_eq!(t.data[0], f64::INFINITY);
+                approx_eq(t.data[1], 0.0, 1e-14);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gammaln_read_typed_integer_storage_exactly() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("int tensor");
+        scalar.data.fill(f64::NAN);
+        match call(Value::Tensor(scalar)).expect("gammaln") {
+            Value::Num(v) => approx_eq(v, 24.0_f64.ln(), 1e-13),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![5, 1]), vec![1, 2]).expect("int tensor");
+        tensor.data.fill(f64::NAN);
+        match call(Value::Tensor(tensor)).expect("gammaln") {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.dtype, NumericDType::F64);
+                approx_eq(t.data[0], 24.0_f64.ln(), 1e-13);
                 approx_eq(t.data[1], 0.0, 1e-14);
             }
             other => panic!("expected tensor result, got {other:?}"),

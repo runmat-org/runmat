@@ -183,10 +183,10 @@ fn erf_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     } else {
         NumericDType::F64
     };
-    let data = tensor
-        .data
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    let data = values
         .iter()
-        .map(|&v| cast_output(erf_real_scalar(v), dtype))
+        .map(|&value| cast_output(erf_real_scalar(value), dtype))
         .collect::<Vec<_>>();
     Tensor::new_with_dtype(data, tensor.shape.clone(), dtype)
         .map_err(|e| builtin_error(format!("erf: {e}")))
@@ -234,7 +234,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        ComplexTensor, IntValue, LogicalArray, ResolveContext, SparseTensor, Type,
+        ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, SparseTensor, Type,
     };
 
     fn erf_builtin(value: Value) -> BuiltinResult<Value> {
@@ -353,6 +353,31 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![1, 2]);
                 approx_eq(t.data[0], 0.0, 1e-15);
                 approx_eq(t.data[1], 0.842_700_792_949_714_9, 1e-15);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn erf_read_typed_integer_storage_exactly() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).expect("int tensor");
+        scalar.data.fill(f64::NAN);
+        match erf_builtin(Value::Tensor(scalar)).expect("erf") {
+            Value::Num(v) => approx_eq(v, 0.842_700_792_949_714_9, 1e-15),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).expect("int tensor");
+        tensor.data.fill(f64::NAN);
+        match erf_builtin(Value::Tensor(tensor)).expect("erf") {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.dtype, NumericDType::F64);
+                approx_eq(t.data[0], 0.842_700_792_949_714_9, 1e-15);
+                approx_eq(t.data[1], 0.0, 1e-15);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
