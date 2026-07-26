@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntegerStorage, NumericDType, StructValue, Tensor, Value,
+    IntValue, IntegerStorage, NumericDType, StructValue, Tensor, Value,
 };
 use runmat_filesystem as fs;
 use runmat_macros::runtime_builtin;
@@ -635,10 +635,23 @@ fn parse_audioread_datatype(value: &str) -> BuiltinResult<bool> {
 }
 
 fn parse_sample_range(value: &Value) -> BuiltinResult<(usize, usize)> {
-    let data: Vec<f64> = match value {
-        Value::Tensor(t) => t.data.clone(),
-        Value::Num(n) => vec![*n],
-        Value::Int(i) => vec![i.to_f64()],
+    let parsed = match value {
+        Value::Tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                storage
+                    .exact_values()
+                    .iter()
+                    .map(|value| parse_positive_integer_value(value, "sample range"))
+                    .collect::<BuiltinResult<Vec<_>>>()?
+            } else {
+                t.data
+                    .iter()
+                    .map(|value| parse_positive_integer(*value, "sample range"))
+                    .collect::<BuiltinResult<Vec<_>>>()?
+            }
+        }
+        Value::Num(n) => vec![parse_positive_integer(*n, "sample range")?],
+        Value::Int(i) => vec![parse_positive_integer_value(i, "sample range")?],
         _ => {
             return Err(audioread_error_with(
                 &AUDIOREAD_ERROR_ARGUMENT,
@@ -646,14 +659,14 @@ fn parse_sample_range(value: &Value) -> BuiltinResult<(usize, usize)> {
             ));
         }
     };
-    if data.len() != 2 {
+    if parsed.len() != 2 {
         return Err(audioread_error_with(
             &AUDIOREAD_ERROR_ARGUMENT,
             "audioread: sample range must be [first last]",
         ));
     }
-    let first = parse_positive_integer(data[0], "first sample")?;
-    let last = parse_positive_integer(data[1], "last sample")?;
+    let first = parsed[0];
+    let last = parsed[1];
     if first > last {
         return Err(audioread_error_with(
             &AUDIOREAD_ERROR_ARGUMENT,
@@ -677,6 +690,22 @@ fn parse_positive_integer(value: f64, label: &str) -> BuiltinResult<usize> {
         ));
     }
     Ok(value as usize)
+}
+
+fn parse_positive_integer_value(value: &IntValue, label: &str) -> BuiltinResult<usize> {
+    let Some(parsed) = value.try_to_usize() else {
+        return Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            format!("audioread: {label} must be a positive integer"),
+        ));
+    };
+    if parsed == 0 {
+        return Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            format!("audioread: {label} must be a positive integer"),
+        ));
+    }
+    Ok(parsed)
 }
 
 fn scalar_text(value: &Value) -> Option<String> {
@@ -2027,6 +2056,26 @@ mod tests {
         assert_eq!(y.shape, vec![2, 1]);
         assert_eq!(y.data, vec![-0.5, 0.0]);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn audioread_sample_range_reads_typed_integer_storage_exactly() {
+        let exact = (1_u64 << 53) + 1;
+        let mut range =
+            Tensor::new_integer(IntegerStorage::U64(vec![exact, exact + 1]), vec![1, 2])
+                .expect("range");
+        range.data.fill(f64::NAN);
+
+        assert_eq!(
+            parse_sample_range(&Value::Tensor(range)).expect("sample range"),
+            (exact as usize, exact as usize + 1)
+        );
+        assert!(parse_sample_range(&Value::Int(IntValue::U64(exact))).is_err());
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, -2]), vec![1, 2]).expect("negative");
+        assert!(parse_sample_range(&Value::Tensor(negative)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
