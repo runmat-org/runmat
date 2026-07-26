@@ -143,18 +143,19 @@ async fn rgb2hsv_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let layout = common::color_layout(&tensor, NAME)
         .map_err(|err| rgb2hsv_map_error(err, &RGB2HSV_ERROR_INVALID_INPUT))?;
     let dtype = common::image_output_dtype(tensor.dtype);
-    let mut data = vec![0.0; tensor.data.len()];
+    let values = common::tensor_values_f64(&tensor);
+    let mut data = vec![0.0; values.len()];
     for pixel in 0..layout.pixels() {
         let r = common::clamp01(common::unit_value(
-            tensor.data[layout.index(pixel, 0)],
+            values[layout.index(pixel, 0)],
             tensor.dtype,
         ));
         let g = common::clamp01(common::unit_value(
-            tensor.data[layout.index(pixel, 1)],
+            values[layout.index(pixel, 1)],
             tensor.dtype,
         ));
         let b = common::clamp01(common::unit_value(
-            tensor.data[layout.index(pixel, 2)],
+            values[layout.index(pixel, 2)],
             tensor.dtype,
         ));
         let (h, s, v) = rgb_to_hsv_unit(r, g, b);
@@ -196,7 +197,7 @@ fn cast_float(value: f64, dtype: NumericDType) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntegerStorage, Tensor};
 
     fn call(tensor: Tensor) -> BuiltinResult<Tensor> {
         let Value::Tensor(out) =
@@ -212,6 +213,12 @@ mod tests {
             (actual - expected).abs() < 1e-12,
             "expected {expected}, got {actual}"
         );
+    }
+
+    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -261,6 +268,18 @@ mod tests {
         assert_close(out.data[0], 1.0 / 18.0);
         assert_close(out.data[1], 0.75);
         assert_close(out.data[2], 128.0 / 255.0);
+    }
+
+    #[test]
+    fn rgb2hsv_reads_typed_integer_rgb_storage_exactly() {
+        let rgb = typed_tensor(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3]);
+
+        let out = call(rgb).unwrap();
+
+        assert_eq!(out.dtype, NumericDType::F64);
+        assert_close(out.data[0], 0.0);
+        assert_close(out.data[1], 1.0);
+        assert_close(out.data[2], 1.0);
     }
 
     #[test]

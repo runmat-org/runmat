@@ -151,11 +151,12 @@ async fn lab2rgb_builtin(lab: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         NumericDType::F32 => NumericDType::F32,
         _ => NumericDType::F64,
     };
-    let mut data = vec![0.0; tensor.data.len()];
+    let values = common::tensor_values_f64(&tensor);
+    let mut data = vec![0.0; values.len()];
     for pixel in 0..layout.pixels() {
-        let l = tensor.data[layout.index(pixel, 0)];
-        let a = tensor.data[layout.index(pixel, 1)];
-        let b = tensor.data[layout.index(pixel, 2)];
+        let l = values[layout.index(pixel, 0)];
+        let a = values[layout.index(pixel, 1)];
+        let b = values[layout.index(pixel, 2)];
         let (r, g, blue) = lab_to_rgb_unit(l, a, b);
         data[layout.index(pixel, 0)] = cast_float(r, dtype);
         data[layout.index(pixel, 1)] = cast_float(g, dtype);
@@ -212,7 +213,7 @@ fn cast_float(value: f64, dtype: NumericDType) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntegerStorage, Tensor};
 
     fn call(tensor: Tensor) -> BuiltinResult<Tensor> {
         let Value::Tensor(out) =
@@ -228,6 +229,12 @@ mod tests {
             (actual - expected).abs() <= tolerance,
             "expected {expected}, got {actual}"
         );
+    }
+
+    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -263,6 +270,18 @@ mod tests {
             .unwrap();
         let out = call(lab).unwrap();
         assert_eq!(out.dtype, NumericDType::F32);
+        assert_close(out.data[0], 1.0, 1e-4);
+        assert_close(out.data[1], 1.0, 1e-4);
+        assert_close(out.data[2], 1.0, 1e-4);
+    }
+
+    #[test]
+    fn lab2rgb_reads_typed_integer_lab_storage_exactly() {
+        let lab = typed_tensor(IntegerStorage::I16(vec![100, 0, 0]), vec![1, 1, 3]);
+
+        let out = call(lab).unwrap();
+
+        assert_eq!(out.dtype, NumericDType::F64);
         assert_close(out.data[0], 1.0, 1e-4);
         assert_close(out.data[1], 1.0, 1e-4);
         assert_close(out.data[2], 1.0, 1e-4);

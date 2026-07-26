@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use runmat_builtins::{NumericDType, Tensor, Type, Value};
 
 use crate::builtins::common::{map_control_flow_with_builtin, tensor};
@@ -46,6 +48,10 @@ pub(crate) async fn gather_value(name: &'static str, value: &Value) -> BuiltinRe
 pub(crate) async fn gather_tensor(name: &'static str, value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_value(name, &value).await?;
     tensor::value_into_tensor_for(name, gathered).map_err(|err| builtin_error(name, err))
+}
+
+pub(crate) fn tensor_values_f64(tensor: &Tensor) -> Cow<'_, [f64]> {
+    tensor::tensor_values_f64_cow(tensor)
 }
 
 pub(crate) fn image_value_from_tensor(tensor: Tensor) -> Value {

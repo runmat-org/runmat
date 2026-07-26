@@ -143,16 +143,16 @@ async fn hsv2rgb_builtin(hsv: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let layout = common::color_layout(&tensor, NAME)
         .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INVALID_INPUT))?;
     let dtype = common::image_output_dtype(tensor.dtype);
-    let mut data = vec![0.0; tensor.data.len()];
+    let values = common::tensor_values_f64(&tensor);
+    let mut data = vec![0.0; values.len()];
     for pixel in 0..layout.pixels() {
-        let h =
-            common::unit_value(tensor.data[layout.index(pixel, 0)], tensor.dtype).rem_euclid(1.0);
+        let h = common::unit_value(values[layout.index(pixel, 0)], tensor.dtype).rem_euclid(1.0);
         let s = common::clamp01(common::unit_value(
-            tensor.data[layout.index(pixel, 1)],
+            values[layout.index(pixel, 1)],
             tensor.dtype,
         ));
         let v = common::clamp01(common::unit_value(
-            tensor.data[layout.index(pixel, 2)],
+            values[layout.index(pixel, 2)],
             tensor.dtype,
         ));
         let (r, g, b) = hsv_to_rgb_unit(h, s, v);
@@ -197,7 +197,7 @@ fn cast_float(value: f64, dtype: NumericDType) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntegerStorage, Tensor};
 
     fn call(tensor: Tensor) -> BuiltinResult<Tensor> {
         let Value::Tensor(out) =
@@ -213,6 +213,12 @@ mod tests {
             (actual - expected).abs() < 1e-12,
             "expected {expected}, got {actual}"
         );
+    }
+
+    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -243,6 +249,18 @@ mod tests {
     fn clamps_saturation_and_value() {
         let hsv = Tensor::new(vec![0.0, 2.0, 1.5], vec![1, 1, 3]).unwrap();
         let out = call(hsv).unwrap();
+        assert_close(out.data[0], 1.0);
+        assert_close(out.data[1], 0.0);
+        assert_close(out.data[2], 0.0);
+    }
+
+    #[test]
+    fn hsv2rgb_reads_typed_integer_hsv_storage_exactly() {
+        let hsv = typed_tensor(IntegerStorage::U8(vec![0, 255, 255]), vec![1, 1, 3]);
+
+        let out = call(hsv).unwrap();
+
+        assert_eq!(out.dtype, NumericDType::F64);
         assert_close(out.data[0], 1.0);
         assert_close(out.data[1], 0.0);
         assert_close(out.data[2], 0.0);

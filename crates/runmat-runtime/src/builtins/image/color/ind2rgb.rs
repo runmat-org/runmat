@@ -196,12 +196,14 @@ async fn ind2rgb_builtin(indexed: Value, map: Value, rest: Vec<Value>) -> Builti
         NumericDType::F32 => NumericDType::F32,
         _ => NumericDType::F64,
     };
+    let indexed_values = common::tensor_values_f64(&indexed);
+    let map_values = common::tensor_values_f64(&map);
     let mut data = vec![0.0; pixels * 3];
-    for (pixel, raw_index) in indexed.data.iter().copied().enumerate() {
+    for (pixel, raw_index) in indexed_values.iter().copied().enumerate() {
         let map_index = map_index(raw_index, indexed.dtype, map_rows)
             .map_err(|err| ind2rgb_map_error(err, &IND2RGB_ERROR_INVALID_INDEX))?;
         for channel in 0..3 {
-            let value = common::unit_value(map.data[layout.index(map_index, channel)], map.dtype);
+            let value = common::unit_value(map_values[layout.index(map_index, channel)], map.dtype);
             data[pixel + pixels * channel] = if matches!(dtype, NumericDType::F32) {
                 (value as f32) as f64
             } else {
@@ -237,7 +239,7 @@ fn map_index(value: f64, dtype: NumericDType, map_rows: usize) -> BuiltinResult<
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntegerStorage, Tensor};
 
     fn call(indexed: Tensor, map: Tensor) -> BuiltinResult<Tensor> {
         let Value::Tensor(out) = block_on(ind2rgb_builtin(
@@ -249,6 +251,12 @@ mod tests {
             panic!("expected tensor");
         };
         Ok(out)
+    }
+
+    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -278,6 +286,18 @@ mod tests {
         )
         .unwrap();
         let out = call(indexed, map).unwrap();
+        assert_eq!(out.shape, vec![2, 1, 3]);
+        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.data, vec![1.0, 0.0, 0.0, 128.0 / 255.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn ind2rgb_reads_typed_integer_indices_and_colormap_exactly() {
+        let indexed = typed_tensor(IntegerStorage::U8(vec![0, 1]), vec![2, 1]);
+        let map = typed_tensor(IntegerStorage::U8(vec![255, 0, 0, 128, 0, 255]), vec![2, 3]);
+
+        let out = call(indexed, map).unwrap();
+
         assert_eq!(out.shape, vec![2, 1, 3]);
         assert_eq!(out.dtype, NumericDType::F64);
         assert_eq!(out.data, vec![1.0, 0.0, 0.0, 128.0 / 255.0, 0.0, 1.0]);
