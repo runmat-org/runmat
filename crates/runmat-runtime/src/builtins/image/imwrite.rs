@@ -619,7 +619,8 @@ fn materialize_direct_image(tensor: &Tensor) -> BuiltinResult<MaterializedImage>
     let pixels = rows.checked_mul(cols).ok_or_else(|| {
         imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "image dimensions overflow")
     })?;
-    if tensor.data.len() != pixels * channels {
+    let values = tensor::tensor_values_f64_cow(tensor);
+    if values.len() != pixels * channels {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_IMAGE,
             "image data length does not match shape",
@@ -637,10 +638,8 @@ fn materialize_direct_image(tensor: &Tensor) -> BuiltinResult<MaterializedImage>
                 let src = row + rows * col + pixels * channel;
                 let dst = (row * cols + col) * channels + channel;
                 match &mut data {
-                    PixelData::U8(data) => data[dst] = value_to_u8(tensor.data[src], tensor.dtype),
-                    PixelData::U16(data) => {
-                        data[dst] = value_to_u16(tensor.data[src], tensor.dtype)
-                    }
+                    PixelData::U8(data) => data[dst] = value_to_u8(values[src], tensor.dtype),
+                    PixelData::U16(data) => data[dst] = value_to_u16(values[src], tensor.dtype),
                 }
             }
         }
@@ -674,15 +673,17 @@ fn materialize_indexed_image(indexed: &Tensor, map: &Tensor) -> BuiltinResult<Ma
     let byte_len = pixels.checked_mul(3).ok_or_else(|| {
         imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "image dimensions overflow")
     })?;
+    let indexed_values = tensor::tensor_values_f64_cow(indexed);
+    let map_values = tensor::tensor_values_f64_cow(map);
     let mut data = vec![0u8; byte_len];
     for row in 0..rows {
         for col in 0..cols {
             let pixel = row + rows * col;
-            let map_idx = map_index(indexed.data[pixel], indexed.dtype, map.shape[0])?;
+            let map_idx = map_index(indexed_values[pixel], indexed.dtype, map.shape[0])?;
             let dst = (row * cols + col) * 3;
             for channel in 0..3 {
                 let src = map_idx + map.shape[0] * channel;
-                data[dst + channel] = value_to_u8(map.data[src], map.dtype);
+                data[dst + channel] = value_to_u8(map_values[src], map.dtype);
             }
         }
     }
@@ -760,7 +761,8 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
             "Alpha must be an MxN array matching the image dimensions",
         ));
     }
-    if alpha.data.len() != image.rows * image.cols {
+    let alpha_values = tensor::tensor_values_f64_cow(alpha);
+    if alpha_values.len() != image.rows * image.cols {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_OPTION,
             "Alpha data length does not match shape",
@@ -791,7 +793,7 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
                         }
                         _ => unreachable!(),
                     }
-                    rgba[dst + 3] = value_to_u8(alpha.data[alpha_idx], alpha.dtype);
+                    rgba[dst + 3] = value_to_u8(alpha_values[alpha_idx], alpha.dtype);
                 }
             }
             PixelData::U8(rgba)
@@ -818,7 +820,7 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
                         }
                         _ => unreachable!(),
                     }
-                    rgba[dst + 3] = value_to_u16(alpha.data[alpha_idx], alpha.dtype);
+                    rgba[dst + 3] = value_to_u16(alpha_values[alpha_idx], alpha.dtype);
                 }
             }
             PixelData::U16(rgba)
@@ -1172,11 +1174,18 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use image::io::Reader as ImageReader;
+    use runmat_builtins::IntegerStorage;
     use std::fs;
     use tempfile::tempdir;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>, dtype: NumericDType) -> Tensor {
         Tensor::new_with_dtype(data, shape, dtype).expect("tensor")
+    }
+
+    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1210,11 +1219,59 @@ mod tests {
     }
 
     #[test]
+    fn writes_typed_integer_png_rgb_from_exact_storage() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("typed-rgb.png");
+        let rgb = typed_tensor(
+            IntegerStorage::U8(vec![255, 0, 0, 0, 0, 255]),
+            vec![1, 2, 3],
+        );
+
+        call(vec![
+            Value::Tensor(rgb),
+            Value::from(path.to_string_lossy().as_ref()),
+        ])
+        .unwrap();
+
+        let decoded = ImageReader::open(&path)
+            .unwrap()
+            .decode()
+            .unwrap()
+            .to_rgb8();
+        assert_eq!(decoded.dimensions(), (2, 1));
+        assert_eq!(decoded.get_pixel(0, 0).0, [255, 0, 0]);
+        assert_eq!(decoded.get_pixel(1, 0).0, [0, 0, 255]);
+    }
+
+    #[test]
     fn writes_png_alpha_option() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("alpha.png");
         let image = tensor(vec![1.0, 0.0, 0.0], vec![1, 1, 3], NumericDType::F64);
         let alpha = tensor(vec![0.5], vec![1, 1], NumericDType::F64);
+
+        call(vec![
+            Value::Tensor(image),
+            Value::from(path.to_string_lossy().as_ref()),
+            Value::from("Alpha"),
+            Value::Tensor(alpha),
+        ])
+        .unwrap();
+
+        let decoded = ImageReader::open(&path)
+            .unwrap()
+            .decode()
+            .unwrap()
+            .to_rgba8();
+        assert_eq!(decoded.get_pixel(0, 0).0, [255, 0, 0, 128]);
+    }
+
+    #[test]
+    fn writes_typed_integer_png_alpha_from_exact_storage() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("typed-alpha.png");
+        let image = tensor(vec![1.0, 0.0, 0.0], vec![1, 1, 3], NumericDType::F64);
+        let alpha = typed_tensor(IntegerStorage::U8(vec![128]), vec![1, 1]);
 
         call(vec![
             Value::Tensor(image),
@@ -1285,6 +1342,30 @@ mod tests {
             vec![2, 3],
             NumericDType::U8,
         );
+
+        call(vec![
+            Value::Tensor(x),
+            Value::Tensor(map),
+            Value::from(path.to_string_lossy().as_ref()),
+        ])
+        .unwrap();
+
+        let decoded = ImageReader::open(&path)
+            .unwrap()
+            .decode()
+            .unwrap()
+            .to_rgb8();
+        assert_eq!(decoded.dimensions(), (2, 1));
+        assert_eq!(decoded.get_pixel(0, 0).0, [255, 0, 0]);
+        assert_eq!(decoded.get_pixel(1, 0).0, [0, 0, 255]);
+    }
+
+    #[test]
+    fn writes_typed_integer_indexed_gif_from_exact_storage() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("typed-indexed.gif");
+        let x = typed_tensor(IntegerStorage::U8(vec![0, 1]), vec![1, 2]);
+        let map = typed_tensor(IntegerStorage::U8(vec![255, 0, 0, 0, 0, 255]), vec![2, 3]);
 
         call(vec![
             Value::Tensor(x),
