@@ -425,14 +425,14 @@ fn normalize_shape(mut shape: Vec<usize>) -> Vec<usize> {
 fn parse_weights(name: &str, value: Value, expected: usize) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_into_tensor_for(name, value)
         .map_err(|err| sampling_error(name, format!("{name}: {err}")))?;
-    if tensor.data.len() != expected {
+    let weights = tensor::tensor_into_values_f64(tensor);
+    if weights.len() != expected {
         return Err(sampling_error(
             name,
             format!("{name}: weights length must match the sampled dimension"),
         ));
     }
-    if tensor
-        .data
+    if weights
         .iter()
         .any(|weight| weight.is_nan() || *weight < 0.0)
     {
@@ -441,13 +441,13 @@ fn parse_weights(name: &str, value: Value, expected: usize) -> BuiltinResult<Vec
             format!("{name}: weights must be nonnegative and cannot contain NaN"),
         ));
     }
-    if tensor.data.iter().sum::<f64>() <= 0.0 {
+    if weights.iter().sum::<f64>() <= 0.0 {
         return Err(sampling_error(
             name,
             format!("{name}: weights must contain at least one positive value"),
         ));
     }
-    Ok(tensor.data)
+    Ok(weights)
 }
 
 fn sample_indices(
@@ -1088,7 +1088,8 @@ async fn parse_unidrnd_args(args: Vec<Value>) -> BuiltinResult<(Tensor, Vec<usiz
     }
     let n = tensor::value_into_tensor_for("unidrnd", gathered(args[0].clone(), "unidrnd").await?)
         .map_err(|err| sampling_error("unidrnd", format!("unidrnd: {err}")))?;
-    if n.data
+    let n_values = tensor::tensor_values_f64(&n);
+    if n_values
         .iter()
         .any(|value| !value.is_finite() || *value < 1.0 || value.fract() != 0.0)
     {
@@ -1133,9 +1134,9 @@ pub mod unidrnd {
             .enumerate()
             .map(|(idx, u)| {
                 let upper = if n.data.len() == 1 {
-                    n.data[0]
+                    tensor::tensor_value_f64(&n, 0)
                 } else {
-                    n.data[idx]
+                    tensor::tensor_value_f64(&n, idx)
                 };
                 (u * upper).floor() + 1.0
             })
@@ -1208,7 +1209,7 @@ fn parse_nonnegative_usize(name: &str, value: Value, label: &str) -> BuiltinResu
             format!("{name}: {label} must be a scalar"),
         ));
     }
-    let raw = tensor.data[0];
+    let raw = tensor::tensor_value_f64(&tensor, 0);
     if !raw.is_finite()
         || raw < 0.0
         || raw.fract() != 0.0
@@ -1232,7 +1233,7 @@ fn parse_nonnegative_scalar_ratio(value: Value, label: &str) -> BuiltinResult<f6
             format!("dividerand: {label} must be a scalar"),
         ));
     }
-    let raw = tensor.data[0];
+    let raw = tensor::tensor_value_f64(&tensor, 0);
     if !raw.is_finite() || raw < 0.0 {
         return Err(sampling_error(
             "dividerand",
@@ -1525,7 +1526,7 @@ async fn bootstat_row(value: Value) -> BuiltinResult<Vec<f64>> {
         Value::Num(v) => Ok(vec![v]),
         Value::Int(v) => Ok(vec![v.to_f64()]),
         Value::Bool(v) => Ok(vec![if v { 1.0 } else { 0.0 }]),
-        Value::Tensor(t) => Ok(t.data),
+        Value::Tensor(t) => Ok(tensor::tensor_into_values_f64(t)),
         Value::LogicalArray(a) => Ok(a
             .data
             .into_iter()
@@ -1688,6 +1689,13 @@ pub mod bootstrp {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(poison);
+        Value::Tensor(tensor)
+    }
 
     #[test]
     fn datasample_samples_rows_and_returns_indices() {
@@ -1857,6 +1865,22 @@ mod tests {
                 assert_eq!(t.data[0], 1.0);
                 assert!((1.0..=2.0).contains(&t.data[1]));
                 assert!((1.0..=3.0).contains(&t.data[2]));
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unidrnd_reads_typed_integer_upper_bound_storage_exactly() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::reset_rng();
+        let n = poisoned_int_tensor(IntegerStorage::U16(vec![3, 3, 3]), vec![3, 1], f64::NAN);
+        let out = block_on(unidrnd::unidrnd_builtin(vec![n])).unwrap();
+        match out {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![3, 1]);
+                assert!(t.data.iter().all(|value| value.is_finite()));
+                assert!(t.data.iter().all(|value| (1.0..=3.0).contains(value)));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2160,5 +2184,49 @@ mod tests {
         ] {
             assert!(parse_nonnegative_usize("test", value, "Q").is_err());
         }
+    }
+
+    #[test]
+    fn sampling_scalar_parsers_read_typed_integer_tensor_storage_exactly() {
+        assert_eq!(
+            parse_nonnegative_usize(
+                "dividerand",
+                poisoned_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1], -1.0),
+                "Q",
+            )
+            .unwrap(),
+            4
+        );
+        assert_eq!(
+            parse_nonnegative_scalar_ratio(
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1], f64::NAN),
+                "trainRatio",
+            )
+            .unwrap(),
+            1.0
+        );
+    }
+
+    #[test]
+    fn sampling_weight_and_bootstat_converters_read_typed_integer_storage_exactly() {
+        assert_eq!(
+            parse_weights(
+                "datasample",
+                poisoned_int_tensor(IntegerStorage::U16(vec![0, 2, 3]), vec![3, 1], f64::NAN),
+                3,
+            )
+            .unwrap(),
+            vec![0.0, 2.0, 3.0]
+        );
+
+        assert_eq!(
+            block_on(bootstat_row(poisoned_int_tensor(
+                IntegerStorage::I16(vec![4, 5]),
+                vec![1, 2],
+                f64::NAN,
+            )))
+            .unwrap(),
+            vec![4.0, 5.0]
+        );
     }
 }

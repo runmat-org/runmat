@@ -1339,7 +1339,7 @@ fn is_option_key(value: &Value) -> bool {
 fn numeric_vector(value: &Value, name: &str, option: &str) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| builtin_error(format!("{name}: {option} must be numeric")))?;
-    Ok(tensor.data)
+    Ok(tensor::tensor_into_values_f64(tensor))
 }
 
 fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usize> {
@@ -1378,7 +1378,7 @@ fn scalar_value(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
             if tensor.data.len() != 1 {
                 return Err(builtin_error(format!("{name}: {option} must be a scalar")));
             }
-            Ok(tensor.data[0])
+            Ok(tensor::tensor_value_f64(tensor, 0))
         }
         Value::LogicalArray(logical) => {
             if logical.data.len() != 1 {
@@ -1458,7 +1458,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
 
     fn tensor_from_value(value: Value) -> Tensor {
         match value {
@@ -1466,6 +1466,12 @@ pub(crate) mod tests {
             Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
             other => panic!("expected tensor value, got {:?}", other),
         }
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(poison);
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -1524,6 +1530,15 @@ pub(crate) mod tests {
             positive_usize(&Value::Int(IntValue::U16(3)), NAME, "NumBins").unwrap(),
             3
         );
+        assert_eq!(
+            positive_usize(
+                &poisoned_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1], -1.0),
+                NAME,
+                "NumBins",
+            )
+            .unwrap(),
+            4
+        );
         for value in [
             Value::Int(IntValue::I8(-1)),
             Value::Num(1.5),
@@ -1531,6 +1546,28 @@ pub(crate) mod tests {
         ] {
             assert!(positive_usize(&value, NAME, "NumBins").is_err());
         }
+    }
+
+    #[test]
+    fn histcounts2_numeric_vectors_read_typed_integer_storage_exactly() {
+        assert_eq!(
+            numeric_vector(
+                &poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5]), vec![1, 3], f64::NAN),
+                NAME,
+                "XBinEdges",
+            )
+            .unwrap(),
+            vec![1.0, 3.0, 5.0]
+        );
+        assert_eq!(
+            scalar_value(
+                &poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1], f64::NAN),
+                NAME,
+                "BinWidth",
+            )
+            .unwrap(),
+            2.0
+        );
     }
 
     #[test]
