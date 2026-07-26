@@ -2,7 +2,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CellArray, ObjectInstance, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::BuiltinResult;
+use crate::{builtins::common::tensor, BuiltinResult};
 
 use super::{
     any_type, autodiff, deep_learning_error, gather_args, layer_names, layers_from_value,
@@ -457,7 +457,7 @@ fn require_network_object(value: Value, function: &'static str) -> BuiltinResult
 }
 
 fn input_tensor(value: Value, function: &'static str) -> BuiltinResult<Tensor> {
-    match value {
+    let tensor = match value {
         Value::Object(object) if object.class_name == "dlarray" => {
             let data = object.properties.get("Data").cloned().ok_or_else(|| {
                 deep_learning_error(function, format!("{function}: dlarray is missing Data"))
@@ -472,7 +472,8 @@ fn input_tensor(value: Value, function: &'static str) -> BuiltinResult<Tensor> {
         }
         other => crate::builtins::common::tensor::value_into_tensor_for(function, other)
             .map_err(|err| deep_learning_error(function, format!("{function}: {err}"))),
-    }
+    }?;
+    normalize_numeric_tensor(tensor, function)
 }
 
 fn dlarray_format(value: &Value) -> String {
@@ -1024,6 +1025,11 @@ pub(super) fn tensor_property(
     let value = autodiff::dlarray_data(&value, function)?;
     crate::builtins::common::tensor::value_into_tensor_for(function, value)
         .map_err(|err| deep_learning_error(function, format!("{function}: {err}")))
+        .and_then(|tensor| normalize_numeric_tensor(tensor, function))
+}
+
+fn normalize_numeric_tensor(tensor: Tensor, function: &'static str) -> BuiltinResult<Tensor> {
+    tensor::integer_tensor_to_f64(tensor).map_err(|err| deep_learning_error(function, err))
 }
 
 pub(super) fn layer_name(object: &ObjectInstance) -> String {
