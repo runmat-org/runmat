@@ -1048,7 +1048,9 @@ async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<
         },
         InputClass::Bool => match value {
             Value::Num(n) => Ok(Value::Bool(n != 0.0)),
-            Value::Tensor(t) if t.data.len() == 1 => Ok(Value::Bool(t.data[0] != 0.0)),
+            Value::Tensor(t) if t.data.len() == 1 => {
+                Ok(Value::Bool(tensor::tensor_value_f64(&t, 0) != 0.0))
+            }
             other => Ok(other),
         },
         _ => {
@@ -1421,6 +1423,20 @@ pub(crate) mod tests {
             block_on(apply_native_template(Value::Tensor(tensor), &meta)).expect("native template");
 
         assert_eq!(result, Value::Int(IntValue::U32(77)));
+
+        let mut logical_tensor =
+            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("logical tensor");
+        logical_tensor.data[0] = 0.0;
+        let meta = InputMeta {
+            class: InputClass::Bool,
+            device: DevicePreference::Host,
+            numeric_dtype: None,
+        };
+
+        let result = block_on(apply_native_template(Value::Tensor(logical_tensor), &meta))
+            .expect("logical native template");
+
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
