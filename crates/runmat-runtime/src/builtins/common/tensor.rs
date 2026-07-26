@@ -110,6 +110,18 @@ pub fn tensor_values_f64_cow(tensor: &Tensor) -> Cow<'_, [f64]> {
     }
 }
 
+/// Return one numeric tensor value as f64, reading typed integer storage exactly
+/// instead of using the compatibility backing buffer.
+pub fn tensor_value_f64(tensor: &Tensor, index: usize) -> f64 {
+    match tensor.integer_storage() {
+        Some(storage) => storage
+            .value_at(index)
+            .expect("tensor_value_f64: integer storage index is in bounds")
+            .to_f64(),
+        None => tensor.data[index],
+    }
+}
+
 /// Consume a tensor and return f64 values, preserving the fast path for
 /// ordinary double tensors while reading typed integer storage exactly.
 pub fn tensor_into_values_f64(tensor: Tensor) -> Vec<f64> {

@@ -505,14 +505,10 @@ fn build_matrix_fit_spec(
 ) -> BuiltinResult<FitSpec> {
     let x = tensor::value_into_tensor_for(FITLM_NAME, x_value)
         .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
-    let x =
-        tensor::integer_tensor_to_f64(x).map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
     if x.shape.len() > 2 {
         return Err(fitlm_invalid("fitlm: X must be a 2-D numeric matrix"));
     }
     let y_tensor = tensor::value_into_tensor_for(FITLM_NAME, y_value)
-        .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
-    let y_tensor = tensor::integer_tensor_to_f64(y_tensor)
         .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
     let y = vector_values(&y_tensor, "y")?;
     if y.len() != x.rows {
@@ -663,8 +659,6 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
         .ok_or_else(|| fitlm_invalid("fitlm: response variable missing from table"))?;
     let y_tensor = tensor::value_into_tensor_for(FITLM_NAME, y_value.clone())
         .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
-    let y_tensor = tensor::integer_tensor_to_f64(y_tensor)
-        .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
     let y = vector_values(&y_tensor, &response_name)?;
     let x = if predictor_names.is_empty() {
         Tensor::new(Vec::new(), vec![y.len(), 0])
@@ -677,8 +671,6 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
                 .get(name)
                 .ok_or_else(|| fitlm_invalid(format!("fitlm: predictor '{name}' missing")))?;
             let tensor = tensor::value_into_tensor_for(FITLM_NAME, value.clone())
-                .map_err(|_| fitlm_invalid(format!("fitlm: predictor '{name}' must be numeric")))?;
-            let tensor = tensor::integer_tensor_to_f64(tensor)
                 .map_err(|_| fitlm_invalid(format!("fitlm: predictor '{name}' must be numeric")))?;
             let values = vector_values(&tensor, name)?;
             if values.len() != y.len() {
@@ -1458,9 +1450,6 @@ fn predictors_for_prediction(value: Value, predictor_names: &[String]) -> Builti
                     tensor::value_into_tensor_for(PREDICT_NAME, raw.clone()).map_err(|_| {
                         predict_invalid(format!("predict: predictor '{name}' must be numeric"))
                     })?;
-                let tensor = tensor::integer_tensor_to_f64(tensor).map_err(|_| {
-                    predict_invalid(format!("predict: predictor '{name}' must be numeric"))
-                })?;
                 let values = vector_values_predict(&tensor, name)?;
                 if let Some(expected) = height {
                     if values.len() != expected {
@@ -1477,8 +1466,6 @@ fn predictors_for_prediction(value: Value, predictor_names: &[String]) -> Builti
         }
     }
     let tensor = tensor::value_into_tensor_for(PREDICT_NAME, value)
-        .map_err(|err| predict_invalid(format!("predict: {err}")))?;
-    let tensor = tensor::integer_tensor_to_f64(tensor)
         .map_err(|err| predict_invalid(format!("predict: {err}")))?;
     if tensor.shape.len() > 2 || tensor.cols != predictor_names.len() {
         return Err(predict_invalid(format!(
@@ -1769,7 +1756,7 @@ fn columns_to_tensor_predict(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
 }
 
 fn x_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
-    tensor.data[col * tensor.rows + row]
+    tensor::tensor_value_f64(tensor, col * tensor.rows + row)
 }
 
 fn terms_tensor(terms: &[Vec<u32>]) -> BuiltinResult<Value> {

@@ -300,8 +300,6 @@ fn build_matrix_fit_spec(
 ) -> BuiltinResult<FitSpec> {
     let x = tensor::value_into_tensor_for(FITCTREE_NAME, x_value)
         .map_err(|err| fitctree_invalid(format!("fitctree: {err}")))?;
-    let x = tensor::integer_tensor_to_f64(x)
-        .map_err(|err| fitctree_invalid(format!("fitctree: {err}")))?;
     if x.shape.len() > 2 {
         return Err(fitctree_invalid("fitctree: X must be a 2-D numeric matrix"));
     }
@@ -429,11 +427,6 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
             ))
         })?;
         let tensor = tensor::value_into_tensor_for(FITCTREE_NAME, value.clone()).map_err(|_| {
-            fitctree_invalid(format!(
-                "fitctree: predictor variable '{name}' must be numeric"
-            ))
-        })?;
-        let tensor = tensor::integer_tensor_to_f64(tensor).map_err(|_| {
             fitctree_invalid(format!(
                 "fitctree: predictor variable '{name}' must be numeric"
             ))
@@ -1120,17 +1113,12 @@ fn predictors_for_prediction(value: Value, predictor_names: &[String]) -> Builti
                     tensor::value_into_tensor_for(PREDICT_NAME, raw.clone()).map_err(|_| {
                         predict_invalid(format!("predict: predictor '{name}' must be numeric"))
                     })?;
-                let tensor = tensor::integer_tensor_to_f64(tensor).map_err(|_| {
-                    predict_invalid(format!("predict: predictor '{name}' must be numeric"))
-                })?;
                 columns.push(vector_values_predict(&tensor, name)?);
             }
             return columns_to_tensor_predict(columns);
         }
     }
     let tensor = tensor::value_into_tensor_for(PREDICT_NAME, value)
-        .map_err(|err| predict_invalid(format!("predict: {err}")))?;
-    let tensor = tensor::integer_tensor_to_f64(tensor)
         .map_err(|err| predict_invalid(format!("predict: {err}")))?;
     if tensor.shape.len() > 2 || tensor.cols != predictor_names.len() {
         return Err(predict_invalid(format!(
@@ -1523,7 +1511,7 @@ fn columns_to_tensor_predict(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
 }
 
 fn x_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
-    tensor.data[col * tensor.rows + row]
+    tensor::tensor_value_f64(tensor, col * tensor.rows + row)
 }
 
 fn string_column(values: &[String]) -> BuiltinResult<Value> {

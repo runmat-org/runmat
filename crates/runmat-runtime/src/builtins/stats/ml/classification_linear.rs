@@ -1305,26 +1305,23 @@ fn predictors_for_prediction(
 }
 
 fn numeric_matrix_for_fit(value: Value) -> BuiltinResult<Tensor> {
-    let tensor = match value {
+    match value {
         Value::SparseTensor(sparse) => sparse
             .to_dense()
             .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}"))),
         other => tensor::value_into_tensor_for(FITCLINEAR_NAME, other)
             .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}"))),
-    }?;
-    tensor::integer_tensor_to_f64(tensor)
-        .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}")))
+    }
 }
 
 fn numeric_matrix_for_predict(value: Value) -> BuiltinResult<Tensor> {
-    let tensor = match value {
+    match value {
         Value::SparseTensor(sparse) => sparse
             .to_dense()
             .map_err(|err| predict_invalid(format!("predict: {err}"))),
         other => tensor::value_into_tensor_for(PREDICT_NAME, other)
             .map_err(|err| predict_invalid(format!("predict: {err}"))),
-    }?;
-    tensor::integer_tensor_to_f64(tensor).map_err(|err| predict_invalid(format!("predict: {err}")))
+    }
 }
 
 fn normalize_observation_matrix(x: Tensor, options: &FitOptions) -> BuiltinResult<Tensor> {
@@ -1649,6 +1646,7 @@ fn char_rows(array: &CharArray) -> Vec<String> {
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(value) => Ok(vec![*value]),
+        Value::Int(value) => Ok(vec![value.to_f64()]),
         Value::Tensor(tensor) => vector_values(tensor, name),
         Value::LogicalArray(array) => Ok(array
             .data
@@ -1815,7 +1813,7 @@ fn row_tensor(values: Vec<f64>) -> BuiltinResult<Value> {
 }
 
 fn x_value(x: &Tensor, row: usize, col: usize) -> f64 {
-    x.data[row + col * x.rows]
+    tensor::tensor_value_f64(x, row + col * x.rows)
 }
 
 fn dot_row(x: &Tensor, row: usize, beta: &[f64]) -> f64 {
