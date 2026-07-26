@@ -1260,7 +1260,9 @@ async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<
     match meta.class {
         InputClass::Integer(class) => match value {
             Value::Num(n) => class.to_value(n),
-            Value::Tensor(t) if t.data.len() == 1 => class.to_value(t.data[0]),
+            Value::Tensor(t) if t.data.len() == 1 => {
+                class.to_value(tensor::tensor_value_f64(&t, 0))
+            }
             other => Ok(other),
         },
         _ => {
@@ -1611,6 +1613,23 @@ pub(crate) mod tests {
         let value = Value::Int(IntValue::I16(42));
         let result = sum_builtin(value, vec![Value::from("native")]).expect("sum");
         assert_eq!(result, Value::Int(IntValue::I16(42)));
+    }
+
+    #[test]
+    fn sum_native_template_reads_typed_integer_scalar_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I32(vec![-9]), vec![1, 1]).expect("tensor");
+        tensor.data[0] = 0.0;
+        let meta = InputMeta {
+            class: InputClass::Integer(IntClass::I32),
+            device: DevicePreference::Host,
+            numeric_dtype: None,
+        };
+
+        let result =
+            block_on(apply_native_template(Value::Tensor(tensor), &meta)).expect("native template");
+
+        assert_eq!(result, Value::Int(IntValue::I32(-9)));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
