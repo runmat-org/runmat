@@ -374,6 +374,9 @@ fn coerce_bool(value: &Value) -> BuiltinResult<bool> {
         Value::Num(n) => bool_from_f64(*n),
         Value::Tensor(t) => {
             if t.data.len() == 1 {
+                if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                    return Ok(int.to_i64() != 0);
+                }
                 bool_from_f64(t.data[0])
             } else {
                 Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_VALUE))
@@ -1118,6 +1121,30 @@ pub(crate) mod tests {
         let args = vec![Value::from("PrettyPrint"), Value::Tensor(tensor_value)];
         let encoded = block_on(jsonencode_builtin(Value::Num(42.0), args)).expect("jsonencode");
         assert_eq!(as_string(encoded), "42");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn jsonencode_options_read_typed_integer_storage_exactly() {
+        let mut false_option =
+            Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("integer tensor");
+        false_option.data[0] = 1.0;
+        let compact = block_on(jsonencode_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor")),
+            vec![Value::from("PrettyPrint"), Value::Tensor(false_option)],
+        ))
+        .expect("jsonencode");
+        assert_eq!(as_string(compact), "[1,2]");
+
+        let mut true_option =
+            Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("integer tensor");
+        true_option.data[0] = 0.0;
+        let pretty = block_on(jsonencode_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("tensor")),
+            vec![Value::from("PrettyPrint"), Value::Tensor(true_option)],
+        ))
+        .expect("jsonencode");
+        assert_eq!(as_string(pretty), "[\n    [1,2],\n    [3,4]\n]");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
