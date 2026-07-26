@@ -225,8 +225,6 @@ pub(crate) async fn tsne_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Va
     let options = parse_options(rest)?;
     let tensor =
         tensor::value_into_tensor_for(NAME, x).map_err(|err| invalid(format!("tsne: {err}")))?;
-    let tensor =
-        tensor::integer_tensor_to_f64(tensor).map_err(|err| invalid(format!("tsne: {err}")))?;
     let result = compute_tsne(tensor, options)?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
@@ -329,8 +327,6 @@ fn parse_options(values: Vec<Value>) -> BuiltinResult<Options> {
             "standardize" => options.standardize = bool_scalar(value, "Standardize")?,
             "initialy" => {
                 let tensor = tensor::value_into_tensor_for(NAME, value.clone())
-                    .map_err(|err| invalid(format!("tsne: InitialY {err}")))?;
-                let tensor = tensor::integer_tensor_to_f64(tensor)
                     .map_err(|err| invalid(format!("tsne: InitialY {err}")))?;
                 options.initial_y = Some(tensor);
             }
@@ -499,13 +495,14 @@ fn single_row_embedding(rows: usize, dims: usize) -> BuiltinResult<EmbeddingResu
 }
 
 fn prepare_data(x: &Tensor) -> BuiltinResult<PreparedData> {
+    let values = tensor::tensor_values_f64_cow(x);
     let mut rows = Vec::new();
     let mut good_rows = Vec::new();
     for row in 0..x.rows {
         let mut out = Vec::with_capacity(x.cols);
         let mut complete = true;
         for col in 0..x.cols {
-            let value = x_value(x, row, col);
+            let value = matrix_value(values.as_ref(), x.rows, row, col);
             if value.is_infinite() {
                 return Err(invalid("tsne: X must not contain Inf values"));
             }
@@ -747,6 +744,7 @@ fn initial_embedding(options: &Options, prepared: &PreparedData) -> BuiltinResul
     let rows = prepared.rows.len();
     let dims = options.num_dimensions;
     if let Some(initial) = &options.initial_y {
+        let values = tensor::tensor_values_f64_cow(initial);
         if initial.shape.len() > 2 || initial.cols != dims {
             return Err(invalid(format!(
                 "tsne: InitialY must have {} columns",
@@ -757,7 +755,7 @@ fn initial_embedding(options: &Options, prepared: &PreparedData) -> BuiltinResul
         if initial.rows == prepared.original_rows {
             for col in 0..dims {
                 for &row in &prepared.good_rows {
-                    let value = x_value(initial, row, col);
+                    let value = matrix_value(values.as_ref(), initial.rows, row, col);
                     if !value.is_finite() {
                         return Err(invalid("tsne: InitialY values must be finite"));
                     }
@@ -767,7 +765,7 @@ fn initial_embedding(options: &Options, prepared: &PreparedData) -> BuiltinResul
         } else if initial.rows == rows {
             for col in 0..dims {
                 for row in 0..rows {
-                    let value = x_value(initial, row, col);
+                    let value = matrix_value(values.as_ref(), initial.rows, row, col);
                     if !value.is_finite() {
                         return Err(invalid("tsne: InitialY values must be finite"));
                     }
@@ -1018,8 +1016,8 @@ fn tied_ranks(values: &[f64]) -> Vec<f64> {
     ranks
 }
 
-fn x_value(x: &Tensor, row: usize, col: usize) -> f64 {
-    x.data[row + col * x.rows]
+fn matrix_value(values: &[f64], rows: usize, row: usize, col: usize) -> f64 {
+    values[row + col * rows]
 }
 
 fn integer_sqrt(value: usize) -> Option<usize> {
