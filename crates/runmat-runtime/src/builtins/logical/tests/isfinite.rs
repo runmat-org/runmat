@@ -170,6 +170,9 @@ fn isfinite_host(value: Value) -> BuiltinResult<Value> {
 }
 
 fn isfinite_tensor(name: &str, tensor: Tensor) -> BuiltinResult<Value> {
+    if tensor.integer_storage().is_some() {
+        return logical_full(name, tensor.shape, true);
+    }
     let data = tensor
         .data
         .iter()
@@ -239,7 +242,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Type};
 
     #[test]
     fn isfinite_type_returns_logical() {
@@ -308,6 +311,22 @@ pub(crate) mod tests {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![2, 2]);
                 assert_eq!(mask.data, vec![1, 0, 0, 1]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn isfinite_typed_integer_tensor_ignores_f64_mirror() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
+        tensor.data.fill(f64::NAN);
+        let result = run_isfinite(Value::Tensor(tensor)).expect("isfinite");
+        match result {
+            Value::LogicalArray(mask) => {
+                assert_eq!(mask.shape, vec![2, 2]);
+                assert_eq!(mask.data, vec![1, 1, 1, 1]);
             }
             other => panic!("expected logical array, got {other:?}"),
         }

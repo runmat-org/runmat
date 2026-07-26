@@ -172,10 +172,16 @@ fn allfinite_host(value: Value) -> BuiltinResult<Value> {
 }
 
 fn tensor_all_finite(tensor: &Tensor) -> bool {
+    if tensor.integer_storage().is_some() {
+        return true;
+    }
     tensor.data.iter().all(|value| value.is_finite())
 }
 
 fn sparse_all_finite(sparse: &SparseTensor) -> bool {
+    if sparse.integer_storage().is_some() {
+        return true;
+    }
     sparse.values.iter().all(|value| value.is_finite())
 }
 
@@ -210,7 +216,9 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, ResolveContext, StringArray};
+    use runmat_builtins::{
+        CharArray, IntValue, IntegerStorage, LogicalArray, ResolveContext, StringArray,
+    };
 
     fn call(value: Value) -> BuiltinResult<Value> {
         block_on(allfinite_builtin(value))
@@ -265,6 +273,14 @@ mod tests {
     }
 
     #[test]
+    fn typed_integer_tensor_checks_native_storage_not_f64_mirror() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I32(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
+        tensor.data.fill(f64::NAN);
+        assert_eq!(call(Value::Tensor(tensor)).unwrap(), Value::Bool(true));
+    }
+
+    #[test]
     fn empty_numeric_arrays_are_true() {
         let empty = Tensor::zeros(vec![0, 3]);
         assert_eq!(call(Value::Tensor(empty)).unwrap(), Value::Bool(true));
@@ -289,6 +305,23 @@ mod tests {
         assert_eq!(
             call(Value::SparseTensor(nonfinite)).unwrap(),
             Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn typed_integer_sparse_tensor_checks_native_storage_not_f64_mirror() {
+        let mut sparse = SparseTensor::new_integer(
+            3,
+            2,
+            vec![0, 1, 2],
+            vec![0, 2],
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+        )
+        .unwrap();
+        sparse.values.fill(f64::NAN);
+        assert_eq!(
+            call(Value::SparseTensor(sparse)).unwrap(),
+            Value::Bool(true)
         );
     }
 
