@@ -241,6 +241,19 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinRe
     if tensor.data.len() != 1 {
         return Err(builtin_error(format!("{name}: expected scalar input")));
     }
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        let re = storage
+            .real
+            .value_at(0)
+            .expect("scalar complex integer tensor has one real value")
+            .to_f64();
+        let im = storage
+            .imag
+            .value_at(0)
+            .expect("scalar complex integer tensor has one imaginary value")
+            .to_f64();
+        return Ok(Scalar::Complex { re, im });
+    }
     let (re, im) = tensor.data[0];
     Ok(Scalar::Complex { re, im })
 }
@@ -484,7 +497,7 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
 
     fn logspace_builtin(
         start: Value,
@@ -625,6 +638,40 @@ pub(crate) mod tests {
                 for (actual, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((actual.0 - exp.0).abs() < 1e-12);
                     assert!((actual.1 - exp.1).abs() < 1e-12);
+                }
+            }
+            other => panic!("expected complex tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn logspace_complex_integer_tensor_endpoints_read_exact_storage() {
+        let start_storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![0]), IntegerStorage::I16(vec![1]))
+                .expect("start storage");
+        let mut start =
+            ComplexTensor::new_integer(start_storage, vec![1, 1]).expect("start tensor");
+        start.data[0] = (f64::NAN, f64::NAN);
+        let stop_storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![0]), IntegerStorage::I16(vec![2]))
+                .expect("stop storage");
+        let mut stop = ComplexTensor::new_integer(stop_storage, vec![1, 1]).expect("stop tensor");
+        stop.data[0] = (f64::NAN, f64::NAN);
+
+        let result = logspace_builtin(
+            Value::ComplexTensor(start),
+            Value::ComplexTensor(stop),
+            vec![Value::Int(IntValue::I32(4))],
+        )
+        .expect("logspace");
+
+        match result {
+            Value::ComplexTensor(t) => {
+                assert_eq!(t.shape, vec![1, 4]);
+                let expected = generate_complex_log_sequence(0.0, 1.0, 0.0, 2.0, 4);
+                for (actual, expected) in t.data.iter().zip(expected.iter()) {
+                    assert!((actual.0 - expected.0).abs() < 1e-12);
+                    assert!((actual.1 - expected.1).abs() < 1e-12);
                 }
             }
             other => panic!("expected complex tensor result, got {other:?}"),
