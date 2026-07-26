@@ -905,8 +905,9 @@ pub(crate) mod tests {
             assert!(maximum.is_err());
         }
 
-        let typed_count =
+        let mut typed_count =
             Tensor::new_integer(IntegerStorage::U64(vec![42]), vec![1, 1]).expect("count");
+        typed_count.data[0] = 0.0;
         assert_eq!(parse_count(&Value::Tensor(typed_count)).unwrap(), 42);
 
         let typed_negative =

@@ -504,10 +504,13 @@ pub(crate) fn parse_timeout_value(value: &Value) -> Result<f64, TimeoutParseErro
     let timeout = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(t) if t.data.len() == 1 => t
-            .integer_storage()
-            .and_then(|storage| storage.value_at(0))
-            .map_or(t.data[0], |int| int.to_f64()),
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                int.to_f64()
+            } else {
+                t.data[0]
+            }
+        }
         Value::Tensor(_) => {
             return Err(TimeoutParseError::NonScalar);
         }
@@ -732,8 +735,9 @@ pub(crate) mod tests {
 
     #[test]
     fn typed_timeout_parser_accepts_integer_tensor_scalars() {
-        let typed =
+        let mut typed =
             Tensor::new_integer(IntegerStorage::U16(vec![30]), vec![1, 1]).expect("timeout");
+        typed.data[0] = f64::NAN;
         assert_eq!(parse_timeout_value(&Value::Tensor(typed)).unwrap(), 30.0);
 
         let negative =

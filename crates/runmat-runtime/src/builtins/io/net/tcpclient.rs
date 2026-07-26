@@ -617,8 +617,9 @@ pub(crate) mod tests {
             parse_buffer_size(&Value::Int(IntValue::U64(u64::MAX)), "InputBufferSize").is_err()
         );
 
-        let typed = Tensor::new_integer(IntegerStorage::U64(vec![i32::MAX as u64]), vec![1, 1])
+        let mut typed = Tensor::new_integer(IntegerStorage::U64(vec![i32::MAX as u64]), vec![1, 1])
             .expect("typed buffer size");
+        typed.data[0] = 0.0;
         assert_eq!(
             parse_buffer_size(&Value::Tensor(typed), "InputBufferSize").unwrap(),
             i32::MAX

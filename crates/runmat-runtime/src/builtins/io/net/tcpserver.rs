@@ -607,10 +607,13 @@ fn parse_timeout(value: &Value) -> Result<f64, TimeoutParseError> {
     let timeout = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(t) if t.data.len() == 1 => t
-            .integer_storage()
-            .and_then(|storage| storage.value_at(0))
-            .map_or(t.data[0], |int| int.to_f64()),
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                int.to_f64()
+            } else {
+                t.data[0]
+            }
+        }
         Value::Tensor(_) => return Err(TimeoutParseError::NonScalar),
         _ => {
             return Err(TimeoutParseError::NonNumeric);
@@ -696,8 +699,10 @@ pub(crate) mod tests {
         assert!(parse_port(&Value::Int(IntValue::U32(u16::MAX as u32 + 1))).is_err());
         assert!(parse_port(&Value::Int(IntValue::U64(u64::MAX))).is_err());
 
-        let typed_max = Tensor::new_integer(IntegerStorage::U64(vec![u16::MAX as u64]), vec![1, 1])
-            .expect("typed port");
+        let mut typed_max =
+            Tensor::new_integer(IntegerStorage::U64(vec![u16::MAX as u64]), vec![1, 1])
+                .expect("typed port");
+        typed_max.data[0] = 0.0;
         assert_eq!(parse_port(&Value::Tensor(typed_max)).unwrap(), u16::MAX);
 
         let typed_too_large =
@@ -708,6 +713,15 @@ pub(crate) mod tests {
         let typed_negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed port");
         assert!(parse_port(&Value::Tensor(typed_negative)).is_err());
+    }
+
+    #[test]
+    fn typed_timeout_parser_reads_integer_storage_exactly() {
+        let mut timeout =
+            Tensor::new_integer(IntegerStorage::U16(vec![30]), vec![1, 1]).expect("timeout");
+        timeout.data[0] = f64::NAN;
+
+        assert_eq!(parse_timeout(&Value::Tensor(timeout)).unwrap(), 30.0);
     }
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
