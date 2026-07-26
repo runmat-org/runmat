@@ -367,11 +367,9 @@ fn tensor_from_numeric(value: Value, context: &str) -> BuiltinResult<Tensor> {
 fn component_tensor(value: Value, context: &str) -> BuiltinResult<Tensor> {
     let tensor = tensor::integer_tensor_to_f64(tensor_from_numeric(value, context)?)
         .map_err(|err| duration_error(format!("duration: {err}")))?;
-    Tensor::new(
-        tensor.data.clone(),
-        tensor::default_shape_for(&tensor.shape, tensor.data.len()),
-    )
-    .map_err(|err| duration_error(format!("duration: {err}")))
+    let shape = tensor::default_shape_for(&tensor.shape, tensor.data.len());
+    let values = tensor::tensor_into_values_f64(tensor);
+    Tensor::new(values, shape).map_err(|err| duration_error(format!("duration: {err}")))
 }
 
 fn format_for_object(obj: &ObjectInstance) -> String {
@@ -442,8 +440,8 @@ async fn duration_unit_value(
         .map_err(|err| duration_error(format!("{unit_name}: {}", err.message())))?;
     if is_duration_object(&value) {
         let days = duration_tensor_from_duration_value(&value)?;
-        let data = days
-            .data
+        let day_values = tensor::tensor_values_f64_cow(&days);
+        let data = day_values
             .iter()
             .map(|day| day / days_per_unit)
             .collect::<Vec<_>>();
@@ -453,7 +451,7 @@ async fn duration_unit_value(
             Ok(Value::Tensor(
                 Tensor::new(
                     data,
-                    tensor::default_shape_for(&days.shape, days.data.len()),
+                    tensor::default_shape_for(&days.shape, day_values.len()),
                 )
                 .map_err(|err| duration_error(format!("{unit_name}: {err}")))?,
             ))
@@ -630,11 +628,12 @@ pub fn duration_string_array(value: &Value) -> BuiltinResult<Option<StringArray>
     }
     let days = duration_tensor_from_duration_value(value)?;
     let format = format_for_object(obj);
-    let mut strings = Vec::with_capacity(days.data.len());
-    for value in &days.data {
+    let day_values = tensor::tensor_values_f64_cow(&days);
+    let mut strings = Vec::with_capacity(day_values.len());
+    for value in day_values.iter() {
         strings.push(format_duration_value(*value, &format)?);
     }
-    let shape = tensor::default_shape_for(&days.shape, days.data.len());
+    let shape = tensor::default_shape_for(&days.shape, day_values.len());
     let array = StringArray::new(strings, shape)
         .map_err(|err| duration_error(format!("duration: {err}")))?;
     Ok(Some(array))
@@ -687,10 +686,13 @@ pub fn duration_summary(value: &Value) -> BuiltinResult<Option<String>> {
         return Ok(None);
     }
     let days = duration_tensor_from_duration_value(value)?;
-    if days.data.len() == 1 {
+    let len = days
+        .integer_storage()
+        .map_or(days.data.len(), runmat_builtins::IntegerStorage::len);
+    if len == 1 {
         return duration_display_text(value);
     }
-    let shape = tensor::default_shape_for(&days.shape, days.data.len());
+    let shape = tensor::default_shape_for(&days.shape, len);
     Ok(Some(format!(
         "[{} duration]",
         shape
@@ -1085,6 +1087,16 @@ mod tests {
         Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
     }
 
+    fn poisoned_integer_tensor(
+        storage: runmat_builtins::IntegerStorage,
+        shape: Vec<usize>,
+        poison: f64,
+    ) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(poison);
+        tensor
+    }
+
     #[test]
     fn duration_descriptor_signatures_cover_constructor_and_methods() {
         let labels: Vec<&str> = DURATION_DESCRIPTOR
@@ -1196,6 +1208,33 @@ mod tests {
             Value::Bool(false)
         );
         assert!(futures::executor::block_on(years_builtin(Value::Num(f64::MAX))).is_err());
+    }
+
+    #[test]
+    fn duration_unit_helpers_read_typed_integer_days_exactly() {
+        let days = poisoned_integer_tensor(
+            runmat_builtins::IntegerStorage::I16(vec![1, 2]),
+            vec![1, 2],
+            f64::NAN,
+        );
+        let value = duration_object_from_days_tensor(days, DEFAULT_DURATION_FORMAT)
+            .expect("duration object");
+
+        let hours = futures::executor::block_on(hours_builtin(value.clone())).expect("hours");
+        assert_eq!(
+            hours,
+            Value::Tensor(Tensor::new(vec![24.0, 48.0], vec![1, 2]).unwrap())
+        );
+
+        let rendered = duration_display_text(&value)
+            .expect("display")
+            .expect("duration text");
+        assert!(rendered.contains("24:00:00"));
+        assert!(rendered.contains("48:00:00"));
+        assert_eq!(
+            duration_summary(&value).expect("summary"),
+            Some("[1x2 duration]".to_string())
+        );
     }
 
     #[test]
