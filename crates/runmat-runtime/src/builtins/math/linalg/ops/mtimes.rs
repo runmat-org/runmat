@@ -169,6 +169,15 @@ async fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
 pub(crate) async fn mtimes_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
     if contains_integer(lhs) || contains_integer(rhs) {
+        if contains_gpu(lhs) || contains_gpu(rhs) {
+            let lhs_integer_matrix = contains_integer(lhs) && !mtimes_scalar(lhs);
+            let rhs_integer_matrix = contains_integer(rhs) && !mtimes_scalar(rhs);
+            if !lhs_integer_matrix && !rhs_integer_matrix {
+                if let Some(result) = try_gpu_matmul(lhs, rhs).await? {
+                    return Ok(result);
+                }
+            }
+        }
         return mtimes_cpu(lhs.clone(), rhs.clone()).await;
     }
     if let Some(result) = try_gpu_matmul(lhs, rhs).await? {
@@ -262,7 +271,7 @@ async fn real_scalar_value(
         Value::Num(n) => Ok(Some(*n)),
         Value::Int(i) => Ok(Some(i.to_f64())),
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(t.data.first().copied()),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(Some(tensor::tensor_value_f64(t, 0))),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(Some(if logical.data[0] != 0 { 1.0 } else { 0.0 }))
         }
@@ -452,6 +461,10 @@ fn contains_integer(value: &Value) -> bool {
         Value::Tensor(tensor) => tensor.integer_storage().is_some(),
         _ => false,
     }
+}
+
+fn contains_gpu(value: &Value) -> bool {
+    matches!(value, Value::GpuTensor(_))
 }
 
 fn mtimes_scalar(value: &Value) -> bool {
@@ -689,6 +702,32 @@ pub(crate) mod tests {
             };
             assert_eq!(gathered.shape, vec![2, 2]);
             assert_eq!(gathered.data, vec![2.0, 4.0, 6.0, 8.0]);
+        });
+    }
+
+    #[test]
+    fn gpu_scalar_mtimes_reads_typed_integer_tensor_storage_exactly() {
+        test_support::with_test_provider(|provider| {
+            let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &matrix.data,
+                shape: &matrix.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let mut scalar =
+                Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).expect("scalar");
+            scalar.data[0] = 0.0;
+
+            let result = mtimes_builtin(Value::Tensor(scalar), Value::GpuTensor(handle))
+                .expect("gpu scalar mtimes");
+            let gathered = match result {
+                Value::GpuTensor(out) => {
+                    test_support::gather(Value::GpuTensor(out)).expect("gather")
+                }
+                other => panic!("expected gpu tensor, got {other:?}"),
+            };
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.data, vec![3.0, 6.0, 9.0, 12.0]);
         });
     }
 
