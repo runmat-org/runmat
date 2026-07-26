@@ -4,7 +4,8 @@ use encoding_rs::{Encoding, UTF_8};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
+    CharArray, IntValue, LogicalArray, ObjectInstance, ResolveContext, StringArray, Tensor, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -1297,12 +1298,21 @@ fn format_number(value: f64, precision: Option<usize>) -> String {
 
 fn bytes_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<u8>> {
     match value {
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|n| byte_from_f64(*n, fn_name))
-            .collect(),
-        Value::Int(i) => Ok(vec![i.to_i64().clamp(0, 255) as u8]),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return Ok(storage
+                    .exact_values()
+                    .into_iter()
+                    .map(|value| byte_from_intvalue(&value))
+                    .collect());
+            }
+            tensor
+                .data
+                .iter()
+                .map(|n| byte_from_f64(*n, fn_name))
+                .collect()
+        }
+        Value::Int(i) => Ok(vec![byte_from_intvalue(i)]),
         Value::Num(n) => Ok(vec![byte_from_f64(*n, fn_name)?]),
         Value::CharArray(array) => {
             Ok(char_row_to_string_slice(&array.data, array.cols, 0).into_bytes())
@@ -1313,6 +1323,13 @@ fn bytes_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<u8>> {
             format!("{fn_name}: expected bytes or text, got {other:?}"),
         )),
     }
+}
+
+fn byte_from_intvalue(value: &IntValue) -> u8 {
+    value
+        .try_to_u64()
+        .map(|value| value.min(255) as u8)
+        .unwrap_or(0)
 }
 
 fn byte_from_f64(value: f64, fn_name: &str) -> BuiltinResult<u8> {
@@ -1722,6 +1739,17 @@ mod tests {
         ] {
             assert!(scan_size_from_value(&value).is_err());
         }
+    }
+
+    #[test]
+    fn native2unicode_reads_typed_integer_byte_storage_exactly() {
+        let mut bytes =
+            Tensor::new_integer(IntegerStorage::U8(vec![104, 105]), vec![1, 2]).unwrap();
+        bytes.data.fill(0.0);
+        assert_eq!(
+            block(native2unicode_builtin(Value::Tensor(bytes), Vec::new())).unwrap(),
+            Value::String("hi".into())
+        );
     }
 
     fn block(
