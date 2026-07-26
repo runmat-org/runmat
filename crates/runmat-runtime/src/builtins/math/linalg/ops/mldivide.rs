@@ -230,7 +230,10 @@ async fn try_gpu_mldivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Valu
 }
 
 fn mldivide_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    if contains_integer(&lhs) || contains_integer(&rhs) {
+    if (contains_integer(&lhs) || contains_integer(&rhs))
+        && !contains_complex(&lhs)
+        && !contains_complex(&rhs)
+    {
         if !scalar_divide_input(&lhs) {
             return Err(mldivide_invalid_input(
                 "mldivide: integer inputs are only supported for scalar left division",
@@ -419,7 +422,8 @@ fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> BuiltinResult<Complex
 }
 
 fn promote_real_tensor(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
-    let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
+    let values = tensor::tensor_values_f64_cow(tensor);
+    let data: Vec<(f64, f64)> = values.iter().map(|&re| (re, 0.0)).collect();
     ComplexTensor::new(data, tensor.shape.clone())
         .map_err(|e| mldivide_internal_error(format!("{NAME}: {e}")))
 }
@@ -655,6 +659,25 @@ pub(crate) mod tests {
             .expect_err("integer matrix solve must reject");
         assert_eq!(err.identifier(), MLDIVIDE_ERROR_INVALID_INPUT.identifier);
         assert!(err.message().contains("only supported for scalar"));
+    }
+
+    #[test]
+    fn mldivide_complex_scalar_promotion_reads_typed_integer_storage_exactly() {
+        let mut divisor =
+            Tensor::new_integer(IntegerStorage::I64(vec![2]), vec![1, 1]).expect("integer scalar");
+        divisor.data.fill(f64::NAN);
+        let rhs = ComplexTensor::new(vec![(6.0, 4.0), (2.0, -8.0)], vec![2, 1]).unwrap();
+
+        let result =
+            mldivide_builtin(Value::Tensor(divisor), Value::ComplexTensor(rhs)).expect("mldivide");
+        let Value::ComplexTensor(out) = result else {
+            panic!("expected complex tensor result");
+        };
+        assert_eq!(out.shape, vec![2, 1]);
+        assert!((out.data[0].0 - 3.0).abs() < 1e-12);
+        assert!((out.data[0].1 - 2.0).abs() < 1e-12);
+        assert!((out.data[1].0 - 1.0).abs() < 1e-12);
+        assert!((out.data[1].1 + 4.0).abs() < 1e-12);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
