@@ -588,8 +588,9 @@ async fn power_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<
             }
         } else if let Some(tensor_rhs) = value_to_real_tensor_for_gpu(&rhs).await? {
             if tensor_rhs.shape == lhs.shape {
+                let data = tensor::tensor_values_f64_cow(&tensor_rhs);
                 let view = HostTensorView {
-                    data: &tensor_rhs.data,
+                    data: &data,
                     shape: &tensor_rhs.shape,
                 };
                 if let Ok(uploaded) = provider.upload(&view) {
@@ -637,8 +638,9 @@ async fn power_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult
             }
         } else if let Some(tensor_lhs) = value_to_real_tensor_for_gpu(&lhs).await? {
             if tensor_lhs.shape == rhs.shape {
+                let data = tensor::tensor_values_f64_cow(&tensor_lhs);
                 let view = HostTensorView {
-                    data: &tensor_lhs.data,
+                    data: &data,
                     shape: &tensor_lhs.shape,
                 };
                 if let Ok(uploaded) = provider.upload(&view) {
@@ -1020,6 +1022,62 @@ pub(crate) mod tests {
 
             assert_eq!(gathered.shape, vec![1, 2]);
             assert_eq!(gathered.data, vec![u64::MAX as f64, 2.0]);
+        });
+    }
+
+    #[test]
+    fn power_gpu_left_host_integer_rhs_upload_reads_typed_storage_exactly() {
+        test_support::with_test_provider(|provider| {
+            let base = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
+            let base_view = HostTensorView {
+                data: &base.data,
+                shape: &base.shape,
+            };
+            let base_handle = provider.upload(&base_view).expect("upload base");
+
+            let mut exponent =
+                Tensor::new_integer(IntegerStorage::U16(vec![3, 2]), vec![1, 2]).unwrap();
+            exponent.data.fill(0.0);
+
+            let result = power_builtin(
+                Value::GpuTensor(base_handle.clone()),
+                Value::Tensor(exponent),
+                Vec::new(),
+            )
+            .expect("power");
+            let gathered = test_support::gather(result).expect("gather");
+
+            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.data, vec![8.0, 9.0]);
+            let _ = provider.free(&base_handle);
+        });
+    }
+
+    #[test]
+    fn power_host_integer_lhs_gpu_right_upload_reads_typed_storage_exactly() {
+        test_support::with_test_provider(|provider| {
+            let exponent = Tensor::new(vec![3.0, 2.0], vec![1, 2]).unwrap();
+            let exponent_view = HostTensorView {
+                data: &exponent.data,
+                shape: &exponent.shape,
+            };
+            let exponent_handle = provider.upload(&exponent_view).expect("upload exponent");
+
+            let mut base =
+                Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).unwrap();
+            base.data.fill(0.0);
+
+            let result = power_builtin(
+                Value::Tensor(base),
+                Value::GpuTensor(exponent_handle.clone()),
+                Vec::new(),
+            )
+            .expect("power");
+            let gathered = test_support::gather(result).expect("gather");
+
+            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.data, vec![8.0, 9.0]);
+            let _ = provider.free(&exponent_handle);
         });
     }
 
