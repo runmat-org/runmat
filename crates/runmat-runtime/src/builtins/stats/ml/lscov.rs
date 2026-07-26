@@ -324,9 +324,7 @@ async fn gather_numeric_matrix(value: Value) -> BuiltinResult<NumericMatrix> {
         other => {
             let tensor = tensor::value_into_tensor_for(NAME, other)
                 .map_err(|err| invalid(format!("lscov: {err}")))?;
-            tensor::integer_tensor_to_f64(tensor)
-                .map(NumericMatrix::Real)
-                .map_err(|err| invalid(format!("lscov: {err}")))
+            Ok(NumericMatrix::Real(tensor))
         }
     }
 }
@@ -380,13 +378,11 @@ async fn parse_weighting(
         .map_err(|err| invalid(format!("lscov: {err}")))?;
     let tensor = tensor::value_into_tensor_for(NAME, gathered)
         .map_err(|err| invalid(format!("lscov: {err}")))?;
-    let tensor =
-        tensor::integer_tensor_to_f64(tensor).map_err(|err| invalid(format!("lscov: {err}")))?;
     if tensor.data.is_empty() {
         return Ok(Weighting::Identity);
     }
+    let values = tensor::tensor_values_f64(&tensor);
     if is_vector(&tensor) {
-        let values = tensor.data.clone();
         let weights = if values.len() == 1 && rows > 1 {
             vec![values[0]; rows]
         } else {
@@ -417,7 +413,7 @@ async fn parse_weighting(
         ));
     }
     ensure_budget(rows, rows, "covariance matrix")?;
-    let cov = DMatrix::from_column_slice(rows, rows, &tensor.data);
+    let cov = DMatrix::from_column_slice(rows, rows, &values);
     validate_symmetric_covariance(&cov)?;
     Ok(Weighting::Covariance(cov))
 }
@@ -461,7 +457,8 @@ fn lscov_real(
 ) -> BuiltinResult<Vec<Value>> {
     let rows = a.rows;
     let cols = a.cols;
-    let a_mat = DMatrix::from_column_slice(rows, cols, &a.data);
+    let a_values = tensor::tensor_values_f64_cow(&a);
+    let a_mat = DMatrix::from_column_slice(rows, cols, a_values.as_ref());
     let b_mat = real_rhs_matrix(&b, rows, rhs_cols)?;
     let transformed = transform_real_problem(&a_mat, &b_mat, &parsed.weighting, parsed.algorithm)?;
     let solve = solve_real_least_squares(&transformed.a, &transformed.b, rows, cols)?;
@@ -892,10 +889,11 @@ fn scaled_covariance_real(covariance_base: &DMatrix<f64>, mse: f64) -> Vec<f64> 
 }
 
 fn real_rhs_matrix(tensor: &Tensor, rows: usize, rhs_cols: usize) -> BuiltinResult<DMatrix<f64>> {
+    let values = tensor::tensor_values_f64_cow(tensor);
     if is_vector(tensor) && tensor.data.len() == rows {
-        Ok(DMatrix::from_column_slice(rows, 1, &tensor.data))
+        Ok(DMatrix::from_column_slice(rows, 1, values.as_ref()))
     } else if tensor.rows == rows && tensor.cols == rhs_cols {
-        Ok(DMatrix::from_column_slice(rows, rhs_cols, &tensor.data))
+        Ok(DMatrix::from_column_slice(rows, rhs_cols, values.as_ref()))
     } else {
         Err(invalid(
             "lscov: B must have one row per observation or be an observation vector",
@@ -905,16 +903,17 @@ fn real_rhs_matrix(tensor: &Tensor, rows: usize, rhs_cols: usize) -> BuiltinResu
 
 fn complex_matrix(value: &NumericMatrix) -> BuiltinResult<DMatrix<Complex64>> {
     match value {
-        NumericMatrix::Real(tensor) => Ok(DMatrix::from_column_slice(
-            tensor.rows,
-            tensor.cols,
-            &tensor
-                .data
-                .iter()
-                .copied()
+        NumericMatrix::Real(tensor) => {
+            let values = tensor::tensor_values_f64(tensor)
+                .into_iter()
                 .map(|value| Complex64::new(value, 0.0))
-                .collect::<Vec<_>>(),
-        )),
+                .collect::<Vec<_>>();
+            Ok(DMatrix::from_column_slice(
+                tensor.rows,
+                tensor.cols,
+                &values,
+            ))
+        }
         NumericMatrix::Complex(tensor) => Ok(DMatrix::from_column_slice(
             tensor.rows,
             tensor.cols,
@@ -1144,8 +1143,15 @@ mod tests {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
     }
 
-    fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).unwrap())
+    fn poisoned_int_tensor(
+        storage: IntegerStorage,
+        rows: usize,
+        cols: usize,
+        poison: f64,
+    ) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.fill(poison);
+        Value::Tensor(tensor)
     }
 
     fn complex_tensor(data: Vec<(f64, f64)>, rows: usize, cols: usize) -> Value {
@@ -1206,14 +1212,36 @@ mod tests {
     #[test]
     fn lscov_accepts_typed_integer_matrices_and_weights() {
         let _guard = crate::output_count::push_output_count(Some(1));
-        let a = int_tensor(IntegerStorage::I16(vec![1, 1, 1, 0, 1, 2]), 3, 2);
-        let b = int_tensor(IntegerStorage::I16(vec![1, 3, 5]), 3, 1);
-        let weights = int_tensor(IntegerStorage::U16(vec![1, 1, 1]), 3, 1);
+        let a = poisoned_int_tensor(IntegerStorage::I16(vec![1, 1, 1, 0, 1, 2]), 3, 2, f64::NAN);
+        let b = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5]), 3, 1, f64::NAN);
+        let weights = poisoned_int_tensor(IntegerStorage::U16(vec![1, 1, 1]), 3, 1, f64::NAN);
         let out = outputs(block_on(lscov_builtin(a, b, vec![weights])).unwrap());
         let x = tensor_ref(&out[0]);
         assert_eq!(x.shape, vec![2, 1]);
         assert_close(x.data[0], 1.0);
         assert_close(x.data[1], 2.0);
+    }
+
+    #[test]
+    fn lscov_reads_typed_integer_covariance_from_exact_storage() {
+        let _guard = crate::output_count::push_output_count(Some(1));
+        let a = poisoned_int_tensor(IntegerStorage::I16(vec![1, 1, 1, 0, 1, 2]), 3, 2, f64::NAN);
+        let b = poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 10]), 3, 1, f64::NAN);
+        let v = poisoned_int_tensor(
+            IntegerStorage::U16(vec![
+                1, 0, 0, //
+                0, 1, 0, //
+                0, 0, 100,
+            ]),
+            3,
+            3,
+            f64::NAN,
+        );
+        let alg = Value::CharArray(CharArray::new_row("chol"));
+        let out = outputs(block_on(lscov_builtin(a, b, vec![v, alg])).unwrap());
+        let x = tensor_ref(&out[0]);
+        assert_eq!(x.shape, vec![2, 1]);
+        assert!(x.data.iter().all(|value| value.is_finite()));
     }
 
     #[test]
