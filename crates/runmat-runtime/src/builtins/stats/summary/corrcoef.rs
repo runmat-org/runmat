@@ -548,11 +548,10 @@ async fn corrcoef_host(args: CorrcoefArgs) -> BuiltinResult<Value> {
 }
 
 async fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
-    let tensor = match value {
+    match value {
         Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle).await,
         other => tensor::value_into_tensor_for("corrcoef", other).map_err(corrcoef_internal_error),
-    }?;
-    tensor::integer_tensor_to_f64(tensor).map_err(corrcoef_internal_error)
+    }
 }
 
 fn parse_rows_option(value: &str) -> BuiltinResult<CorrcoefRows> {
@@ -636,10 +635,12 @@ impl Matrix {
                 "inputs must be 2-D matrices or vectors",
             ));
         }
+        let rows = tensor.rows();
+        let cols = tensor.cols();
         Ok(Self {
-            rows: tensor.rows(),
-            cols: tensor.cols(),
-            data: tensor.data,
+            rows,
+            cols,
+            data: tensor::tensor_into_values_f64(tensor),
         })
     }
 
@@ -944,6 +945,12 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value};
 
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(poison);
+        tensor
+    }
+
     fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
         let dim = (expected.len() as f64).sqrt() as usize;
         assert_eq!(actual.shape, vec![dim, dim], "unexpected tensor shape");
@@ -1036,8 +1043,7 @@ pub(crate) mod tests {
 
     #[test]
     fn corrcoef_accepts_typed_integer_matrix_inputs() {
-        let tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 1, 4]), vec![2, 2]).unwrap();
+        let tensor = poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 1, 4]), vec![2, 2], 0.0);
         let result =
             block_on(corrcoef_builtin(Value::Tensor(tensor), Vec::new())).expect("corrcoef");
         match result {
@@ -1045,6 +1051,36 @@ pub(crate) mod tests {
                 assert_eq!(out.shape, vec![2, 2]);
                 assert!((out.data[0] - 1.0).abs() < 1.0e-12);
                 assert!((out.data[3] - 1.0).abs() < 1.0e-12);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn corrcoef_complete_rows_reads_typed_integer_storage() {
+        let x = poisoned_int_tensor(
+            IntegerStorage::I16(vec![1, 2, 3, 2, 4, 6]),
+            vec![3, 2],
+            f64::NAN,
+        );
+        let y = poisoned_int_tensor(IntegerStorage::U16(vec![5, 10, 15]), vec![3, 1], f64::NAN);
+
+        let result = block_on(corrcoef_builtin(
+            Value::Tensor(x),
+            vec![
+                Value::Tensor(y),
+                Value::from("Rows"),
+                Value::from("complete"),
+            ],
+        ))
+        .expect("corrcoef complete rows");
+
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 3]);
+                for value in out.data {
+                    assert!((value - 1.0).abs() < 1.0e-12);
+                }
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
