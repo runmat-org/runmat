@@ -153,10 +153,14 @@ async fn covariance_tensor(
         Value::Tensor(tensor) if matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) => {
             Ok(tensor)
         }
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            tensor::integer_tensor_to_f64(tensor)
+                .map_err(|err| conversion_error(name, format!("{name}: {err}")))
+        }
         Value::Tensor(tensor) => Err(conversion_error(
             name,
             format!(
-                "{name}: covariance matrix must be double or single, got {}",
+                "{name}: covariance matrix must be numeric real, got {}",
                 tensor.dtype.class_name()
             ),
         )),
@@ -507,12 +511,19 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn assert_close(actual: f64, expected: f64) {
         assert!(
             (actual - expected).abs() < 1.0e-10,
             "expected {expected}, got {actual}"
         );
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -669,13 +680,38 @@ mod tests {
     }
 
     #[test]
-    fn corrcov_rejects_integer_tensors_but_accepts_scalar_and_logical_extensions() {
-        let integer = Value::Tensor(
-            Tensor::new_with_dtype(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2], NumericDType::U8)
-                .expect("tensor"),
-        );
-        let err = block_on(corrcov::corrcov_builtin(integer, Vec::new())).unwrap_err();
-        assert!(err.message().contains("double or single"));
+    fn corrcov_accepts_typed_integer_tensors_and_scalar_logical_extensions() {
+        {
+            let integer = poisoned_int_tensor(IntegerStorage::U16(vec![4, 2, 2, 9]), vec![2, 2]);
+            let _guard = crate::output_count::push_output_count(Some(2));
+            let out = block_on(corrcov::corrcov_builtin(integer, Vec::new())).unwrap();
+            match out {
+                Value::OutputList(values) => {
+                    assert_eq!(values.len(), 2);
+                    match &values[0] {
+                        Value::Tensor(tensor) => {
+                            assert_eq!(tensor.dtype, NumericDType::F64);
+                            assert_eq!(tensor.shape, vec![2, 2]);
+                            assert_close(tensor.data[0], 1.0);
+                            assert_close(tensor.data[1], 1.0 / 3.0);
+                            assert_close(tensor.data[2], 1.0 / 3.0);
+                            assert_close(tensor.data[3], 1.0);
+                        }
+                        other => panic!("expected correlation tensor, got {other:?}"),
+                    }
+                    match &values[1] {
+                        Value::Tensor(tensor) => {
+                            assert_eq!(tensor.dtype, NumericDType::F64);
+                            assert_eq!(tensor.shape, vec![2, 1]);
+                            assert_close(tensor.data[0], 2.0);
+                            assert_close(tensor.data[1], 3.0);
+                        }
+                        other => panic!("expected sigma tensor, got {other:?}"),
+                    }
+                }
+                other => panic!("expected output list, got {other:?}"),
+            }
+        }
 
         let scalar = block_on(corrcov::corrcov_builtin(Value::Num(4.0), Vec::new())).unwrap();
         match scalar {
