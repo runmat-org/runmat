@@ -136,7 +136,10 @@ fn cospi_real_value(value: Value) -> BuiltinResult<Value> {
 }
 
 fn cospi_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor.data.iter().map(|&value| cospi_real(value)).collect();
+    let data = tensor::tensor_values_f64_cow(&tensor)
+        .iter()
+        .map(|&value| cospi_real(value))
+        .collect();
     Tensor::new(data, tensor.shape.clone())
         .map_err(|err| cospi_error_with_detail(&ERROR_INTERNAL, err))
 }
@@ -281,6 +284,26 @@ mod tests {
             };
             assert_eq!(out.data, vec![1.0, 0.0, -1.0]);
         });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn cospi_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-1, 0, 2]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+
+        match call(Value::Tensor(tensor)).expect("cospi") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.data, vec![-1.0, 1.0, 1.0]);
+                assert!(out.integer_storage().is_none());
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

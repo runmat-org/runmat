@@ -250,7 +250,10 @@ fn sin_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sin_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor.data.iter().map(|&v| v.sin()).collect::<Vec<_>>();
+    let data = tensor::tensor_values_f64_cow(&tensor)
+        .iter()
+        .map(|&v| v.sin())
+        .collect::<Vec<_>>();
     Tensor::new(data, tensor.shape.clone())
         .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))
 }
@@ -571,6 +574,30 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![2, 1]);
                 assert!((t.data[0] - 0.0).abs() < 1e-12);
                 assert!((t.data[1] - 0.0).abs() < 1e-12);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn sin_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![0, 1, 2]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+        tensor.data.fill(0.0);
+
+        let result = block_on(sin_builtin(Value::Tensor(tensor), Vec::new())).expect("sin");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                let expected = [0.0, 1.0f64.sin(), 2.0f64.sin()];
+                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                    assert!((actual - expected).abs() < 1e-12);
+                }
+                assert!(out.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

@@ -160,7 +160,10 @@ fn sinh_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sinh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor.data.iter().map(|&v| v.sinh()).collect::<Vec<_>>();
+    let data = tensor::tensor_values_f64_cow(&tensor)
+        .iter()
+        .map(|&v| v.sinh())
+        .collect::<Vec<_>>();
     Tensor::new(data, tensor.shape.clone())
         .map_err(|e| sinh_error_with_detail(&SINH_ERROR_INTERNAL, e))
 }
@@ -269,6 +272,29 @@ pub(crate) mod tests {
                 for (got, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((got - exp).abs() < 1e-12);
                 }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn sinh_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-1, 0, 1]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+        tensor.data.fill(0.0);
+
+        match sinh_builtin(Value::Tensor(tensor)).expect("sinh") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                let expected = [-1.0f64.sinh(), 0.0, 1.0f64.sinh()];
+                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                    assert!((actual - expected).abs() < 1e-12);
+                }
+                assert!(out.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

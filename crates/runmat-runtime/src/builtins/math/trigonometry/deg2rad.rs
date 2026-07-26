@@ -144,8 +144,7 @@ fn deg2rad_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn deg2rad_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor
-        .data
+    let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&value| value * DEG_TO_RAD)
         .collect::<Vec<_>>();
@@ -232,6 +231,29 @@ pub(crate) mod tests {
                 for (actual, expected) in tensor.data.iter().zip(expected) {
                     assert!((actual - expected).abs() < 1e-12);
                 }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn deg2rad_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![0, 90, 180]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+        tensor.data.fill(0.0);
+
+        match deg2rad_builtin(Value::Tensor(tensor)).expect("deg2rad") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                let expected = [0.0, std::f64::consts::FRAC_PI_2, std::f64::consts::PI];
+                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                    assert!((actual - expected).abs() < 1e-12);
+                }
+                assert!(out.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
