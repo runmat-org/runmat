@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::state::{
     axes_handle_exists, decode_axes_handle, figure_handle_exists,
 };
@@ -362,7 +363,9 @@ fn parse_axes_handle(value: &Value) -> BuiltinResult<f64> {
     let scalar = match value {
         Value::Num(v) => *v,
         Value::Int(v) => v.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            tensor_utils::tensor_value_f64(tensor, 0)
+        }
         Value::Tensor(_) => {
             return Err(scatterplot_error(
                 "scatterplot: ax must be a scalar axes handle",
@@ -488,7 +491,10 @@ fn complex_samples(value: Value) -> BuiltinResult<Vec<(f64, f64)>> {
         Value::Num(v) => Ok(vec![(v, 0.0)]),
         Value::Int(v) => Ok(vec![(v.to_f64(), 0.0)]),
         Value::Bool(v) => Ok(vec![(if v { 1.0 } else { 0.0 }, 0.0)]),
-        Value::Tensor(tensor) => Ok(tensor.data.into_iter().map(|v| (v, 0.0)).collect()),
+        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(&tensor)
+            .into_iter()
+            .map(|v| (v, 0.0))
+            .collect()),
         Value::LogicalArray(logical) => Ok(logical
             .data
             .into_iter()
@@ -523,7 +529,9 @@ fn parse_numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(v) => Ok(*v),
         Value::Int(v) => Ok(v.to_f64()),
         Value::Bool(v) => Ok(if *v { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         other => Err(scatterplot_error(
             format!("scatterplot: {name} must be a numeric scalar, got {other:?}"),
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
@@ -592,6 +600,7 @@ mod tests {
         reset_hold_state_for_run,
     };
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::{scatter::MarkerStyle, PlotElement};
 
     fn setup_plot_tests() {
@@ -608,6 +617,12 @@ mod tests {
         ComplexTensor::new(data.to_vec(), vec![data.len(), 1]).expect("complex tensor")
     }
 
+    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
+    }
+
     #[test]
     fn scatterplot_decimates_from_zero_based_offset() {
         let data = complex_tensor(&[(1.0, 10.0), (2.0, 20.0), (3.0, 30.0), (4.0, 40.0)]);
@@ -615,6 +630,20 @@ mod tests {
             extract_host_points(Value::ComplexTensor(data), 2, 1).expect("decimated points");
         assert_eq!(x.data, vec![2.0, 4.0]);
         assert_eq!(y.data, vec![20.0, 40.0]);
+    }
+
+    #[test]
+    fn scatterplot_samples_and_scalars_read_typed_integer_storage() {
+        let samples = poisoned_integer_tensor(IntegerStorage::I16(vec![1, -2, 3]), vec![3, 1]);
+        let (x, y) = extract_host_points(Value::Tensor(samples), 1, 0).expect("integer samples");
+        assert_eq!(x.data, vec![1.0, -2.0, 3.0]);
+        assert_eq!(y.data, vec![0.0, 0.0, 0.0]);
+
+        let decimation = poisoned_integer_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]);
+        assert_eq!(
+            parse_nonnegative_integer(&Value::Tensor(decimation), "n").expect("decimation"),
+            2
+        );
     }
 
     #[test]

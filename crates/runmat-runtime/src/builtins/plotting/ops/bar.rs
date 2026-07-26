@@ -22,6 +22,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::gather_if_needed_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -969,6 +970,7 @@ fn build_stacked_bar_gpu_bounds(
     if tensor.data.len() != expected_len {
         return Err(config.invalid("gpuArray shape mismatch"));
     }
+    let tensor_values = tensor_utils::tensor_values_f64_cow(&tensor);
     let mut pos = vec![0.0f64; shape.rows];
     let mut neg = vec![0.0f64; shape.rows];
     let mut max_pos = 0.0f64;
@@ -980,7 +982,7 @@ fn build_stacked_bar_gpu_bounds(
             } else {
                 row + col * shape.source_rows
             };
-            let value = tensor.data[value_index];
+            let value = tensor_values[value_index];
             if !value.is_finite() {
                 continue;
             }
@@ -1176,11 +1178,8 @@ fn tensor_to_bar_input(tensor: Tensor, config: BarRenderConfig) -> BuiltinResult
     if rows * cols != tensor.data.len() {
         return Err(config.invalid("matrix inputs must be dense numeric arrays"));
     }
-    Ok(BarTensorInput::Matrix(BarMatrixData {
-        rows,
-        cols,
-        data: tensor.data,
-    }))
+    let data = tensor_utils::tensor_values_f64(&tensor);
+    Ok(BarTensorInput::Matrix(BarMatrixData { rows, cols, data }))
 }
 
 fn build_bar_series_from_tensor(
@@ -1289,7 +1288,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use futures::executor::block_on;
-    use runmat_builtins::Value;
+    use runmat_builtins::{IntegerStorage, Value};
     use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
@@ -1324,6 +1323,12 @@ pub(crate) mod tests {
             cols,
             dtype: runmat_builtins::NumericDType::F64,
         }
+    }
+
+    fn poisoned_integer_matrix(storage: IntegerStorage, rows: usize, cols: usize) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer matrix");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     fn row_vector_tensor(data: &[f64]) -> Tensor {
@@ -1459,6 +1464,19 @@ pub(crate) mod tests {
         let style = parse_bar_style_args("bar", &[], defaults).unwrap();
         let charts = build_bar_series_from_tensor(None, tensor, &style, BAR_CONFIG).unwrap();
         assert_eq!(charts.len(), 2);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn bar_series_from_matrix_reads_typed_integer_storage() {
+        setup_plot_tests();
+        let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
+        let style = parse_bar_style_args("bar", &[], defaults).unwrap();
+        let tensor = poisoned_integer_matrix(IntegerStorage::I16(vec![1, -2, 3, 4]), 2, 2);
+        let charts = build_bar_series_from_tensor(None, tensor, &style, BAR_CONFIG).unwrap();
+        assert_eq!(charts.len(), 2);
+        assert_eq!(charts[0].values().unwrap(), &[1.0, -2.0]);
+        assert_eq!(charts[1].values().unwrap(), &[3.0, 4.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
