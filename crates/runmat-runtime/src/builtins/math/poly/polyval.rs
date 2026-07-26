@@ -728,8 +728,32 @@ async fn parse_mu(value: Value) -> BuiltinResult<Mu> {
                     "polyval: mu must contain at least two elements",
                 ));
             }
-            let (mean_re, mean_im) = tensor.data[0];
-            let (scale_re, scale_im) = tensor.data[1];
+            let ((mean_re, mean_im), (scale_re, scale_im)) =
+                if let Some(storage) = tensor.integer_data.as_ref() {
+                    let mean_re = storage
+                        .real
+                        .value_at(0)
+                        .expect("complex integer mu real mean")
+                        .to_f64();
+                    let mean_im = storage
+                        .imag
+                        .value_at(0)
+                        .expect("complex integer mu imag mean")
+                        .to_f64();
+                    let scale_re = storage
+                        .real
+                        .value_at(1)
+                        .expect("complex integer mu real scale")
+                        .to_f64();
+                    let scale_im = storage
+                        .imag
+                        .value_at(1)
+                        .expect("complex integer mu imag scale")
+                        .to_f64();
+                    ((mean_re, mean_im), (scale_re, scale_im))
+                } else {
+                    (tensor.data[0], tensor.data[1])
+                };
             if mean_im.abs() > EPS || scale_im.abs() > EPS {
                 return Err(polyval_error("polyval: mu values must be real"));
             }
@@ -1056,7 +1080,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, StructValue};
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, StructValue};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -1188,6 +1212,37 @@ pub(crate) mod tests {
                 assert_eq!(tensor.shape, vec![1, 3]);
                 assert_eq!(tensor.data, vec![0.25, 0.0, 0.25]);
                 assert!(tensor.integer_storage().is_none());
+            }
+            other => panic!("expected tensor output, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn polyval_complex_integer_mu_reads_exact_real_storage() {
+        let coeffs = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
+        let points = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 2]),
+            IntegerStorage::I16(vec![0, 0]),
+        )
+        .expect("complex integer mu");
+        let mut mu = ComplexTensor::new_integer(storage, vec![1, 2]).expect("mu tensor");
+        mu.data.fill((f64::NAN, f64::NAN));
+
+        let value = polyval_builtin(
+            Value::Tensor(coeffs),
+            Value::Tensor(points),
+            vec![
+                Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap()),
+                Value::ComplexTensor(mu),
+            ],
+        )
+        .expect("polyval");
+
+        match value {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.data, vec![0.25, 0.0, 0.25]);
             }
             other => panic!("expected tensor output, got {other:?}"),
         }
