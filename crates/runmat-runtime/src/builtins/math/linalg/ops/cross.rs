@@ -176,7 +176,7 @@ fn cross_internal_error(message: impl Into<String>) -> RuntimeError {
 
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(_) | Value::Num(_) => {
+        Value::Int(_) | Value::Num(_) | Value::Tensor(_) | Value::LogicalArray(_) => {
             let dim = tensor::dimension_from_value_async(value, CROSS_NAME, false)
                 .await
                 .map_err(cross_invalid_argument)?;
@@ -316,8 +316,9 @@ fn value_into_complex_tensor(value: Value) -> BuiltinResult<ComplexTensor> {
 
 fn real_tensor_to_complex(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
     let shape = canonical_shape_tensor(tensor);
-    let mut data = Vec::with_capacity(tensor.data.len());
-    for &value in &tensor.data {
+    let values = tensor::tensor_values_f64_cow(tensor);
+    let mut data = Vec::with_capacity(values.len());
+    for &value in values.iter() {
         data.push((value, 0.0));
     }
     ComplexTensor::new(data, shape).map_err(|e| cross_internal_error(format!("{CROSS_NAME}: {e}")))
@@ -335,6 +336,8 @@ fn cross_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResul
     ensure_same_size(a, b)?;
 
     let shape = canonical_shape_tensor(a);
+    let a_values = tensor::tensor_values_f64_cow(a);
+    let b_values = tensor::tensor_values_f64_cow(b);
     let target_dim = resolve_dimension(&shape, dim)?;
     let dim_index = target_dim - 1;
     let stride_before = dim_product(&shape[..dim_index]);
@@ -349,12 +352,12 @@ fn cross_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResul
             let idx2 = idx1 + stride_before;
             let idx3 = idx2 + stride_before;
 
-            let a1 = a.data[idx1];
-            let a2 = a.data[idx2];
-            let a3 = a.data[idx3];
-            let b1 = b.data[idx1];
-            let b2 = b.data[idx2];
-            let b3 = b.data[idx3];
+            let a1 = a_values[idx1];
+            let a2 = a_values[idx2];
+            let a3 = a_values[idx3];
+            let b1 = b_values[idx1];
+            let b2 = b_values[idx2];
+            let b3 = b_values[idx3];
 
             output[idx1] = a2 * b3 - a3 * b2;
             output[idx2] = a3 * b1 - a1 * b3;
@@ -495,7 +498,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LiteralValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{
+        IntValue, IntegerStorage, LiteralValue, LogicalArray, ResolveContext, Type,
+    };
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -609,6 +614,32 @@ pub(crate) mod tests {
             Value::Tensor(lhs),
             Value::Tensor(rhs),
             vec![Value::Int(IntValue::I32(2))],
+        )
+        .expect("cross");
+        match value {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.data, vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cross_reads_typed_integer_tensors_and_dimension_exactly() {
+        let mut lhs = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0, 1, 0, 0]), vec![2, 3])
+            .expect("lhs");
+        lhs.data.fill(f64::NAN);
+        let mut rhs = Tensor::new_integer(IntegerStorage::U16(vec![0, 0, 1, 0, 0, 1]), vec![2, 3])
+            .expect("rhs");
+        rhs.data.fill(f64::NAN);
+        let mut dim = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("dim");
+        dim.data.fill(f64::NAN);
+
+        let value = cross_builtin(
+            Value::Tensor(lhs),
+            Value::Tensor(rhs),
+            vec![Value::Tensor(dim)],
         )
         .expect("cross");
         match value {

@@ -165,7 +165,7 @@ fn dot_internal_error(message: impl Into<String>) -> RuntimeError {
 
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(_) | Value::Num(_) => {
+        Value::Int(_) | Value::Num(_) | Value::Tensor(_) | Value::LogicalArray(_) => {
             let dim = tensor::dimension_from_value_async(value, DOT_NAME, false)
                 .await
                 .map_err(dot_invalid_argument)?;
@@ -317,8 +317,9 @@ fn value_into_complex_tensor(value: Value) -> BuiltinResult<ComplexTensor> {
 
 fn real_tensor_to_complex(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
     let shape = canonical_shape_tensor(tensor);
-    let mut data = Vec::with_capacity(tensor.data.len());
-    for &value in &tensor.data {
+    let values = tensor::tensor_values_f64_cow(tensor);
+    let mut data = Vec::with_capacity(values.len());
+    for &value in values.iter() {
         data.push((value, 0.0));
     }
     ComplexTensor::new(data, shape).map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))
@@ -328,11 +329,13 @@ fn dot_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResult<
     ensure_same_size(a, b)?;
 
     let shape = canonical_shape_tensor(a);
+    let a_values = tensor::tensor_values_f64_cow(a);
+    let b_values = tensor::tensor_values_f64_cow(b);
     let target_dim = dim.unwrap_or_else(|| default_dimension(&shape));
     let dim_index = target_dim - 1;
 
     if dim_index >= shape.len() {
-        return elementwise_real_product(a, b);
+        return elementwise_real_product_values(a, &a_values, &b_values);
     }
 
     let reduce_len = shape[dim_index];
@@ -345,7 +348,7 @@ fn dot_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResult<
             let mut acc = 0.0;
             for k in 0..reduce_len {
                 let idx = before + k * stride_before + after * stride_before * reduce_len;
-                let prod = a.data[idx] * b.data[idx];
+                let prod = a_values[idx] * b_values[idx];
                 acc += prod;
             }
             let out_idx = after * stride_before + before;
@@ -418,9 +421,13 @@ pub fn dot_host_complex_for_provider(
     dot_complex_tensor(a, b, dim)
 }
 
-fn elementwise_real_product(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
-    let mut data = Vec::with_capacity(a.data.len());
-    for (x, y) in a.data.iter().zip(&b.data) {
+fn elementwise_real_product_values(
+    a: &Tensor,
+    a_values: &[f64],
+    b_values: &[f64],
+) -> BuiltinResult<Tensor> {
+    let mut data = Vec::with_capacity(a_values.len());
+    for (x, y) in a_values.iter().zip(b_values) {
         data.push(x * y);
     }
     let shape = canonical_shape_tensor(a);
@@ -526,7 +533,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LiteralValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{
+        IntValue, IntegerStorage, LiteralValue, LogicalArray, ResolveContext, Type,
+    };
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -645,6 +654,32 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
                 assert_eq!(t.data, vec![28.0, 28.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dot_reads_typed_integer_tensors_and_dimension_exactly() {
+        let mut lhs = Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
+            .expect("lhs");
+        lhs.data.fill(f64::NAN);
+        let mut rhs = Tensor::new_integer(IntegerStorage::U16(vec![6, 3, 5, 2, 4, 1]), vec![2, 3])
+            .expect("rhs");
+        rhs.data.fill(f64::NAN);
+        let mut dim = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("dim");
+        dim.data.fill(f64::NAN);
+
+        let value = dot_builtin(
+            Value::Tensor(lhs),
+            Value::Tensor(rhs),
+            vec![Value::Tensor(dim)],
+        )
+        .expect("dot");
+        match value {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.data, vec![18.0, 20.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

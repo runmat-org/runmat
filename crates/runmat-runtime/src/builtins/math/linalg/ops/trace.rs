@@ -257,7 +257,7 @@ fn trace_tensor_sum(tensor: &Tensor) -> f64 {
     let mut sum = 0.0;
     for idx in 0..diag_len {
         let linear = idx + idx * rows;
-        sum += tensor.data[linear];
+        sum += tensor::tensor_value_f64(tensor, linear);
     }
     sum
 }
@@ -285,7 +285,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -329,6 +329,16 @@ pub(crate) mod tests {
     #[test]
     fn trace_rectangular_matrix() {
         let tensor = Tensor::new(vec![4.0, 1.0, 5.0, 2.0, 6.0, 3.0], vec![3, 2]).unwrap();
+        let result = trace_builtin(Value::Tensor(tensor)).expect("trace");
+        assert_eq!(result, Value::Num(10.0));
+    }
+
+    #[test]
+    fn trace_reads_typed_integer_diagonal_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![4, 1, 5, 2, 6, 3]), vec![3, 2])
+                .expect("tensor");
+        tensor.data.fill(f64::NAN);
         let result = trace_builtin(Value::Tensor(tensor)).expect("trace");
         assert_eq!(result, Value::Num(10.0));
     }
