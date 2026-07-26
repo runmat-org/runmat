@@ -441,8 +441,11 @@ pub fn value_is_finite(value: &Value) -> bool {
         Value::Num(v) => v.is_finite(),
         Value::Int(_) | Value::Bool(_) => true,
         Value::Complex(re, im) => re.is_finite() && im.is_finite(),
+        Value::Tensor(t) if t.integer_storage().is_some() => true,
         Value::Tensor(t) => t.data.iter().all(|v| v.is_finite()),
+        Value::SparseTensor(t) if t.integer_storage().is_some() => true,
         Value::SparseTensor(t) => t.values.iter().all(|v| v.is_finite()),
+        Value::ComplexTensor(t) if t.integer_data.is_some() => true,
         Value::ComplexTensor(t) => t
             .data
             .iter()
@@ -524,6 +527,14 @@ pub fn value_is_scalar_or_empty(value: &Value) -> bool {
 pub fn value_is_real(value: &Value) -> bool {
     match value {
         Value::Complex(_, im) => *im == 0.0,
+        Value::ComplexTensor(t) if t.integer_data.is_some() => t
+            .integer_data
+            .as_ref()
+            .expect("checked integer complex storage")
+            .imag
+            .exact_values()
+            .iter()
+            .all(IntValue::is_zero),
         Value::ComplexTensor(t) => t.data.iter().all(|(_, im)| *im == 0.0),
         _ => true,
     }
@@ -534,9 +545,12 @@ pub fn value_is_integer(value: &Value) -> bool {
         Value::Int(_) => true,
         Value::Bool(_) | Value::LogicalArray(_) => true,
         Value::Num(v) => v.is_finite() && v.fract() == 0.0,
+        Value::Tensor(t) if t.integer_storage().is_some() => true,
         Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && v.fract() == 0.0),
+        Value::SparseTensor(t) if t.integer_storage().is_some() => true,
         Value::SparseTensor(t) => t.values.iter().all(|v| v.is_finite() && v.fract() == 0.0),
         Value::Complex(re, im) => *im == 0.0 && re.is_finite() && re.fract() == 0.0,
+        Value::ComplexTensor(t) if t.integer_data.is_some() => value_is_real(value),
         Value::ComplexTensor(t) => t
             .data
             .iter()
@@ -552,8 +566,11 @@ pub fn value_is_non_nan(value: &Value) -> bool {
     match value {
         Value::Num(v) => !v.is_nan(),
         Value::Complex(re, im) => !re.is_nan() && !im.is_nan(),
+        Value::Tensor(t) if t.integer_storage().is_some() => true,
         Value::Tensor(t) => t.data.iter().all(|v| !v.is_nan()),
+        Value::SparseTensor(t) if t.integer_storage().is_some() => true,
         Value::SparseTensor(t) => t.values.iter().all(|v| !v.is_nan()),
+        Value::ComplexTensor(t) if t.integer_data.is_some() => true,
         Value::ComplexTensor(t) => t.data.iter().all(|(re, im)| !re.is_nan() && !im.is_nan()),
         Value::Cell(c) => c.data.iter().all(value_is_non_nan),
         _ => true,
@@ -1108,6 +1125,63 @@ mod tests {
 
         let zero = Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("zero");
         err("mustBeNonzero", vec![Value::Tensor(zero)]);
+    }
+
+    #[test]
+    fn finite_integer_and_nan_predicates_read_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1, 0, 2]), vec![1, 3]).unwrap();
+        tensor.data = vec![f64::NAN, f64::INFINITY, 1.5];
+        let value = Value::Tensor(tensor);
+
+        assert!(value_is_finite(&value));
+        assert!(value_is_integer(&value));
+        assert!(value_is_non_nan(&value));
+        ok("mustBeFinite", vec![value.clone()]);
+        ok("mustBeInteger", vec![value.clone()]);
+        ok("mustBeNonNan", vec![value]);
+
+        let sparse = Value::SparseTensor(SparseTensor {
+            rows: 2,
+            cols: 2,
+            col_ptrs: vec![0, 1, 2],
+            row_indices: vec![0, 1],
+            values: vec![f64::NAN, f64::INFINITY],
+            integer_data: Some(IntegerStorage::U8(vec![1, 2])),
+        });
+        assert!(value_is_finite(&sparse));
+        assert!(value_is_integer(&sparse));
+        assert!(value_is_non_nan(&sparse));
+    }
+
+    #[test]
+    fn real_and_integer_predicates_read_complex_integer_storage_exactly() {
+        let real_storage = IntegerStorage::I16(vec![1, -2]);
+        let zero_imag = IntegerStorage::I16(vec![0, 0]);
+        let mut real_complex = ComplexTensor {
+            data: vec![(f64::NAN, 5.0), (f64::INFINITY, -7.0)],
+            integer_data: Some(IntegerComplexStorage::new(real_storage, zero_imag).unwrap()),
+            shape: vec![1, 2],
+            rows: 1,
+            cols: 2,
+        };
+        let value = Value::ComplexTensor(real_complex.clone());
+        assert!(value_is_finite(&value));
+        assert!(value_is_real(&value));
+        assert!(value_is_integer(&value));
+        assert!(value_is_non_nan(&value));
+
+        real_complex.integer_data = Some(
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![1]), IntegerStorage::I16(vec![1]))
+                .unwrap(),
+        );
+        real_complex.data = vec![(1.0, 0.0)];
+        real_complex.shape = vec![1, 1];
+        real_complex.rows = 1;
+        real_complex.cols = 1;
+        let value = Value::ComplexTensor(real_complex);
+        assert!(!value_is_real(&value));
+        assert!(!value_is_integer(&value));
     }
 
     #[test]
