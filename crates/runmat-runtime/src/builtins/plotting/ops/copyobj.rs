@@ -11,6 +11,7 @@ use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{
     copy_plot_child_to_parent, validate_plot_child_copy_source, CopyParentTarget, FigureError,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_array_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -305,7 +306,9 @@ fn handle_scalar(value: &Value, role: &'static str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(value.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         _ => Err(copyobj_error(
             &COPYOBJ_ERROR_INVALID_ARGUMENT,
             format!("expected {role} graphics handle or numeric handle array"),
@@ -357,6 +360,18 @@ mod tests {
             ]))
             .unwrap(),
         )
+    }
+
+    #[test]
+    fn copyobj_handle_scalar_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U32(vec![7]), vec![1, 1]).unwrap();
+        tensor.data[0] = 0.0;
+
+        assert_eq!(
+            handle_scalar(&Value::Tensor(tensor), "source").unwrap(),
+            7.0
+        );
     }
 
     #[test]

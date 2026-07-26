@@ -172,7 +172,23 @@ fn scalar_numeric_value(value: &Value) -> Option<f64> {
     match value {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Some(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
+
+    #[test]
+    fn axis_tick_angle_scalar_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![45]), vec![1, 1]).unwrap();
+        tensor.data[0] = -90.0;
+
+        assert_eq!(scalar_numeric_value(&Value::Tensor(tensor)), Some(45.0));
     }
 }

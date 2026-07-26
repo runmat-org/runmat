@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::optim::common::call_function;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -569,7 +570,9 @@ fn contour_value_to_scalar(value: Value) -> BuiltinResult<f64> {
         Value::Num(value) => Ok(value),
         Value::Int(value) => Ok(value.to_f64()),
         Value::Bool(value) => Ok(if value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(tensor_utils::tensor_value_f64(&tensor, 0))
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok(if array.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -786,5 +789,20 @@ mod tests {
         )
         .expect("negative density");
         assert!(parse_mesh_density(&Value::Tensor(negative)).is_err());
+    }
+
+    #[test]
+    fn fcontour_function_scalar_reads_typed_integer_storage_exactly() {
+        let mut tensor = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![12]),
+            vec![1, 1],
+        )
+        .unwrap();
+        tensor.data[0] = -3.0;
+
+        assert_eq!(
+            contour_value_to_scalar(Value::Tensor(tensor)).unwrap(),
+            12.0
+        );
     }
 }

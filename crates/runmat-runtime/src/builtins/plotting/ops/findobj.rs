@@ -11,6 +11,7 @@ use runmat_macros::runtime_builtin;
 use super::properties::{get_properties, map_figure_error, resolve_plot_handle, PlotHandle};
 use super::state::{self, FigureHandle, PlotObjectKind};
 use super::style::{parse_color_value, LineStyleParseOptions};
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_array_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -179,7 +180,9 @@ fn depth_from_value(value: &Value) -> crate::BuiltinResult<usize> {
     let number = match value {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            tensor_utils::tensor_value_f64(tensor, 0)
+        }
         _ => return Err(invalid_argument("-depth must be numeric")),
     };
     if number.is_infinite() && number.is_sign_positive() {
@@ -604,7 +607,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
     use futures::executor::block_on;
-    use runmat_builtins::CellArray;
+    use runmat_builtins::{CellArray, IntegerStorage};
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -627,6 +630,14 @@ mod tests {
 
     fn row(data: &[f64]) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), vec![1, data.len()]).expect("tensor"))
+    }
+
+    #[test]
+    fn findobj_depth_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).unwrap();
+        tensor.data[0] = 0.0;
+
+        assert_eq!(depth_from_value(&Value::Tensor(tensor)).unwrap(), 3);
     }
 
     #[test]

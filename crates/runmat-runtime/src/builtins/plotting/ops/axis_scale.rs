@@ -6,6 +6,7 @@ use super::state::{
     set_log_modes_for_axes, FigureHandle,
 };
 use super::{plotting_error, plotting_error_with_source};
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::style::value_as_string;
 use crate::BuiltinResult;
 
@@ -98,7 +99,7 @@ fn numeric_scalar(value: &Value) -> Option<f64> {
     match value {
         Value::Num(v) => Some(*v),
         Value::Int(i) => Some(i.to_f64()),
-        Value::Tensor(t) if t.data.len() == 1 => Some(t.data[0]),
+        Value::Tensor(t) if t.data.len() == 1 => Some(tensor_utils::tensor_value_f64(t, 0)),
         _ => None,
     }
 }
@@ -139,4 +140,18 @@ fn set_scale(
     };
     set_log_modes_for_axes(handle, axes_index, x_log, y_log)
         .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
+
+    #[test]
+    fn axis_scale_numeric_scalar_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![12]), vec![1, 1]).unwrap();
+        tensor.data[0] = -3.0;
+
+        assert_eq!(numeric_scalar(&Value::Tensor(tensor)), Some(12.0));
+    }
 }

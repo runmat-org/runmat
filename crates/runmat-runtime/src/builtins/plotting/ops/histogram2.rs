@@ -728,7 +728,7 @@ pub(crate) fn option_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(value.to_f64()),
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor::tensor_value_f64(tensor, 0)),
         _ => Err(invalid(format!("histogram2: {name} must be a scalar"))),
     }
 }
@@ -769,6 +769,18 @@ mod tests {
 
     fn vec_tensor(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
+    }
+
+    #[test]
+    fn histogram2_option_scalar_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        tensor.data[0] = 0.25;
+
+        assert_eq!(
+            option_scalar(&Value::Tensor(tensor), "FaceAlpha").unwrap(),
+            1.0
+        );
     }
 
     #[test]

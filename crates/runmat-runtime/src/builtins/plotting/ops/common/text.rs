@@ -1,6 +1,7 @@
 use runmat_builtins::Value;
 use runmat_plot::plots::{LegendStyle, TextStyle};
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::properties::{parse_text_style_pairs, split_legend_style_pairs};
 use crate::builtins::plotting::state::{
     axes_handle_exists, current_axes_state, decode_axes_handle, FigureError, FigureHandle,
@@ -173,7 +174,9 @@ fn try_parse_axes_target(value: &Value) -> Option<(FigureHandle, usize)> {
     match value {
         Value::Num(v) => decode_axes_handle(*v).ok(),
         Value::Int(i) => decode_axes_handle(i.to_f64()).ok(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => decode_axes_handle(tensor.data[0]).ok(),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            decode_axes_handle(tensor_utils::tensor_value_f64(tensor, 0)).ok()
+        }
         _ => None,
     }
 }
@@ -207,4 +210,24 @@ fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult
 pub fn vec4_eq(a: Option<glam::Vec4>, b: glam::Vec4) -> bool {
     a.map(|v| (v - b).abs().max_element() < 1e-6)
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
+
+    #[test]
+    fn axes_target_parser_reads_typed_integer_storage_exactly() {
+        let encoded =
+            crate::builtins::plotting::state::encode_axes_handle(FigureHandle::from(7), 2);
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U32(vec![encoded as u32]), vec![1, 1]).unwrap();
+        tensor.data[0] = 0.0;
+
+        assert_eq!(
+            try_parse_axes_target(&Value::Tensor(tensor)),
+            Some((FigureHandle::from(7), 2))
+        );
+    }
 }

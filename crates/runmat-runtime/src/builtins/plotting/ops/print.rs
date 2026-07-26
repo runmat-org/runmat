@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::op_common::handles::handle_from_scalar;
@@ -291,9 +292,10 @@ fn figure_handle_arg(value: &Value) -> BuiltinResult<Option<FigureHandle>> {
     match value {
         Value::Num(v) => Ok(Some(handle_from_scalar(*v, BUILTIN_NAME)?)),
         Value::Int(i) => Ok(Some(handle_from_scalar(i.to_f64(), BUILTIN_NAME)?)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(Some(handle_from_scalar(tensor.data[0], BUILTIN_NAME)?))
-        }
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Some(handle_from_scalar(
+            tensor_utils::tensor_value_f64(tensor, 0),
+            BUILTIN_NAME,
+        )?)),
         _ => Ok(None),
     }
 }
@@ -631,6 +633,18 @@ mod tests {
             safe_thread_name
         ));
         path
+    }
+
+    #[test]
+    fn print_figure_handle_arg_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U32(vec![5]), vec![1, 1]).unwrap();
+        tensor.data[0] = 0.0;
+
+        assert_eq!(
+            figure_handle_arg(&Value::Tensor(tensor)).unwrap(),
+            Some(FigureHandle::from(5))
+        );
     }
 
     #[test]

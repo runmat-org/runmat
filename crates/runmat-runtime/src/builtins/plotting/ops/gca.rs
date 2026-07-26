@@ -15,6 +15,7 @@ use super::state::{
     FigureHandle,
 };
 use super::style::value_as_string;
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::gca_type;
 
 const GCA_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -156,9 +157,10 @@ fn figure_handle_arg(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>
     match value {
         Value::Num(v) => Ok(Some(handle_from_scalar(*v, "gca")?)),
         Value::Int(i) => Ok(Some(handle_from_scalar(i.to_f64(), "gca")?)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(Some(handle_from_scalar(tensor.data[0], "gca")?))
-        }
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Some(handle_from_scalar(
+            tensor_utils::tensor_value_f64(tensor, 0),
+            "gca",
+        )?)),
         _ => Ok(None),
     }
 }
@@ -184,6 +186,21 @@ pub(crate) mod tests {
         assert!(labels.contains(&"ax = gca()"));
         assert!(labels.contains(&"ax = gca(fig)"));
         assert!(labels.contains(&"s = gca('struct')"));
+    }
+
+    #[test]
+    fn gca_figure_handle_arg_reads_typed_integer_storage_exactly() {
+        let mut tensor = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U32(vec![7]),
+            vec![1, 1],
+        )
+        .unwrap();
+        tensor.data[0] = 0.0;
+
+        assert_eq!(
+            figure_handle_arg(&Value::Tensor(tensor)).unwrap(),
+            Some(FigureHandle::from(7))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
