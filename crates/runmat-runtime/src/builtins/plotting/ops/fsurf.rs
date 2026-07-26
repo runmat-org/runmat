@@ -406,7 +406,7 @@ fn numeric_vector(value: &Value) -> BuiltinResult<Vec<f64>> {
         Value::Num(n) => Ok(vec![*n]),
         Value::Int(i) => Ok(vec![i.to_f64()]),
         Value::Bool(b) => Ok(vec![if *b { 1.0 } else { 0.0 }]),
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(tensor)),
         other => Err(fsurf_invalid(format!(
             "expected numeric domain vector, got {other:?}"
         ))),
@@ -695,6 +695,21 @@ mod tests {
                 Box::pin(async move { Ok(Value::Num(f(a, b))) })
             },
         )))
+    }
+
+    #[test]
+    fn fsurf_numeric_vector_reads_typed_integer_storage_exactly() {
+        let mut domain = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-2, 2]),
+            vec![1, 2],
+        )
+        .expect("typed domain vector");
+        domain.data = vec![f64::NAN, f64::NAN];
+
+        assert_eq!(
+            numeric_vector(&Value::Tensor(domain)).expect("numeric vector"),
+            vec![-2.0, 2.0]
+        );
     }
 
     #[test]

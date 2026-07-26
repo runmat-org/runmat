@@ -10,6 +10,7 @@ use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{Figure, TextStyle};
 use std::collections::HashMap;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::state::{
     register_wordcloud_handle, update_wordcloud_figure, update_wordcloud_handle_state,
@@ -1228,7 +1229,7 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(value) => Ok(vec![*value]),
         Value::Int(value) => Ok(vec![value.to_f64()]),
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(tensor)),
         other => Err(wordcloud_error(format!(
             "{name} must be numeric, got {other:?}"
         ))),
@@ -1503,6 +1504,21 @@ mod tests {
 
     fn tensor(values: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(values, shape).unwrap())
+    }
+
+    #[test]
+    fn wordcloud_numeric_vector_reads_typed_integer_storage_exactly() {
+        let mut sizes = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![2, 4, 8]),
+            vec![1, 3],
+        )
+        .expect("typed size vector");
+        sizes.data = vec![f64::NAN, f64::NAN, f64::NAN];
+
+        assert_eq!(
+            numeric_vector(&Value::Tensor(sizes), "SizeData").expect("numeric vector"),
+            vec![2.0, 4.0, 8.0]
+        );
     }
 
     #[test]

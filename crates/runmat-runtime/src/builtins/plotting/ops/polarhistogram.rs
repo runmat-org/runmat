@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -478,7 +479,7 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
         _ => {
             let tensor = Tensor::try_from(value)
                 .map_err(|err| invalid_argument(format!("{name} must be numeric: {err}")))?;
-            Ok(tensor.data)
+            Ok(tensor_utils::tensor_into_values_f64(tensor))
         }
     }
 }
@@ -674,6 +675,21 @@ mod tests {
             cols: 1,
             dtype: NumericDType::F64,
         })
+    }
+
+    #[test]
+    fn polarhistogram_numeric_vector_reads_typed_integer_storage_exactly() {
+        let mut edges = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-3, 0, 3]),
+            vec![1, 3],
+        )
+        .expect("typed edge vector");
+        edges.data = vec![f64::NAN, f64::NAN, f64::NAN];
+
+        assert_eq!(
+            numeric_vector(&Value::Tensor(edges), "BinEdges").expect("numeric vector"),
+            vec![-3.0, 0.0, 3.0]
+        );
     }
 
     #[test]

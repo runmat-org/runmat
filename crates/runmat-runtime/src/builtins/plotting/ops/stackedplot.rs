@@ -20,6 +20,7 @@ use super::style::{
     marker_metadata_from_appearance, parse_line_style_args, value_as_string, LineAppearance,
     LineStyleParseOptions, MarkerKind,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::builtins::table::{
     is_tabular_object, parse_variable_selector_for_object, table_height,
@@ -1011,7 +1012,7 @@ fn numeric_vector_from_value(value: &Value, name: &str) -> BuiltinResult<Vec<f64
     if tensor.rows() != tensor.data.len() && tensor.cols() != tensor.data.len() {
         return Err(stacked_err(format!("{name} must be a vector")));
     }
-    Ok(tensor.data)
+    Ok(tensor_utils::tensor_into_values_f64(tensor))
 }
 
 fn plotted_row_count(tensor: &Tensor) -> usize {
@@ -1302,6 +1303,21 @@ mod tests {
             PlotChildHandleState::StackedPlot(state) => state,
             other => panic!("unexpected state {other:?}"),
         }
+    }
+
+    #[test]
+    fn stackedplot_numeric_vector_reads_typed_integer_storage_exactly() {
+        let mut x = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![1, 2, 3]),
+            vec![1, 3],
+        )
+        .expect("typed x vector");
+        x.data = vec![f64::NAN, f64::NAN, f64::NAN];
+
+        assert_eq!(
+            numeric_vector(&Value::Tensor(x), "X").expect("numeric vector"),
+            vec![1.0, 2.0, 3.0]
+        );
     }
 
     #[test]
