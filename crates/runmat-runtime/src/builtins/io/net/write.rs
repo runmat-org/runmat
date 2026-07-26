@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Value,
+    IntValue, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::io::{self, Write};
@@ -343,6 +343,21 @@ struct Payload {
     elements: usize,
 }
 
+#[derive(Clone, Debug)]
+enum WriteElement {
+    Floating(f64),
+    Integer(IntValue),
+}
+
+impl WriteElement {
+    fn as_f64(&self) -> f64 {
+        match self {
+            Self::Floating(value) => *value,
+            Self::Integer(value) => value.to_f64(),
+        }
+    }
+}
+
 fn parse_arguments(args: &[Value]) -> BuiltinResult<DataType> {
     match args.len() {
         0 => Ok(DataType::default()),
@@ -397,18 +412,49 @@ fn prepare_payload(data: &Value, datatype: DataType, order: ByteOrder) -> Builti
 fn numeric_payload(data: &Value, datatype: DataType, order: ByteOrder) -> BuiltinResult<Payload> {
     let values = flatten_numeric(data)?;
     let mut bytes = Vec::with_capacity(values.len() * datatype.element_size());
-    for value in values.iter().copied() {
+    for value in &values {
+        let floating = value.as_f64();
         match datatype {
-            DataType::UInt8 => bytes.push(cast_to_u8(value)),
-            DataType::Int8 => bytes.push(cast_to_i8(value) as u8),
-            DataType::UInt16 => extend_u16(&mut bytes, cast_to_u16(value), order),
-            DataType::Int16 => extend_i16(&mut bytes, cast_to_i16(value), order),
-            DataType::UInt32 => extend_u32(&mut bytes, cast_to_u32(value), order),
-            DataType::Int32 => extend_i32(&mut bytes, cast_to_i32(value), order),
-            DataType::UInt64 => extend_u64(&mut bytes, cast_to_u64(value), order),
-            DataType::Int64 => extend_i64(&mut bytes, cast_to_i64(value), order),
-            DataType::Single => extend_f32(&mut bytes, cast_to_f32(value), order),
-            DataType::Double => extend_f64(&mut bytes, value, order),
+            DataType::UInt8 => bytes.push(
+                integer_unsigned(value, u8::MAX as u64)
+                    .map_or_else(|| cast_to_u8(floating), |v| v as u8),
+            ),
+            DataType::Int8 => bytes.push(
+                integer_signed(value, i8::MIN as i64, i8::MAX as i64)
+                    .map_or_else(|| cast_to_i8(floating), |v| v as i8) as u8,
+            ),
+            DataType::UInt16 => {
+                let encoded = integer_unsigned(value, u16::MAX as u64)
+                    .map_or_else(|| cast_to_u16(floating), |v| v as u16);
+                extend_u16(&mut bytes, encoded, order)
+            }
+            DataType::Int16 => {
+                let encoded = integer_signed(value, i16::MIN as i64, i16::MAX as i64)
+                    .map_or_else(|| cast_to_i16(floating), |v| v as i16);
+                extend_i16(&mut bytes, encoded, order)
+            }
+            DataType::UInt32 => {
+                let encoded = integer_unsigned(value, u32::MAX as u64)
+                    .map_or_else(|| cast_to_u32(floating), |v| v as u32);
+                extend_u32(&mut bytes, encoded, order)
+            }
+            DataType::Int32 => {
+                let encoded = integer_signed(value, i32::MIN as i64, i32::MAX as i64)
+                    .map_or_else(|| cast_to_i32(floating), |v| v as i32);
+                extend_i32(&mut bytes, encoded, order)
+            }
+            DataType::UInt64 => {
+                let encoded =
+                    integer_unsigned(value, u64::MAX).unwrap_or_else(|| cast_to_u64(floating));
+                extend_u64(&mut bytes, encoded, order)
+            }
+            DataType::Int64 => {
+                let encoded = integer_signed(value, i64::MIN, i64::MAX)
+                    .unwrap_or_else(|| cast_to_i64(floating));
+                extend_i64(&mut bytes, encoded, order)
+            }
+            DataType::Single => extend_f32(&mut bytes, cast_to_f32(floating), order),
+            DataType::Double => extend_f64(&mut bytes, floating, order),
             DataType::Char | DataType::String => unreachable!(),
         }
     }
@@ -431,9 +477,20 @@ fn char_payload(data: &Value) -> BuiltinResult<Payload> {
             }
             sa.data[0].as_bytes().to_vec()
         }
-        Value::Tensor(t) => t.data.iter().map(|&v| cast_to_u8(v)).collect::<Vec<u8>>(),
+        Value::Tensor(_) => flatten_numeric(data)?
+            .iter()
+            .map(|value| {
+                let floating = value.as_f64();
+                integer_unsigned(value, u8::MAX as u64)
+                    .map_or_else(|| cast_to_u8(floating), |v| v as u8)
+            })
+            .collect(),
         Value::Num(n) => vec![cast_to_u8(*n)],
-        Value::Int(iv) => vec![cast_to_u8(iv.to_f64())],
+        Value::Int(iv) => vec![
+            integer_unsigned(&WriteElement::Integer(iv.clone()), u8::MAX as u64)
+                .expect("integer conversion is always available for integer input")
+                as u8,
+        ],
         Value::Bool(b) => vec![if *b { 1 } else { 0 }],
         Value::LogicalArray(la) => la
             .data
@@ -491,9 +548,18 @@ fn string_payload(data: &Value) -> BuiltinResult<Payload> {
     }
 }
 
-fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
+fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<WriteElement>> {
     match value {
-        Value::Tensor(t) => Ok(t.data.clone()),
+        Value::Tensor(t) => Ok(t.integer_storage().map_or_else(
+            || t.data.iter().copied().map(WriteElement::Floating).collect(),
+            |storage| {
+                storage
+                    .exact_values()
+                    .into_iter()
+                    .map(WriteElement::Integer)
+                    .collect()
+            },
+        )),
         Value::SparseTensor(s) => {
             let total_elements = s.rows.checked_mul(s.cols).ok_or_else(|| {
                 write_error_with_message(
@@ -507,24 +573,28 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
                     &WRITE_ERROR_INTERNAL,
                 ));
             }
-            s.to_dense().map(|dense| dense.data).map_err(|err| {
+            let dense = s.to_dense().map_err(|err| {
                 write_error_with_message(format!("write: {err}"), &WRITE_ERROR_INTERNAL)
-            })
+            })?;
+            Ok(dense.data.into_iter().map(WriteElement::Floating).collect())
         }
-        Value::Num(n) => Ok(vec![*n]),
-        Value::Int(iv) => Ok(vec![iv.to_f64()]),
-        Value::Bool(b) => Ok(vec![if *b { 1.0 } else { 0.0 }]),
+        Value::Num(n) => Ok(vec![WriteElement::Floating(*n)]),
+        Value::Int(iv) => Ok(vec![WriteElement::Integer(iv.clone())]),
+        Value::Bool(b) => Ok(vec![WriteElement::Floating(if *b { 1.0 } else { 0.0 })]),
         Value::LogicalArray(la) => Ok(la
             .data
             .iter()
-            .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+            .map(|&b| WriteElement::Floating(if b != 0 { 1.0 } else { 0.0 }))
             .collect()),
         Value::CharArray(ca) => Ok(ca
             .data
             .iter()
-            .map(|&ch| (ch as u32 & 0xFF) as f64)
+            .map(|&ch| WriteElement::Floating((ch as u32 & 0xFF) as f64))
             .collect()),
-        Value::String(text) => Ok(text.chars().map(|ch| (ch as u32) as f64).collect()),
+        Value::String(text) => Ok(text
+            .chars()
+            .map(|ch| WriteElement::Floating((ch as u32) as f64))
+            .collect()),
         Value::StringArray(sa) => {
             if sa.data.len() != 1 {
                 return Err(write_flow(
@@ -532,7 +602,10 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
                     "write: string array input must be scalar",
                 ));
             }
-            Ok(sa.data[0].chars().map(|ch| (ch as u32) as f64).collect())
+            Ok(sa.data[0]
+                .chars()
+                .map(|ch| WriteElement::Floating((ch as u32) as f64))
+                .collect())
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(write_flow(
             &WRITE_ERROR_INVALID_DATA,
@@ -563,6 +636,28 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
             "write: GPU tensor should have been gathered before encoding",
         )),
     }
+}
+
+fn integer_raw(value: &WriteElement) -> Option<i128> {
+    match value {
+        WriteElement::Integer(IntValue::I8(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::I16(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::I32(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::I64(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U8(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U16(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U32(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U64(v)) => Some(*v as i128),
+        WriteElement::Floating(_) => None,
+    }
+}
+
+fn integer_unsigned(value: &WriteElement, max: u64) -> Option<u64> {
+    integer_raw(value).map(|raw| raw.clamp(0, max as i128) as u64)
+}
+
+fn integer_signed(value: &WriteElement, min: i64, max: i64) -> Option<i64> {
+    integer_raw(value).map(|raw| raw.clamp(min as i128, max as i128) as i64)
 }
 
 fn cast_to_u8(value: f64) -> u8 {
@@ -868,7 +963,7 @@ pub(crate) mod tests {
     use crate::builtins::io::net::accept::{
         configure_stream, insert_client, remove_client_for_test,
     };
-    use runmat_builtins::{CharArray, IntValue, StructValue, Tensor};
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, StructValue, Tensor};
     use std::io::Read;
     use std::net::{TcpListener, TcpStream};
     use std::sync::{Arc, Barrier};
@@ -986,6 +1081,50 @@ pub(crate) mod tests {
         extend_f64(&mut expected, 2.5, ByteOrder::Big);
         extend_f64(&mut expected, 3.5, ByteOrder::Big);
         assert_eq!(received.to_vec(), expected);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn write_uint64_payload_reads_typed_integer_storage_exactly() {
+        let wide = (1_u64 << 53) + 1;
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide, u64::MAX]), vec![1, 2])
+            .expect("typed integer tensor");
+        tensor.data[0] = wide as f64 - 1.0;
+        tensor.data[1] = 0.0;
+
+        let payload =
+            prepare_payload(&Value::Tensor(tensor), DataType::UInt64, ByteOrder::Little).unwrap();
+        let mut expected = Vec::new();
+        extend_u64(&mut expected, wide, ByteOrder::Little);
+        extend_u64(&mut expected, u64::MAX, ByteOrder::Little);
+        assert_eq!(payload.elements, 2);
+        assert_eq!(payload.bytes, expected);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn write_integer_payload_narrowing_uses_exact_integer_bounds() {
+        let value = Value::Int(IntValue::U64((1_u64 << 53) + 1));
+        let payload = prepare_payload(&value, DataType::UInt32, ByteOrder::Big).unwrap();
+        assert_eq!(payload.bytes, u32::MAX.to_be_bytes());
+
+        let value = Value::Int(IntValue::I64(i64::MIN + 1));
+        let payload = prepare_payload(&value, DataType::Int16, ByteOrder::Little).unwrap();
+        assert_eq!(payload.bytes, i16::MIN.to_le_bytes());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn write_char_payload_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![82, 77]), vec![1, 2]).expect("chars");
+        tensor.data[0] = 0.0;
+        tensor.data[1] = 0.0;
+
+        let payload = prepare_payload(&Value::Tensor(tensor), DataType::Char, ByteOrder::Little)
+            .expect("char payload");
+        assert_eq!(payload.elements, 2);
+        assert_eq!(payload.bytes, b"RM");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
