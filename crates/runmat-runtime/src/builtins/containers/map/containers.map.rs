@@ -22,6 +22,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::containers::type_resolvers::{
     map_cell_type, map_handle_type, map_is_key_type, map_unknown_type,
 };
@@ -1807,7 +1808,7 @@ fn numeric_from_value(value: &Value, context: &str, builtin: &'static str) -> Bu
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if t.data.len() == 1 => Ok(tensor::tensor_values_f64(t)[0]),
         Value::LogicalArray(arr) if arr.data.len() == 1 => {
             Ok(if arr.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1831,6 +1832,25 @@ fn integer_from_value(
                 return Err(map_error(context, builtin));
             }
             Ok(v)
+        }
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(storage) = t.integer_storage() {
+                let Some(v) = storage.value_at(0).and_then(|value| value.try_to_i64()) else {
+                    return Err(map_error(context, builtin));
+                };
+                if v < min || v > max {
+                    return Err(map_error(context, builtin));
+                }
+                Ok(v)
+            } else {
+                integer_from_value(
+                    &Value::Num(tensor::tensor_values_f64(t)[0]),
+                    min,
+                    max,
+                    context,
+                    builtin,
+                )
+            }
         }
         Value::Num(n) => {
             if !n.is_finite() {
@@ -1871,6 +1891,24 @@ fn unsigned_from_value(
             }
             Ok(v)
         }
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(storage) = t.integer_storage() {
+                let Some(v) = storage.value_at(0).and_then(|value| value.try_to_u64()) else {
+                    return Err(map_error(context, builtin));
+                };
+                if v > max {
+                    return Err(map_error(context, builtin));
+                }
+                Ok(v)
+            } else {
+                unsigned_from_value(
+                    &Value::Num(tensor::tensor_values_f64(t)[0]),
+                    max,
+                    context,
+                    builtin,
+                )
+            }
+        }
         Value::Num(n) => {
             if !n.is_finite() || *n < 0.0 || *n > max as f64 {
                 return Err(map_error(context, builtin));
@@ -1891,6 +1929,16 @@ fn bool_from_value(value: &Value, context: &str, builtin: &'static str) -> Built
         Value::LogicalArray(arr) if arr.data.len() == 1 => Ok(arr.data[0] != 0),
         Value::Int(i) => Ok(i.to_i64() != 0),
         Value::Num(n) => Ok(*n != 0.0),
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(storage) = t.integer_storage() {
+                Ok(!storage
+                    .value_at(0)
+                    .ok_or_else(|| map_error(context, builtin))?
+                    .is_zero())
+            } else {
+                Ok(tensor::tensor_values_f64(t)[0] != 0.0)
+            }
+        }
         _ => Err(map_error(context, builtin)),
     }
 }
@@ -2027,7 +2075,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Type};
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message.clone()
@@ -2511,6 +2559,46 @@ pub(crate) mod tests {
             BUILTIN_CONSTRUCTOR,
         )
         .is_err());
+    }
+
+    #[test]
+    fn scalar_map_helpers_read_typed_integer_tensor_storage_exactly() {
+        let mut u64_tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("uint64 key");
+        u64_tensor.data[0] = 0.0;
+        assert_eq!(
+            unsigned_from_value(
+                &Value::Tensor(u64_tensor),
+                u64::MAX,
+                "key",
+                BUILTIN_CONSTRUCTOR,
+            )
+            .expect("uint64 key"),
+            u64::MAX
+        );
+
+        let mut i32_tensor =
+            Tensor::new_integer(IntegerStorage::I32(vec![-7]), vec![1, 1]).expect("int32 key");
+        i32_tensor.data[0] = 7.0;
+        assert_eq!(
+            integer_from_value(
+                &Value::Tensor(i32_tensor),
+                i32::MIN as i64,
+                i32::MAX as i64,
+                "key",
+                BUILTIN_CONSTRUCTOR,
+            )
+            .expect("int32 key"),
+            -7
+        );
+
+        let mut logical_tensor =
+            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("logical key");
+        logical_tensor.data[0] = 0.0;
+        assert!(
+            bool_from_value(&Value::Tensor(logical_tensor), "key", BUILTIN_CONSTRUCTOR,)
+                .expect("logical key")
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

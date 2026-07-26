@@ -3,6 +3,8 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 
+use crate::builtins::common::tensor;
+
 const INPUTNAME_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "name",
     ty: BuiltinParamType::StringScalar,
@@ -64,10 +66,22 @@ fn descriptor_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeErr
 }
 
 fn numeric_index(value: &Value) -> Option<usize> {
+    if let Value::Int(value) = value {
+        let index = value.try_to_usize()?;
+        return (index >= 1).then_some(index);
+    }
+    if let Value::Tensor(tensor) = value {
+        if tensor.data.len() != 1 {
+            return None;
+        }
+        if let Some(storage) = tensor.integer_storage() {
+            let index = storage.value_at(0)?.try_to_usize()?;
+            return (index >= 1).then_some(index);
+        }
+    }
     let n = match value {
-        Value::Int(value) => value.to_f64(),
         Value::Num(value) => *value,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
         _ => return None,
     };
     if !n.is_finite() || n < 1.0 || n.fract() != 0.0 || n > usize::MAX as f64 {
@@ -116,6 +130,7 @@ pub fn inputname_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Va
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
     use runmat_hir::{SourceId, Span};
 
     fn span_of(source: &str, needle: &str) -> Span {
@@ -170,5 +185,25 @@ mod tests {
         assert_eq!(expr, Value::String(String::new()));
         assert_eq!(literal, Value::String(String::new()));
         assert_eq!(missing, Value::String(String::new()));
+    }
+
+    #[test]
+    fn inputname_reads_typed_integer_tensor_index_exactly() {
+        let source = "out = probe(alpha, beta);";
+        let _catalog_guard = crate::source_context::replace_source_catalog(vec![(
+            SourceId(9),
+            "/tmp/caller.m".to_string(),
+            source.to_string(),
+        )]);
+        let _callsite_guard = crate::callsite::push_function_input_callsite(
+            Some(SourceId(9)),
+            Some(vec![span_of(source, "alpha"), span_of(source, "beta")]),
+        );
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer tensor");
+        tensor.data[0] = 1.0;
+
+        let name = dispatch_inputname(vec![Value::Tensor(tensor)]).expect("inputname succeeds");
+        assert_eq!(name, Value::String("beta".to_string()));
     }
 }

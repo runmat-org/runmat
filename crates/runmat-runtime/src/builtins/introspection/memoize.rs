@@ -18,8 +18,8 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use crate::{
-    build_runtime_error, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN,
-    OBJECT_SUBSREF_METHOD,
+    build_runtime_error, builtins::common::tensor, BuiltinResult, RuntimeError,
+    OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN, OBJECT_SUBSREF_METHOD,
 };
 
 pub(crate) const MEMOIZED_FUNCTION_CLASS: &str = "MemoizedFunction";
@@ -485,7 +485,13 @@ fn memoized_state(handle: &HandleRef) -> BuiltinResult<(Value, bool, usize)> {
                 Some(Value::Num(value)) => *value != 0.0,
                 Some(Value::Int(value)) => !value.is_zero(),
                 Some(Value::LogicalArray(array)) if array.data.len() == 1 => array.data[0] != 0,
-                Some(Value::Tensor(tensor)) if tensor.data.len() == 1 => tensor.data[0] != 0.0,
+                Some(Value::Tensor(tensor)) if tensor.data.len() == 1 => {
+                    if let Some(storage) = tensor.integer_storage() {
+                        !storage.value_at(0).is_some_and(|value| value.is_zero())
+                    } else {
+                        tensor::tensor_values_f64(tensor)[0] != 0.0
+                    }
+                }
                 _ => true,
             };
             let cache_size = parse_cache_size(object.properties.get(CACHE_SIZE_PROPERTY))?;
@@ -500,10 +506,33 @@ fn memoized_state(handle: &HandleRef) -> BuiltinResult<(Value, bool, usize)> {
 }
 
 fn parse_cache_size(value: Option<&Value>) -> BuiltinResult<usize> {
+    if let Some(Value::Int(v)) = value {
+        return v.try_to_usize().filter(|value| *value >= 1).ok_or_else(|| {
+            memoize_error(
+                &MEMOIZE_ERROR_INVALID_CACHE_SIZE,
+                MEMOIZE_ERROR_INVALID_CACHE_SIZE.message,
+            )
+        });
+    }
+    if let Some(Value::Tensor(t)) = value {
+        if t.data.len() == 1 {
+            if let Some(storage) = t.integer_storage() {
+                return storage
+                    .value_at(0)
+                    .and_then(|value| value.try_to_usize())
+                    .filter(|value| *value >= 1)
+                    .ok_or_else(|| {
+                        memoize_error(
+                            &MEMOIZE_ERROR_INVALID_CACHE_SIZE,
+                            MEMOIZE_ERROR_INVALID_CACHE_SIZE.message,
+                        )
+                    });
+            }
+        }
+    }
     let numeric = match value {
         Some(Value::Num(v)) => *v,
-        Some(Value::Int(v)) => v.to_f64(),
-        Some(Value::Tensor(t)) if t.data.len() == 1 => t.data[0],
+        Some(Value::Tensor(t)) if t.data.len() == 1 => tensor::tensor_values_f64(t)[0],
         Some(Value::LogicalArray(a)) if a.data.len() == 1 => a.data[0] as f64,
         Some(Value::Bool(v)) => {
             if *v {
@@ -1180,6 +1209,46 @@ mod tests {
             numeric_counter(Some(&Value::Num(usize::MAX as f64 + 1.0))),
             None
         );
+    }
+
+    #[test]
+    fn parse_cache_size_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1]).expect("cache size");
+        tensor.data[0] = 0.0;
+
+        assert_eq!(
+            parse_cache_size(Some(&Value::Tensor(tensor))).expect("cache size"),
+            3
+        );
+    }
+
+    #[test]
+    fn memoized_state_reads_enabled_from_typed_integer_tensor_storage() {
+        let function = Value::BoundFunctionHandle {
+            name: "step".to_string(),
+            function: 42,
+        };
+        let mut enabled =
+            Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("enabled");
+        enabled.data[0] = 0.0;
+
+        let mut object = ObjectInstance::new(MEMOIZED_FUNCTION_CLASS.to_string());
+        object
+            .properties
+            .insert(FUNCTION_PROPERTY.to_string(), function);
+        object
+            .properties
+            .insert(ENABLED_PROPERTY.to_string(), Value::Tensor(enabled));
+        let target = runmat_gc::gc_allocate(Value::Object(object)).expect("target");
+        let handle = HandleRef {
+            class_name: MEMOIZED_FUNCTION_CLASS.to_string(),
+            target,
+            valid: true,
+        };
+
+        let (_function, enabled, _cache_size) = memoized_state(&handle).expect("state");
+        assert!(enabled);
     }
 
     #[test]

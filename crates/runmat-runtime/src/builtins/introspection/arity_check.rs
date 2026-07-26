@@ -6,6 +6,8 @@ use runmat_hir::{NARGINCHK_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 
+use crate::builtins::common::tensor;
+
 const NO_OUTPUTS: [BuiltinParamDescriptor; 0] = [];
 
 const ARITY_CHECK_INPUTS: [BuiltinParamDescriptor; 2] = [
@@ -186,10 +188,25 @@ fn parse_finite_arity_bound(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
 ) -> crate::BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return value
+            .try_to_usize()
+            .ok_or_else(|| descriptor_error(builtin, error));
+    }
+    if let Value::Tensor(tensor) = value {
+        if tensor.data.len() != 1 {
+            return Err(descriptor_error(builtin, error));
+        }
+        if let Some(storage) = tensor.integer_storage() {
+            return storage
+                .value_at(0)
+                .and_then(|value| value.try_to_usize())
+                .ok_or_else(|| descriptor_error(builtin, error));
+        }
+    }
     let number = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
         _ => return Err(descriptor_error(builtin, error)),
     };
 
@@ -209,9 +226,10 @@ fn parse_max_arity_bound(
             Ok(ArityBound::Unbounded)
         }
         Value::Tensor(tensor)
-            if tensor.data.len() == 1
-                && tensor.data[0].is_infinite()
-                && tensor.data[0].is_sign_positive() =>
+            if tensor.data.len() == 1 && {
+                let value = tensor::tensor_values_f64(tensor)[0];
+                value.is_infinite() && value.is_sign_positive()
+            } =>
         {
             Ok(ArityBound::Unbounded)
         }
@@ -338,6 +356,7 @@ pub fn nargoutchk_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
 
     #[test]
     fn narginchk_uses_runtime_call_count_context() {
@@ -367,5 +386,20 @@ mod tests {
             err.identifier(),
             Some("RunMat:NargoutchkContextUnavailable")
         );
+    }
+
+    #[test]
+    fn arity_bounds_read_typed_integer_tensor_storage_exactly() {
+        let _guard = replace_call_counts(vec![(2, 1)]);
+        let mut min =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer min");
+        let mut max =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer max");
+        min.data[0] = 3.0;
+        max.data[0] = 1.0;
+
+        let value = dispatch_narginchk(vec![Value::Tensor(min), Value::Tensor(max)])
+            .expect("narginchk succeeds");
+        assert_eq!(value, Value::Num(0.0));
     }
 }
