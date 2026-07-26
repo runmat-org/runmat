@@ -156,10 +156,9 @@ pub(crate) fn rectpuls_scalar(t: f64, width: f64) -> f64 {
 
 pub(crate) fn rectpuls_tensor(tensor: Tensor, width: f64) -> Result<Tensor, String> {
     let shape = tensor.shape.clone();
-    let data = tensor
-        .data
-        .iter()
-        .map(|&value| rectpuls_scalar(value, width))
+    let data = tensor::tensor_into_values_f64(tensor)
+        .into_iter()
+        .map(|value| rectpuls_scalar(value, width))
         .collect::<Vec<_>>();
     Tensor::new(data, shape).map_err(|err| err.to_string())
 }
@@ -237,7 +236,9 @@ fn rectpuls_real(value: Value, width: f64) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, CharArray, ResolveContext, Type};
+    use runmat_builtins::{
+        builtin_function_by_name, CharArray, IntegerStorage, ResolveContext, Type,
+    };
 
     fn call(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(rectpuls_builtin(t, rest))
@@ -248,6 +249,13 @@ mod tests {
             Value::Tensor(tensor) => tensor,
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -272,6 +280,15 @@ mod tests {
         let out = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("rectpuls"));
         assert_eq!(out.shape, vec![1, 6]);
         assert_eq!(out.data, vec![0.5, 1.0, 1.0, 1.0, 0.5, 0.0]);
+    }
+
+    #[test]
+    fn rectpuls_reads_typed_integer_storage_exactly() {
+        let input = integer_tensor(vec![-1, 0, 1], vec![1, 3]);
+        let out =
+            expect_tensor(call(Value::Tensor(input), vec![Value::Num(2.0)]).expect("rectpuls"));
+        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.data, vec![0.5, 1.0, 0.5]);
     }
 
     #[test]

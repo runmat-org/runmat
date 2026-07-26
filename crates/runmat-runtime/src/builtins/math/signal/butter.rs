@@ -601,7 +601,7 @@ fn parse_cutoff(value: Value) -> BuiltinResult<Vec<f64>> {
         Value::Bool(value) => vec![if value { 1.0 } else { 0.0 }],
         Value::Tensor(tensor) => {
             ensure_vector_shape("Wn", &tensor.shape)?;
-            tensor.data
+            tensor::tensor_into_values_f64(tensor)
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(|detail| {
@@ -1306,6 +1306,21 @@ mod tests {
 
         assert_slice_close(&tensor_data(&values[0]), &[0.5, 0.5], 1e-12);
         assert_slice_close(&tensor_data(&values[1]), &[1.0, 0.0], 1e-12);
+    }
+
+    #[test]
+    fn butter_cutoff_reads_typed_integer_storage_exactly() {
+        let mut cutoff =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("cutoff");
+        cutoff.data[0] = f64::NAN;
+        let values = output_values(
+            1,
+            Value::Tensor(cutoff),
+            vec![Value::String("s".to_string())],
+            2,
+        );
+        assert_slice_close(&tensor_data(&values[0]), &[0.0, 1.0], 1e-12);
+        assert_slice_close(&tensor_data(&values[1]), &[1.0, 1.0], 1e-12);
     }
 
     #[test]

@@ -299,10 +299,9 @@ pub(crate) fn gauspuls_cutoff(params: GauspulsParams, tpe: f64) -> f64 {
 
 pub(crate) fn gauspuls_tensor(tensor: Tensor, params: GauspulsParams) -> Result<Tensor, String> {
     let shape = tensor.shape.clone();
-    let data = tensor
-        .data
-        .iter()
-        .map(|&value| gauspuls_scalar(value, params))
+    let data = tensor::tensor_into_values_f64(tensor)
+        .into_iter()
+        .map(|value| gauspuls_scalar(value, params))
         .collect::<Vec<_>>();
     Tensor::new(data, shape).map_err(|err| err.to_string())
 }
@@ -312,10 +311,11 @@ pub(crate) fn gauspuls_components_tensor(
     params: GauspulsParams,
 ) -> Result<(Tensor, Tensor, Tensor), String> {
     let shape = tensor.shape.clone();
-    let mut in_phase = Vec::with_capacity(tensor.data.len());
-    let mut quadrature = Vec::with_capacity(tensor.data.len());
-    let mut envelope = Vec::with_capacity(tensor.data.len());
-    for value in tensor.data {
+    let values = tensor::tensor_into_values_f64(tensor);
+    let mut in_phase = Vec::with_capacity(values.len());
+    let mut quadrature = Vec::with_capacity(values.len());
+    let mut envelope = Vec::with_capacity(values.len());
+    for value in values {
         let (yi, yq, ye) = gauspuls_components_scalar(value, params);
         in_phase.push(yi);
         quadrature.push(yq);
@@ -522,7 +522,7 @@ fn text_scalar(value: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, CharArray};
+    use runmat_builtins::{builtin_function_by_name, CharArray, IntegerStorage};
 
     fn call(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(gauspuls_builtin(t, rest))
@@ -533,6 +533,13 @@ mod tests {
             Value::Tensor(tensor) => tensor,
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -554,6 +561,15 @@ mod tests {
         assert_eq!(out.shape, vec![1, 3]);
         assert!(out.data[1] > out.data[0]);
         assert!(out.data[1] > out.data[2]);
+    }
+
+    #[test]
+    fn gauspuls_reads_typed_integer_storage_exactly() {
+        let input = integer_tensor(vec![0, 1], vec![1, 2]);
+        let out = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("gauspuls"));
+        assert_eq!(out.shape, vec![1, 2]);
+        assert!((out.data[0] - 1.0).abs() <= 1e-12);
+        assert!(out.data[1].is_finite());
     }
 
     #[test]
@@ -580,6 +596,26 @@ mod tests {
         assert!((envelope.data[0] - 1.0).abs() <= 1e-12);
         assert!(in_phase.data[1].abs() <= 1e-12);
         assert!((quadrature.data[1] - envelope.data[1]).abs() <= 1e-12);
+    }
+
+    #[test]
+    fn gauspuls_multi_output_reads_typed_integer_storage_exactly() {
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let input = integer_tensor(vec![0, 1], vec![1, 2]);
+        let out = call(Value::Tensor(input), Vec::new()).expect("gauspuls");
+        let Value::OutputList(outputs) = out else {
+            panic!("expected output list");
+        };
+        assert_eq!(outputs.len(), 3);
+        let in_phase = expect_tensor(outputs[0].clone());
+        let quadrature = expect_tensor(outputs[1].clone());
+        let envelope = expect_tensor(outputs[2].clone());
+        assert_eq!(in_phase.shape, vec![1, 2]);
+        assert_eq!(quadrature.shape, vec![1, 2]);
+        assert_eq!(envelope.shape, vec![1, 2]);
+        assert!((in_phase.data[0] - 1.0).abs() <= 1e-12);
+        assert!(quadrature.data[0].abs() <= 1e-12);
+        assert!((envelope.data[0] - 1.0).abs() <= 1e-12);
     }
 
     #[test]
