@@ -171,7 +171,10 @@ fn exp_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn exp_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data: Vec<f64> = tensor.data.iter().map(|&v| v.exp()).collect();
+    let data: Vec<f64> = tensor::tensor_values_f64(&tensor)
+        .into_iter()
+        .map(|v| v.exp())
+        .collect();
     Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("exp: {e}")))
 }
 
@@ -210,7 +213,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type};
 
     fn exp_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::exp_builtin(value))
@@ -287,6 +290,28 @@ pub(crate) mod tests {
             }
             Value::Num(_) => panic!("expected tensor result"),
             other => panic!("unexpected result {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn exp_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 2]), vec![3, 1]).unwrap();
+        tensor.data.fill(f64::NAN);
+
+        let result = exp_builtin(Value::Tensor(tensor)).expect("exp");
+
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![3, 1]);
+                assert!(t.integer_storage().is_none());
+                let expected = [1.0, std::f64::consts::E, 2.0_f64.exp()];
+                for (actual, expected) in t.data.iter().zip(expected) {
+                    assert!((*actual - expected).abs() < 1e-12);
+                }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
         }
     }
 

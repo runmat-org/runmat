@@ -252,7 +252,7 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
 fn gamma_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let mut data = Vec::with_capacity(tensor.data.len());
-    for &v in &tensor.data {
+    for v in tensor::tensor_values_f64(&tensor) {
         data.push(gamma_real_scalar(v));
     }
     Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("gamma: {e}")))
@@ -484,7 +484,10 @@ async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(tensor) => {
-            let data = tensor.data.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
+            let data = tensor::tensor_values_f64(&tensor)
+                .into_iter()
+                .map(|re| (re, 0.0))
+                .collect::<Vec<_>>();
             let complex = ComplexTensor::new(data, tensor.shape.clone())
                 .map_err(|e| builtin_error(format!("gamma: {e}")))?;
             Ok(complex_tensor_into_value(complex))
@@ -560,7 +563,10 @@ async fn convert_to_gpu_complex(value: Value) -> BuiltinResult<Value> {
         }
         Value::Num(n) => convert_to_gpu_complex(Value::Complex(n, 0.0)).await,
         Value::Tensor(tensor) => {
-            let data = tensor.data.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
+            let data = tensor::tensor_values_f64(&tensor)
+                .into_iter()
+                .map(|re| (re, 0.0))
+                .collect::<Vec<_>>();
             let complex = ComplexTensor::new(data, tensor.shape.clone())
                 .map_err(|e| builtin_error(format!("gamma: {e}")))?;
             convert_to_gpu_complex(Value::ComplexTensor(complex)).await
@@ -639,7 +645,7 @@ pub(crate) mod tests {
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type};
 
     fn gamma_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::gamma_builtin(value, rest))
@@ -693,6 +699,28 @@ pub(crate) mod tests {
         match gamma_builtin(Value::Num(5.0), Vec::new()).expect("gamma") {
             Value::Num(v) => approx_eq(v, 24.0, 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gamma_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3]).unwrap();
+        tensor.data.fill(f64::NAN);
+
+        let result = gamma_builtin(Value::Tensor(tensor), Vec::new()).expect("gamma");
+
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 3]);
+                assert!(t.integer_storage().is_none());
+                let expected = [1.0, 1.0, 2.0];
+                for (actual, expected) in t.data.iter().zip(expected) {
+                    approx_eq(*actual, expected, 1e-12);
+                }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
         }
     }
 
