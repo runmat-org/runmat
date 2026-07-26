@@ -621,18 +621,15 @@ impl CoeffInput {
 
     fn from_tensor(name: &str, label: &str, tensor: Tensor) -> BuiltinResult<Self> {
         ensure_vector_shape(name, label, &tensor.shape)?;
-        let len = tensor.data.len();
+        let values = tensor::tensor_into_values_f64(tensor);
+        let len = values.len();
         if len == 0 {
             return Err(filter_error_with_detail(
                 Self::empty_error(label),
                 format!("{name}: {label} coefficients cannot be empty"),
             ));
         }
-        let data = tensor
-            .data
-            .into_iter()
-            .map(|re| Complex::new(re, 0.0))
-            .collect();
+        let data = values.into_iter().map(|re| Complex::new(re, 0.0)).collect();
         Ok(Self {
             data,
             len,
@@ -662,8 +659,7 @@ impl SignalInput {
                         )
                     })?;
                 let shape = tensor.shape.clone();
-                let data = tensor
-                    .data
+                let data = tensor::tensor_into_values_f64(tensor)
                     .into_iter()
                     .map(|re| Complex::new(re, 0.0))
                     .collect();
@@ -676,8 +672,7 @@ impl SignalInput {
             }
             Value::Tensor(tensor) => {
                 let shape = tensor.shape.clone();
-                let data = tensor
-                    .data
+                let data = tensor::tensor_into_values_f64(tensor)
                     .into_iter()
                     .map(|re| Complex::new(re, 0.0))
                     .collect();
@@ -710,8 +705,7 @@ impl SignalInput {
                     )
                 })?;
                 let shape = tensor.shape.clone();
-                let data = tensor
-                    .data
+                let data = tensor::tensor_into_values_f64(tensor)
                     .into_iter()
                     .map(|re| Complex::new(re, 0.0))
                     .collect();
@@ -859,27 +853,29 @@ impl InitialState {
                             map_control_flow_with_builtin(flow, BUILTIN_NAME),
                         )
                     })?;
+                let shape = tensor.shape.clone();
                 (
-                    tensor
-                        .data
+                    tensor::tensor_into_values_f64(tensor)
                         .iter()
                         .map(|&re| Complex::new(re, 0.0))
                         .collect::<Vec<_>>(),
-                    tensor.shape.clone(),
+                    shape,
                     false,
                     Some(handle),
                 )
             }
-            Value::Tensor(tensor) => (
-                tensor
-                    .data
-                    .iter()
-                    .map(|&re| Complex::new(re, 0.0))
-                    .collect::<Vec<_>>(),
-                tensor.shape.clone(),
-                false,
-                None,
-            ),
+            Value::Tensor(tensor) => {
+                let shape = tensor.shape.clone();
+                (
+                    tensor::tensor_into_values_f64(tensor)
+                        .iter()
+                        .map(|&re| Complex::new(re, 0.0))
+                        .collect::<Vec<_>>(),
+                    shape,
+                    false,
+                    None,
+                )
+            }
             Value::ComplexTensor(tensor) => (
                 tensor
                     .data
@@ -897,13 +893,13 @@ impl InitialState {
                         format!("{name}: initial conditions: {e}"),
                     )
                 })?;
+                let shape = tensor.shape.clone();
                 (
-                    tensor
-                        .data
+                    tensor::tensor_into_values_f64(tensor)
                         .iter()
                         .map(|&re| Complex::new(re, 0.0))
                         .collect::<Vec<_>>(),
-                    tensor.shape.clone(),
+                    shape,
                     false,
                     None,
                 )
@@ -1481,7 +1477,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntValue, ResolveContext, Type};
+    use runmat_builtins::{
+        builtin_function_by_name, IntValue, IntegerStorage, ResolveContext, Tensor, Type,
+    };
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -1489,6 +1487,12 @@ pub(crate) mod tests {
 
     fn evaluate(b: Value, a: Value, x: Value, rest: &[Value]) -> BuiltinResult<FilterEvaluation> {
         block_on(super::evaluate(b, a, x, rest))
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -1593,6 +1597,37 @@ pub(crate) mod tests {
             other => panic!("expected tensor final state, got {other:?}"),
         };
         approx_eq_slice(&z_data, &[1.0, 1.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn filter_reads_typed_integer_coefficients_signal_and_state_exactly() {
+        let b = integer_tensor(IntegerStorage::I16(vec![1, 1]), vec![1, 2]);
+        let a = integer_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]);
+        let x = integer_tensor(IntegerStorage::I16(vec![2, 3]), vec![1, 2]);
+        let zi = integer_tensor(IntegerStorage::I16(vec![7]), vec![1, 1]);
+
+        let eval = evaluate(
+            Value::Tensor(b),
+            Value::Tensor(a),
+            Value::Tensor(x),
+            &[Value::Tensor(zi)],
+        )
+        .expect("filter");
+        let (y, zf) = eval.into_pair();
+
+        let Tensor { data: y_data, .. } = match y {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor output, got {other:?}"),
+        };
+        approx_eq_slice(&y_data, &[9.0, 5.0]);
+
+        let zf_data = match zf {
+            Value::Tensor(t) => t.data,
+            Value::Num(n) => vec![n],
+            other => panic!("expected numeric final state, got {other:?}"),
+        };
+        approx_eq_slice(&zf_data, &[3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
