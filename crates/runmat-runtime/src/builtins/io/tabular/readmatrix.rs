@@ -865,7 +865,7 @@ fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
 
 fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
     let elements = match value {
-        Value::Tensor(t) => t.data.clone(),
+        Value::Tensor(t) => tensor::tensor_values_f64(t),
         _ => {
             return Err(readmatrix_error_with(
                 &READMATRIX_ERROR_RANGE,
@@ -1649,6 +1649,19 @@ pub(crate) mod tests {
 
         let value = value_to_f64(&Value::Tensor(tensor), "EmptyValue").expect("EmptyValue");
         assert_eq!(value, -7.0);
+    }
+
+    #[test]
+    fn numeric_range_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 4, 5]), vec![1, 4]).expect("range");
+        tensor.data.fill(f64::NAN);
+
+        let range = parse_range_numeric(&Value::Tensor(tensor)).expect("range");
+        assert_eq!(range.start_row, 1);
+        assert_eq!(range.start_col, 2);
+        assert_eq!(range.end_row, Some(3));
+        assert_eq!(range.end_col, Some(4));
     }
 
     #[test]
