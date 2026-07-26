@@ -956,8 +956,10 @@ fn backward_substitution_complex(
 }
 
 fn solve_general_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)> {
-    let a = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), &lhs.data);
-    let b = DMatrix::from_column_slice(rhs.rows(), rhs.cols(), &rhs.data);
+    let lhs_values = tensor::tensor_values_f64_cow(lhs);
+    let rhs_values = tensor::tensor_values_f64_cow(rhs);
+    let a = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), lhs_values.as_ref());
+    let b = DMatrix::from_column_slice(rhs.rows(), rhs.cols(), rhs_values.as_ref());
     let svd = SVD::new(a.clone(), true, true);
     let rcond = singular_value_rcond(svd.singular_values.as_slice());
     let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.rows(), lhs.cols());
@@ -1093,10 +1095,11 @@ fn ensure_square(rows: usize, cols: usize) -> BuiltinResult<()> {
 fn transpose_tensor(tensor: &Tensor) -> Tensor {
     let rows = tensor.rows();
     let cols = tensor.cols();
-    let mut data = vec![0.0; tensor.data.len()];
+    let values = tensor::tensor_values_f64_cow(tensor);
+    let mut data = vec![0.0; values.len()];
     for r in 0..rows {
         for c in 0..cols {
-            data[c + r * cols] = tensor.data[r + c * rows];
+            data[c + r * cols] = values[r + c * rows];
         }
     }
     Tensor::new(data, vec![cols, rows]).expect("transpose_tensor valid")
@@ -1327,6 +1330,72 @@ pub(crate) mod tests {
         assert_eq!(solution.shape, vec![2, 1]);
         approx_eq(solution.data[0], 1.0);
         approx_eq(solution.data[1], 2.0);
+    }
+
+    #[test]
+    fn linsolve_general_real_reads_typed_integer_storage_exactly() {
+        let mut a = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 1, 0, 0, 1]), vec![3, 2])
+            .expect("integer lhs");
+        let mut b =
+            Tensor::new_integer(IntegerStorage::I16(vec![3, 2, 1]), vec![3, 1]).expect("rhs");
+        a.data.fill(f64::NAN);
+        b.data.fill(f64::NAN);
+
+        let (solution, _rcond) =
+            linsolve_host_real_for_provider(&a, &b, &ProviderLinsolveOptions::default())
+                .expect("provider helper");
+
+        assert_eq!(solution.shape, vec![2, 1]);
+        approx_eq(solution.data[0], 7.0 / 5.0);
+        approx_eq(solution.data[1], -2.0 / 5.0);
+        assert!(solution.integer_storage().is_none());
+    }
+
+    #[test]
+    fn linsolve_transa_reads_typed_integer_storage_exactly() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
+        let mut a = Tensor::new_integer(
+            IntegerStorage::I16(vec![3, 1, 0, 0, 4, 2, 0, 0, 5]),
+            vec![3, 3],
+        )
+        .expect("integer lhs");
+        let mut b = Tensor::new_integer(IntegerStorage::I16(vec![5, 14, 23]), vec![3, 1])
+            .expect("integer rhs");
+        a.data.fill(f64::NAN);
+        b.data.fill(f64::NAN);
+        let mut opts = StructValue::new();
+        opts.fields.insert("LT".to_string(), Value::Bool(true));
+        opts.fields.insert(
+            "TRANSA".to_string(),
+            Value::CharArray(CharArray::new_row("T")),
+        );
+
+        let result = linsolve_builtin(
+            Value::Tensor(a),
+            Value::Tensor(b),
+            vec![Value::Struct(opts)],
+        )
+        .expect("linsolve");
+        let tensor = test_support::gather(result).expect("gather");
+
+        assert_eq!(tensor.shape, vec![3, 1]);
+        let expected_a = Tensor::new(
+            vec![3.0, 1.0, 0.0, 0.0, 4.0, 2.0, 0.0, 0.0, 5.0],
+            vec![3, 3],
+        )
+        .expect("expected lhs");
+        let expected_b = Tensor::new(vec![5.0, 14.0, 23.0], vec![3, 1]).expect("expected rhs");
+        let expected_a_transposed = transpose_tensor(&expected_a);
+        let (expected_tensor, _) = host_linsolve_real(
+            &expected_a_transposed,
+            &expected_b,
+            ProviderLinsolveOptions::default(),
+        );
+        for (actual, expected) in tensor.data.iter().zip(expected_tensor.data.iter()) {
+            approx_eq(*actual, *expected);
+        }
+        assert!(tensor.integer_storage().is_none());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
