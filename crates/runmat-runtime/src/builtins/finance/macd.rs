@@ -271,10 +271,9 @@ fn exponential_moving_average(data: &[f64], rows: usize, cols: usize, alpha: f64
 fn close_column_from_matrix(tensor: &Tensor, shape: &[usize]) -> BuiltinResult<Tensor> {
     let rows = shape[0];
     let close = (0..rows)
-        .map(|row| tensor.data[row + 3 * rows])
+        .map(|row| tensor::tensor_value_f64(tensor, row + 3 * rows))
         .collect::<Vec<_>>();
-    Tensor::new_with_dtype(close, vec![rows, 1], tensor.dtype)
-        .map_err(|err| macd_internal(format!("macd: {err}")))
+    Tensor::new(close, vec![rows, 1]).map_err(|err| macd_internal(format!("macd: {err}")))
 }
 
 fn validate_price_variables(object: &runmat_builtins::ObjectInstance) -> BuiltinResult<Tensor> {
@@ -308,7 +307,9 @@ fn validate_price_variables(object: &runmat_builtins::ObjectInstance) -> Builtin
 }
 
 fn tensor_from_numeric_value(value: Value) -> BuiltinResult<Tensor> {
-    tensor::value_into_tensor_for(NAME, value).map_err(|err| macd_invalid(format!("macd: {err}")))
+    let tensor = tensor::value_into_tensor_for(NAME, value)
+        .map_err(|err| macd_invalid(format!("macd: {err}")))?;
+    tensor::integer_tensor_to_f64(tensor).map_err(|err| macd_invalid(format!("macd: {err}")))
 }
 
 fn tensor_shape_for(tensor: &Tensor) -> Vec<usize> {
@@ -338,7 +339,7 @@ fn macd_error(identifier: &'static str, message: impl Into<String>) -> RuntimeEr
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Value;
+    use runmat_builtins::{IntegerStorage, Value};
 
     use crate::builtins::table::{table_from_columns, table_variables};
 
@@ -354,6 +355,19 @@ mod tests {
             }
         }
         Value::Tensor(Tensor::new(data, vec![rows, 4]).unwrap())
+    }
+
+    fn integer_matrix(rows: usize, columns: [[i16; 4]; 5]) -> Value {
+        let mut data = Vec::with_capacity(rows * 4);
+        for col in 0..4 {
+            for row_values in columns.iter().take(rows) {
+                data.push(row_values[col]);
+            }
+        }
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(data), vec![rows, 4]).expect("integer matrix");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn expect_tensor(value: Value) -> Tensor {
@@ -386,6 +400,30 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(out.shape, vec![5, 1]);
+        assert_close(out.data[0], 0.0);
+        assert_close(out.data[1], 0.075);
+        assert_close(out.data[2], 0.283125);
+        assert_close(out.data[3], 0.743578125);
+        assert_close(out.data[4], 1.697244140625);
+    }
+
+    #[test]
+    fn matrix_input_reads_typed_integer_storage_exactly_as_double() {
+        let out = expect_tensor(
+            call(integer_matrix(
+                5,
+                [
+                    [2, 1, 1, 1],
+                    [3, 2, 2, 2],
+                    [4, 3, 3, 4],
+                    [5, 4, 4, 8],
+                    [6, 5, 5, 16],
+                ],
+            ))
+            .unwrap(),
+        );
+        assert_eq!(out.shape, vec![5, 1]);
+        assert!(out.integer_storage().is_none());
         assert_close(out.data[0], 0.0);
         assert_close(out.data[1], 0.075);
         assert_close(out.data[2], 0.283125);
