@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use runmat_builtins::{ObjectInstance, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::BuiltinResult;
+use crate::{builtins::common::tensor, BuiltinResult};
 
 use super::{
     any_type, deep_learning_error, gather_args, model, numeric_values, scalar_text, string_array,
@@ -217,17 +217,16 @@ impl Matrix {
                 format!("{function}: {label} must be a 2-D numeric matrix"),
             ));
         }
-        if tensor.data.iter().any(|value| !value.is_finite()) {
+        let rows = tensor.rows;
+        let cols = tensor.cols;
+        let data = tensor::tensor_into_values_f64(tensor);
+        if data.iter().any(|value| !value.is_finite()) {
             return Err(deep_learning_error(
                 function,
                 format!("{function}: {label} must contain finite numeric values"),
             ));
         }
-        Ok(Self {
-            data: tensor.data,
-            rows: tensor.rows,
-            cols: tensor.cols,
-        })
+        Ok(Self { data, rows, cols })
     }
 
     fn zeros(rows: usize, cols: usize) -> Self {

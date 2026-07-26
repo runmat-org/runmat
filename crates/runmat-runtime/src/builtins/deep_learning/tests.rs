@@ -1062,6 +1062,32 @@ fn train_network_regression_updates_weights_and_predicts() {
 }
 
 #[test]
+fn train_network_regression_reads_typed_integer_storage_exactly() {
+    let x = poisoned_int_tensor(IntegerStorage::I32(vec![0, 1, 2, 3]), vec![4, 1], 99.0);
+    let y = poisoned_int_tensor(IntegerStorage::I32(vec![1, 3, 5, 7]), vec![4, 1], 99.0);
+    let net = block_on(train_network_builtin(vec![
+        x.clone(),
+        y,
+        regression_training_layers(),
+        adam_training_options(),
+    ]))
+    .unwrap();
+
+    let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+        net,
+        x,
+        vec![],
+    ))
+    .unwrap();
+    let Value::Tensor(predicted) = predicted else {
+        panic!("expected prediction tensor");
+    };
+    assert_eq!(predicted.shape, vec![4, 1]);
+    assert!((predicted.data[0] - 1.0).abs() < 0.35);
+    assert!((predicted.data[3] - 7.0).abs() < 0.35);
+}
+
+#[test]
 fn train_network_classification_supports_string_labels() {
     let x = Value::Tensor(
         Tensor::new(vec![1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0], vec![4, 2]).unwrap(),
