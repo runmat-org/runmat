@@ -16,11 +16,11 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::eig;
@@ -484,7 +484,7 @@ fn parse_integer_scalar(value: &Value) -> BuiltinResult<Option<i64>> {
     }
     let raw = match value {
         Value::Num(n) => *n,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => scalar_tensor_f64(tensor),
         Value::LogicalArray(logical) if logical.len() == 1 => {
             if logical.data[0] != 0 {
                 1.0
@@ -1061,8 +1061,11 @@ fn parse_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
                 if raw == Some(0) || raw == Some(1) {
                     return Ok(raw != Some(0));
                 }
-            } else if tensor.data[0] == 0.0 || tensor.data[0] == 1.0 {
-                return Ok(tensor.data[0] != 0.0);
+            } else {
+                let raw = scalar_tensor_f64(tensor);
+                if raw == 0.0 || raw == 1.0 {
+                    return Ok(raw != 0.0);
+                }
             }
             Err(error_with_detail(
                 format!("eigs: {name} must be logical scalar true or false"),
@@ -1134,7 +1137,7 @@ fn parse_permutation(value: &Value, n: usize) -> BuiltinResult<Vec<usize>> {
 fn numeric_vector_values(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) if tensor.rows() == 1 || tensor.cols() == 1 => {
-            Ok(tensor.data.clone())
+            Ok(tensor::tensor_values_f64(tensor))
         }
         Value::LogicalArray(logical) => {
             let (rows, cols) = matrix_shape_from_slice(&logical.shape);
@@ -1321,6 +1324,29 @@ mod tests {
         sigma.data[0] = 1.0;
         let out = tensor(call(a, vec![Value::Tensor(k), Value::Tensor(sigma)]).unwrap());
         assert_eq!(out.data, vec![8.0]);
+    }
+
+    #[test]
+    fn eigs_reads_integer_tensor_vector_options_exactly() {
+        let mut permutation =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 1, 3]), vec![1, 3]).unwrap();
+        permutation.data.fill(f64::NAN);
+        assert_eq!(
+            parse_permutation(&Value::Tensor(permutation), 3).unwrap(),
+            vec![2, 1, 3]
+        );
+
+        let mut initial =
+            Tensor::new_integer(IntegerStorage::I16(vec![3, 2, 1]), vec![3, 1]).unwrap();
+        initial.data.fill(f64::NAN);
+        assert_eq!(
+            numeric_vector_values(&Value::Tensor(initial), "InitialVector").unwrap(),
+            vec![3.0, 2.0, 1.0]
+        );
+
+        let mut fail = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        fail.data[0] = 0.0;
+        assert!(parse_bool(&Value::Tensor(fail), "Fail").unwrap());
     }
 
     #[test]

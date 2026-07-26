@@ -11,7 +11,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::random_args::complex_tensor_into_value;
+use crate::builtins::common::{random_args::complex_tensor_into_value, tensor};
 use crate::builtins::math::linalg::ops::{mldivide::mldivide_eval, mrdivide::mrdivide_eval};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER};
 
@@ -1270,7 +1270,9 @@ fn complex_scalar(value: &Value, label: &str) -> BuiltinResult<(f64, f64)> {
         Value::Int(i) => Ok((i.to_f64(), 0.0)),
         Value::Bool(b) => Ok((if *b { 1.0 } else { 0.0 }, 0.0)),
         Value::Complex(re, im) => Ok((*re, *im)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok((tensor.data[0], 0.0)),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok((tensor::tensor_value_f64(tensor, 0), 0.0))
+        }
         Value::ComplexTensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok((if array.data[0] != 0 { 1.0 } else { 0.0 }, 0.0))
@@ -1342,6 +1344,7 @@ fn complex_div(lhs: (f64, f64), rhs: (f64, f64)) -> BuiltinResult<(f64, f64)> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).unwrap())
@@ -1518,6 +1521,28 @@ mod tests {
         let values = approx_vec(result);
         assert!((values[0] - 3.0).abs() < 1e-12);
         assert!((values[1] + 5.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn decomposition_scalar_operands_read_typed_integer_storage_exactly() {
+        let a = tensor(&[2.0, 0.0, 0.0, 4.0], 2, 2);
+        let d = call_constructor(vec![a]).expect("decomposition");
+        let mut scale =
+            Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("scale");
+        scale.data[0] = f64::NAN;
+
+        let scaled = call_mtimes(d, Value::Tensor(scale.clone())).expect("scale");
+        let prop = block_on(decomposition_subsref(
+            scaled,
+            OBJECT_INDEX_MEMBER.to_string(),
+            Value::String(SCALE_FACTOR_FIELD.to_string()),
+        ))
+        .expect("ScaleFactor");
+        assert_eq!(approx_vec(prop), vec![3.0]);
+        assert_eq!(
+            complex_scalar(&Value::Tensor(scale), "scale").unwrap(),
+            (3.0, 0.0)
+        );
     }
 
     #[test]

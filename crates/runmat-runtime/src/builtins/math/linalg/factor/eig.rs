@@ -997,8 +997,9 @@ fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<Complex64>> {
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
-    let mut data = Vec::with_capacity(tensor.data.len());
-    for &value in &tensor.data {
+    let values = tensor::tensor_values_f64_cow(tensor);
+    let mut data = Vec::with_capacity(values.len());
+    for &value in values.iter() {
         data.push(Complex64::new(value, 0.0));
     }
     Ok(DMatrix::from_column_slice(rows, cols, &data))
@@ -1101,7 +1102,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -1158,6 +1159,24 @@ pub(crate) mod tests {
         assert!(codes.contains(&"RM.EIG.INVALID_ARGUMENT"));
         assert!(codes.contains(&"RM.EIG.INVALID_INPUT"));
         assert!(codes.contains(&"RM.EIG.INTERNAL"));
+    }
+
+    #[test]
+    fn eig_matrix_conversion_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![3, 2])
+                .expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+
+        let matrix = tensor_to_matrix(&tensor).expect("matrix");
+        assert_eq!(matrix.nrows(), 3);
+        assert_eq!(matrix.ncols(), 2);
+        assert_eq!(matrix[(0, 0)], Complex64::new(1.0, 0.0));
+        assert_eq!(matrix[(1, 0)], Complex64::new(2.0, 0.0));
+        assert_eq!(matrix[(2, 0)], Complex64::new(3.0, 0.0));
+        assert_eq!(matrix[(0, 1)], Complex64::new(4.0, 0.0));
+        assert_eq!(matrix[(1, 1)], Complex64::new(5.0, 0.0));
+        assert_eq!(matrix[(2, 1)], Complex64::new(6.0, 0.0));
     }
 
     fn column_vector_from_value(value: Value) -> Vec<Complex64> {
