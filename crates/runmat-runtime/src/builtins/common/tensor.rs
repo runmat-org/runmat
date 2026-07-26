@@ -750,6 +750,61 @@ mod dimension_tests {
     }
 
     #[test]
+    fn binary_numeric_tensors_reads_typed_integer_scalar_storage_exactly() {
+        let wide = 9_007_199_254_740_993_u64;
+        let mut lhs = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
+            .expect("integer tensor");
+        lhs.data.fill(0.0);
+        let rhs = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("double tensor");
+
+        let (lhs_values, rhs_values, shape) =
+            super::binary_numeric_tensors(&lhs, &rhs, "plus", "plus").expect("align");
+        assert_eq!(lhs_values, vec![IntValue::U64(wide).to_f64(); 2]);
+        assert_eq!(rhs_values, vec![1.0, 2.0]);
+        assert_eq!(shape, vec![1, 2]);
+    }
+
+    #[test]
+    fn binary_numeric_tensors_reads_typed_integer_array_storage_exactly() {
+        let mut lhs =
+            Tensor::new_integer(IntegerStorage::I16(vec![-2, 3]), vec![1, 2]).expect("lhs");
+        lhs.data.fill(0.0);
+        let mut rhs =
+            Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![1, 2]).expect("rhs");
+        rhs.data.fill(9.0);
+
+        let (lhs_values, rhs_values, shape) =
+            super::binary_numeric_tensors(&lhs, &rhs, "times", "times").expect("align");
+        assert_eq!(lhs_values, vec![-2.0, 3.0]);
+        assert_eq!(rhs_values, vec![4.0, 5.0]);
+        assert_eq!(shape, vec![1, 2]);
+    }
+
+    #[test]
+    fn binary_numeric_tensors_reads_typed_integer_rhs_scalar_storage_exactly() {
+        let lhs = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("double tensor");
+        let mut rhs =
+            Tensor::new_integer(IntegerStorage::I64(vec![-7]), vec![1, 1]).expect("integer tensor");
+        rhs.data.fill(0.0);
+
+        let (lhs_values, rhs_values, shape) =
+            super::binary_numeric_tensors(&lhs, &rhs, "minus", "minus").expect("align");
+        assert_eq!(lhs_values, vec![1.0, 2.0]);
+        assert_eq!(rhs_values, vec![-7.0, -7.0]);
+        assert_eq!(shape, vec![1, 2]);
+    }
+
+    #[test]
+    fn binary_numeric_tensors_preserves_shape_mismatch_error() {
+        let lhs = Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![1, 2]).expect("lhs");
+        let rhs = Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![2, 1]).expect("rhs");
+
+        let err = super::binary_numeric_tensors(&lhs, &rhs, "plus", "plus").unwrap_err();
+        assert!(err.message().contains("matching sizes"));
+        assert_eq!(err.context.builtin.as_deref(), Some("plus"));
+    }
+
+    #[test]
     fn floating_dimension_parsers_reject_values_outside_platform_range() {
         let out_of_range = usize::MAX as f64;
         assert!(parse_dimension(&Value::Num(out_of_range), "size").is_err());
@@ -775,14 +830,16 @@ pub fn binary_numeric_tensors(
     context: &str,
     builtin: &str,
 ) -> crate::BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
-    let lhs_shape = default_shape_for(&lhs.shape, lhs.data.len());
-    let rhs_shape = default_shape_for(&rhs.shape, rhs.data.len());
-    match (lhs.data.len(), rhs.data.len()) {
-        (1, 1) => Ok((vec![lhs.data[0]], vec![rhs.data[0]], vec![1, 1])),
-        (1, len) => Ok((vec![lhs.data[0]; len], rhs.data.clone(), rhs_shape)),
-        (len, 1) => Ok((lhs.data.clone(), vec![rhs.data[0]; len], lhs_shape)),
+    let lhs_values = tensor_values_f64_cow(lhs);
+    let rhs_values = tensor_values_f64_cow(rhs);
+    let lhs_shape = default_shape_for(&lhs.shape, lhs_values.len());
+    let rhs_shape = default_shape_for(&rhs.shape, rhs_values.len());
+    match (lhs_values.len(), rhs_values.len()) {
+        (1, 1) => Ok((vec![lhs_values[0]], vec![rhs_values[0]], vec![1, 1])),
+        (1, len) => Ok((vec![lhs_values[0]; len], rhs_values.into_owned(), rhs_shape)),
+        (len, 1) => Ok((lhs_values.into_owned(), vec![rhs_values[0]; len], lhs_shape)),
         (left, right) if left == right && lhs_shape == rhs_shape => {
-            Ok((lhs.data.clone(), rhs.data.clone(), lhs_shape))
+            Ok((lhs_values.into_owned(), rhs_values.into_owned(), lhs_shape))
         }
         _ => Err(crate::build_runtime_error(format!(
             "{context}: operands must be scalar or have matching sizes"
