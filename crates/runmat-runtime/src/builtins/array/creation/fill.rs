@@ -398,6 +398,19 @@ impl FillScalar {
                 if tensor.data.len() != 1 {
                     return Err("fill: fill value must be a scalar".to_string());
                 }
+                if let Some(storage) = tensor.integer_data.as_ref() {
+                    let re = storage
+                        .real
+                        .value_at(0)
+                        .ok_or_else(|| "fill: fill value must be a scalar".to_string())?
+                        .to_f64();
+                    let im = storage
+                        .imag
+                        .value_at(0)
+                        .ok_or_else(|| "fill: fill value must be a scalar".to_string())?
+                        .to_f64();
+                    return Ok(FillScalar::Complex(re, im));
+                }
                 Ok(FillScalar::Complex(tensor.data[0].0, tensor.data[0].1))
             }
             Value::CharArray(ca) => {
@@ -1094,6 +1107,31 @@ pub(crate) mod tests {
                     .data
                     .iter()
                     .all(|&(re, im)| (re - 1.0).abs() < 1e-12 && (im - 2.0).abs() < 1e-12));
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fill_complex_scalar_reads_typed_integer_storage_exactly() {
+        let storage = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![3]),
+            IntegerStorage::I16(vec![-2]),
+        )
+        .expect("complex integer storage");
+        let mut scalar = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
+        scalar.data[0] = (f64::NAN, f64::NAN);
+
+        let result = block_on(fill_builtin(
+            Value::ComplexTensor(scalar),
+            vec![Value::Num(2.0), Value::from("complex")],
+        ))
+        .expect("fill");
+
+        match result {
+            Value::ComplexTensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.data, vec![(3.0, -2.0); 4]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
