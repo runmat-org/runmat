@@ -499,8 +499,9 @@ pub(crate) mod tests {
         assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
         assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
 
-        let fid_tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+        let mut fid_tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
             .expect("typed fid tensor");
+        fid_tensor.data[0] = 0.0;
         assert_eq!(parse_fid(&Value::Tensor(fid_tensor)).unwrap(), 7);
         let fid_too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("typed fid tensor");
@@ -509,8 +510,9 @@ pub(crate) mod tests {
         let nchar =
             futures::executor::block_on(parse_nchar(&[Value::Int(IntValue::U16(64))])).unwrap();
         assert_eq!(nchar, Some(64));
-        let nchar_tensor = Tensor::new_integer(IntegerStorage::U16(vec![64]), vec![1, 1])
+        let mut nchar_tensor = Tensor::new_integer(IntegerStorage::U16(vec![64]), vec![1, 1])
             .expect("typed nchar tensor");
+        nchar_tensor.data[0] = 0.0;
         let nchar_from_tensor =
             futures::executor::block_on(parse_nchar(&[Value::Tensor(nchar_tensor)])).unwrap();
         assert_eq!(nchar_from_tensor, Some(64));
