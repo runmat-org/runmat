@@ -1,6 +1,9 @@
 use std::{borrow::Cow, convert::TryFrom};
 
-use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
+use num_complex::Complex64;
+use runmat_builtins::{
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
+};
 
 use crate::dispatcher::gather_if_needed_async;
 
@@ -129,6 +132,43 @@ pub fn tensor_into_values_f64(tensor: Tensor) -> Vec<f64> {
         tensor_values_f64(&tensor)
     } else {
         tensor.data
+    }
+}
+
+/// Return a complex tensor's numeric values as Complex64, reading typed integer
+/// real/imaginary storage exactly instead of using the compatibility buffer.
+pub fn complex_tensor_values_complex64(tensor: &ComplexTensor) -> Vec<Complex64> {
+    tensor
+        .integer_data
+        .as_ref()
+        .map(|storage| {
+            let real = storage.real.exact_values();
+            let imag = storage.imag.exact_values();
+            real.into_iter()
+                .zip(imag)
+                .map(|(re, im)| Complex64::new(re.to_f64(), im.to_f64()))
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            tensor
+                .data
+                .iter()
+                .map(|&(re, im)| Complex64::new(re, im))
+                .collect()
+        })
+}
+
+/// Consume a complex tensor and return Complex64 values, preserving the fast
+/// path for ordinary complex double tensors.
+pub fn complex_tensor_into_values_complex64(tensor: ComplexTensor) -> Vec<Complex64> {
+    if tensor.integer_data.is_some() {
+        complex_tensor_values_complex64(&tensor)
+    } else {
+        tensor
+            .data
+            .into_iter()
+            .map(|(re, im)| Complex64::new(re, im))
+            .collect()
     }
 }
 

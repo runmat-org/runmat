@@ -568,8 +568,7 @@ fn tensor_to_matrix(tensor: Tensor, name: &str, arg: &str) -> BuiltinResult<Matr
     Ok(Matrix {
         rows: tensor.rows,
         cols: tensor.cols,
-        data: tensor
-            .data
+        data: tensor::tensor_into_values_f64(tensor)
             .into_iter()
             .map(|re| Complex::new(re, 0.0))
             .collect(),
@@ -586,11 +585,7 @@ fn complex_tensor_to_matrix(tensor: ComplexTensor, name: &str, arg: &str) -> Bui
     Ok(Matrix {
         rows: tensor.rows,
         cols: tensor.cols,
-        data: tensor
-            .data
-            .into_iter()
-            .map(|(re, im)| Complex::new(re, im))
-            .collect(),
+        data: tensor::complex_tensor_into_values_complex64(tensor),
     })
 }
 
@@ -691,7 +686,9 @@ pub(crate) mod tests {
     use crate::builtins::common::{tensor, test_support};
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{builtin_function_by_name, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{
+        builtin_function_by_name, IntegerStorage, LogicalArray, ResolveContext, Type,
+    };
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -707,6 +704,12 @@ pub(crate) mod tests {
             }
         }
         Tensor::new(col_major, vec![rows, cols]).unwrap()
+    }
+
+    fn integer_tensor_from_rows(rows: usize, cols: usize, storage: IntegerStorage) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -757,6 +760,23 @@ pub(crate) mod tests {
                 let expected =
                     tensor_from_rows(3, 3, &[1.0, 3.0, 2.0, 4.0, 10.0, 6.0, 3.0, 7.0, 4.0]);
                 assert_eq!(t.data, expected.data);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn conv2_reads_typed_integer_matrices_exactly() {
+        let a = integer_tensor_from_rows(2, 2, IntegerStorage::I16(vec![1, 3, 2, 4]));
+        let b = integer_tensor_from_rows(1, 1, IntegerStorage::U16(vec![2]));
+
+        let result = conv2_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("conv2");
+
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.data, vec![2.0, 6.0, 4.0, 8.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

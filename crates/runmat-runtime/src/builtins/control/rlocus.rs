@@ -600,21 +600,16 @@ fn matrix_property(object: &ObjectInstance, name: &str) -> BuiltinResult<DMatrix
     match value {
         Value::Tensor(tensor) => {
             ensure_matrix_shape(name, &tensor.shape)?;
-            let data = tensor
-                .data
-                .iter()
-                .map(|&re| Complex64::new(re, 0.0))
+            let data = tensor::tensor_values_f64(tensor)
+                .into_iter()
+                .map(|re| Complex64::new(re, 0.0))
                 .collect::<Vec<_>>();
             ensure_finite_coefficients(name, &data)?;
             Ok(DMatrix::from_column_slice(tensor.rows, tensor.cols, &data))
         }
         Value::ComplexTensor(tensor) => {
             ensure_matrix_shape(name, &tensor.shape)?;
-            let data = tensor
-                .data
-                .iter()
-                .map(|&(re, im)| Complex64::new(re, im))
-                .collect::<Vec<_>>();
+            let data = tensor::complex_tensor_values_complex64(tensor);
             ensure_finite_coefficients(name, &data)?;
             Ok(DMatrix::from_column_slice(tensor.rows, tensor.cols, &data))
         }
@@ -699,7 +694,7 @@ fn numeric_values(value: &Value, name: &str) -> BuiltinResult<Vec<Complex64>> {
             .into_iter()
             .map(|re| Complex64::new(re, 0.0))
             .collect(),
-        Value::ComplexTensor(tensor) => complex_tensor_values(tensor),
+        Value::ComplexTensor(tensor) => tensor::complex_tensor_values_complex64(tensor),
         Value::LogicalArray(logical) => logical
             .data
             .iter()
@@ -714,23 +709,6 @@ fn numeric_values(value: &Value, name: &str) -> BuiltinResult<Vec<Complex64>> {
     };
     ensure_finite_coefficients(name, &values)?;
     Ok(values)
-}
-
-fn complex_tensor_values(tensor: &ComplexTensor) -> Vec<Complex64> {
-    if let Some(storage) = tensor.integer_data.as_ref() {
-        let real = storage.real.exact_values();
-        let imag = storage.imag.exact_values();
-        return real
-            .into_iter()
-            .zip(imag)
-            .map(|(re, im)| Complex64::new(re.to_f64(), im.to_f64()))
-            .collect();
-    }
-    tensor
-        .data
-        .iter()
-        .map(|&(re, im)| Complex64::new(re, im))
-        .collect()
 }
 
 fn validate_ss_dimensions(
@@ -1290,6 +1268,46 @@ mod tests {
             numeric_values(&Value::ComplexTensor(tensor), "A").expect("numeric values"),
             vec![Complex64::new(1.0, 3.0), Complex64::new(-2.0, -4.0)]
         );
+    }
+
+    #[test]
+    fn matrix_property_reads_typed_integer_storage_exactly() {
+        let mut matrix = Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2])
+            .expect("typed integer matrix");
+        matrix.data.fill(f64::NAN);
+        let mut object = ObjectInstance::new("ss".to_string());
+        object
+            .properties
+            .insert("A".to_string(), Value::Tensor(matrix));
+
+        let parsed = matrix_property(&object, "A").expect("matrix property");
+
+        assert_eq!(parsed[(0, 0)], Complex64::new(1.0, 0.0));
+        assert_eq!(parsed[(1, 0)], Complex64::new(3.0, 0.0));
+        assert_eq!(parsed[(0, 1)], Complex64::new(2.0, 0.0));
+        assert_eq!(parsed[(1, 1)], Complex64::new(4.0, 0.0));
+    }
+
+    #[test]
+    fn matrix_property_reads_complex_integer_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 3, 2, 4]),
+            IntegerStorage::I16(vec![-1, -3, -2, -4]),
+        )
+        .expect("complex integer storage");
+        let mut matrix = ComplexTensor::new(vec![(f64::NAN, f64::NAN); 4], vec![2, 2]).unwrap();
+        matrix.integer_data = Some(storage);
+        let mut object = ObjectInstance::new("ss".to_string());
+        object
+            .properties
+            .insert("A".to_string(), Value::ComplexTensor(matrix));
+
+        let parsed = matrix_property(&object, "A").expect("matrix property");
+
+        assert_eq!(parsed[(0, 0)], Complex64::new(1.0, -1.0));
+        assert_eq!(parsed[(1, 0)], Complex64::new(3.0, -3.0));
+        assert_eq!(parsed[(0, 1)], Complex64::new(2.0, -2.0));
+        assert_eq!(parsed[(1, 1)], Complex64::new(4.0, -4.0));
     }
 
     #[test]

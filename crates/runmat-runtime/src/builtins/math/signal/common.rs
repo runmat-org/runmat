@@ -139,13 +139,10 @@ fn complex_tensor_to_complex_vector(
     tensor: ComplexTensor,
 ) -> BuiltinResult<ComplexVectorInput> {
     ensure_vector_shape(builtin, label, &tensor.shape)?;
+    let shape = tensor.shape.clone();
     Ok(ComplexVectorInput {
-        data: tensor
-            .data
-            .into_iter()
-            .map(|(re, im)| Complex::new(re, im))
-            .collect(),
-        shape: tensor.shape,
+        data: tensor::complex_tensor_into_values_complex64(tensor),
+        shape,
         is_complex: true,
         gpu_handle: None,
     })
@@ -423,7 +420,7 @@ fn string_keyword(value: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
     #[test]
     fn complex_vector_to_value_treats_near_zero_imaginary_as_real() {
@@ -456,6 +453,24 @@ mod tests {
                 Complex::new(-2.0, 0.0),
                 Complex::new(5.0, 0.0)
             ]
+        );
+    }
+
+    #[test]
+    fn signal_complex_vector_parser_reads_typed_complex_integer_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![3, -2]),
+            IntegerStorage::I16(vec![4, -5]),
+        )
+        .unwrap();
+        let mut tensor = ComplexTensor::new(vec![(0.0, 0.0), (0.0, 0.0)], vec![1, 2]).unwrap();
+        tensor.integer_data = Some(storage);
+
+        let input = complex_tensor_to_complex_vector("test", "x", tensor).expect("vector");
+
+        assert_eq!(
+            input.data,
+            vec![Complex::new(3.0, 4.0), Complex::new(-2.0, -5.0)]
         );
     }
 

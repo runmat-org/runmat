@@ -356,11 +356,7 @@ async fn complex_matrix(value: Value) -> BuiltinResult<ComplexMatrixInput> {
             let rows = tensor.shape.first().copied().unwrap_or(0);
             let cols = tensor.shape.get(1).copied().unwrap_or(1);
             Ok(ComplexMatrixInput {
-                data: tensor
-                    .data
-                    .into_iter()
-                    .map(|(re, im)| Complex::new(re, im))
-                    .collect(),
+                data: tensor::complex_tensor_into_values_complex64(tensor),
                 rows,
                 cols,
                 is_complex: true,
@@ -417,11 +413,7 @@ fn roots_value_to_complex(value: Value) -> BuiltinResult<Vec<Complex<f64>>> {
             .into_iter()
             .map(|re| Complex::new(re, 0.0))
             .collect()),
-        Value::ComplexTensor(tensor) => Ok(tensor
-            .data
-            .into_iter()
-            .map(|(re, im)| Complex::new(re, im))
-            .collect()),
+        Value::ComplexTensor(tensor) => Ok(tensor::complex_tensor_into_values_complex64(tensor)),
         Value::Num(n) => Ok(vec![Complex::new(n, 0.0)]),
         other => Err(zplane_error(
             &ZPLANE_ERROR_INTERNAL,

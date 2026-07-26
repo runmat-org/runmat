@@ -422,19 +422,11 @@ fn convert_tensor(tensor: Tensor) -> BuiltinResult<ConvInput> {
 }
 
 fn convert_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<ConvInput> {
-    let ComplexTensor {
-        data,
-        shape: _,
-        rows,
-        cols,
-        ..
-    } = tensor;
+    let rows = tensor.rows;
+    let cols = tensor.cols;
+    let data = tensor::complex_tensor_into_values_complex64(tensor);
     let len = data.len();
     let hint = classify_orientation(rows, cols, len);
-    let data = data
-        .into_iter()
-        .map(|(re, im)| Complex::new(re, im))
-        .collect();
     Ok(ConvInput { data, len, hint })
 }
 
