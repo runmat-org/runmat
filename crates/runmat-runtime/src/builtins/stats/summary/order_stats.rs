@@ -241,8 +241,9 @@ fn parse_dim(name: &str, value: &Value) -> BuiltinResult<usize> {
 fn parse_probabilities(name: &str, value: Value, scale: f64) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_into_tensor_for(name, value)
         .map_err(|err| order_error(name, format!("{name}: {err}")))?;
-    let mut out = Vec::with_capacity(tensor.data.len());
-    for raw in tensor.data {
+    let values = tensor::tensor_into_values_f64(tensor);
+    let mut out = Vec::with_capacity(values.len());
+    for raw in values {
         let p = raw / scale;
         if p.is_nan() || !(0.0..=1.0).contains(&p) {
             return Err(order_error(
@@ -391,9 +392,10 @@ fn quantile_from_sorted(values: &[f64], p: f64) -> f64 {
 }
 
 fn quantile_tensor(args: QuantileArgs, name: &str) -> BuiltinResult<Value> {
-    let shape = tensor::default_shape_for(&args.input.shape, args.input.data.len());
+    let input_values = tensor::tensor_values_f64_cow(&args.input);
+    let shape = tensor::default_shape_for(&args.input.shape, input_values.len());
     if args.dim == 0 {
-        let values = sorted_slice(args.input.data.clone(), args.nanflag);
+        let values = sorted_slice(input_values.to_vec(), args.nanflag);
         let data = args
             .probabilities
             .iter()
@@ -425,7 +427,7 @@ fn quantile_tensor(args: QuantileArgs, name: &str) -> BuiltinResult<Value> {
             let mut slice = Vec::with_capacity(axis_len);
             for idx in 0..axis_len {
                 let src = prefix + idx * pre + suffix * pre * axis_len;
-                slice.push(args.input.data[src]);
+                slice.push(input_values[src]);
             }
             let slice = sorted_slice(slice, args.nanflag);
             for (p_idx, p) in args.probabilities.iter().enumerate() {
@@ -473,9 +475,10 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 }
 
 fn tiedrank_tensor(input: Tensor) -> BuiltinResult<(Value, Value)> {
-    let shape = tensor::default_shape_for(&input.shape, input.data.len());
+    let input_values = tensor::tensor_values_f64_cow(&input);
+    let shape = tensor::default_shape_for(&input.shape, input_values.len());
     if is_vector_shape(&shape) {
-        let (ranks, tieadj) = tiedrank_slice(&input.data);
+        let (ranks, tieadj) = tiedrank_slice(&input_values);
         let ranks = Tensor::new(ranks, shape)
             .map(tensor::tensor_into_value)
             .map_err(|err| order_error("tiedrank", format!("tiedrank: {err}")))?;
@@ -490,7 +493,7 @@ fn tiedrank_tensor(input: Tensor) -> BuiltinResult<(Value, Value)> {
     let mut tieadj_shape = padded_shape.clone();
     tieadj_shape[axis] = 1;
     let tieadj_len = tensor::element_count(&tieadj_shape);
-    let mut ranks = vec![f64::NAN; input.data.len()];
+    let mut ranks = vec![f64::NAN; input_values.len()];
     let mut tieadj = vec![0.0; tieadj_len];
     let pre: usize = padded_shape[..axis].iter().product();
     let post: usize = padded_shape[axis + 1..].iter().product();
@@ -499,7 +502,7 @@ fn tiedrank_tensor(input: Tensor) -> BuiltinResult<(Value, Value)> {
             let mut slice = Vec::with_capacity(axis_len);
             for idx in 0..axis_len {
                 let src = prefix + idx * pre + suffix * pre * axis_len;
-                slice.push(input.data[src]);
+                slice.push(input_values[src]);
             }
             let (slice_ranks, slice_tieadj) = tiedrank_slice(&slice);
             let tie_dst = prefix + suffix * pre;
@@ -589,6 +592,7 @@ pub mod tiedrank {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     #[test]
     fn quantile_vector_uses_linear_interpolation() {
@@ -673,6 +677,86 @@ mod tests {
         let x = Value::Tensor(Tensor::new(vec![3.0, 1.0, 1.0, 2.0, 2.0, 5.0], vec![3, 2]).unwrap());
         let _guard = crate::output_count::push_output_count(Some(2));
         let out = block_on(tiedrank::tiedrank_builtin(x)).unwrap();
+        match out {
+            Value::OutputList(values) => {
+                assert_eq!(values.len(), 2);
+                match &values[0] {
+                    Value::Tensor(tensor) => {
+                        assert_eq!(tensor.shape, vec![3, 2]);
+                        assert_eq!(tensor.data, vec![3.0, 1.5, 1.5, 1.5, 1.5, 3.0]);
+                    }
+                    other => panic!("expected rank tensor, got {other:?}"),
+                }
+                match &values[1] {
+                    Value::Tensor(tensor) => {
+                        assert_eq!(tensor.shape, vec![1, 2]);
+                        assert_eq!(tensor.data, vec![6.0, 6.0]);
+                    }
+                    other => panic!("expected tieadj tensor, got {other:?}"),
+                }
+            }
+            other => panic!("expected output list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quantile_typed_integer_input_and_probability_read_exact_storage() {
+        let mut x =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 9, 27]), vec![4, 1]).unwrap();
+        let mut p = Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap();
+        x.data.fill(0.0);
+        p.data.fill(0.5);
+
+        let out = block_on(quantile::quantile_builtin(
+            Value::Tensor(x),
+            vec![Value::Tensor(p), Value::from("all")],
+        ))
+        .unwrap();
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.data, vec![1.0, 27.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prctile_typed_integer_input_and_percentiles_read_exact_storage() {
+        let mut x = Tensor::new_integer(
+            IntegerStorage::I16(vec![10, 30, 50, 70, 20, 40, 60, 80]),
+            vec![4, 2],
+        )
+        .unwrap();
+        let mut p = Tensor::new_integer(IntegerStorage::U8(vec![25, 50, 75]), vec![1, 3]).unwrap();
+        x.data.fill(0.0);
+        p.data.fill(50.0);
+
+        let out = block_on(prctile::prctile_builtin(
+            Value::Tensor(x),
+            vec![Value::Tensor(p)],
+        ))
+        .unwrap();
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![3, 2]);
+                let expected = [25.0, 40.0, 55.0, 35.0, 50.0, 65.0];
+                for (actual, expect) in tensor.data.iter().zip(expected.iter()) {
+                    assert!((actual - expect).abs() < 1.0e-12, "{actual} vs {expect}");
+                }
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tiedrank_typed_integer_matrix_reads_exact_storage() {
+        let mut x =
+            Tensor::new_integer(IntegerStorage::I16(vec![3, 1, 1, 2, 2, 5]), vec![3, 2]).unwrap();
+        x.data.fill(0.0);
+
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let out = block_on(tiedrank::tiedrank_builtin(Value::Tensor(x))).unwrap();
         match out {
             Value::OutputList(values) => {
                 assert_eq!(values.len(), 2);
