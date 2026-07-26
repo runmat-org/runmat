@@ -441,7 +441,7 @@ fn integer_colon_value(
         }
         Value::Num(value) => float_to_integral_i128(*value)?,
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            float_to_integral_i128(tensor.data[0])?
+            float_to_integral_i128(tensor::tensor_value_f64(tensor, 0))?
         }
         Value::Bool(value) => i128::from(u8::from(*value)),
         Value::LogicalArray(array) if array.len() == 1 => i128::from(u8::from(array.data[0] != 0)),
@@ -789,7 +789,7 @@ fn tensor_scalar(name: &str, tensor: &Tensor) -> crate::BuiltinResult<f64> {
             &COLON_ERROR_NON_SCALAR_INPUT,
         ));
     }
-    ensure_finite(name, tensor.data[0])
+    ensure_finite(name, tensor::tensor_value_f64(tensor, 0))
 }
 
 fn logical_scalar(name: &str, logical: &LogicalArray) -> crate::BuiltinResult<f64> {
@@ -1091,6 +1091,51 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
             }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn colon_scalar_tensors_read_typed_integer_storage_exactly() {
+        let mut start = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993]),
+            vec![1, 1],
+        )
+        .unwrap();
+        start.data[0] = 1.0;
+        let mut stop = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_995]),
+            vec![1, 1],
+        )
+        .unwrap();
+        stop.data[0] = 3.0;
+
+        let result =
+            colon_builtin(Value::Tensor(start), Value::Tensor(stop), Vec::new()).expect("colon");
+        match result {
+            Value::Tensor(tensor) => assert_eq!(
+                tensor.integer_storage(),
+                Some(&runmat_builtins::IntegerStorage::U64(vec![
+                    9_007_199_254_740_993,
+                    9_007_199_254_740_994,
+                    9_007_199_254_740_995,
+                ]))
+            ),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn colon_double_path_scalar_tensor_reads_typed_integer_storage_exactly() {
+        let mut start =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
+        start.data[0] = 1.0;
+        let stop = Tensor::new(vec![6.0], vec![1, 1]).unwrap();
+
+        let result =
+            colon_builtin(Value::Tensor(start), Value::Tensor(stop), Vec::new()).expect("colon");
+        match result {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![4.0, 5.0, 6.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
