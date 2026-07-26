@@ -695,16 +695,11 @@ fn numeric_values(value: &Value, name: &str) -> BuiltinResult<Vec<Complex64>> {
         Value::Int(i) => vec![Complex64::new(i.to_f64(), 0.0)],
         Value::Bool(b) => vec![Complex64::new(if *b { 1.0 } else { 0.0 }, 0.0)],
         Value::Complex(re, im) => vec![Complex64::new(*re, *im)],
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|&re| Complex64::new(re, 0.0))
+        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor)
+            .into_iter()
+            .map(|re| Complex64::new(re, 0.0))
             .collect(),
-        Value::ComplexTensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|&(re, im)| Complex64::new(re, im))
-            .collect(),
+        Value::ComplexTensor(tensor) => complex_tensor_values(tensor),
         Value::LogicalArray(logical) => logical
             .data
             .iter()
@@ -719,6 +714,23 @@ fn numeric_values(value: &Value, name: &str) -> BuiltinResult<Vec<Complex64>> {
     };
     ensure_finite_coefficients(name, &values)?;
     Ok(values)
+}
+
+fn complex_tensor_values(tensor: &ComplexTensor) -> Vec<Complex64> {
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        let real = storage.real.exact_values();
+        let imag = storage.imag.exact_values();
+        return real
+            .into_iter()
+            .zip(imag)
+            .map(|(re, im)| Complex64::new(re.to_f64(), im.to_f64()))
+            .collect();
+    }
+    tensor
+        .data
+        .iter()
+        .map(|&(re, im)| Complex64::new(re, im))
+        .collect()
 }
 
 fn validate_ss_dimensions(
@@ -1203,7 +1215,7 @@ fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
     fn tf(num: Vec<f64>, den: Vec<f64>) -> Value {
         block_on(crate::call_builtin_async(
@@ -1241,6 +1253,43 @@ mod tests {
             Value::Tensor(tensor) => tensor,
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn numeric_values_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![-1, 0, 2]), vec![1, 3])
+            .expect("typed integer tensor");
+        tensor.data = vec![f64::NAN, f64::INFINITY, 1.5];
+
+        assert_eq!(
+            numeric_values(&Value::Tensor(tensor), "A").expect("numeric values"),
+            vec![
+                Complex64::new(-1.0, 0.0),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(2.0, 0.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn numeric_values_reads_complex_integer_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, -2]),
+            IntegerStorage::I16(vec![3, -4]),
+        )
+        .expect("complex integer storage");
+        let tensor = ComplexTensor {
+            data: vec![(f64::NAN, f64::NAN), (f64::INFINITY, 1.5)],
+            integer_data: Some(storage),
+            shape: vec![1, 2],
+            rows: 1,
+            cols: 2,
+        };
+
+        assert_eq!(
+            numeric_values(&Value::ComplexTensor(tensor), "A").expect("numeric values"),
+            vec![Complex64::new(1.0, 3.0), Complex64::new(-2.0, -4.0)]
+        );
     }
 
     #[test]
