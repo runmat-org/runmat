@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{
     call_function, initial_guess, lookup_option, option_f64, option_string, option_usize,
 };
@@ -703,7 +704,10 @@ async fn real_array(label: &str, value: Value) -> BuiltinResult<RealArray> {
         Value::Num(n) => finite_array(label, vec![n], vec![1, 1]),
         Value::Int(i) => finite_array(label, vec![i.to_f64()], vec![1, 1]),
         Value::Bool(flag) => finite_array(label, vec![if flag { 1.0 } else { 0.0 }], vec![1, 1]),
-        Value::Tensor(tensor) => finite_array(label, tensor.data, tensor.shape),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            finite_array(label, tensor::tensor_into_values_f64(tensor), shape)
+        }
         Value::LogicalArray(LogicalArray { data, shape }) => finite_array(
             label,
             data.into_iter()
@@ -920,10 +924,23 @@ fn gradient(jacobian: &[f64], residual: &[f64], n: usize) -> Vec<f64> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
     use std::sync::Arc;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    #[test]
+    fn lsqnonlin_real_array_reads_typed_integer_storage_exactly() {
+        let mut input =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).expect("integer");
+        input.data.fill(f64::NAN);
+
+        let parsed = block_on(real_array("x0", Value::Tensor(input))).expect("real array");
+
+        assert_eq!(parsed.values, vec![1.0, 2.0]);
+        assert_eq!(parsed.shape, vec![2, 1]);
     }
 
     #[test]
