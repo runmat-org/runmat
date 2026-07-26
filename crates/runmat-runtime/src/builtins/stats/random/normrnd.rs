@@ -195,22 +195,24 @@ async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<(f64, f64, Vec<usi
             "normrnd: requires at least two arguments (mu, sigma)",
         ));
     }
-    let mu = scalar_f64(&args[0])?;
-    let sigma = scalar_f64(&args[1])?;
+    let mu = scalar_f64(&args[0]).await?;
+    let sigma = scalar_f64(&args[1]).await?;
     let shape = parse_shape_args(&args[2..]).await?;
     Ok((mu, sigma, shape))
 }
 
-fn scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
-    match value {
-        Value::Num(v) => Ok(*v),
-        Value::Int(i) => Ok(i.to_f64()),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        other => Err(normrnd_error_with(
-            &NORMRND_ERROR_INVALID_ARGUMENT,
-            format!("normrnd: expected scalar parameter, got {other:?}"),
-        )),
-    }
+async fn scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
+    tensor::scalar_f64_from_value_async(value)
+        .await
+        .map_err(|err| {
+            normrnd_error_with(&NORMRND_ERROR_INVALID_ARGUMENT, format!("normrnd: {err}"))
+        })?
+        .ok_or_else(|| {
+            normrnd_error_with(
+                &NORMRND_ERROR_INVALID_ARGUMENT,
+                format!("normrnd: expected scalar parameter, got {value:?}"),
+            )
+        })
 }
 
 async fn parse_shape_args(rest: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
@@ -266,10 +268,17 @@ mod tests {
     use super::*;
     use crate::builtins::common::random;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn reset() {
         runmat_accelerate_api::clear_provider();
         random::reset_rng();
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -311,6 +320,25 @@ mod tests {
         let result = block_on(normrnd_builtin(args)).expect("normrnd");
         match result {
             Value::Tensor(t) => assert_eq!(t.shape, vec![3, 4]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn normrnd_reads_typed_integer_parameters_and_size_exactly() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset();
+        let mu = poisoned_int_tensor(IntegerStorage::I16(vec![5]), vec![1, 1]);
+        let sigma = poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]);
+        let size = poisoned_int_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
+        let result = block_on(normrnd_builtin(vec![
+            Value::Tensor(mu),
+            Value::Tensor(sigma),
+            Value::Tensor(size),
+        ]))
+        .expect("normrnd");
+        match result {
+            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 3]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }

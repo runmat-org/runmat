@@ -171,21 +171,21 @@ async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<(f64, Vec<usize>)>
             "exprnd: requires at least one argument (mu)",
         ));
     }
-    let mu = scalar_f64(&args[0])?;
+    let mu = scalar_f64(&args[0]).await?;
     let shape = parse_shape_args(&args[1..]).await?;
     Ok((mu, shape))
 }
 
-fn scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
-    match value {
-        Value::Num(v) => Ok(*v),
-        Value::Int(i) => Ok(i.to_f64()),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        other => Err(exprnd_error_with(
-            &EXPRND_ERROR_INVALID_ARGUMENT,
-            format!("exprnd: expected scalar parameter, got {other:?}"),
-        )),
-    }
+async fn scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
+    tensor::scalar_f64_from_value_async(value)
+        .await
+        .map_err(|err| exprnd_error_with(&EXPRND_ERROR_INVALID_ARGUMENT, format!("exprnd: {err}")))?
+        .ok_or_else(|| {
+            exprnd_error_with(
+                &EXPRND_ERROR_INVALID_ARGUMENT,
+                format!("exprnd: expected scalar parameter, got {value:?}"),
+            )
+        })
 }
 
 async fn parse_shape_args(rest: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
@@ -239,10 +239,17 @@ mod tests {
     use super::*;
     use crate::builtins::common::random;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn reset() {
         runmat_accelerate_api::clear_provider();
         random::reset_rng();
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -284,6 +291,23 @@ mod tests {
         let result = block_on(exprnd_builtin(args)).expect("exprnd");
         match result {
             Value::Tensor(t) => assert_eq!(t.shape, vec![3, 4]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn exprnd_reads_typed_integer_mu_and_size_exactly() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset();
+        let mu = poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]);
+        let size = poisoned_int_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
+        let result =
+            block_on(exprnd_builtin(vec![Value::Tensor(mu), Value::Tensor(size)])).expect("exprnd");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 3]);
+                assert!(t.data.iter().all(|&v| v > 0.0));
+            }
             other => panic!("expected tensor, got {other:?}"),
         }
     }

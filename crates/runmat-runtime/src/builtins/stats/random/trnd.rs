@@ -130,6 +130,8 @@ async fn parse_args(args: Vec<Value>) -> BuiltinResult<(Tensor, Vec<usize>)> {
         .map_err(|err| trnd_error(&ERROR_INVALID_ARGUMENT, format!("trnd: {err}")))?;
     let nu = tensor::value_into_tensor_for(BUILTIN_NAME, nu_value)
         .map_err(|err| trnd_error(&ERROR_INVALID_ARGUMENT, format!("trnd: {err}")))?;
+    let nu = tensor::integer_tensor_to_f64(nu)
+        .map_err(|err| trnd_error(&ERROR_INVALID_ARGUMENT, format!("trnd: {err}")))?;
     if nu.data.iter().any(|value| value.is_nan() || *value <= 0.0) {
         return Err(trnd_error(
             &ERROR_INVALID_ARGUMENT,
@@ -195,10 +197,17 @@ mod tests {
     use super::*;
     use crate::builtins::common::random;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn reset() {
         runmat_accelerate_api::clear_provider();
         random::reset_rng();
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -252,6 +261,30 @@ mod tests {
         ]))
         .expect_err("mismatched shape should fail");
         assert_eq!(err.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn trnd_reads_typed_integer_nu_and_size_exactly() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset();
+        let nu = poisoned_int_tensor(IntegerStorage::U16(vec![5, 6, 7]), vec![3, 1]);
+        let out = block_on(trnd_builtin(vec![Value::Tensor(nu)])).expect("trnd");
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![3, 1]);
+                assert!(tensor.data.iter().all(|value| value.is_finite()));
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+
+        let nu = poisoned_int_tensor(IntegerStorage::I16(vec![5]), vec![1, 1]);
+        let size = poisoned_int_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
+        let out =
+            block_on(trnd_builtin(vec![Value::Tensor(nu), Value::Tensor(size)])).expect("trnd");
+        match out {
+            Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 3]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
     }
 
     #[test]
