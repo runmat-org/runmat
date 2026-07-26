@@ -625,12 +625,13 @@ impl RowMajorMatrix {
         }
         let rows = tensor.rows();
         let cols = tensor.cols();
+        let values = tensor::tensor_values_f64_cow(tensor);
         let mut data = vec![Complex64::new(0.0, 0.0); rows.saturating_mul(cols)];
         for col in 0..cols {
             for row in 0..rows {
                 let idx_col_major = row + col * rows;
                 let idx_row_major = row * cols + col;
-                data[idx_row_major] = Complex64::new(tensor.data[idx_col_major], 0.0);
+                data[idx_row_major] = Complex64::new(values[idx_col_major], 0.0);
             }
         }
         Ok(Self { rows, cols, data })
@@ -677,7 +678,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor as CMatrix, ResolveContext, Tensor as Matrix, Type};
+    use runmat_builtins::{
+        ComplexTensor as CMatrix, IntegerStorage, ResolveContext, Tensor as Matrix, Type,
+    };
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -737,6 +740,26 @@ pub(crate) mod tests {
         assert!(codes.contains(&"RM.LU.INVALID_ARGUMENT"));
         assert!(codes.contains(&"RM.LU.INVALID_INPUT"));
         assert!(codes.contains(&"RM.LU.INTERNAL"));
+    }
+
+    #[test]
+    fn lu_matrix_conversion_reads_typed_integer_storage_exactly() {
+        let mut tensor = Matrix::new_integer(IntegerStorage::I16(vec![4, 6, 3, 3]), vec![2, 2])
+            .expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+
+        let matrix = RowMajorMatrix::from_tensor(&tensor).expect("matrix");
+        assert_eq!(matrix.rows, 2);
+        assert_eq!(matrix.cols, 2);
+        assert_eq!(
+            matrix.data,
+            vec![
+                Complex64::new(4.0, 0.0),
+                Complex64::new(3.0, 0.0),
+                Complex64::new(6.0, 0.0),
+                Complex64::new(3.0, 0.0),
+            ]
+        );
     }
 
     fn row_major_matmul(a: &RowMajorMatrix, b: &RowMajorMatrix) -> RowMajorMatrix {

@@ -531,12 +531,13 @@ impl RowMajorMatrix {
         }
         let rows = tensor.rows();
         let cols = tensor.cols();
+        let values = tensor::tensor_values_f64_cow(tensor);
         let mut data = vec![Complex64::new(0.0, 0.0); rows.saturating_mul(cols)];
         for col in 0..cols {
             for row in 0..rows {
                 let idx_col_major = row + col * rows;
                 let idx_row_major = row * cols + col;
-                data[idx_row_major] = Complex64::new(tensor.data[idx_col_major], 0.0);
+                data[idx_row_major] = Complex64::new(values[idx_col_major], 0.0);
             }
         }
         Ok(Self { rows, cols, data })
@@ -585,7 +586,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LogicalArray, ResolveContext, Tensor as Matrix, Type};
+    use runmat_builtins::{IntegerStorage, LogicalArray, ResolveContext, Tensor as Matrix, Type};
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -635,6 +636,26 @@ pub(crate) mod tests {
         assert!(codes.contains(&"RM.CHOL.INVALID_INPUT"));
         assert!(codes.contains(&"RM.CHOL.NOT_POSITIVE_DEFINITE"));
         assert!(codes.contains(&"RM.CHOL.INTERNAL"));
+    }
+
+    #[test]
+    fn chol_matrix_conversion_reads_typed_integer_storage_exactly() {
+        let mut tensor = Matrix::new_integer(IntegerStorage::I16(vec![4, 2, 2, 3]), vec![2, 2])
+            .expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+
+        let matrix = RowMajorMatrix::from_tensor(&tensor, "chol").expect("matrix");
+        assert_eq!(matrix.rows, 2);
+        assert_eq!(matrix.cols, 2);
+        assert_eq!(
+            matrix.data,
+            vec![
+                Complex64::new(4.0, 0.0),
+                Complex64::new(2.0, 0.0),
+                Complex64::new(2.0, 0.0),
+                Complex64::new(3.0, 0.0),
+            ]
+        );
     }
 
     fn reconstruct_from_upper(matrix: &Matrix) -> Matrix {

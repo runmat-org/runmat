@@ -903,11 +903,12 @@ impl ColMajorMatrix {
         }
         let rows = tensor.rows();
         let cols = tensor.cols();
+        let values = tensor::tensor_values_f64_cow(tensor);
         let mut data = vec![Complex64::new(0.0, 0.0); rows.saturating_mul(cols)];
         for col in 0..cols {
             for row in 0..rows {
                 let idx = row + col * rows;
-                data[idx] = Complex64::new(tensor.data[idx], 0.0);
+                data[idx] = Complex64::new(values[idx], 0.0);
             }
         }
         Ok(Self { rows, cols, data })
@@ -1030,7 +1031,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Tensor as Matrix, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Tensor as Matrix, Type};
 
     fn tensor_from_value(value: Value) -> Matrix {
         match value {
@@ -1088,6 +1089,29 @@ pub(crate) mod tests {
         assert!(codes.contains(&"RM.QR.INVALID_ARGUMENT"));
         assert!(codes.contains(&"RM.QR.INVALID_INPUT"));
         assert!(codes.contains(&"RM.QR.INTERNAL"));
+    }
+
+    #[test]
+    fn qr_matrix_conversion_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Matrix::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![3, 2])
+                .expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+
+        let matrix = ColMajorMatrix::from_tensor(&tensor).expect("matrix");
+        assert_eq!(matrix.rows, 3);
+        assert_eq!(matrix.cols, 2);
+        assert_eq!(
+            matrix.data,
+            vec![
+                Complex64::new(1.0, 0.0),
+                Complex64::new(2.0, 0.0),
+                Complex64::new(3.0, 0.0),
+                Complex64::new(4.0, 0.0),
+                Complex64::new(5.0, 0.0),
+                Complex64::new(6.0, 0.0),
+            ]
+        );
     }
 
     #[test]

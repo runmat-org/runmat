@@ -426,7 +426,8 @@ fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<f64>> {
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
-    Ok(DMatrix::from_column_slice(rows, cols, &tensor.data))
+    let values = tensor::tensor_values_f64_cow(tensor);
+    Ok(DMatrix::from_column_slice(rows, cols, &values))
 }
 
 fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Complex64>> {
@@ -852,7 +853,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, LogicalArray, ResolveContext, Type};
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
     }
@@ -905,6 +906,24 @@ pub(crate) mod tests {
         assert!(codes.contains(&"RM.SVD.INVALID_ARGUMENT"));
         assert!(codes.contains(&"RM.SVD.INVALID_INPUT"));
         assert!(codes.contains(&"RM.SVD.INTERNAL"));
+    }
+
+    #[test]
+    fn svd_matrix_conversion_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![3, 2])
+                .expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+
+        let matrix = tensor_to_matrix(&tensor).expect("matrix");
+        assert_eq!(matrix.nrows(), 3);
+        assert_eq!(matrix.ncols(), 2);
+        assert_eq!(matrix[(0, 0)], 1.0);
+        assert_eq!(matrix[(1, 0)], 2.0);
+        assert_eq!(matrix[(2, 0)], 3.0);
+        assert_eq!(matrix[(0, 1)], 4.0);
+        assert_eq!(matrix[(1, 1)], 5.0);
+        assert_eq!(matrix[(2, 1)], 6.0);
     }
 
     fn dmatrix_from_value(value: Value) -> DMatrix<f64> {
