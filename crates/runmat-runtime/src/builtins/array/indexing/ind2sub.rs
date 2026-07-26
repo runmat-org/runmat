@@ -306,10 +306,11 @@ fn compute_subscripts(
         return Err(ind2sub_error("Size vector must have at least one element."));
     }
 
-    let len = indices.data.len();
+    let values = tensor::tensor_values_f64_cow(indices);
+    let len = values.len();
     let mut outputs: Vec<Vec<f64>> = dims.iter().map(|_| Vec::with_capacity(len)).collect();
 
-    for &value in &indices.data {
+    for &value in values.iter() {
         let idx = coerce_linear_index(value, total)?;
         let zero_based = idx - 1;
         for (dim_index, (&dim, &stride)) in dims.iter().zip(strides.iter()).enumerate() {
@@ -371,7 +372,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Tensor, Type, Value};
 
     fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
         block_on(super::ind2sub_builtin(dims_val, indices_val))
@@ -490,6 +491,35 @@ pub(crate) mod tests {
         } else {
             panic!("expected cell output");
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn ind2sub_linear_indices_read_typed_integer_storage_exactly() {
+        let dims = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
+        let mut idx =
+            Tensor::new_integer(IntegerStorage::U16(vec![3, 11]), vec![1, 2]).expect("indices");
+        idx.data.fill(f64::NAN);
+
+        let result =
+            ind2sub_builtin(Value::Tensor(dims), Value::Tensor(idx)).expect("ind2sub result");
+        let Value::Cell(cell) = result else {
+            panic!("expected cell output");
+        };
+        let values = cell_to_vec(&cell);
+        assert_eq!(values.len(), 3);
+        assert_eq!(
+            values[0],
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap())
+        );
+        assert_eq!(
+            values[1],
+            Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap())
+        );
+        assert_eq!(
+            values[2],
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
