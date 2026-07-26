@@ -2413,13 +2413,22 @@ fn parse_shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(t) => {
             let mut out = Vec::with_capacity(t.data.len());
-            for v in &t.data {
-                if !v.is_finite() || *v < 0.0 {
-                    return Err(data_error(
-                        "shape dimensions must be non-negative finite numbers",
-                    ));
+            if let Some(storage) = t.integer_storage() {
+                for index in 0..t.data.len() {
+                    let value = storage.value_at(index).expect("integer storage length");
+                    out.push(value.try_to_usize().ok_or_else(|| {
+                        data_error("shape dimensions must be non-negative integers")
+                    })?);
                 }
-                out.push(*v as usize);
+            } else {
+                for v in &t.data {
+                    if !v.is_finite() || *v < 0.0 {
+                        return Err(data_error(
+                            "shape dimensions must be non-negative finite numbers",
+                        ));
+                    }
+                    out.push(*v as usize);
+                }
             }
             Ok(out)
         }
@@ -2800,15 +2809,39 @@ fn parse_dim_range(value: &Value, extent: usize) -> BuiltinResult<DimRange> {
             })
         }
         Value::Tensor(t) if t.data.len() == 2 => {
-            let start = (t.data[0] as isize) - 1;
-            let end_inclusive = (t.data[1] as isize) - 1;
-            if start < 0 || end_inclusive < start || end_inclusive as usize >= extent {
-                return Err(data_error("INVALID_SLICE: range out of bounds"));
+            if let Some(storage) = t.integer_storage() {
+                let Some(start) = storage
+                    .value_at(0)
+                    .and_then(|value| value.try_to_usize())
+                    .and_then(|index| index.checked_sub(1))
+                else {
+                    return Err(data_error("INVALID_SLICE: range out of bounds"));
+                };
+                let Some(end_inclusive) = storage
+                    .value_at(1)
+                    .and_then(|value| value.try_to_usize())
+                    .and_then(|index| index.checked_sub(1))
+                else {
+                    return Err(data_error("INVALID_SLICE: range out of bounds"));
+                };
+                if end_inclusive < start || end_inclusive >= extent {
+                    return Err(data_error("INVALID_SLICE: range out of bounds"));
+                }
+                Ok(DimRange {
+                    start,
+                    end: end_inclusive + 1,
+                })
+            } else {
+                let start = (t.data[0] as isize) - 1;
+                let end_inclusive = (t.data[1] as isize) - 1;
+                if start < 0 || end_inclusive < start || end_inclusive as usize >= extent {
+                    return Err(data_error("INVALID_SLICE: range out of bounds"));
+                }
+                Ok(DimRange {
+                    start: start as usize,
+                    end: end_inclusive as usize + 1,
+                })
             }
-            Ok(DimRange {
-                start: start as usize,
-                end: end_inclusive as usize + 1,
-            })
         }
         _ => Err(data_error(
             "INVALID_SLICE: dimension must be ':', scalar index, or [start end] range",
@@ -3094,6 +3127,40 @@ mod tests {
             _ => assert!(result.is_err()),
         }
         assert!(parse_dim_range(&Value::Int(IntValue::I64(-1)), extent).is_err());
+    }
+
+    #[test]
+    fn data_shape_and_slice_parsers_read_typed_integer_storage_exactly() {
+        let mut shape =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2, 3]), vec![1, 2])
+                .expect("shape");
+        shape.data = vec![99.0, 99.0];
+        assert_eq!(
+            parse_shape_from_value(&Value::Tensor(shape)).expect("shape"),
+            vec![2, 3]
+        );
+
+        let mut negative =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
+                .expect("shape");
+        negative.data = vec![2.0];
+        assert!(parse_shape_from_value(&Value::Tensor(negative)).is_err());
+
+        let mut range =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2, 4]), vec![1, 2])
+                .expect("range");
+        range.data = vec![99.0, 99.0];
+        let parsed = parse_dim_range(&Value::Tensor(range), 5).expect("range");
+        assert_eq!(parsed.start, 1);
+        assert_eq!(parsed.end, 4);
+
+        let mut invalid = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("range");
+        invalid.data = vec![1.0, 1.0];
+        assert!(parse_dim_range(&Value::Tensor(invalid), 5).is_err());
     }
     use crate::dispatcher::call_builtin;
     use async_trait::async_trait;
