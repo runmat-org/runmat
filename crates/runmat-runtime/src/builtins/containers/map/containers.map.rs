@@ -1483,7 +1483,7 @@ async fn flatten_keys(
                     builtin,
                 ));
             }
-            Ok(t.data.iter().map(|&v| Value::Num(v)).collect())
+            Ok(tensor_elements_to_values(t))
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => {
             Ok(vec![value.clone()])
@@ -1526,7 +1526,7 @@ async fn flatten_values(value: &Value, builtin: &'static str) -> BuiltinResult<V
                     builtin,
                 ));
             }
-            Ok(t.data.iter().map(|&v| Value::Num(v)).collect())
+            Ok(tensor_elements_to_values(t))
         }
         _ => Ok(vec![value.clone()]),
     }
@@ -1557,6 +1557,13 @@ fn is_vector_shape(shape: &[usize]) -> bool {
         2 => shape[0] == 1 || shape[1] == 1,
         _ => false,
     }
+}
+
+fn tensor_elements_to_values(tensor: &Tensor) -> Vec<Value> {
+    if let Some(storage) = tensor.integer_storage() {
+        return storage.exact_values().into_iter().map(Value::Int).collect();
+    }
+    tensor.data.iter().map(|&value| Value::Num(value)).collect()
 }
 
 fn canonicalize_key(
@@ -1764,14 +1771,21 @@ fn normalize_numeric_value(value: Value, builtin: &'static str) -> BuiltinResult
 fn normalize_logical_value(value: Value, builtin: &'static str) -> BuiltinResult<Value> {
     match value {
         Value::Bool(_) | Value::LogicalArray(_) => Ok(value),
-        Value::Int(i) => Ok(Value::Bool(i.to_i64() != 0)),
+        Value::Int(i) => Ok(Value::Bool(!i.is_zero())),
         Value::Num(n) => Ok(Value::Bool(n != 0.0)),
         Value::Tensor(t) => {
-            let flags: Vec<u8> = t
-                .data
-                .iter()
-                .map(|&v| if v != 0.0 { 1 } else { 0 })
-                .collect();
+            let flags: Vec<u8> = if let Some(storage) = t.integer_storage() {
+                storage
+                    .exact_values()
+                    .into_iter()
+                    .map(|value| if value.is_zero() { 0 } else { 1 })
+                    .collect()
+            } else {
+                t.data
+                    .iter()
+                    .map(|&v| if v != 0.0 { 1 } else { 0 })
+                    .collect()
+            };
             let logical = LogicalArray::new(flags, t.shape.clone())
                 .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))?;
             Ok(Value::LogicalArray(logical))
@@ -1927,7 +1941,7 @@ fn bool_from_value(value: &Value, context: &str, builtin: &'static str) -> Built
     match value {
         Value::Bool(b) => Ok(*b),
         Value::LogicalArray(arr) if arr.data.len() == 1 => Ok(arr.data[0] != 0),
-        Value::Int(i) => Ok(i.to_i64() != 0),
+        Value::Int(i) => Ok(!i.is_zero()),
         Value::Num(n) => Ok(*n != 0.0),
         Value::Tensor(t) if t.data.len() == 1 => {
             if let Some(storage) = t.integer_storage() {
@@ -2043,7 +2057,7 @@ async fn collect_key_spec(
         }),
         Value::Tensor(t) if key_type != KeyType::Char && key_type != KeyType::String => {
             Ok(KeyCollection {
-                values: t.data.iter().map(|&n| Value::Num(n)).collect(),
+                values: tensor_elements_to_values(t),
                 shape: t.shape.clone(),
             })
         }
@@ -2599,6 +2613,69 @@ pub(crate) mod tests {
             bool_from_value(&Value::Tensor(logical_tensor), "key", BUILTIN_CONSTRUCTOR,)
                 .expect("logical key")
         );
+    }
+
+    #[test]
+    fn vector_map_keys_and_values_read_typed_integer_storage_exactly() {
+        let mut keys = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("uint64 keys");
+        keys.data = vec![42.0, 42.0];
+        let mut values =
+            Tensor::new_integer(IntegerStorage::I32(vec![11, 22]), vec![1, 2]).expect("values");
+        values.data = vec![0.0, 0.0];
+
+        let map = containers_map_builtin(vec![
+            Value::Tensor(keys),
+            Value::Tensor(values),
+            Value::from("KeyType"),
+            Value::from("uint64"),
+        ])
+        .expect("map");
+
+        let mut payload = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("payload");
+        payload.data = vec![42.0, 42.0];
+        let key_payload = crate::make_cell(vec![Value::Tensor(payload)], 1, 1).unwrap();
+        let result = containers_map_subsref(map, "()".to_string(), key_payload).expect("lookup");
+        match result {
+            Value::Cell(cell) => {
+                assert_eq!((cell.rows, cell.cols), (1, 2));
+                assert_eq!(cell.data[0], Value::Int(IntValue::I32(11)));
+                assert_eq!(cell.data[1], Value::Int(IntValue::I32(22)));
+            }
+            other => panic!("expected cell lookup result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn value_type_logical_reads_typed_integer_tensor_storage_exactly() {
+        let keys = crate::make_cell(vec![Value::from("mask")], 1, 1).unwrap();
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
+            .expect("integer logical source");
+        tensor.data = vec![7.0, 0.0];
+        let values = crate::make_cell(vec![Value::Tensor(tensor)], 1, 1).unwrap();
+        let map = containers_map_builtin(vec![
+            keys,
+            values,
+            Value::from("ValueType"),
+            Value::from("logical"),
+        ])
+        .expect("map");
+        let payload = crate::make_cell(vec![Value::from("mask")], 1, 1).unwrap();
+        let value = containers_map_subsref(map, "()".to_string(), payload).expect("lookup");
+        match value {
+            Value::LogicalArray(arr) => {
+                assert_eq!(arr.shape, vec![1, 2]);
+                assert_eq!(arr.data, vec![0, 1]);
+            }
+            other => panic!("expected logical array, got {:?}", other),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
