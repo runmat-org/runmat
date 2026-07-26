@@ -642,7 +642,7 @@ async fn bound_vector(
         Value::Num(value) => vec![value],
         Value::Int(value) => vec![value.to_f64()],
         Value::Bool(flag) => vec![if flag { 1.0 } else { 0.0 }],
-        Value::Tensor(Tensor { data, .. }) => data,
+        Value::Tensor(tensor) => tensor::tensor_into_values_f64(tensor),
         Value::LogicalArray(LogicalArray { data, .. }) => data
             .into_iter()
             .map(|flag| if flag == 0 { 0.0 } else { 1.0 })
@@ -815,6 +815,23 @@ mod tests {
 
         assert_eq!(parsed.values, vec![1.0, 2.0, 3.0]);
         assert_eq!(parsed.shape, vec![1, 3]);
+    }
+
+    #[test]
+    fn lsqcurvefit_bound_vector_reads_typed_integer_storage_exactly() {
+        let mut input =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1, 2]), vec![1, 2]).expect("integer");
+        input.data.fill(f64::NAN);
+
+        let parsed = block_on(bound_vector(
+            "lower bounds",
+            Value::Tensor(input),
+            2,
+            f64::NEG_INFINITY,
+        ))
+        .expect("bounds");
+
+        assert_eq!(parsed, vec![-1.0, 2.0]);
     }
 
     #[test]
