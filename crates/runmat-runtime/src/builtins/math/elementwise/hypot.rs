@@ -200,9 +200,11 @@ fn compute_hypot_tensor(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
             .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
+    let a_data = tensor::tensor_values_f64_cow(a);
+    let b_data = tensor::tensor_values_f64_cow(b);
     let mut result = vec![0.0f64; plan.len()];
     for (out_idx, idx_a, idx_b) in plan.iter() {
-        result[out_idx] = a.data[idx_a].hypot(b.data[idx_b]);
+        result[out_idx] = a_data[idx_a].hypot(b_data[idx_b]);
     }
     let tensor = Tensor::new(result, plan.output_shape().to_vec())
         .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e))?;
@@ -405,6 +407,34 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn hypot_typed_integer_tensor_broadcast_reads_integer_storage() {
+        let mut matrix =
+            Tensor::new_integer(IntegerStorage::I16(vec![3, 4, 5, 12]), vec![2, 2]).unwrap();
+        let mut row = Tensor::new_integer(IntegerStorage::I16(vec![4, 3]), vec![1, 2]).unwrap();
+        matrix.data.fill(0.0);
+        row.data.fill(0.0);
+
+        let result =
+            hypot_builtin(Value::Tensor(matrix), Value::Tensor(row)).expect("integer hypot");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                let expected = [
+                    3.0_f64.hypot(4.0),
+                    4.0_f64.hypot(4.0),
+                    5.0_f64.hypot(3.0),
+                    12.0_f64.hypot(3.0),
+                ];
+                for (actual, expect) in t.data.iter().zip(expected.iter()) {
+                    assert!((actual - expect).abs() < 1e-12, "{actual} vs {expect}");
+                }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn hypot_complex_scalars() {
         let left = (3.0, 4.0);
         let right = (-1.0, 2.0);
@@ -587,6 +617,56 @@ pub(crate) mod tests {
             let expected: Vec<f64> = lhs.data.iter().map(|&x| x.hypot(4.0)).collect();
             for (actual, expect) in gathered.data.iter().zip(expected.iter()) {
                 assert!((actual - expect).abs() < 1e-12);
+            }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn hypot_gpu_left_host_integer_right_fallback_reads_integer_storage() {
+        test_support::with_test_provider(|provider| {
+            let lhs = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &lhs.data,
+                    shape: &lhs.shape,
+                })
+                .expect("upload");
+            let mut rhs = Tensor::new_integer(IntegerStorage::I16(vec![4, 3]), vec![2, 1]).unwrap();
+            rhs.data.fill(0.0);
+
+            let result = hypot_builtin(Value::GpuTensor(handle), Value::Tensor(rhs))
+                .expect("gpu + integer host hypot");
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 1]);
+            let expected = [5.0, 5.0];
+            for (actual, expect) in gathered.data.iter().zip(expected.iter()) {
+                assert!((actual - expect).abs() < 1e-12, "{actual} vs {expect}");
+            }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn hypot_host_integer_left_gpu_right_fallback_reads_integer_storage() {
+        test_support::with_test_provider(|provider| {
+            let rhs = Tensor::new(vec![4.0, 3.0], vec![2, 1]).unwrap();
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &rhs.data,
+                    shape: &rhs.shape,
+                })
+                .expect("upload");
+            let mut lhs = Tensor::new_integer(IntegerStorage::I16(vec![3, 4]), vec![2, 1]).unwrap();
+            lhs.data.fill(0.0);
+
+            let result = hypot_builtin(Value::Tensor(lhs), Value::GpuTensor(handle))
+                .expect("integer host + gpu hypot");
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 1]);
+            let expected = [5.0, 5.0];
+            for (actual, expect) in gathered.data.iter().zip(expected.iter()) {
+                assert!((actual - expect).abs() < 1e-12, "{actual} vs {expect}");
             }
         });
     }
