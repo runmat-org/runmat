@@ -2067,10 +2067,10 @@ async fn datenum_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                 if let Ok(datevec) = tensor_from_datevec_like(args[0].clone(), "datenum") {
                     datenum_from_datevec_tensor(&datevec, "datenum")?
                 } else {
-                    tensor_from_numeric(args[0].clone(), "datenum")?
+                    serial_tensor_from_value(args[0].clone(), "datenum")?
                 }
             }
-            _ => tensor_from_numeric(args[0].clone(), "datenum")?,
+            _ => serial_tensor_from_value(args[0].clone(), "datenum")?,
         },
         3..=6 => {
             let datetime = build_from_components(args, None)?;
@@ -3922,6 +3922,37 @@ mod tests {
             futures::executor::block_on(datenum_builtin(vec![Value::Tensor(typed_date_vector)]))
                 .expect("datenum typed date vector");
         assert_eq!(typed_round_trip, Value::Num(serial));
+    }
+
+    #[test]
+    fn datenum_typed_integer_serials_read_exact_storage() {
+        let serial = serial_for_date(2024, 3, 14).floor() as u32;
+        let mut scalar = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U32(vec![serial]),
+            vec![1, 1],
+        )
+        .expect("typed serial");
+        scalar.data.fill(f64::NAN);
+        let scalar_out = futures::executor::block_on(datenum_builtin(vec![Value::Tensor(scalar)]))
+            .expect("datenum typed scalar serial");
+        assert_eq!(scalar_out, Value::Num(f64::from(serial)));
+
+        let mut vector = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U32(vec![serial, serial + 1]),
+            vec![1, 2],
+        )
+        .expect("typed serial vector");
+        vector.data.fill(f64::NAN);
+        let vector_out = futures::executor::block_on(datenum_builtin(vec![Value::Tensor(vector)]))
+            .expect("datenum typed vector serial");
+        let Value::Tensor(vector_out) = vector_out else {
+            panic!("expected datenum vector tensor");
+        };
+        assert_eq!(vector_out.shape, vec![1, 2]);
+        assert_eq!(
+            vector_out.data,
+            vec![f64::from(serial), f64::from(serial + 1)]
+        );
     }
 
     #[test]
