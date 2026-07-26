@@ -410,11 +410,22 @@ fn parse_index_component(value: &Value) -> BuiltinResult<IndexComponent> {
         Value::String(s) => parse_index_text(s.trim()),
         Value::StringArray(sa) if sa.data.len() == 1 => parse_index_text(sa.data[0].trim()),
         Value::Tensor(tensor) if tensor.data.len() > 1 => {
-            let indices = tensor
-                .data
-                .iter()
-                .map(|&value| parse_positive_integer(value))
-                .collect::<BuiltinResult<Vec<_>>>()?;
+            let indices = if let Some(indices) =
+                tensor::integer_tensor_dimension_vector(tensor, "getfield", false)
+            {
+                indices.map_err(|message| {
+                    getfield_error_with_message(
+                        format!("getfield: invalid index element ({message})"),
+                        &GETFIELD_ERROR_INDEX_INVALID,
+                    )
+                })?
+            } else {
+                tensor
+                    .data
+                    .iter()
+                    .map(|&value| parse_positive_integer(value))
+                    .collect::<BuiltinResult<Vec<_>>>()?
+            };
             Ok(IndexComponent::Vector(indices, tensor.shape.clone()))
         }
         _ => {
@@ -461,10 +472,30 @@ fn parse_index_text(text: &str) -> BuiltinResult<IndexComponent> {
 }
 
 fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
+    if let Value::Int(i) = value {
+        return i.try_to_usize().filter(|index| *index >= 1).ok_or_else(|| {
+            getfield_error_with_message("index must be >= 1", &GETFIELD_ERROR_INDEX_INVALID)
+        });
+    }
+    if let Value::Tensor(t) = value {
+        if t.data.len() == 1 {
+            if let Some(storage) = t.integer_storage() {
+                return storage
+                    .value_at(0)
+                    .and_then(|value| value.try_to_usize())
+                    .filter(|index| *index >= 1)
+                    .ok_or_else(|| {
+                        getfield_error_with_message(
+                            "index must be >= 1",
+                            &GETFIELD_ERROR_INDEX_INVALID,
+                        )
+                    });
+            }
+        }
+    }
     let number = match value {
-        Value::Int(i) => i.to_i64() as f64,
         Value::Num(n) => *n,
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if t.data.len() == 1 => tensor::tensor_values_f64(t)[0],
         _ => {
             let repr = format!("{value:?}");
             return Err(getfield_error_with_message(
@@ -1134,8 +1165,8 @@ fn is_struct_array(cell: &CellArray) -> bool {
 pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{
-        Access, CellArray, CharArray, ClassDef, ComplexTensor, HandleRef, IntValue, Listener,
-        MException, ObjectInstance, PropertyDef, StructValue,
+        Access, CellArray, CharArray, ClassDef, ComplexTensor, HandleRef, IntValue, IntegerStorage,
+        Listener, MException, ObjectInstance, PropertyDef, StructValue,
     };
 
     #[cfg(feature = "wgpu")]
@@ -1199,6 +1230,60 @@ pub(crate) mod tests {
         )
         .expect("struct array element");
         assert_eq!(result, Value::from("Grace"));
+    }
+
+    #[test]
+    fn getfield_index_selectors_read_typed_integer_storage_exactly() {
+        let mut first = StructValue::new();
+        first.fields.insert("name".to_string(), Value::from("Ada"));
+        let mut second = StructValue::new();
+        second
+            .fields
+            .insert("name".to_string(), Value::from("Grace"));
+        let array = CellArray::new_with_shape(
+            vec![Value::Struct(first), Value::Struct(second)],
+            vec![1, 2],
+        )
+        .unwrap();
+        let mut index_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("index tensor");
+        index_tensor.data[0] = 1.0;
+        let index = CellArray::new_with_shape(vec![Value::Tensor(index_tensor)], vec![1, 1])
+            .expect("index cell");
+
+        let result = run_getfield(
+            Value::Cell(array),
+            vec![Value::Cell(index), Value::from("name")],
+        )
+        .expect("struct array element");
+        assert_eq!(result, Value::from("Grace"));
+    }
+
+    #[test]
+    fn getfield_vector_index_selector_reads_typed_integer_storage_exactly() {
+        let mut st = StructValue::new();
+        st.fields.insert(
+            "values".to_string(),
+            Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap()),
+        );
+        let mut selector =
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![1, 2]).expect("selector");
+        selector.data = vec![1.0, 1.0];
+        let index =
+            CellArray::new_with_shape(vec![Value::Tensor(selector)], vec![1, 1]).expect("index");
+
+        let result = run_getfield(
+            Value::Struct(st),
+            vec![Value::from("values"), Value::Cell(index)],
+        )
+        .expect("vector index");
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(tensor.data, vec![20.0, 10.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

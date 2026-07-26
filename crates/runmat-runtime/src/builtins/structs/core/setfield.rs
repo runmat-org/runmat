@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::introspection::dynamicprops;
 use crate::builtins::structs::type_resolvers::setfield_type;
 use crate::{
@@ -1149,10 +1150,26 @@ fn parse_index_text(text: &str) -> BuiltinResult<IndexComponent> {
 }
 
 fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
+    if let Value::Int(i) = value {
+        return i
+            .try_to_usize()
+            .filter(|index| *index >= 1)
+            .ok_or_else(|| setfield_flow("index must be >= 1"));
+    }
+    if let Value::Tensor(t) = value {
+        if t.data.len() == 1 {
+            if let Some(storage) = t.integer_storage() {
+                return storage
+                    .value_at(0)
+                    .and_then(|value| value.try_to_usize())
+                    .filter(|index| *index >= 1)
+                    .ok_or_else(|| setfield_flow("index must be >= 1"));
+            }
+        }
+    }
     let number = match value {
-        Value::Int(i) => i.to_i64() as f64,
         Value::Num(n) => *n,
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if t.data.len() == 1 => tensor::tensor_values_f64(t)[0],
         _ => {
             let repr = format!("{value:?}");
             return Err(setfield_flow(format!(
@@ -1417,7 +1434,7 @@ fn value_to_scalar(value: Value) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if t.data.len() == 1 => Ok(tensor::tensor_values_f64(&t)[0]),
         other => Err(setfield_flow(format!(
             "setfield: cannot assign {other:?} into a numeric tensor element"
         ))),
@@ -1428,8 +1445,17 @@ fn value_to_bool(value: Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(b),
         Value::Num(n) => Ok(n != 0.0),
-        Value::Int(i) => Ok(i.to_i64() != 0),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0] != 0.0),
+        Value::Int(i) => Ok(!i.is_zero()),
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(storage) = t.integer_storage() {
+                Ok(!storage
+                    .value_at(0)
+                    .ok_or_else(|| setfield_flow("setfield: invalid integer tensor storage"))?
+                    .is_zero())
+            } else {
+                Ok(tensor::tensor_values_f64(&t)[0] != 0.0)
+            }
+        }
         other => Err(setfield_flow(format!(
             "setfield: cannot assign {other:?} into a logical array element"
         ))),
@@ -1446,7 +1472,8 @@ fn is_struct_array(cell: &CellArray) -> bool {
 pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{
-        Access, CellArray, ClassDef, HandleRef, IntValue, ObjectInstance, PropertyDef, StructValue,
+        Access, CellArray, ClassDef, HandleRef, IntValue, IntegerStorage, LogicalArray,
+        ObjectInstance, PropertyDef, StructValue,
     };
     use runmat_gc::gc_allocate;
 
@@ -1543,6 +1570,105 @@ pub(crate) mod tests {
                 }
             }
             other => panic!("expected cell array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn setfield_index_selector_reads_typed_integer_storage_exactly() {
+        let mut a = StructValue::new();
+        a.fields
+            .insert("id".to_string(), Value::Int(IntValue::I32(1)));
+        let mut b = StructValue::new();
+        b.fields
+            .insert("id".to_string(), Value::Int(IntValue::I32(2)));
+        let array = CellArray::new_with_shape(vec![Value::Struct(a), Value::Struct(b)], vec![1, 2])
+            .unwrap();
+        let mut index_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("index tensor");
+        index_tensor.data[0] = 1.0;
+        let indices = CellArray::new_with_shape(vec![Value::Tensor(index_tensor)], vec![1, 1])
+            .expect("index cell");
+
+        let updated = run_setfield(
+            Value::Cell(array),
+            vec![
+                Value::Cell(indices),
+                Value::from("id"),
+                Value::Int(IntValue::I32(42)),
+            ],
+        )
+        .expect("setfield");
+        match updated {
+            Value::Cell(cell) => match &cell.data[1] {
+                Value::Struct(st) => {
+                    assert_eq!(st.fields.get("id"), Some(&Value::Int(IntValue::I32(42))));
+                }
+                other => panic!("expected struct element, got {other:?}"),
+            },
+            other => panic!("expected cell array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn setfield_scalar_assignment_reads_typed_integer_storage_exactly() {
+        let mut root = StructValue::new();
+        root.fields.insert(
+            "values".to_string(),
+            Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap()),
+        );
+        root.fields.insert(
+            "mask".to_string(),
+            Value::LogicalArray(LogicalArray::new(vec![0, 0], vec![1, 2]).unwrap()),
+        );
+
+        let mut index_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("index tensor");
+        index_tensor.data[0] = 1.0;
+        let index =
+            CellArray::new_with_shape(vec![Value::Tensor(index_tensor)], vec![1, 1]).unwrap();
+        let mut rhs =
+            Tensor::new_integer(IntegerStorage::U64(vec![77]), vec![1, 1]).expect("rhs tensor");
+        rhs.data[0] = 0.0;
+        let updated = run_setfield(
+            Value::Struct(root),
+            vec![
+                Value::from("values"),
+                Value::Cell(index),
+                Value::Tensor(rhs),
+            ],
+        )
+        .expect("numeric setfield");
+
+        let mut logical_index =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("logical index");
+        logical_index.data[0] = 1.0;
+        let logical_index =
+            CellArray::new_with_shape(vec![Value::Tensor(logical_index)], vec![1, 1]).unwrap();
+        let mut logical_rhs =
+            Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("logical rhs");
+        logical_rhs.data[0] = 0.0;
+        let updated = run_setfield(
+            updated,
+            vec![
+                Value::from("mask"),
+                Value::Cell(logical_index),
+                Value::Tensor(logical_rhs),
+            ],
+        )
+        .expect("logical setfield");
+
+        match updated {
+            Value::Struct(st) => {
+                match st.fields.get("values").expect("values") {
+                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![10.0, 77.0]),
+                    other => panic!("expected tensor field, got {other:?}"),
+                }
+                match st.fields.get("mask").expect("mask") {
+                    Value::LogicalArray(array) => assert_eq!(array.data, vec![0, 1]),
+                    other => panic!("expected logical field, got {other:?}"),
+                }
+            }
+            other => panic!("expected struct, got {other:?}"),
         }
     }
 
