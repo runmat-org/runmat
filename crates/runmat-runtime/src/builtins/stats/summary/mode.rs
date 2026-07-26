@@ -852,6 +852,59 @@ impl IntKind {
             IntKind::U64 => Value::Int(IntValue::U64(value.round() as u64)),
         }
     }
+
+    fn storage_from_f64_values(self, values: &[f64]) -> IntegerStorage {
+        match self {
+            IntKind::I8 => IntegerStorage::I8(
+                values
+                    .iter()
+                    .map(|value| value.round().clamp(i8::MIN as f64, i8::MAX as f64) as i8)
+                    .collect(),
+            ),
+            IntKind::I16 => IntegerStorage::I16(
+                values
+                    .iter()
+                    .map(|value| value.round().clamp(i16::MIN as f64, i16::MAX as f64) as i16)
+                    .collect(),
+            ),
+            IntKind::I32 => IntegerStorage::I32(
+                values
+                    .iter()
+                    .map(|value| value.round().clamp(i32::MIN as f64, i32::MAX as f64) as i32)
+                    .collect(),
+            ),
+            IntKind::I64 => IntegerStorage::I64(
+                values
+                    .iter()
+                    .map(|value| value.round().clamp(i64::MIN as f64, i64::MAX as f64) as i64)
+                    .collect(),
+            ),
+            IntKind::U8 => IntegerStorage::U8(
+                values
+                    .iter()
+                    .map(|value| value.round().clamp(0.0, u8::MAX as f64) as u8)
+                    .collect(),
+            ),
+            IntKind::U16 => IntegerStorage::U16(
+                values
+                    .iter()
+                    .map(|value| value.round().clamp(0.0, u16::MAX as f64) as u16)
+                    .collect(),
+            ),
+            IntKind::U32 => IntegerStorage::U32(
+                values
+                    .iter()
+                    .map(|value| value.round().clamp(0.0, u32::MAX as f64) as u32)
+                    .collect(),
+            ),
+            IntKind::U64 => IntegerStorage::U64(
+                values
+                    .iter()
+                    .map(|value| value.round().clamp(0.0, u64::MAX as f64) as u64)
+                    .collect(),
+            ),
+        }
+    }
 }
 
 fn tensor_into_class_value(mut tensor: Tensor, class: OutputClass) -> BuiltinResult<Value> {
@@ -869,43 +922,19 @@ fn tensor_into_class_value(mut tensor: Tensor, class: OutputClass) -> BuiltinRes
             if contains_nan {
                 return Ok(tensor::tensor_into_value(tensor));
             }
-            for value in &mut tensor.data {
-                *value = value.round().clamp(0.0, u8::MAX as f64);
-            }
-            tensor.dtype = NumericDType::U8;
-            if tensor.data.len() == 1 {
-                Ok(Value::Int(IntValue::U8(tensor.data[0] as u8)))
-            } else {
-                Ok(Value::Tensor(tensor))
-            }
+            tensor_into_integer_class_value(tensor, IntKind::U8)
         }
         OutputClass::UInt16 => {
             if contains_nan {
                 return Ok(tensor::tensor_into_value(tensor));
             }
-            for value in &mut tensor.data {
-                *value = value.round().clamp(0.0, u16::MAX as f64);
-            }
-            tensor.dtype = NumericDType::U16;
-            if tensor.data.len() == 1 {
-                Ok(Value::Int(IntValue::U16(tensor.data[0] as u16)))
-            } else {
-                Ok(Value::Tensor(tensor))
-            }
+            tensor_into_integer_class_value(tensor, IntKind::U16)
         }
         OutputClass::UInt32 => {
             if contains_nan {
                 return Ok(tensor::tensor_into_value(tensor));
             }
-            for value in &mut tensor.data {
-                *value = value.round().clamp(0.0, u32::MAX as f64);
-            }
-            tensor.dtype = NumericDType::U32;
-            if tensor.data.len() == 1 {
-                Ok(Value::Int(IntValue::U32(tensor.data[0] as u32)))
-            } else {
-                Ok(Value::Tensor(tensor))
-            }
+            tensor_into_integer_class_value(tensor, IntKind::U32)
         }
         OutputClass::Logical => {
             if contains_nan {
@@ -928,11 +957,7 @@ fn tensor_into_class_value(mut tensor: Tensor, class: OutputClass) -> BuiltinRes
             if contains_nan {
                 return Ok(tensor::tensor_into_value(tensor));
             }
-            if tensor.data.len() == 1 {
-                Ok(kind.to_value(tensor.data[0]))
-            } else {
-                Ok(tensor::tensor_into_value(tensor))
-            }
+            tensor_into_integer_class_value(tensor, kind)
         }
     }
 }
@@ -952,31 +977,19 @@ fn tensor_into_class_array_value(mut tensor: Tensor, class: OutputClass) -> Buil
             if contains_nan {
                 return Ok(Value::Tensor(tensor));
             }
-            for value in &mut tensor.data {
-                *value = value.round().clamp(0.0, u8::MAX as f64);
-            }
-            tensor.dtype = NumericDType::U8;
-            Ok(Value::Tensor(tensor))
+            tensor_into_integer_class_array_value(tensor, IntKind::U8)
         }
         OutputClass::UInt16 => {
             if contains_nan {
                 return Ok(Value::Tensor(tensor));
             }
-            for value in &mut tensor.data {
-                *value = value.round().clamp(0.0, u16::MAX as f64);
-            }
-            tensor.dtype = NumericDType::U16;
-            Ok(Value::Tensor(tensor))
+            tensor_into_integer_class_array_value(tensor, IntKind::U16)
         }
         OutputClass::UInt32 => {
             if contains_nan {
                 return Ok(Value::Tensor(tensor));
             }
-            for value in &mut tensor.data {
-                *value = value.round().clamp(0.0, u32::MAX as f64);
-            }
-            tensor.dtype = NumericDType::U32;
-            Ok(Value::Tensor(tensor))
+            tensor_into_integer_class_array_value(tensor, IntKind::U32)
         }
         OutputClass::Logical => {
             if contains_nan {
@@ -992,12 +1005,27 @@ fn tensor_into_class_array_value(mut tensor: Tensor, class: OutputClass) -> Buil
                 .map_err(mode_internal_error)
         }
         OutputClass::Int(kind) => {
-            if contains_nan || tensor.data.len() != 1 {
+            if contains_nan {
                 return Ok(Value::Tensor(tensor));
             }
-            Ok(kind.to_value(tensor.data[0]))
+            tensor_into_integer_class_array_value(tensor, kind)
         }
     }
+}
+
+fn tensor_into_integer_class_value(tensor: Tensor, kind: IntKind) -> BuiltinResult<Value> {
+    if tensor.data.len() == 1 {
+        Ok(kind.to_value(tensor.data[0]))
+    } else {
+        tensor_into_integer_class_array_value(tensor, kind)
+    }
+}
+
+fn tensor_into_integer_class_array_value(tensor: Tensor, kind: IntKind) -> BuiltinResult<Value> {
+    let storage = kind.storage_from_f64_values(&tensor.data);
+    Tensor::new_integer(storage, tensor.shape)
+        .map(Value::Tensor)
+        .map_err(mode_internal_error)
 }
 
 fn dim_product(dims: &[usize]) -> BuiltinResult<usize> {
@@ -1265,6 +1293,54 @@ pub(crate) mod tests {
                 }
             }
             other => panic!("expected cell array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mode_dtype_only_integer_outputs_materialize_typed_integer_storage_exactly() {
+        let mut unsigned = Tensor::new(vec![2.0, 2.0, 1.0, 3.0, 3.0, 1.0], vec![3, 2]).unwrap();
+        unsigned.dtype = NumericDType::U16;
+        let outputs = mode_outputs(Value::Tensor(unsigned), Vec::new(), 3).expect("mode");
+        match &outputs[0] {
+            Value::Tensor(values) => {
+                assert_eq!(values.shape, vec![1, 2]);
+                assert_eq!(
+                    values.integer_storage(),
+                    Some(&IntegerStorage::U16(vec![2, 3]))
+                );
+            }
+            other => panic!("expected uint16 tensor, got {other:?}"),
+        }
+        match &outputs[2] {
+            Value::Cell(cell) => {
+                assert_eq!(
+                    expect_tensor(&cell.data[0]).integer_storage(),
+                    Some(&IntegerStorage::U16(vec![2]))
+                );
+                assert_eq!(
+                    expect_tensor(&cell.data[1]).integer_storage(),
+                    Some(&IntegerStorage::U16(vec![3]))
+                );
+            }
+            other => panic!("expected tied-value cell array, got {other:?}"),
+        }
+
+        let mut signed = Tensor::new(vec![-5.0, -5.0, 3.0, -2.0, -2.0, 1.0], vec![3, 2]).unwrap();
+        signed.dtype = NumericDType::I16;
+        let outputs = mode_outputs(Value::Tensor(signed), Vec::new(), 3).expect("mode");
+        match &outputs[0] {
+            Value::Tensor(values) => assert_eq!(
+                values.integer_storage(),
+                Some(&IntegerStorage::I16(vec![-5, -2]))
+            ),
+            other => panic!("expected int16 tensor, got {other:?}"),
+        }
+        match &outputs[2] {
+            Value::Cell(cell) => assert_eq!(
+                expect_tensor(&cell.data[1]).integer_storage(),
+                Some(&IntegerStorage::I16(vec![-2]))
+            ),
+            other => panic!("expected tied-value cell array, got {other:?}"),
         }
     }
 
