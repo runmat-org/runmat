@@ -250,10 +250,7 @@ fn scalar_property(value: &Value, label: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor
-            .integer_storage()
-            .and_then(|storage| storage.value_at(0))
-            .map_or(tensor.data[0], |value| value.to_f64())),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor::tensor_value_f64(tensor, 0)),
         other => Err(nyquist_error(format!(
             "nyquist: {label} must be a real scalar, got {other:?}"
         ))),
@@ -559,7 +556,9 @@ mod tests {
     }
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     #[test]

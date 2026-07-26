@@ -415,10 +415,7 @@ fn scalar_property(value: &Value, label: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor
-            .integer_storage()
-            .and_then(|storage| storage.value_at(0))
-            .map_or(tensor.data[0], |value| value.to_f64())),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor::tensor_value_f64(tensor, 0)),
         other => Err(impulse_error_with_detail(
             &IMPULSE_ERROR_INVALID_MODEL,
             format!("{label} must be a real scalar, got {other:?}"),
@@ -467,12 +464,9 @@ fn scalar_time_from_value(value: &Value) -> BuiltinResult<Option<f64>> {
         Value::Num(n) => Ok(Some(*n)),
         Value::Int(i) => Ok(Some(i.to_f64())),
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Some(
-            tensor
-                .integer_storage()
-                .and_then(|storage| storage.value_at(0))
-                .map_or(tensor.data[0], |value| value.to_f64()),
-        )),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(Some(tensor::tensor_value_f64(tensor, 0)))
+        }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(Some(if logical.data[0] == 0 { 0.0 } else { 1.0 }))
         }
@@ -875,7 +869,9 @@ mod tests {
     }
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     #[test]

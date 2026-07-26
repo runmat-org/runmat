@@ -665,10 +665,7 @@ pub fn scalar_f64(value: &Value, context: &str, builtin: &'static str) -> Builti
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor
-            .integer_storage()
-            .and_then(|storage| storage.value_at(0))
-            .map_or(tensor.data[0], |value| value.to_f64())),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor::tensor_value_f64(tensor, 0)),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] == 0 { 0.0 } else { 1.0 })
         }
@@ -686,13 +683,9 @@ pub fn scalar_complex(value: &Value, builtin: &'static str) -> BuiltinResult<Com
         Value::Int(i) => Ok(Complex64::new(i.to_f64(), 0.0)),
         Value::Bool(b) => Ok(Complex64::new(if *b { 1.0 } else { 0.0 }, 0.0)),
         Value::Complex(re, im) => Ok(Complex64::new(*re, *im)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Complex64::new(
-            tensor
-                .integer_storage()
-                .and_then(|storage| storage.value_at(0))
-                .map_or(tensor.data[0], |value| value.to_f64()),
-            0.0,
-        )),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(Complex64::new(tensor::tensor_value_f64(tensor, 0), 0.0))
+        }
         Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
             let (re, im) = tensor.data[0];
             Ok(Complex64::new(re, im))
@@ -1234,5 +1227,32 @@ fn internal_identifier(builtin: &str) -> &'static str {
         "pzmap" => "RunMat:pzmap:Internal",
         "isstable" => "RunMat:isstable:Internal",
         _ => "RunMat:tf:Internal",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn scalar_f64_reads_typed_integer_storage_exactly() {
+        let value = poisoned_integer_tensor(IntegerStorage::I16(vec![-7]), vec![1, 1]);
+        assert_eq!(scalar_f64(&value, "Ts", "tf").expect("scalar"), -7.0);
+    }
+
+    #[test]
+    fn scalar_complex_reads_typed_integer_storage_exactly() {
+        let value = poisoned_integer_tensor(IntegerStorage::U64(vec![42]), vec![1, 1]);
+        assert_eq!(
+            scalar_complex(&value, "tf").expect("scalar"),
+            Complex64::new(42.0, 0.0)
+        );
     }
 }
