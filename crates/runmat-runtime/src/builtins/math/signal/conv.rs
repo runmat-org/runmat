@@ -412,13 +412,9 @@ async fn normalize_input(value: Value) -> BuiltinResult<ConvInput> {
 }
 
 fn convert_tensor(tensor: Tensor) -> BuiltinResult<ConvInput> {
-    let Tensor {
-        data,
-        shape: _,
-        rows,
-        cols,
-        ..
-    } = tensor;
+    let rows = tensor.rows;
+    let cols = tensor.cols;
+    let data = tensor::tensor_into_values_f64(tensor);
     let len = data.len();
     let hint = classify_orientation(rows, cols, len);
     let data = data.into_iter().map(|re| Complex::new(re, 0.0)).collect();
@@ -567,11 +563,18 @@ pub(crate) mod tests {
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        builtin_function_by_name, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+        builtin_function_by_name, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor,
+        Type,
     };
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -614,6 +617,23 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
         let b = Tensor::new(vec![1.0, 1.0, 1.0], vec![1, 3]).unwrap();
         let result = conv_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("conv");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.data, vec![1.0, 3.0, 6.0, 5.0, 3.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn conv_reads_typed_integer_vectors_exactly() {
+        let a = integer_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3]);
+        let b = integer_tensor(IntegerStorage::U16(vec![1, 1, 1]), vec![1, 3]);
+
+        let result = conv_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("conv");
+
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 5]);
