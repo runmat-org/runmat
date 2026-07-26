@@ -452,10 +452,10 @@ fn numeric_input(builtin: &'static str, value: Value) -> BuiltinResult<NumericIn
         Value::Num(n) => (vec![n], vec![1, 1]),
         Value::Int(i) => (vec![i.to_f64()], vec![1, 1]),
         Value::Bool(flag) => (vec![if flag { 1.0 } else { 0.0 }], vec![1, 1]),
-        Value::Tensor(tensor) => (
-            tensor.data,
-            tensor_shape(&tensor.shape, tensor.rows, tensor.cols),
-        ),
+        Value::Tensor(tensor) => {
+            let shape = tensor_shape(&tensor.shape, tensor.rows, tensor.cols);
+            (tensor_utils::tensor_into_values_f64(tensor), shape)
+        }
         Value::LogicalArray(logical) => {
             let shape = logical_shape(&logical.shape);
             let data = logical
@@ -1262,6 +1262,12 @@ mod tests {
         Value::Tensor(Tensor::new_2d(data, rows, cols).unwrap())
     }
 
+    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
     fn empty_numeric() -> Value {
         Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap())
     }
@@ -1332,6 +1338,34 @@ mod tests {
         let put = as_tensor(&out[1]);
         assert_eq!(call.shape, vec![2, 1]);
         assert_eq!(put.shape, vec![2, 1]);
+        assert!(call.data[0] > call.data[1]);
+        assert!(put.data[0] < put.data[1]);
+    }
+
+    #[test]
+    fn blsprice_broadcast_inputs_read_typed_integer_storage_exactly() {
+        let guard = crate::output_count::push_output_count(Some(2));
+        let out = output_list(
+            block_on(blsprice_builtin(
+                poisoned_integer_tensor(IntegerStorage::U16(vec![100, 90]), vec![2, 1]),
+                poisoned_integer_tensor(IntegerStorage::U16(vec![95]), vec![1, 1]),
+                Value::Num(0.10),
+                Value::Num(0.25),
+                Value::Num(0.50),
+                vec![poisoned_integer_tensor(
+                    IntegerStorage::U8(vec![0]),
+                    vec![1, 1],
+                )],
+            ))
+            .unwrap(),
+        );
+        drop(guard);
+        let call = as_tensor(&out[0]);
+        let put = as_tensor(&out[1]);
+        assert_eq!(call.shape, vec![2, 1]);
+        assert_eq!(put.shape, vec![2, 1]);
+        assert!(call.integer_storage().is_none());
+        assert!(put.integer_storage().is_none());
         assert!(call.data[0] > call.data[1]);
         assert!(put.data[0] < put.data[1]);
     }
