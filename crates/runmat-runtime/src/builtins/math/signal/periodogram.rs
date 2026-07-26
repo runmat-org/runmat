@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::signal::common::{
     centered_frequency_offset, centered_shift, gpu_matrix_shape, parse_nonnegative_integer,
     parse_scalar_f64, value_to_complex_vector,
@@ -462,9 +463,9 @@ fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
     let rows = tensor.rows();
     let cols = tensor.cols();
     if rows == 1 || cols == 1 {
+        let values = tensor_utils::tensor_into_values_f64(tensor);
         return Ok(SignalColumns {
-            columns: vec![tensor
-                .data
+            columns: vec![values
                 .into_iter()
                 .map(|value| Complex::new(value, 0.0))
                 .collect()],
@@ -477,7 +478,10 @@ fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
     for col in 0..cols {
         let mut column = Vec::with_capacity(rows);
         for row in 0..rows {
-            column.push(Complex::new(tensor.data[row + col * rows], 0.0));
+            column.push(Complex::new(
+                tensor_utils::tensor_value_f64(&tensor, row + col * rows),
+                0.0,
+            ));
         }
         columns.push(column);
     }
@@ -947,7 +951,7 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::builtin_function_by_name;
+    use runmat_builtins::{builtin_function_by_name, IntegerStorage};
 
     fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
         let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
@@ -978,6 +982,13 @@ mod tests {
             panic!("expected f tensor");
         };
         (pxx.data.clone(), pxx.shape.clone(), f.data.clone())
+    }
+
+    fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -1016,6 +1027,28 @@ mod tests {
     }
 
     #[test]
+    fn periodogram_reads_typed_integer_vector_storage_exactly() {
+        let out = call(
+            Value::Tensor(integer_tensor(vec![0, 1, 0, -1, 0, 1, 0, -1], vec![1, 8])),
+            &[
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                Value::Num(8.0),
+                Value::Num(8.0),
+            ],
+            Some(2),
+        )
+        .unwrap();
+        let (pxx, f) = output_pair(out);
+        let (peak_idx, _) = pxx
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .unwrap();
+        assert_eq!(peak_idx, 2);
+        assert_eq!(f[peak_idx], 2.0);
+    }
+
+    #[test]
     fn periodogram_power_reports_mean_square_sinusoid_power() {
         let amp = 1.8;
         let x = (0..32)
@@ -1045,6 +1078,28 @@ mod tests {
         ];
         let out = call(
             Value::Tensor(Tensor::new(data, vec![8, 2]).unwrap()),
+            &[
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                Value::Num(8.0),
+            ],
+            Some(2),
+        )
+        .unwrap();
+        let (pxx, shape, f) = output_pair_with_pxx_shape(out);
+        assert_eq!(shape, vec![5, 2]);
+        assert_eq!(pxx.len(), 10);
+        assert_eq!(f.len(), 5);
+        assert!(pxx[0] > pxx[5]);
+    }
+
+    #[test]
+    fn periodogram_reads_typed_integer_matrix_storage_exactly() {
+        let data = vec![
+            1, 1, 1, 1, 0, 0, 0, 0, //
+            0, 1, 0, -1, 0, 1, 0, -1,
+        ];
+        let out = call(
+            Value::Tensor(integer_tensor(data, vec![8, 2])),
             &[
                 Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
                 Value::Num(8.0),
