@@ -1458,7 +1458,8 @@ fn days_in_month(year: i32, month: u32) -> BuiltinResult<u32> {
 }
 
 fn tensor_from_datevec_like(value: Value, context: &str) -> BuiltinResult<Tensor> {
-    let tensor = tensor_from_numeric(value, context)?;
+    let tensor = tensor::integer_tensor_to_f64(tensor_from_numeric(value, context)?)
+        .map_err(|err| datetime_error(format!("{context}: {err}")))?;
     let shape = tensor::default_shape_for(&tensor.shape, tensor.data.len());
     let normalize = |rows: usize, cols: usize, data: Vec<f64>| -> BuiltinResult<Tensor> {
         if cols == 6 {
@@ -3906,6 +3907,21 @@ mod tests {
             .expect("isbetween"),
             Value::Num(1.0)
         );
+    }
+
+    #[test]
+    fn datenum_typed_integer_date_vector_reads_exact_storage() {
+        let serial = serial_for_date(2024, 3, 14);
+        let mut typed_date_vector = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![2024, 3, 14]),
+            vec![1, 3],
+        )
+        .expect("typed date vector");
+        typed_date_vector.data.fill(99.0);
+        let typed_round_trip =
+            futures::executor::block_on(datenum_builtin(vec![Value::Tensor(typed_date_vector)]))
+                .expect("datenum typed date vector");
+        assert_eq!(typed_round_trip, Value::Num(serial));
     }
 
     #[test]
