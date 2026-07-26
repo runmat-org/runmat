@@ -10,6 +10,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const MAX_ONEHOT_CELLS: usize = 50_000_000;
@@ -675,7 +676,10 @@ fn labels_from_value(name: &str, value: Value) -> BuiltinResult<LabelArray> {
             categories: None,
         }),
         Value::Tensor(tensor) => Ok(LabelArray {
-            labels: tensor.data.iter().copied().map(numeric_label).collect(),
+            labels: tensor::tensor_values_f64(&tensor)
+                .into_iter()
+                .map(numeric_label)
+                .collect(),
             shape: normalized_shape(&tensor.shape),
             kind: LabelKind::Numeric,
             categories: None,
@@ -754,11 +758,12 @@ fn dummyvar_groups(value: Value) -> BuiltinResult<Vec<LabelArray>> {
         {
             let rows = tensor.rows();
             let cols = tensor.cols();
+            let values = tensor::tensor_values_f64_cow(&tensor);
             let mut groups = Vec::with_capacity(cols);
             for col in 0..cols {
                 let mut labels = Vec::with_capacity(rows);
                 for row in 0..rows {
-                    labels.push(numeric_label(tensor.data[row + col * rows]));
+                    labels.push(numeric_label(values[row + col * rows]));
                 }
                 groups.push(LabelArray {
                     labels,
@@ -898,10 +903,13 @@ struct EncodedArray {
 
 fn encoded_values(value: Value) -> BuiltinResult<EncodedArray> {
     match value {
-        Value::Tensor(tensor) => Ok(EncodedArray {
-            data: tensor.data,
-            shape: normalized_shape(&tensor.shape),
-        }),
+        Value::Tensor(tensor) => {
+            let shape = normalized_shape(&tensor.shape);
+            Ok(EncodedArray {
+                data: tensor::tensor_into_values_f64(tensor),
+                shape,
+            })
+        }
         Value::LogicalArray(array) => Ok(EncodedArray {
             data: array.data.into_iter().map(|value| value as f64).collect(),
             shape: normalized_shape(&array.shape),
@@ -1256,9 +1264,16 @@ fn linear_for_coords(coords: &[usize], strides: &[usize]) -> usize {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn assert_f64_slice_eq_nan(left: &[f64], right: &[f64]) {
@@ -1354,6 +1369,22 @@ mod tests {
         };
         assert_eq!(out.shape, vec![3, 2]);
         assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn dummyvar_reads_typed_integer_labels_exactly() {
+        let Value::Tensor(out) = block_on(dummyvar_builtin(int_tensor(
+            IntegerStorage::I16(vec![1, 2, 1, 2, 2, 1]),
+            vec![3, 2],
+        )))
+        .unwrap() else {
+            panic!("tensor");
+        };
+        assert_eq!(out.shape, vec![3, 4]);
+        assert_eq!(
+            out.data,
+            vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]
+        );
     }
 
     #[test]
@@ -1481,6 +1512,23 @@ mod tests {
     }
 
     #[test]
+    fn onehotencode_reads_typed_integer_labels_and_classes_exactly() {
+        let Value::Tensor(out) = block_on(onehotencode_builtin(
+            int_tensor(IntegerStorage::U16(vec![1, 2, 1]), vec![3, 1]),
+            Value::Num(2.0),
+            vec![
+                Value::from("ClassNames"),
+                int_tensor(IntegerStorage::I16(vec![1, 2]), vec![1, 2]),
+            ],
+        ))
+        .unwrap() else {
+            panic!("tensor");
+        };
+        assert_eq!(out.shape, vec![3, 2]);
+        assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
     fn onehotencode_rejects_pathological_feature_dimension_before_resizing_shape() {
         let err = block_on(onehotencode_builtin(
             tensor(vec![1.0], vec![1, 1]),
@@ -1574,6 +1622,24 @@ mod tests {
             other => panic!("categories {other:?}"),
         };
         assert_eq!(categories, vec!["low", "high"]);
+    }
+
+    #[test]
+    fn onehotdecode_reads_typed_integer_encoded_array_exactly() {
+        let encoded = int_tensor(IntegerStorage::U8(vec![0, 1, 1, 0]), vec![2, 2]);
+        let Value::StringArray(out) = block_on(onehotdecode_builtin(
+            encoded,
+            Value::StringArray(
+                StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
+            ),
+            Value::Num(2.0),
+            vec![Value::from("string")],
+        ))
+        .unwrap() else {
+            panic!("strings");
+        };
+        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.data, vec!["high", "low"]);
     }
 
     #[test]

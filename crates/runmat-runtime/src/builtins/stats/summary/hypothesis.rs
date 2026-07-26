@@ -513,8 +513,8 @@ fn parse_kstest_cdf_table(tensor: &Tensor) -> BuiltinResult<CdfSpec> {
     let rows = tensor.shape[0];
     let mut points = Vec::with_capacity(rows);
     for row in 0..rows {
-        let x = tensor.data[row];
-        let f = tensor.data[row + rows];
+        let x = tensor::tensor_value_f64(tensor, row);
+        let f = tensor::tensor_value_f64(tensor, row + rows);
         if !x.is_finite() || !f.is_finite() || !(0.0..=1.0).contains(&f) {
             return Err(kstest_invalid_argument(
                 "kstest: CDF table values must be finite and probabilities must be in [0,1]",
@@ -585,10 +585,8 @@ fn evaluate_kstest(x: &Tensor, options: &KstestOptions) -> BuiltinResult<KstestE
     if !is_kstest_vector_shape(&x.shape) {
         return Err(kstest_invalid_argument("kstest: x must be a vector"));
     }
-    let mut sample = x
-        .data
-        .iter()
-        .copied()
+    let mut sample = tensor::tensor_values_f64(x)
+        .into_iter()
         .filter(|value| !value.is_nan())
         .collect::<Vec<_>>();
     sample.sort_by(f64::total_cmp);
@@ -1108,7 +1106,10 @@ fn sample_along_dim(
     coords.resize(shape.len(), 0);
     for idx in 0..shape[dim] {
         coords[dim] = idx;
-        values.push(tensor.data[linear_index(&coords, shape)]);
+        values.push(tensor::tensor_value_f64(
+            tensor,
+            linear_index(&coords, shape),
+        ));
     }
     values
 }
@@ -1184,6 +1185,12 @@ mod tests {
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
         let mut tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
         tensor.data[0] = f64::NAN;
+        Value::Tensor(tensor)
+    }
+
+    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
     }
 
@@ -1373,6 +1380,14 @@ mod tests {
     }
 
     #[test]
+    fn ttest2_sample_values_read_typed_integer_storage_exactly() {
+        let x = poisoned_integer_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![4, 1]);
+        let y = poisoned_integer_tensor(IntegerStorage::U16(vec![1, 2, 4, 8]), vec![4, 1]);
+        let out = block_on(ttest2_builtin(x, y, Vec::new())).unwrap();
+        assert_eq!(out, Value::Bool(false));
+    }
+
+    #[test]
     fn ttest2_empty_and_nd_outputs_preserve_shapes() {
         let empty_x = Value::Tensor(Tensor::new(Vec::new(), vec![3, 0]).unwrap());
         let empty_y = Value::Tensor(Tensor::new(Vec::new(), vec![3, 0]).unwrap());
@@ -1512,6 +1527,20 @@ mod tests {
             Value::Tensor(Tensor::new(vec![0.0, 0.5, 1.0, 0.0, 0.5, 1.0], vec![3, 2]).unwrap());
         let err = block_on(kstest_builtin(sample, vec![Value::from("CDF"), cdf])).unwrap_err();
         assert!(err.message.contains("CDF table range"));
+    }
+
+    #[test]
+    fn kstest_reads_typed_integer_sample_and_cdf_table_exactly() {
+        let sample = poisoned_integer_tensor(IntegerStorage::U8(vec![0, 1]), vec![2, 1]);
+        let cdf = poisoned_integer_tensor(IntegerStorage::U8(vec![0, 1, 0, 1]), vec![2, 2]);
+        let _guard = crate::output_count::push_output_count(Some(4));
+        let outputs =
+            output_list(block_on(kstest_builtin(sample, vec![Value::from("CDF"), cdf])).unwrap());
+        assert_eq!(outputs[0], Value::Bool(false));
+        match outputs[2] {
+            Value::Num(stat) => assert!(stat.is_finite()),
+            ref other => panic!("expected statistic, got {other:?}"),
+        }
     }
 
     #[test]

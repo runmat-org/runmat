@@ -549,13 +549,14 @@ fn build_box_stats(
 }
 
 fn ungrouped_series(tensor: &Tensor) -> Vec<(String, Vec<f64>)> {
+    let values = tensor::tensor_values_f64_cow(tensor);
     if tensor.rows == 1 || tensor.cols == 1 {
-        return vec![("1".to_string(), tensor.data.clone())];
+        return vec![("1".to_string(), values.to_vec())];
     }
     (0..tensor.cols)
         .map(|col| {
             let values = (0..tensor.rows)
-                .map(|row| tensor.data[col * tensor.rows + row])
+                .map(|row| values[col * tensor.rows + row])
                 .collect::<Vec<_>>();
             ((col + 1).to_string(), values)
         })
@@ -567,6 +568,7 @@ fn grouped_series(
     group: Value,
     options: &BoxplotOptions,
 ) -> BuiltinResult<Vec<(String, Vec<f64>)>> {
+    let values = tensor::tensor_values_f64_cow(tensor);
     let labels = match group_labels(&group, tensor.data.len()) {
         Ok(labels) => labels,
         Err(err) if tensor.rows > 1 && tensor.cols > 1 => {
@@ -604,12 +606,12 @@ fn grouped_series(
                 .entry(OrderedF64(value))
                 .or_insert_with(|| (label.clone(), Vec::new()))
                 .1
-                .push(tensor.data[idx]);
+                .push(values[idx]);
         } else {
             if !text_groups.contains_key(&label) {
                 first_seen.push(label.clone());
             }
-            text_groups.entry(label).or_default().push(tensor.data[idx]);
+            text_groups.entry(label).or_default().push(values[idx]);
         }
     }
 
@@ -963,7 +965,7 @@ fn color_for(idx: usize, colors: &[Vec4]) -> Vec4 {
 fn numeric_vector(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_into_tensor_for(NAME, value.clone())
         .map_err(|err| invalid(format!("boxplot: {label} must be numeric ({err})")))?;
-    Ok(tensor.data)
+    Ok(tensor::tensor_into_values_f64(tensor))
 }
 
 fn scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
@@ -1005,7 +1007,10 @@ fn text_vector(value: &Value, label: &str) -> BuiltinResult<Vec<String>> {
             .iter()
             .map(|value| value_text_preserve_case(value, label))
             .collect(),
-        Value::Tensor(tensor) => Ok(tensor.data.iter().map(number_label).collect()),
+        Value::Tensor(tensor) => Ok(tensor::tensor_values_f64(tensor)
+            .iter()
+            .map(number_label)
+            .collect()),
         Value::Num(n) => Ok(vec![number_label(n)]),
         Value::Int(i) => Ok(vec![number_label(&i.to_f64())]),
         _ => Err(invalid(format!("boxplot: {label} must be a text vector"))),
@@ -1184,11 +1189,12 @@ fn parse_colors(value: &Value) -> BuiltinResult<Vec<Vec4>> {
             "boxplot: Colors RGB matrix must have three columns",
         ));
     }
+    let values = tensor::tensor_values_f64_cow(&tensor);
     let mut colors = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
-        let r = tensor.data[row];
-        let g = tensor.data[tensor.rows + row];
-        let b = tensor.data[2 * tensor.rows + row];
+        let r = values[row];
+        let g = values[tensor.rows + row];
+        let b = values[2 * tensor.rows + row];
         if !(0.0..=1.0).contains(&r) || !(0.0..=1.0).contains(&g) || !(0.0..=1.0).contains(&b) {
             return Err(invalid("boxplot: RGB values must be in the range [0,1]"));
         }
@@ -1246,8 +1252,7 @@ fn group_labels(value: &Value, expected_len: usize) -> BuiltinResult<Vec<Option<
                     "boxplot: grouping variable length must match the number of X elements",
                 ));
             }
-            Ok(tensor
-                .data
+            Ok(tensor::tensor_values_f64(&tensor)
                 .iter()
                 .map(|value| value.is_finite().then(|| number_label(value)))
                 .collect())
@@ -1322,7 +1327,7 @@ fn scalar_group_label(value: &Value) -> BuiltinResult<Option<String>> {
         Value::Int(i) => Ok(Some(number_label(&i.to_f64()))),
         Value::Bool(b) => Ok(Some(if *b { "true" } else { "false" }.to_string())),
         Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            let value = tensor.data[0];
+            let value = tensor::tensor_value_f64(tensor, 0);
             Ok(value.is_finite().then(|| number_label(&value)))
         }
         _ => Err(invalid("boxplot: cell grouping labels must be scalar")),
@@ -1382,9 +1387,16 @@ impl Ord for OrderedF64 {
 mod tests {
     use super::*;
     use crate::builtins::plotting::{clone_figure, current_figure_handle};
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).expect("tensor"))
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -1460,6 +1472,33 @@ mod tests {
         assert_eq!(boxes[1].label, "high");
         assert!((boxes[0].median - 1.5).abs() < 1.0e-12);
         assert!((boxes[1].median - 15.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn reads_typed_integer_data_groups_and_options_exactly() {
+        let options = BoxplotOptions::parse(vec![
+            Value::CharArray(CharArray::new_row("Colors")),
+            int_tensor(IntegerStorage::U8(vec![0, 1, 0]), vec![1, 3]),
+            Value::CharArray(CharArray::new_row("Positions")),
+            int_tensor(IntegerStorage::I16(vec![5, 9]), vec![1, 2]),
+        ])
+        .expect("options");
+        let boxes = build_box_stats(
+            int_tensor(IntegerStorage::I16(vec![1, 10, 3, 20]), vec![4, 1]),
+            Some(int_tensor(
+                IntegerStorage::U16(vec![2, 1, 2, 1]),
+                vec![4, 1],
+            )),
+            &options,
+        )
+        .expect("stats");
+        assert_eq!(boxes.len(), 2);
+        assert_eq!(boxes[0].label, "1");
+        assert_eq!(boxes[0].position, 5.0);
+        assert!((boxes[0].median - 15.0).abs() < 1.0e-12);
+        assert_eq!(boxes[1].label, "2");
+        assert_eq!(boxes[1].position, 9.0);
+        assert!((boxes[1].median - 2.0).abs() < 1.0e-12);
     }
 
     #[test]
