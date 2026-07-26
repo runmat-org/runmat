@@ -478,6 +478,32 @@ pub fn parse_2d_lengths_from_data(
     }
 }
 
+pub fn parse_2d_lengths_from_tensor(
+    tensor: &Tensor,
+    builtin: &str,
+) -> BuiltinResult<(Option<usize>, Option<usize>)> {
+    if let Some(storage) = tensor.integer_storage() {
+        let exact = storage.exact_values();
+        return match exact.len() {
+            0 => Ok((None, None)),
+            1 => {
+                let len = parse_length(&Value::Int(exact[0].clone()), builtin)?;
+                Ok((len, len))
+            }
+            2 => {
+                let len_rows = parse_length(&Value::Int(exact[0].clone()), builtin)?;
+                let len_cols = parse_length(&Value::Int(exact[1].clone()), builtin)?;
+                Ok((len_rows, len_cols))
+            }
+            _ => Err(builtin_error(
+                builtin,
+                format!("{builtin}: size vector must contain at most two elements"),
+            )),
+        };
+    }
+    parse_2d_lengths_from_data(&tensor.data, builtin)
+}
+
 pub fn parse_nd_sizes_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(t) => {
@@ -896,6 +922,28 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
+        assert!(err.contains("non-negative"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn fft_2d_lengths_preserve_typed_integer_size_vectors() {
+        #[cfg(target_pointer_width = "64")]
+        {
+            let exact = 9_007_199_254_740_993_u64;
+            let mut sizes =
+                Tensor::new_integer(IntegerStorage::U64(vec![1, exact]), vec![1, 2]).unwrap();
+            sizes.data.fill(f64::NAN);
+
+            assert_eq!(
+                parse_2d_lengths_from_tensor(&sizes, "fft2").unwrap(),
+                (Some(1), Some(exact as usize))
+            );
+        }
+
+        let negative = Tensor::new_integer(IntegerStorage::I16(vec![4, -1]), vec![1, 2]).unwrap();
+        let err = parse_2d_lengths_from_tensor(&negative, "fft2")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("non-negative"), "unexpected error: {err}");
     }
 

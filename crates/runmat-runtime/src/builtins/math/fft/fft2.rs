@@ -2,7 +2,8 @@
 
 use super::common::{
     download_provider_complex_tensor, gather_gpu_complex_tensor, parse_2d_lengths_from_data,
-    parse_length, transform_axes_complex_tensor, value_to_complex_tensor, TransformDirection,
+    parse_2d_lengths_from_tensor, parse_length, transform_axes_complex_tensor,
+    value_to_complex_tensor, TransformDirection,
 };
 use super::fft::fft_complex_tensor;
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -332,7 +333,7 @@ fn parse_fft2_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<
 fn parse_fft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match value {
         Value::Tensor(tensor) => {
-            parse_2d_lengths_from_data(&tensor.data, BUILTIN_NAME).map_err(|source| {
+            parse_2d_lengths_from_tensor(tensor, BUILTIN_NAME).map_err(|source| {
                 fft2_error_with_detail(
                     &FFT2_ERROR_INVALID_SIZE_VECTOR,
                     format!("size vector parse failed: {source}"),
@@ -402,7 +403,9 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{builtin_function_by_name, IntValue, ResolveContext, Tensor, Type};
+    use runmat_builtins::{
+        builtin_function_by_name, IntValue, IntegerStorage, ResolveContext, Tensor, Type,
+    };
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
         (a.0 - b.0).abs() <= tol && (a.1 - b.1).abs() <= tol
@@ -506,6 +509,20 @@ pub(crate) mod tests {
         let size = Tensor::new(vec![4.0, 2.0], vec![1, 2]).unwrap();
         let result =
             fft2_builtin(Value::Tensor(tensor.clone()), vec![Value::Tensor(size)]).expect("fft2");
+        match result {
+            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![4, 2]),
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fft2_size_vector_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new((0..6).map(|v| v as f64).collect(), vec![2, 3]).unwrap();
+        let mut size = Tensor::new_integer(IntegerStorage::U16(vec![4, 2]), vec![1, 2]).unwrap();
+        size.data.fill(f64::NAN);
+
+        let result = fft2_builtin(Value::Tensor(tensor), vec![Value::Tensor(size)]).expect("fft2");
+
         match result {
             Value::ComplexTensor(out) => assert_eq!(out.shape, vec![4, 2]),
             other => panic!("expected complex tensor, got {other:?}"),

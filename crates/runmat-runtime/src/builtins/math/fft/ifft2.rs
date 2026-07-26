@@ -2,8 +2,8 @@
 
 use super::common::{
     complex_tensor_to_real_value, download_provider_complex_tensor, gather_gpu_complex_tensor,
-    parse_2d_lengths_from_data, parse_length, parse_symflag, transform_axes_complex_tensor,
-    value_to_complex_tensor, TransformDirection,
+    parse_2d_lengths_from_data, parse_2d_lengths_from_tensor, parse_length, parse_symflag,
+    transform_axes_complex_tensor, value_to_complex_tensor, TransformDirection,
 };
 use super::ifft::ifft_complex_tensor;
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -535,7 +535,7 @@ fn split_symflag(args: &[Value]) -> BuiltinResult<(Option<bool>, &[Value])> {
 fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match value {
         Value::Tensor(tensor) => {
-            parse_2d_lengths_from_data(&tensor.data, BUILTIN_NAME).map_err(|source| {
+            parse_2d_lengths_from_tensor(tensor, BUILTIN_NAME).map_err(|source| {
                 ifft2_error_with_detail(
                     &IFFT2_ERROR_INVALID_SIZE_VECTOR,
                     format!("size vector parse failed: {source}"),
@@ -606,7 +606,8 @@ pub(crate) mod tests {
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        builtin_function_by_name, IntValue, ResolveContext, Tensor as HostTensor, Type,
+        builtin_function_by_name, IntValue, IntegerStorage, ResolveContext, Tensor as HostTensor,
+        Type,
     };
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
@@ -752,6 +753,23 @@ pub(crate) mod tests {
         let size = HostTensor::new(vec![4.0, 2.0], vec![1, 2]).unwrap();
         let value = ifft2_builtin(Value::ComplexTensor(spectrum), vec![Value::Tensor(size)])
             .expect("ifft2");
+        match value {
+            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![4, 2]),
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ifft2_size_vector_reads_typed_integer_storage_exactly() {
+        let tensor = HostTensor::new((0..6).map(|v| v as f64).collect(), vec![2, 3]).unwrap();
+        let spectrum = fft2_of_tensor(&tensor);
+        let mut size =
+            HostTensor::new_integer(IntegerStorage::U16(vec![4, 2]), vec![1, 2]).unwrap();
+        size.data.fill(f64::NAN);
+
+        let value = ifft2_builtin(Value::ComplexTensor(spectrum), vec![Value::Tensor(size)])
+            .expect("ifft2");
+
         match value {
             Value::ComplexTensor(out) => assert_eq!(out.shape, vec![4, 2]),
             other => panic!("expected complex tensor, got {other:?}"),
