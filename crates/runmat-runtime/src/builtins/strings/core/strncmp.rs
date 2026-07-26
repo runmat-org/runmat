@@ -249,7 +249,7 @@ fn parse_prefix_length(value: Value) -> BuiltinResult<usize> {
             if tensor.data.len() != 1 {
                 return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
             }
-            parse_prefix_length_from_float(tensor.data[0])
+            parse_prefix_length_from_float(tensor::tensor_value_f64(&tensor, 0))
         }
         Value::LogicalArray(array) => {
             if array.data.len() != 1 {
@@ -284,7 +284,8 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{
-        CellArray, CharArray, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type,
+        CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, ResolveContext, StringArray,
+        Tensor, Type,
     };
 
     fn strncmp_builtin(a: Value, b: Value, n: Value) -> BuiltinResult<Value> {
@@ -384,6 +385,21 @@ pub(crate) mod tests {
     #[test]
     fn strncmp_prefix_length_tensor_scalar_double() {
         let limit = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+        let result = strncmp_builtin(
+            Value::String("gamma".into()),
+            Value::String("gamut".into()),
+            Value::Tensor(limit),
+        )
+        .expect("strncmp");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strncmp_prefix_length_typed_integer_tensor_reads_exact_storage() {
+        let mut limit =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer tensor");
+        limit.data.fill(f64::NAN);
         let result = strncmp_builtin(
             Value::String("gamma".into()),
             Value::String("gamut".into()),

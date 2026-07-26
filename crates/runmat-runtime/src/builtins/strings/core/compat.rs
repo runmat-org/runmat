@@ -10,6 +10,7 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast as matlab_broadcast;
 use crate::builtins::common::map_control_flow_with_builtin;
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
@@ -930,7 +931,7 @@ fn parse_nonnegative_usize(value: &Value, fn_name: &str) -> BuiltinResult<usize>
             .integer_storage()
             .and_then(|storage| storage.value_at(0))
             .and_then(|value| value.try_to_usize())
-            .or_else(|| nonnegative_platform_usize(tensor.data[0])),
+            .or_else(|| nonnegative_platform_usize(tensor_utils::tensor_value_f64(tensor, 0))),
         _ => {
             return Err(compat_error(
                 fn_name,
@@ -1678,6 +1679,8 @@ mod tests {
         );
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![9]), vec![1, 1])
             .expect("typed scalar tensor");
+        let mut tensor = tensor;
+        tensor.data.fill(f64::NAN);
         assert_eq!(
             parse_nonnegative_usize(&Value::Tensor(tensor), "digitsPattern").unwrap(),
             9

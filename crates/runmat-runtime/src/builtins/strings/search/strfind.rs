@@ -451,13 +451,13 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
                     ),
                     &STRFIND_ERROR_INVALID_OPTION,
                 ))
-            } else if !tensor.data[0].is_finite() {
+            } else if !tensor::tensor_value_f64(tensor, 0).is_finite() {
                 Err(strfind_error_with_message(
                     "strfind: option values must be finite numeric scalars",
                     &STRFIND_ERROR_INVALID_OPTION,
                 ))
             } else {
-                Ok(tensor.data[0] != 0.0)
+                Ok(tensor::tensor_value_f64(tensor, 0) != 0.0)
             }
         }
         other => value_to_owned_string(other)
@@ -483,7 +483,9 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, CharArray, ResolveContext, StringArray, Tensor, Type};
+    use runmat_builtins::{
+        CellArray, CharArray, IntegerStorage, ResolveContext, StringArray, Tensor, Type,
+    };
 
     fn run_strfind(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(strfind_builtin(text, pattern, rest))
@@ -663,6 +665,31 @@ pub(crate) mod tests {
             Value::String("mission".into()),
             Value::String("s".into()),
             vec![Value::String("ForceCellOutput".into()), Value::Num(1.0)],
+        )
+        .expect("strfind");
+        match result {
+            Value::Cell(cell) => {
+                assert_eq!(cell.rows, 1);
+                assert_eq!(cell.cols, 1);
+                match cell.get(0, 0).unwrap() {
+                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0, 4.0]),
+                    other => panic!("expected tensor inside cell, got {other:?}"),
+                }
+            }
+            other => panic!("expected cell output, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strfind_force_cell_output_typed_integer_tensor_reads_exact_storage() {
+        let mut flag =
+            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("integer tensor");
+        flag.data.fill(f64::NAN);
+        let result = run_strfind(
+            Value::String("mission".into()),
+            Value::String("s".into()),
+            vec![Value::String("ForceCellOutput".into()), Value::Tensor(flag)],
         )
         .expect("strfind");
         match result {

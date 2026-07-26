@@ -368,7 +368,8 @@ fn evaluate_startswith(
 pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{
-        CellArray, CharArray, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type,
+        CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, ResolveContext, StringArray,
+        Tensor, Type,
     };
 
     fn run_startswith(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -588,6 +589,21 @@ pub(crate) mod tests {
         )
         .expect("startsWith");
         assert_eq!(result, Value::Bool(false));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn startswith_ignore_case_typed_integer_tensor_reads_exact_storage() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        let result = run_startswith(
+            Value::String("RunMat".into()),
+            Value::String("run".into()),
+            vec![Value::String("IgnoreCase".into()), Value::Tensor(tensor)],
+        )
+        .expect("startsWith");
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
