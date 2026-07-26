@@ -557,11 +557,7 @@ pub async fn parse_coefficients(
         }
         Value::ComplexTensor(tensor) => {
             ensure_vector_shape(label, &tensor.shape, builtin)?;
-            tensor
-                .data
-                .into_iter()
-                .map(|(re, im)| Complex64::new(re, im))
-                .collect()
+            tensor::complex_tensor_into_values_complex64(tensor)
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(|err| {
@@ -687,8 +683,7 @@ pub fn scalar_complex(value: &Value, builtin: &'static str) -> BuiltinResult<Com
             Ok(Complex64::new(tensor::tensor_value_f64(tensor, 0), 0.0))
         }
         Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
-            let (re, im) = tensor.data[0];
-            Ok(Complex64::new(re, im))
+            Ok(tensor::complex_tensor_values_complex64(tensor)[0])
         }
         Value::LogicalArray(logical) if logical.data.len() == 1 => Ok(Complex64::new(
             if logical.data[0] == 0 { 0.0 } else { 1.0 },
@@ -1233,12 +1228,25 @@ fn internal_identifier(builtin: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use futures::executor::block_on;
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
     fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
+    }
+
+    fn poisoned_complex_integer_tensor(
+        real: IntegerStorage,
+        imag: IntegerStorage,
+        shape: Vec<usize>,
+    ) -> Value {
+        let storage = IntegerComplexStorage::new(real, imag).expect("complex integer storage");
+        let mut tensor =
+            ComplexTensor::new_integer(storage, shape).expect("complex integer tensor");
+        tensor.data.fill((f64::NAN, f64::NAN));
+        Value::ComplexTensor(tensor)
     }
 
     #[test]
@@ -1253,6 +1261,32 @@ mod tests {
         assert_eq!(
             scalar_complex(&value, "tf").expect("scalar"),
             Complex64::new(42.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn scalar_complex_reads_complex_typed_integer_storage_exactly() {
+        let value = poisoned_complex_integer_tensor(
+            IntegerStorage::I16(vec![3]),
+            IntegerStorage::I16(vec![-4]),
+            vec![1, 1],
+        );
+        assert_eq!(
+            scalar_complex(&value, "tf").expect("scalar"),
+            Complex64::new(3.0, -4.0)
+        );
+    }
+
+    #[test]
+    fn parse_coefficients_reads_complex_typed_integer_storage_exactly() {
+        let value = poisoned_complex_integer_tensor(
+            IntegerStorage::I16(vec![1, 3]),
+            IntegerStorage::I16(vec![2, -4]),
+            vec![1, 2],
+        );
+        assert_eq!(
+            block_on(parse_coefficients("numerator", value, "tf")).expect("coefficients"),
+            vec![Complex64::new(1.0, 2.0), Complex64::new(3.0, -4.0)]
         );
     }
 }
