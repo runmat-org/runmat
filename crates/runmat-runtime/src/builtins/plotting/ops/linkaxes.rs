@@ -11,6 +11,7 @@ use super::state::{
     axes_metadata_snapshot, decode_axes_handle, figure_handle_exists, link_axes, FigureHandle,
     LinkAxesMode,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::style::value_as_string;
 use crate::builtins::plotting::type_resolvers::set_type;
 
@@ -136,7 +137,7 @@ fn axes_handles_from_value(value: &Value) -> crate::BuiltinResult<Vec<(FigureHan
     let raw = match value {
         Value::Num(handle) => vec![*handle],
         Value::Int(handle) => vec![handle.to_f64()],
-        Value::Tensor(tensor) => tensor.data.clone(),
+        Value::Tensor(tensor) => tensor_utils::tensor_values_f64(tensor),
         _ => {
             return Err(plotting_error(
                 "linkaxes",
@@ -215,6 +216,26 @@ mod tests {
         numeric_vec(
             get_builtin(vec![Value::Num(ax), Value::String(property.into())]).expect("get limits"),
         )
+    }
+
+    #[test]
+    fn linkaxes_handle_vector_reads_typed_integer_storage_exactly() {
+        let _guard = setup();
+        let first = subplot(1.0, 2.0, 1.0);
+        let second = subplot(1.0, 2.0, 2.0);
+        let mut handles = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U32(vec![first as u32, second as u32]),
+            vec![1, 2],
+        )
+        .expect("typed axes handles");
+        handles.data = vec![f64::NAN, f64::NAN];
+        let first_target = decode_axes_handle(first).expect("first axes handle");
+        let second_target = decode_axes_handle(second).expect("second axes handle");
+
+        assert_eq!(
+            axes_handles_from_value(&Value::Tensor(handles)).expect("axes handles"),
+            vec![first_target, second_target]
+        );
     }
 
     #[test]

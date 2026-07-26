@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use super::op_common::line_inputs::NumericInput;
@@ -732,11 +733,14 @@ fn quiver_axis_source(
     match input {
         QuiverCoordinateInput::Explicit(NumericInput::Host(tensor)) => match precision {
             runmat_accelerate_api::ProviderPrecision::F32 => Ok(QuiverAxisSource::HostF32(
-                tensor.data.iter().map(|value| *value as f32).collect(),
+                tensor_utils::tensor_values_f64(tensor)
+                    .into_iter()
+                    .map(|value| value as f32)
+                    .collect(),
             )),
-            runmat_accelerate_api::ProviderPrecision::F64 => {
-                Ok(QuiverAxisSource::HostF64(tensor.data.clone()))
-            }
+            runmat_accelerate_api::ProviderPrecision::F64 => Ok(QuiverAxisSource::HostF64(
+                tensor_utils::tensor_values_f64(tensor),
+            )),
         },
         QuiverCoordinateInput::Explicit(NumericInput::Gpu(handle)) => {
             let exported = runmat_accelerate_api::export_wgpu_buffer(handle).ok_or_else(|| {
@@ -1068,6 +1072,31 @@ mod tests {
             _ => panic!("expected f64 axis data for f64 shader"),
         }
         assert_eq!(f64_axis.bounds(BUILTIN_NAME).unwrap(), (1.0, 2.5));
+    }
+
+    #[test]
+    fn quiver_axis_source_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-2, 0, 2]),
+            vec![3],
+        )
+        .expect("typed quiver axis");
+        tensor.data = vec![f64::NAN, f64::NAN, f64::NAN];
+        let host = QuiverCoordinateInput::Explicit(NumericInput::Host(tensor));
+
+        let f64_axis =
+            quiver_axis_source(&host, runmat_accelerate_api::ProviderPrecision::F64, "X").unwrap();
+        match f64_axis.axis_data() {
+            AxisData::F64(values) => assert_eq!(values, &[-2.0, 0.0, 2.0]),
+            _ => panic!("expected f64 axis data"),
+        }
+
+        let f32_axis =
+            quiver_axis_source(&host, runmat_accelerate_api::ProviderPrecision::F32, "X").unwrap();
+        match f32_axis.axis_data() {
+            AxisData::F32(values) => assert_eq!(values, &[-2.0, 0.0, 2.0]),
+            _ => panic!("expected f32 axis data"),
+        }
     }
 
     #[test]

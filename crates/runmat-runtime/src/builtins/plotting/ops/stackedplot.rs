@@ -1033,7 +1033,7 @@ fn tensor_plot_column_count(tensor: &Tensor) -> usize {
 
 fn tensor_plot_columns(tensor: &Tensor) -> BuiltinResult<Vec<Vec<f64>>> {
     if tensor.rows() == 1 || tensor.cols() == 1 {
-        return Ok(vec![tensor.data.clone()]);
+        return Ok(vec![tensor_utils::tensor_values_f64(tensor)]);
     }
     let cols = tensor.cols().max(1);
     (0..cols).map(|col| tensor_column(tensor, col)).collect()
@@ -1043,7 +1043,8 @@ fn tensor_column(tensor: &Tensor, col: usize) -> BuiltinResult<Vec<f64>> {
     let rows = tensor.rows();
     let mut out = Vec::with_capacity(rows);
     for row in 0..rows {
-        out.push(tensor.get2(row, col).map_err(|err| stacked_err(err))?);
+        let index = row + col * rows;
+        out.push(tensor_utils::tensor_value_f64(tensor, index));
     }
     Ok(out)
 }
@@ -1317,6 +1318,21 @@ mod tests {
         assert_eq!(
             numeric_vector(&Value::Tensor(x), "X").expect("numeric vector"),
             vec![1.0, 2.0, 3.0]
+        );
+    }
+
+    #[test]
+    fn stackedplot_columns_reads_typed_integer_storage_exactly() {
+        let mut y = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![10, 20, 30, 40]),
+            vec![2, 2],
+        )
+        .expect("typed y matrix");
+        y.data = vec![f64::NAN, f64::NAN, f64::NAN, f64::NAN];
+
+        assert_eq!(
+            tensor_plot_columns(&y).expect("plot columns"),
+            vec![vec![10.0, 20.0], vec![30.0, 40.0]]
         );
     }
 

@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use super::op_common::line_inputs::NumericInput;
@@ -725,7 +726,7 @@ fn vector_from_tensor(tensor: &Tensor) -> crate::BuiltinResult<Vec<f64>> {
             "X input must be a vector matching the row count of Y",
         ));
     }
-    Ok(tensor.data.clone())
+    Ok(tensor_utils::tensor_values_f64(tensor))
 }
 
 fn area_shape_from_tensor(tensor: &Tensor) -> (usize, usize) {
@@ -792,6 +793,21 @@ mod tests {
             cols,
             dtype: runmat_builtins::NumericDType::F64,
         }
+    }
+
+    #[test]
+    fn area_vector_from_tensor_reads_typed_integer_storage_exactly() {
+        let mut x = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-1, 0, 1]),
+            vec![1, 3],
+        )
+        .expect("typed area x vector");
+        x.data = vec![f64::NAN, f64::NAN, f64::NAN];
+
+        assert_eq!(
+            vector_from_tensor(&x).expect("area vector"),
+            vec![-1.0, 0.0, 1.0]
+        );
     }
 
     #[test]

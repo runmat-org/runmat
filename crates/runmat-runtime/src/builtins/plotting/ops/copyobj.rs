@@ -259,7 +259,7 @@ fn copy_plot_child(source_handle: f64, target: CopyParentTarget) -> BuiltinResul
 fn handle_list(value: &Value, role: &'static str) -> BuiltinResult<HandleList> {
     match value {
         Value::Tensor(tensor) => Ok(HandleList {
-            handles: tensor.data.clone(),
+            handles: tensor_utils::tensor_values_f64(tensor),
             shape: tensor.shape.clone(),
             is_scalar: tensor.data.len() == 1,
         }),
@@ -372,6 +372,20 @@ mod tests {
             handle_scalar(&Value::Tensor(tensor), "source").unwrap(),
             7.0
         );
+    }
+
+    #[test]
+    fn copyobj_handle_list_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U32(vec![3, 5]), vec![1, 2])
+                .unwrap();
+        tensor.data = vec![f64::NAN, f64::NAN];
+
+        let list = handle_list(&Value::Tensor(tensor), "source").expect("handle list");
+
+        assert_eq!(list.handles, vec![3.0, 5.0]);
+        assert_eq!(list.shape, vec![1, 2]);
+        assert!(!list.is_scalar);
     }
 
     #[test]

@@ -146,7 +146,7 @@ fn split_root_handles(args: &[Value]) -> crate::BuiltinResult<Option<(Vec<f64>, 
     match first {
         Value::Num(value) => Ok(Some((vec![*value], &args[1..]))),
         Value::Int(value) => Ok(Some((vec![value.to_f64()], &args[1..]))),
-        Value::Tensor(tensor) => Ok(Some((tensor.data.clone(), &args[1..]))),
+        Value::Tensor(tensor) => Ok(Some((tensor_utils::tensor_values_f64(tensor), &args[1..]))),
         _ => Ok(None),
     }
 }
@@ -638,6 +638,19 @@ mod tests {
         tensor.data[0] = 0.0;
 
         assert_eq!(depth_from_value(&Value::Tensor(tensor)).unwrap(), 3);
+    }
+
+    #[test]
+    fn findobj_root_handles_reads_typed_integer_storage_exactly() {
+        let mut roots = Tensor::new_integer(IntegerStorage::U16(vec![11, 13]), vec![1, 2]).unwrap();
+        roots.data = vec![f64::NAN, f64::NAN];
+        let args = vec![Value::Tensor(roots), Value::String("Type".into())];
+        let (handles, rest) = split_root_handles(&args)
+            .expect("split roots")
+            .expect("root handle list");
+
+        assert_eq!(handles, vec![11.0, 13.0]);
+        assert_eq!(rest.len(), 1);
     }
 
     #[test]
