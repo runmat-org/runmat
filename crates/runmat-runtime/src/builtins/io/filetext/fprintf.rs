@@ -4,7 +4,8 @@ use std::io::Write;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -311,21 +312,33 @@ fn try_tensor_char_row_as_string(value: &Value) -> Option<Result<String, String>
                 || (t.shape.len() == 1 && t.data.len() == t.shape[0]);
             if is_row {
                 let mut out = String::with_capacity(t.data.len());
-                for &code in &t.data {
-                    if !code.is_finite() {
-                        return Some(Err(
-                            "fprintf: formatSpec must be a character row vector or string scalar"
-                                .to_string(),
-                        ));
+                if let Some(storage) = t.integer_storage() {
+                    for code in storage.exact_values() {
+                        if let Some(ch) = char_from_int_value(&code) {
+                            out.push(ch);
+                        } else {
+                            return Some(Err(
+                                "fprintf: formatSpec contains invalid character code".to_string(),
+                            ));
+                        }
                     }
-                    let v = code as u32;
-                    // Allow full Unicode range; MATLAB chars are UTF-16 but format strings are ASCII-compatible typically
-                    if let Some(ch) = char::from_u32(v) {
-                        out.push(ch);
-                    } else {
-                        return Some(Err(
-                            "fprintf: formatSpec contains invalid character code".to_string()
-                        ));
+                } else {
+                    for &code in &t.data {
+                        if !code.is_finite() || code.fract().abs() > f64::EPSILON || code < 0.0 {
+                            return Some(Err(
+                                "fprintf: formatSpec must be a character row vector or string scalar"
+                                    .to_string(),
+                            ));
+                        }
+                        let v = code as u32;
+                        // Allow full Unicode range; MATLAB chars are UTF-16 but format strings are ASCII-compatible typically
+                        if let Some(ch) = char::from_u32(v) {
+                            out.push(ch);
+                        } else {
+                            return Some(Err(
+                                "fprintf: formatSpec contains invalid character code".to_string(),
+                            ));
+                        }
                     }
                 }
                 return Some(Ok(out));
@@ -334,6 +347,13 @@ fn try_tensor_char_row_as_string(value: &Value) -> Option<Result<String, String>
         }
         _ => None,
     }
+}
+
+fn char_from_int_value(value: &IntValue) -> Option<char> {
+    value
+        .try_to_u64()
+        .and_then(|code| u32::try_from(code).ok())
+        .and_then(char::from_u32)
 }
 
 fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
@@ -492,9 +512,18 @@ fn target_from_fid(fid: i32) -> BuiltinResult<OutputTarget> {
 fn parse_fid(value: &Value) -> Result<i32, String> {
     let scalar = match value {
         Value::Num(n) => *n,
-        Value::Int(int) => int.to_f64(),
+        Value::Int(int) => {
+            return int
+                .try_to_i32()
+                .ok_or_else(|| "fprintf: file identifier is out of range".to_string());
+        }
         Value::Tensor(t) => {
             if t.shape == vec![1, 1] && t.data.len() == 1 {
+                if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                    return int
+                        .try_to_i32()
+                        .ok_or_else(|| "fprintf: file identifier is out of range".to_string());
+                }
                 t.data[0]
             } else {
                 return Err("fprintf: file identifier must be numeric".to_string());
@@ -507,6 +536,9 @@ fn parse_fid(value: &Value) -> Result<i32, String> {
     }
     if (scalar.fract().abs()) > f64::EPSILON {
         return Err("fprintf: file identifier must be an integer".to_string());
+    }
+    if scalar < i32::MIN as f64 || scalar > i32::MAX as f64 {
+        return Err("fprintf: file identifier is out of range".to_string());
     }
     Ok(scalar as i32)
 }
@@ -691,7 +723,7 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::{fclose, fopen, registry};
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
     use runmat_filesystem::File;
     use runmat_time::system_time_now;
     use std::io::Read;
@@ -728,6 +760,33 @@ pub(crate) mod tests {
             .collect();
         assert!(labels.contains(&"count = fprintf(formatSpec, A...)"));
         assert!(labels.contains(&"count = fprintf(fid_or_stream, formatSpec, A...)"));
+    }
+
+    #[test]
+    fn fprintf_format_tensor_reads_typed_integer_storage_exactly() {
+        let mut format = Tensor::new_integer(
+            IntegerStorage::U16(vec![b'%' as u16, b'd' as u16]),
+            vec![1, 2],
+        )
+        .expect("format tensor");
+        format.data.fill(f64::NAN);
+
+        assert_eq!(
+            coerce_to_format_string(&Value::Tensor(format)).unwrap(),
+            Some(Value::String("%d".to_string()))
+        );
+    }
+
+    #[test]
+    fn fprintf_fid_parser_reads_typed_integer_storage_exactly() {
+        let mut fid =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("fid tensor");
+        fid.data[0] = 0.0;
+        assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
+
+        let too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("fid");
+        assert!(parse_fid(&Value::Tensor(too_large)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
