@@ -955,10 +955,11 @@ fn transpose_2d(tensor: &Tensor, function: &'static str) -> BuiltinResult<Tensor
             "predict: ObservationsIn='columns' requires a 2-D matrix",
         ));
     }
-    let mut out = vec![0.0; tensor.data.len()];
+    let values = tensor::tensor_values_f64_cow(tensor);
+    let mut out = vec![0.0; values.len()];
     for row in 0..tensor.rows {
         for col in 0..tensor.cols {
-            out[col + row * tensor.cols] = tensor.data[row + col * tensor.rows];
+            out[col + row * tensor.cols] = values[row + col * tensor.rows];
         }
     }
     Tensor::new(out, vec![tensor.cols, tensor.rows])

@@ -457,6 +457,43 @@ fn forward_and_predict_read_typed_integer_storage_exactly() {
 }
 
 #[test]
+fn predict_observations_in_columns_reads_typed_integer_storage_exactly() {
+    let input_layer = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let fc = block_on(fully_connected_layer_builtin(
+        Value::Num(1.0),
+        vec![
+            Value::String("Weights".into()),
+            poisoned_int_tensor(IntegerStorage::I32(vec![10, 1]), vec![1, 2], 99.0),
+            Value::String("Bias".into()),
+            poisoned_int_tensor(IntegerStorage::I32(vec![5]), vec![1, 1], 99.0),
+        ],
+    ))
+    .unwrap();
+    let net = block_on(dlnetwork_builtin(vec![Value::Cell(
+        CellArray::new(vec![input_layer, fc], 2, 1).unwrap(),
+    )]))
+    .unwrap();
+    let input = poisoned_int_tensor(IntegerStorage::I32(vec![1, 2, 3, 4]), vec![2, 2], 99.0);
+
+    let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+        net,
+        input,
+        vec![
+            Value::String("ObservationsIn".into()),
+            Value::String("columns".into()),
+        ],
+    ))
+    .unwrap();
+
+    let Value::Tensor(predicted) = predicted else {
+        panic!("expected predict tensor output");
+    };
+    assert_eq!(predicted.shape, vec![2, 1]);
+    assert_eq!(predicted.data, vec![17.0, 39.0]);
+    assert!(predicted.integer_storage().is_none());
+}
+
+#[test]
 fn forward_preserves_dlarray_wrapper() {
     let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
     let data = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
