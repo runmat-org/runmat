@@ -857,8 +857,17 @@ impl BoundaryPositions {
             }),
             Value::Tensor(t) => {
                 let mut data = Vec::with_capacity(t.data.len());
-                for &entry in &t.data {
-                    data.push(parse_position(entry)?);
+                if let Some(storage) = t.integer_storage() {
+                    for idx in 0..t.data.len() {
+                        let entry = storage.value_at(idx).ok_or_else(|| {
+                            extract_between_error(&EXTRACT_BETWEEN_ERROR_POSITION_TYPE)
+                        })?;
+                        data.push(parse_position_int(entry)?);
+                    }
+                } else {
+                    for &entry in &t.data {
+                        data.push(parse_position(entry)?);
+                    }
                 }
                 Ok(Self {
                     data,
@@ -899,7 +908,7 @@ pub(crate) mod tests {
     #![allow(non_snake_case)]
 
     use super::*;
-    use runmat_builtins::{CellArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{CellArray, IntegerStorage, ResolveContext, Tensor, Type};
 
     fn extract_between_builtin(
         text: Value,
@@ -908,6 +917,25 @@ pub(crate) mod tests {
         rest: Vec<Value>,
     ) -> BuiltinResult<Value> {
         futures::executor::block_on(super::extract_between_builtin(text, start, stop, rest))
+    }
+
+    #[test]
+    fn extractBetween_position_vectors_read_typed_integer_storage_exactly() {
+        let mut positions =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 4]), vec![1, 2]).expect("positions");
+        positions.data.fill(1.0);
+
+        let parsed = BoundaryPositions::from_value(Value::Tensor(positions)).unwrap();
+        assert_eq!(parsed.data, vec![2, 4]);
+        assert_eq!(parsed.shape, vec![1, 2]);
+    }
+
+    #[test]
+    fn extractBetween_position_vectors_reject_nonpositive_integer_storage() {
+        let positions =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).expect("positions");
+
+        assert!(BoundaryPositions::from_value(Value::Tensor(positions)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

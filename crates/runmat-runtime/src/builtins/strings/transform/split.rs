@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor::tensor_value_f64;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::type_resolvers::{string_array_type, unknown_type};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
@@ -967,7 +968,7 @@ fn parse_bool_for_builtin(
         }
         Value::Tensor(tensor) => {
             if tensor.data.len() == 1 {
-                Ok(tensor.data[0] != 0.0)
+                Ok(tensor_value_f64(tensor, 0) != 0.0)
             } else {
                 Err(builtin_error_with_descriptor(
                     builtin_name,
@@ -1245,7 +1246,7 @@ fn strsplit_name_key(value: &Value) -> Option<StrsplitNameKey> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{CellArray, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type};
 
     fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::split_builtin(text, rest))
@@ -1253,6 +1254,19 @@ pub(crate) mod tests {
 
     fn strsplit_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strsplit_builtin(text, rest))
+    }
+
+    #[test]
+    fn split_bool_options_read_typed_integer_storage_exactly() {
+        let mut enabled =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("enabled");
+        enabled.data[0] = 0.0;
+        assert!(parse_bool(&Value::Tensor(enabled), "IncludeDelimiters").unwrap());
+
+        let mut disabled =
+            Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("disabled");
+        disabled.data[0] = 1.0;
+        assert!(!parse_bool(&Value::Tensor(disabled), "IncludeDelimiters").unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
