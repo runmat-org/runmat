@@ -347,13 +347,8 @@ async fn value_to_tensor(builtin: &'static str, value: Value) -> BuiltinResult<T
     let value = gather_if_needed_async(&value).await.map_err(|err| {
         invalid_argument(builtin, format!("{builtin}: failed to gather input: {err}"))
     })?;
-    let tensor = tensor::value_into_tensor_for(builtin, value)
-        .map_err(|err| invalid_argument(builtin, format!("{builtin}: {err}")))?;
-    if tensor.integer_storage().is_some() {
-        return Tensor::new(tensor_values_f64(&tensor), tensor.shape.clone())
-            .map_err(|err| internal_error(builtin, format!("{builtin}: {err}")));
-    }
-    Ok(tensor)
+    tensor::value_into_tensor_for(builtin, value)
+        .map_err(|err| invalid_argument(builtin, format!("{builtin}: {err}")))
 }
 
 async fn parse_detection_options(
@@ -518,18 +513,19 @@ fn detect_outliers(
     options: &DetectionOptions,
     builtin: &'static str,
 ) -> BuiltinResult<DetectionResult> {
+    let input_values = tensor::tensor_values_f64_cow(input);
     if let Some(mask) = &options.forced_mask {
-        if mask.len() != input.data.len() {
+        if mask.len() != input_values.len() {
             return Err(invalid_argument(
                 builtin,
                 "OutlierLocations must have the same number of elements as the input",
             ));
         }
     }
-    let shape = tensor::default_shape_for(&input.shape, input.data.len());
+    let shape = tensor::default_shape_for(&input.shape, input_values.len());
     let dim = options.dim.unwrap_or_else(|| first_non_singleton(&shape));
     let mut result = if dim == 0 {
-        detect_all(input, options)?
+        detect_all(input, &input_values, options)?
     } else {
         let axis = dim - 1;
         let rank = shape.len().max(axis + 1);
@@ -539,9 +535,9 @@ fn detect_outliers(
             options.method,
             DetectionMethod::MovingMedian(_) | DetectionMethod::MovingMean(_)
         ) {
-            detect_moving(input, &padded_shape, axis, options)?
+            detect_moving(input, &input_values, &padded_shape, axis, options)?
         } else {
-            detect_by_slice(input, &padded_shape, axis, options)?
+            detect_by_slice(input, &input_values, &padded_shape, axis, options)?
         }
     };
     if let Some(mask) = &options.forced_mask {
@@ -550,10 +546,13 @@ fn detect_outliers(
     Ok(result)
 }
 
-fn detect_all(input: &Tensor, options: &DetectionOptions) -> BuiltinResult<DetectionResult> {
-    let stats = slice_stats(&input.data, &options.method, threshold_factor(options))?;
-    let mask = input
-        .data
+fn detect_all(
+    input: &Tensor,
+    input_values: &[f64],
+    options: &DetectionOptions,
+) -> BuiltinResult<DetectionResult> {
+    let stats = slice_stats(input_values, &options.method, threshold_factor(options))?;
+    let mask = input_values
         .iter()
         .map(|value| u8::from(is_outlier_value(*value, stats.lower, stats.upper)))
         .collect();
@@ -563,15 +562,16 @@ fn detect_all(input: &Tensor, options: &DetectionOptions) -> BuiltinResult<Detec
         lower: vec![stats.lower],
         upper: vec![stats.upper],
         center: vec![stats.center],
-        lower_full: vec![stats.lower; input.data.len()],
-        upper_full: vec![stats.upper; input.data.len()],
-        center_full: vec![stats.center; input.data.len()],
+        lower_full: vec![stats.lower; input_values.len()],
+        upper_full: vec![stats.upper; input_values.len()],
+        center_full: vec![stats.center; input_values.len()],
         threshold_shape: vec![1, 1],
     })
 }
 
 fn detect_by_slice(
     input: &Tensor,
+    input_values: &[f64],
     shape: &[usize],
     axis: usize,
     options: &DetectionOptions,
@@ -582,20 +582,20 @@ fn detect_by_slice(
     let mut threshold_shape = shape.to_vec();
     threshold_shape[axis] = 1;
     let threshold_len = tensor::element_count(&threshold_shape);
-    let mut mask = vec![0u8; input.data.len()];
+    let mut mask = vec![0u8; input_values.len()];
     let mut lower = vec![f64::NAN; threshold_len];
     let mut upper = vec![f64::NAN; threshold_len];
     let mut center = vec![f64::NAN; threshold_len];
-    let mut lower_full = vec![f64::NAN; input.data.len()];
-    let mut upper_full = vec![f64::NAN; input.data.len()];
-    let mut center_full = vec![f64::NAN; input.data.len()];
+    let mut lower_full = vec![f64::NAN; input_values.len()];
+    let mut upper_full = vec![f64::NAN; input_values.len()];
+    let mut center_full = vec![f64::NAN; input_values.len()];
     for prefix in 0..pre {
         for suffix in 0..post {
             let mut slice = Vec::with_capacity(axis_len);
             let mut indices = Vec::with_capacity(axis_len);
             for idx in 0..axis_len {
                 let linear = prefix + idx * pre + suffix * pre * axis_len;
-                slice.push(input.data[linear]);
+                slice.push(input_values[linear]);
                 indices.push(linear);
             }
             let stats = slice_stats(&slice, &options.method, threshold_factor(options))?;
@@ -626,6 +626,7 @@ fn detect_by_slice(
 
 fn detect_moving(
     input: &Tensor,
+    input_values: &[f64],
     shape: &[usize],
     axis: usize,
     options: &DetectionOptions,
@@ -633,17 +634,17 @@ fn detect_moving(
     let axis_len = shape[axis];
     let pre: usize = shape[..axis].iter().product();
     let post: usize = shape[axis + 1..].iter().product();
-    let mut mask = vec![0u8; input.data.len()];
-    let mut lower = vec![f64::NAN; input.data.len()];
-    let mut upper = vec![f64::NAN; input.data.len()];
-    let mut center = vec![f64::NAN; input.data.len()];
+    let mut mask = vec![0u8; input_values.len()];
+    let mut lower = vec![f64::NAN; input_values.len()];
+    let mut upper = vec![f64::NAN; input_values.len()];
+    let mut center = vec![f64::NAN; input_values.len()];
     for prefix in 0..pre {
         for suffix in 0..post {
             let mut slice = Vec::with_capacity(axis_len);
             let mut indices = Vec::with_capacity(axis_len);
             for idx in 0..axis_len {
                 let linear = prefix + idx * pre + suffix * pre * axis_len;
-                slice.push(input.data[linear]);
+                slice.push(input_values[linear]);
                 indices.push(linear);
             }
             let window = match options.method {
@@ -686,13 +687,14 @@ fn fill_outlier_tensor(
     options: &DetectionOptions,
     method: &FillMethod,
 ) -> BuiltinResult<Value> {
-    let mut data = input.data.clone();
-    let shape = tensor::default_shape_for(&input.shape, input.data.len());
+    let input_values = tensor::tensor_values_f64_cow(input);
+    let mut data = input_values.to_vec();
+    let shape = tensor::default_shape_for(&input.shape, input_values.len());
     let dim = options.dim.unwrap_or_else(|| first_non_singleton(&shape));
     if dim == 0 {
         fill_slice(
             &mut data,
-            &(0..input.data.len()).collect::<Vec<_>>(),
+            &(0..input_values.len()).collect::<Vec<_>>(),
             result,
             method,
         );
@@ -1116,6 +1118,12 @@ mod tests {
         Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
     }
 
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(poison);
+        Value::Tensor(tensor)
+    }
+
     #[test]
     fn outlier_numeric_parsers_read_typed_integer_storage_exactly() {
         let wide = u64::MAX - 1;
@@ -1170,9 +1178,11 @@ mod tests {
 
     #[test]
     fn filloutliers_accepts_typed_integer_input_fill_and_mask() {
-        let value = int_tensor(IntegerStorage::I16(vec![1, 2, 100, 4, 5]), vec![5, 1]);
-        let fill = int_tensor(IntegerStorage::I16(vec![-7]), vec![1, 1]);
-        let locations = int_tensor(IntegerStorage::U8(vec![0, 0, 1, 0, 0]), vec![5, 1]);
+        let value =
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 100, 4, 5]), vec![5, 1], 0.0);
+        let fill = poisoned_int_tensor(IntegerStorage::I16(vec![-7]), vec![1, 1], 99.0);
+        let locations =
+            poisoned_int_tensor(IntegerStorage::U8(vec![0, 0, 1, 0, 0]), vec![5, 1], 0.0);
         let out = block_on(filloutliers_builtin(
             value,
             vec![fill, Value::from("OutlierLocations"), locations],
@@ -1181,6 +1191,64 @@ mod tests {
         assert!(
             matches!(out, Value::Tensor(tensor) if tensor.data == vec![1.0, 2.0, -7.0, 4.0, 5.0])
         );
+    }
+
+    #[test]
+    fn isoutlier_typed_integer_input_reads_exact_storage() {
+        let value =
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 100, 4, 5]), vec![5, 1], 0.0);
+        let out = block_on(isoutlier_builtin(value, Vec::new())).unwrap();
+        let Value::LogicalArray(mask) = out else {
+            panic!("expected logical mask");
+        };
+        assert_eq!(mask.data, vec![0, 0, 1, 0, 0]);
+    }
+
+    #[test]
+    fn isoutlier_moving_method_reads_typed_integer_input_and_window() {
+        let value =
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 100, 4, 5]), vec![5, 1], 0.0);
+        let window = poisoned_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1], 0.0);
+        let out = block_on(isoutlier_builtin(
+            value,
+            vec![Value::from("movmedian"), window],
+        ))
+        .unwrap();
+        let Value::LogicalArray(mask) = out else {
+            panic!("expected logical mask");
+        };
+        assert_eq!(mask.data, vec![0, 0, 1, 0, 0]);
+    }
+
+    #[test]
+    fn isoutlier_threshold_factor_reads_typed_integer_storage() {
+        let value = poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 9, 10]), vec![5, 1], 0.0);
+        let factor = poisoned_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1], 0.0);
+        let out = block_on(isoutlier_builtin(
+            value,
+            vec![Value::from("ThresholdFactor"), factor],
+        ))
+        .unwrap();
+        let Value::LogicalArray(mask) = out else {
+            panic!("expected logical mask");
+        };
+        assert_eq!(mask.data, vec![0, 0, 0, 1, 1]);
+    }
+
+    #[test]
+    fn isoutlier_percentile_bounds_read_typed_integer_storage() {
+        let value =
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 100, 4, 5]), vec![5, 1], 0.0);
+        let bounds = poisoned_int_tensor(IntegerStorage::U8(vec![10, 90]), vec![1, 2], 0.0);
+        let out = block_on(isoutlier_builtin(
+            value,
+            vec![Value::from("percentiles"), bounds],
+        ))
+        .unwrap();
+        let Value::LogicalArray(mask) = out else {
+            panic!("expected logical mask");
+        };
+        assert_eq!(mask.data, vec![1, 0, 1, 0, 0]);
     }
 
     #[test]
