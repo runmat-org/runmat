@@ -1597,8 +1597,21 @@ fn scalar_complex_tensor(re: f64, im: f64) -> crate::BuiltinResult<ComplexTensor
 }
 
 fn tensor_to_complex_owned(name: &str, tensor: Tensor) -> crate::BuiltinResult<ComplexTensor> {
-    let Tensor { data, shape, .. } = tensor;
-    let complex: Vec<(f64, f64)> = data.into_iter().map(|re| (re, 0.0)).collect();
+    let Tensor {
+        data,
+        integer_data,
+        shape,
+        ..
+    } = tensor;
+    let complex: Vec<(f64, f64)> = if let Some(storage) = integer_data {
+        storage
+            .exact_values()
+            .into_iter()
+            .map(|value| (value.to_f64(), 0.0))
+            .collect()
+    } else {
+        data.into_iter().map(|re| (re, 0.0)).collect()
+    };
     ComplexTensor::new(complex, shape).map_err(|e| intersect_internal_error(format!("{name}: {e}")))
 }
 
@@ -1862,6 +1875,26 @@ pub(crate) mod tests {
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
         assert_eq!(ia.data, vec![1.0, 2.0]);
         assert_eq!(ib.data, vec![3.0, 1.0]);
+    }
+
+    #[test]
+    fn intersect_complex_real_alignment_reads_typed_integer_storage_exactly() {
+        let mut real =
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, -7, 3]), vec![3, 1]).unwrap();
+        real.data = vec![f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
+        let complex = ComplexTensor::new(vec![(-7.0, 0.0), (4.0, 0.0)], vec![2, 1]).unwrap();
+
+        let eval = evaluate_sync(Value::Tensor(real), Value::ComplexTensor(complex), &[])
+            .expect("intersect");
+        let Value::Complex(re, im) = eval.values_value() else {
+            panic!("expected complex scalar");
+        };
+        assert_eq!(re, -7.0);
+        assert_eq!(im, 0.0);
+        let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
+        let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
+        assert_eq!(ia.data, vec![2.0]);
+        assert_eq!(ib.data, vec![1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
