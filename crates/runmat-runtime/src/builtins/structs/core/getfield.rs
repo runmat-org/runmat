@@ -637,6 +637,25 @@ fn apply_vector_index(value: &Value, selector: &IndexSelector) -> BuiltinResult<
     };
     match value {
         Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                let mut selected = Vec::with_capacity(indices.len());
+                for &index in indices {
+                    if index < 1 || index > storage.len() {
+                        return Err(getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS));
+                    }
+                    selected.push(
+                        storage
+                            .value_at(index - 1)
+                            .expect("validated integer storage index"),
+                    );
+                }
+                let storage = storage
+                    .from_same_class_values(selected)
+                    .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
+                let tensor = Tensor::new_integer(storage, shape.clone())
+                    .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
+                return Ok(Some(Value::Tensor(tensor)));
+            }
             let mut data = Vec::with_capacity(indices.len());
             for &index in indices {
                 if index < 1 || index > tensor.data.len() {
@@ -1281,6 +1300,42 @@ pub(crate) mod tests {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
                 assert_eq!(tensor.data, vec![20.0, 10.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn getfield_vector_index_preserves_typed_integer_target_storage() {
+        let mut values = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("typed target");
+        values.data = vec![10.0, 20.0];
+        let mut st = StructValue::new();
+        st.fields
+            .insert("values".to_string(), Value::Tensor(values));
+
+        let mut selector =
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![1, 2]).expect("selector");
+        selector.data = vec![1.0, 1.0];
+        let index =
+            CellArray::new_with_shape(vec![Value::Tensor(selector)], vec![1, 1]).expect("index");
+
+        let result = run_getfield(
+            Value::Struct(st),
+            vec![Value::from("values"), Value::Cell(index)],
+        )
+        .expect("vector index");
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(
+                    tensor.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![u64::MAX, u64::MAX - 1]))
+                );
+                assert_eq!(tensor.data, vec![u64::MAX as f64, (u64::MAX - 1) as f64]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
