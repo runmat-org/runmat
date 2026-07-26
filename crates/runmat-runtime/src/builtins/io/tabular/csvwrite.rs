@@ -437,8 +437,7 @@ async fn write_csv(
         }
         for col in 0..cols {
             let idx = row + col * rows;
-            let value = tensor.data[idx];
-            fields.push(format_numeric(value));
+            fields.push(format_tensor_value(tensor, idx));
         }
         let line = fields.join(",");
         if !line.is_empty() {
@@ -513,6 +512,16 @@ fn format_numeric(value: f64) -> String {
         trimmed = "0".to_string();
     }
     trimmed
+}
+
+fn format_tensor_value(tensor: &Tensor, idx: usize) -> String {
+    if let Some(storage) = tensor.integer_storage() {
+        return storage
+            .value_at(idx)
+            .expect("integer storage mirrors tensor shape")
+            .decimal_string();
+    }
+    format_numeric(tensor.data[idx])
 }
 
 fn trim_trailing_zeros(mut value: String) -> String {
@@ -618,6 +627,32 @@ pub(crate) mod tests {
 
         let contents = fs::read_to_string(&path).expect("read contents");
         assert_eq!(contents, format!("1,2,3{le}4,5,6{le}", le = line_ending()));
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn csvwrite_preserves_typed_integer_matrix_values_exactly() {
+        let path = temp_path("csv");
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 17, (1_u64 << 53) + 1, 29]),
+            vec![2, 2],
+        )
+        .expect("typed integer matrix");
+        tensor.data.fill(0.0);
+        let filename = path.to_string_lossy().into_owned();
+
+        csvwrite_builtin(Value::from(filename), Value::Tensor(tensor), Vec::new())
+            .expect("csvwrite");
+
+        let contents = fs::read_to_string(&path).expect("read contents");
+        assert_eq!(
+            contents,
+            format!(
+                "18446744073709551615,9007199254740993{le}17,29{le}",
+                le = line_ending()
+            )
+        );
         let _ = fs::remove_file(path);
     }
 

@@ -334,6 +334,7 @@ struct DlmWriteOptions {
     roffset: usize,
     coffset: usize,
     precision: PrecisionSpec,
+    precision_explicit: bool,
     append: bool,
 }
 
@@ -345,6 +346,7 @@ impl Default for DlmWriteOptions {
             roffset: 0,
             coffset: 0,
             precision: PrecisionSpec::Significant(5),
+            precision_explicit: false,
             append: false,
         }
     }
@@ -448,6 +450,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmWriteOptions> {
             }
             "precision" => {
                 options.precision = parse_precision_value(value)?;
+                options.precision_explicit = true;
             }
             "newline" => {
                 options.newline = parse_newline_value(value)?;
@@ -889,8 +892,7 @@ async fn write_dlm(
         }
         for col in 0..cols {
             let idx = row + col * rows;
-            let value = tensor.data[idx];
-            fields.push(format_numeric(value, &options.precision)?);
+            fields.push(format_tensor_value(tensor, idx, options)?);
         }
         let line = fields.join(&options.delimiter);
         if !line.is_empty() {
@@ -1019,6 +1021,23 @@ fn format_numeric(value: f64, precision: &PrecisionSpec) -> BuiltinResult<String
             }
         }
     }
+}
+
+fn format_tensor_value(
+    tensor: &Tensor,
+    idx: usize,
+    options: &DlmWriteOptions,
+) -> BuiltinResult<String> {
+    if let Some(storage) = tensor.integer_storage() {
+        let value = storage
+            .value_at(idx)
+            .expect("integer storage mirrors tensor shape");
+        if !options.precision_explicit {
+            return Ok(value.decimal_string());
+        }
+        return format_numeric(value.to_f64(), &options.precision);
+    }
+    format_numeric(tensor.data[idx], &options.precision)
 }
 
 fn c_format(value: f64, spec: &str) -> BuiltinResult<String> {
@@ -1520,6 +1539,29 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn dlmwrite_preserves_typed_integer_matrix_values_exactly_by_default() {
+        let path = temp_path("csv");
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 17, (1_u64 << 53) + 1, 29]),
+            vec![2, 2],
+        )
+        .expect("typed integer matrix");
+        tensor.data.fill(0.0);
+        let filename = path.to_string_lossy().into_owned();
+
+        dlmwrite_builtin(Value::from(filename), Value::Tensor(tensor), Vec::new()).unwrap();
+
+        let contents = fs::read_to_string(&path).unwrap();
+        let nl = platform_newline();
+        assert_eq!(
+            contents,
+            format!("18446744073709551615,9007199254740993{nl}17,29{nl}")
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn dlmwrite_accepts_positional_delimiter_and_offsets() {
         let path = temp_path("txt");
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -1590,6 +1632,27 @@ pub(crate) mod tests {
         let contents = fs::read_to_string(&path).unwrap();
         let nl = platform_newline();
         assert_eq!(contents, format!("12.3,3.14{nl}"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn dlmwrite_explicit_precision_keeps_numeric_formatting_for_typed_integers() {
+        let path = temp_path("csv");
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![12, 345]), vec![1, 2]).unwrap();
+        tensor.data.fill(0.0);
+        let filename = path.to_string_lossy().into_owned();
+        dlmwrite_builtin(
+            Value::from(filename),
+            Value::Tensor(tensor),
+            vec![Value::from("precision"), Value::Int(IntValue::I32(2))],
+        )
+        .unwrap();
+
+        let contents = fs::read_to_string(&path).unwrap();
+        let nl = platform_newline();
+        assert_eq!(contents, format!("12,3.4e+02{nl}"));
         let _ = fs::remove_file(path);
     }
 
