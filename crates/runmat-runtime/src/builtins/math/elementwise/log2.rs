@@ -187,11 +187,12 @@ fn log2_real(value: Value) -> BuiltinResult<Value> {
 
 fn log2_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let shape = tensor.shape.clone();
-    let len = tensor.data.len();
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    let len = values.len();
     let mut complex_values = Vec::with_capacity(len);
     let mut has_imag = false;
 
-    for &v in &tensor.data {
+    for &v in values.iter() {
         let (re_part, im_part) = log2_complex_parts(v, 0.0);
         if im_part != 0.0 {
             has_imag = true;
@@ -265,7 +266,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LogicalArray, ResolveContext, StringArray, Tensor, Type, Value};
+    use runmat_builtins::{
+        IntegerStorage, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    };
 
     fn log2_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::log2_builtin(value))
@@ -279,6 +282,43 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"Y = log2(X)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn log2_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 4]), vec![3, 1])
+            .expect("integer tensor");
+        tensor.data.fill(1.0);
+
+        let result = log2_builtin(Value::Tensor(tensor)).expect("log2");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.data, vec![0.0, 1.0, 2.0]);
+                assert!(out.integer_storage().is_none());
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn log2_negative_typed_integer_tensor_promotes_to_complex_from_storage() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I32(vec![-4, 4]), vec![1, 2])
+            .expect("integer tensor");
+        tensor.data.fill(4.0);
+
+        let result = log2_builtin(Value::Tensor(tensor)).expect("log2");
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert!((out.data[0].0 - 2.0).abs() < 1e-12);
+                assert!((out.data[0].1 - std::f64::consts::PI * LOG2_E).abs() < 1e-12);
+                assert_eq!(out.data[1], (2.0, 0.0));
+            }
+            other => panic!("expected complex tensor result, got {other:?}"),
+        }
     }
 
     #[test]

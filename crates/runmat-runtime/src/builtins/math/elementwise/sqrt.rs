@@ -207,9 +207,10 @@ fn sqrt_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sqrt_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
-    let len = tensor.data.len();
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    let len = values.len();
     let mut requires_complex = false;
-    for &v in &tensor.data {
+    for &v in values.iter() {
         if v < 0.0 {
             requires_complex = true;
             break;
@@ -218,7 +219,7 @@ fn sqrt_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
 
     if !requires_complex {
         let mut data = Vec::with_capacity(len);
-        for &v in &tensor.data {
+        for &v in values.iter() {
             let root = zero_small(v.sqrt());
             data.push(root);
         }
@@ -227,7 +228,7 @@ fn sqrt_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
         Ok(tensor::tensor_into_value(tensor))
     } else {
         let mut data = Vec::with_capacity(len);
-        for &v in &tensor.data {
+        for &v in values.iter() {
             if v < 0.0 {
                 let imag = zero_small((-v).sqrt());
                 data.push((0.0, imag));
@@ -324,7 +325,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{
+        CharArray, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type,
+    };
 
     fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::sqrt_builtin(value))
@@ -483,6 +486,42 @@ pub(crate) mod tests {
         match result {
             Value::Num(v) => assert!((v - 3.0).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn sqrt_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U32(vec![0, 4, 9]), vec![3, 1])
+            .expect("integer tensor");
+        tensor.data.fill(0.0);
+
+        let result = sqrt_builtin(Value::Tensor(tensor)).expect("sqrt");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.data, vec![0.0, 2.0, 3.0]);
+                assert!(out.integer_storage().is_none());
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn sqrt_negative_typed_integer_tensor_promotes_to_complex_from_storage() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I32(vec![-4, 9]), vec![1, 2])
+            .expect("integer tensor");
+        tensor.data.fill(9.0);
+
+        let result = sqrt_builtin(Value::Tensor(tensor)).expect("sqrt");
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data[0], (0.0, 2.0));
+                assert_eq!(out.data[1], (3.0, 0.0));
+            }
+            other => panic!("expected complex tensor result, got {other:?}"),
         }
     }
 

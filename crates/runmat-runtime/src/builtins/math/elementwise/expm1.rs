@@ -171,7 +171,10 @@ fn expm1_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn expm1_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor.data.iter().map(|&v| v.exp_m1()).collect::<Vec<_>>();
+    let data = tensor::tensor_values_f64_cow(&tensor)
+        .iter()
+        .map(|&v| v.exp_m1())
+        .collect::<Vec<_>>();
     Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("expm1: {e}")))
 }
 
@@ -215,7 +218,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type};
 
     fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::expm1_builtin(value))
@@ -303,6 +306,27 @@ pub(crate) mod tests {
                 for (out, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((out - exp).abs() < 1e-12);
                 }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn expm1_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 2]), vec![3, 1])
+            .expect("integer tensor");
+        tensor.data.fill(0.0);
+
+        let result = expm1_builtin(Value::Tensor(tensor)).expect("expm1");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                let expected = [0.0, 1.0f64.exp_m1(), 2.0f64.exp_m1()];
+                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                    assert!((actual - expected).abs() < 1e-12);
+                }
+                assert!(out.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

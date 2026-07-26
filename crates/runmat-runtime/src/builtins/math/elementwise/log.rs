@@ -210,11 +210,12 @@ fn log_real(value: Value) -> BuiltinResult<Value> {
 
 fn log_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
     let shape = tensor.shape.clone();
-    let len = tensor.data.len();
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    let len = values.len();
     let mut complex_values = Vec::with_capacity(len);
     let mut has_imag = false;
 
-    for &v in &tensor.data {
+    for &v in values.iter() {
         let (mut real_part, mut imag_part) = log_complex_parts(v, 0.0);
         if real_part.is_finite() && real_part.abs() < IMAG_EPS {
             real_part = 0.0;
@@ -289,7 +290,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{
+        IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
+    };
 
     fn log_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::log_builtin(value))
@@ -512,6 +515,46 @@ pub(crate) mod tests {
         match result {
             Value::Num(v) => assert!((v - (4.0f64).ln()).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn log_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 4]), vec![3, 1])
+            .expect("integer tensor");
+        tensor.data.fill(1.0);
+
+        let result = log_builtin(Value::Tensor(tensor)).expect("log");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                let expected = [0.0, 2.0f64.ln(), 4.0f64.ln()];
+                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                    assert!((actual - expected).abs() < 1e-12);
+                }
+                assert!(out.integer_storage().is_none());
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn log_negative_typed_integer_tensor_promotes_to_complex_from_storage() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![-1, 1]), vec![1, 2])
+            .expect("integer tensor");
+        tensor.data.fill(1.0);
+
+        let result = log_builtin(Value::Tensor(tensor)).expect("log");
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data[0].0, 0.0);
+                assert!((out.data[0].1 - std::f64::consts::PI).abs() < 1e-12);
+                assert_eq!(out.data[1], (0.0, 0.0));
+            }
+            other => panic!("expected complex tensor result, got {other:?}"),
         }
     }
 
