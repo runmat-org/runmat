@@ -267,22 +267,22 @@ fn parse_delays(tensor: Tensor) -> BuiltinResult<Vec<PulseInstance>> {
     if tensor.data.is_empty() {
         return Ok(Vec::new());
     }
+    let values = tensor::tensor_values_f64(&tensor);
     let shape = tensor.shape.as_slice();
     if shape.len() <= 2 {
-        let rows = shape.first().copied().unwrap_or(tensor.data.len());
+        let rows = shape.first().copied().unwrap_or(values.len());
         let cols = shape.get(1).copied().unwrap_or(1);
-        let is_vector = rows == 1 || cols == 1 || tensor.data.len() == 1;
+        let is_vector = rows == 1 || cols == 1 || values.len() == 1;
         if !is_vector && cols == 2 {
             return Ok((0..rows)
                 .map(|row| PulseInstance {
-                    delay: tensor.data[row],
-                    amplitude: tensor.data[row + rows],
+                    delay: values[row],
+                    amplitude: values[row + rows],
                 })
                 .collect());
         }
         if is_vector {
-            return Ok(tensor
-                .data
+            return Ok(values
                 .into_iter()
                 .map(|delay| PulseInstance {
                     delay,
@@ -370,7 +370,7 @@ async fn parse_sampled_prototype(pulse: Value, rest: Vec<Value>) -> BuiltinResul
         None => 1.0,
     };
     Ok(PulseSource::Prototype {
-        samples: prototype.data,
+        samples: tensor::tensor_into_values_f64(prototype),
         fs,
     })
 }
@@ -493,26 +493,27 @@ async fn evaluate_pulse_train(
     delays: &[PulseInstance],
     source: &PulseSource,
 ) -> BuiltinResult<Tensor> {
-    let mut out = vec![0.0; t.data.len()];
+    let times = tensor::tensor_values_f64_cow(t);
+    let mut out = vec![0.0; times.len()];
     for pulse in delays {
         match source {
             PulseSource::Rect { width } => {
-                for (idx, &time) in t.data.iter().enumerate() {
+                for (idx, &time) in times.iter().enumerate() {
                     out[idx] += pulse.amplitude * rectpuls_scalar(time - pulse.delay, *width);
                 }
             }
             PulseSource::Tri { width, skew } => {
-                for (idx, &time) in t.data.iter().enumerate() {
+                for (idx, &time) in times.iter().enumerate() {
                     out[idx] += pulse.amplitude * tripuls_scalar(time - pulse.delay, *width, *skew);
                 }
             }
             PulseSource::Gaus { params } => {
-                for (idx, &time) in t.data.iter().enumerate() {
+                for (idx, &time) in times.iter().enumerate() {
                     out[idx] += pulse.amplitude * gauspuls_scalar(time - pulse.delay, *params);
                 }
             }
             PulseSource::Prototype { samples, fs } => {
-                for (idx, &time) in t.data.iter().enumerate() {
+                for (idx, &time) in times.iter().enumerate() {
                     out[idx] += pulse.amplitude * prototype_value(samples, *fs, time - pulse.delay);
                 }
             }
@@ -530,7 +531,7 @@ async fn evaluate_pulse_train(
                             err,
                         )
                     })?;
-                let samples = callback_samples(value, t.data.len()).await?;
+                let samples = callback_samples(value, times.len()).await?;
                 for (idx, sample) in samples.into_iter().enumerate() {
                     out[idx] += pulse.amplitude * sample;
                 }
@@ -542,7 +543,10 @@ async fn evaluate_pulse_train(
 }
 
 fn shifted_time_value(t: &Tensor, delay: f64) -> BuiltinResult<Value> {
-    let data = t.data.iter().map(|value| value - delay).collect::<Vec<_>>();
+    let data = tensor::tensor_values_f64_cow(t)
+        .iter()
+        .map(|value| value - delay)
+        .collect::<Vec<_>>();
     Tensor::new(data, t.shape.clone())
         .map(tensor_into_value)
         .map_err(|err| pulstran_error_with_detail(&PULSTRAN_ERROR_INTERNAL, &err))
@@ -551,9 +555,9 @@ fn shifted_time_value(t: &Tensor, delay: f64) -> BuiltinResult<Value> {
 async fn callback_samples(value: Value, expected_len: usize) -> BuiltinResult<Vec<f64>> {
     let tensor = real_tensor_arg(value, &PULSTRAN_ERROR_INVALID_PULSE).await?;
     if tensor.data.len() == expected_len {
-        Ok(tensor.data)
+        Ok(tensor::tensor_into_values_f64(tensor))
     } else if tensor.data.len() == 1 {
-        Ok(vec![tensor.data[0]; expected_len])
+        Ok(vec![tensor::tensor_value_f64(&tensor, 0); expected_len])
     } else {
         Err(pulstran_error_with_detail(
             &PULSTRAN_ERROR_INVALID_PULSE,
@@ -591,7 +595,7 @@ fn prototype_value(samples: &[f64], fs: f64, t: f64) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, CharArray, StringArray};
+    use runmat_builtins::{builtin_function_by_name, CharArray, IntegerStorage, StringArray};
 
     fn call(t: Value, d: Value, pulse: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(pulstran_builtin(t, d, pulse, rest))
@@ -602,6 +606,13 @@ mod tests {
             Value::Tensor(tensor) => tensor,
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -641,6 +652,24 @@ mod tests {
     }
 
     #[test]
+    fn pulstran_reads_typed_integer_times_and_delay_amplitudes_exactly() {
+        let t = integer_tensor(vec![0, 1], vec![1, 2]);
+        let d = integer_tensor(vec![0, 1, 2, 3], vec![2, 2]);
+        let pulse =
+            Value::StringArray(StringArray::new(vec!["rectpuls".to_string()], vec![1, 1]).unwrap());
+        let out = expect_tensor(
+            call(
+                Value::Tensor(t),
+                Value::Tensor(d),
+                pulse,
+                vec![Value::Num(0.25)],
+            )
+            .expect("pulstran"),
+        );
+        assert_eq!(out.data, vec![2.0, 3.0]);
+    }
+
+    #[test]
     fn pulstran_sampled_prototype_interpolates_at_sample_rate() {
         let t = Tensor::new(vec![0.0, 0.5, 1.0, 1.5, 2.0], vec![1, 5]).unwrap();
         let d = Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap();
@@ -655,6 +684,40 @@ mod tests {
             .expect("pulstran"),
         );
         assert_eq!(out.data, vec![0.0, 1.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn pulstran_reads_typed_integer_sampled_prototype_exactly() {
+        let t = Tensor::new(vec![0.0, 0.5, 1.0, 1.5, 2.0], vec![1, 5]).unwrap();
+        let d = Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap();
+        let prototype = integer_tensor(vec![0, 1, 0], vec![1, 3]);
+        let out = expect_tensor(
+            call(
+                Value::Tensor(t),
+                Value::Tensor(d),
+                Value::Tensor(prototype),
+                vec![Value::Num(2.0)],
+            )
+            .expect("pulstran"),
+        );
+        assert_eq!(out.data, vec![0.0, 1.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn pulstran_callback_samples_read_typed_integer_storage_exactly() {
+        let samples = block_on(callback_samples(
+            Value::Tensor(integer_tensor(vec![2, 4, 6], vec![1, 3])),
+            3,
+        ))
+        .expect("callback samples");
+        assert_eq!(samples, vec![2.0, 4.0, 6.0]);
+
+        let repeated = block_on(callback_samples(
+            Value::Tensor(integer_tensor(vec![7], vec![1, 1])),
+            3,
+        ))
+        .expect("scalar callback sample");
+        assert_eq!(repeated, vec![7.0, 7.0, 7.0]);
     }
 
     #[test]

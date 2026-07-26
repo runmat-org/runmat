@@ -430,20 +430,23 @@ fn scalar_signal_input(value: f64) -> BuiltinResult<SignalInput> {
 }
 
 fn tensor_to_signal_input(tensor: Tensor) -> BuiltinResult<SignalInput> {
-    if tensor.data.is_empty() || tensor.data.iter().any(|value| !value.is_finite()) {
+    let len = tensor.data.len();
+    let shape_meta = tensor.shape.clone();
+    let data = tensor::tensor_into_values_f64(tensor);
+    if data.is_empty() || data.iter().any(|value| !value.is_finite()) {
         return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
     }
-    let shape = tensor::default_shape_for(&tensor.shape, tensor.data.len());
+    let shape = tensor::default_shape_for(&shape_meta, len);
     if shape.len() > 2 || shape.iter().filter(|&&dim| dim > 1).count() > 2 {
         return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
     }
-    let rows = shape.first().copied().unwrap_or(tensor.data.len());
+    let rows = shape.first().copied().unwrap_or(data.len());
     let cols = shape.get(1).copied().unwrap_or(1);
-    if rows == 0 || cols == 0 || rows.checked_mul(cols) != Some(tensor.data.len()) {
+    if rows == 0 || cols == 0 || rows.checked_mul(cols) != Some(data.len()) {
         return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
     }
     Ok(SignalInput {
-        data: tensor.data,
+        data,
         shape,
         rows,
         cols,
@@ -793,7 +796,7 @@ fn spline_interpolate(points: &[(usize, f64)], query: &[f64]) -> BuiltinResult<V
     let value = evaluate_pp(&pp, &query, &Extrapolation::Extrapolate, BUILTIN_NAME)
         .map_err(|err| envelope_error_with_detail(&ENVELOPE_ERROR_INTERNAL, err.message()))?;
     match value {
-        Value::Tensor(tensor) => Ok(tensor.data),
+        Value::Tensor(tensor) => Ok(tensor::tensor_into_values_f64(tensor)),
         Value::Num(value) => Ok(vec![value]),
         _ => Err(envelope_error(&ENVELOPE_ERROR_INTERNAL)),
     }
@@ -855,6 +858,7 @@ fn column_value(values: &[f64]) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn row(values: Vec<f64>) -> Value {
         Value::Tensor(Tensor::new(values.clone(), vec![1, values.len()]).expect("tensor"))
@@ -862,6 +866,21 @@ mod tests {
 
     fn col(values: Vec<f64>) -> Value {
         Value::Tensor(Tensor::new(values.clone(), vec![values.len(), 1]).expect("tensor"))
+    }
+
+    fn integer_row(values: Vec<i16>) -> Value {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(values.clone()), vec![1, values.len()])
+                .expect("typed integer row");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
+    fn integer_matrix(values: Vec<i16>, shape: Vec<usize>) -> Value {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer matrix");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn call(value: Value, rest: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
@@ -921,6 +940,20 @@ mod tests {
     }
 
     #[test]
+    fn envelope_reads_typed_integer_vector_storage_exactly() {
+        let outputs =
+            output_list(call(integer_row(vec![3, 4, 3, 2]), Vec::new(), Some(2)).unwrap());
+        let upper = tensor_data(outputs[0].clone());
+        let lower = tensor_data(outputs[1].clone());
+        assert_eq!(upper.len(), 4);
+        assert_eq!(lower.len(), 4);
+        assert!(upper.iter().all(|value| value.is_finite()));
+        assert!(lower.iter().all(|value| value.is_finite()));
+        assert!(upper.iter().all(|value| *value >= 3.0));
+        assert!(lower.iter().all(|value| *value <= 3.0));
+    }
+
+    #[test]
     fn rms_envelope_uses_centered_window() {
         let outputs = output_list(
             call(
@@ -958,6 +991,25 @@ mod tests {
         let matrix =
             Tensor::new(vec![1.0, 0.0, -1.0, 0.0, 2.0, 3.0, 2.0, 1.0], vec![4, 2]).expect("matrix");
         let out = call(Value::Tensor(matrix), Vec::new(), Some(2)).expect("envelope");
+        let outputs = output_list(out);
+        let Value::Tensor(upper) = outputs[0].clone() else {
+            panic!("expected tensor");
+        };
+        assert_eq!(upper.shape, vec![4, 2]);
+        assert!(upper.data[..4]
+            .iter()
+            .all(|value| (*value - 1.0).abs() < 1.0e-12));
+        assert!(upper.data[4..].iter().all(|value| *value >= 2.0));
+    }
+
+    #[test]
+    fn envelope_reads_typed_integer_matrix_storage_exactly() {
+        let out = call(
+            integer_matrix(vec![1, 0, -1, 0, 2, 3, 2, 1], vec![4, 2]),
+            Vec::new(),
+            Some(2),
+        )
+        .expect("envelope");
         let outputs = output_list(out);
         let Value::Tensor(upper) = outputs[0].clone() else {
             panic!("expected tensor");
