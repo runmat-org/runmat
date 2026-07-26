@@ -19,6 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::helpers::decode_bytes;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -565,7 +566,7 @@ fn value_to_f64(value: &Value, context: &str) -> BuiltinResult<f64> {
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(t) => {
             if t.data.len() == 1 {
-                let v = t.data[0];
+                let v = tensor::tensor_value_f64(t, 0);
                 if v.is_finite() {
                     Ok(v)
                 } else {
@@ -1638,6 +1639,16 @@ pub(crate) mod tests {
         let tokens =
             block_on(parse_treat_as_missing(&Value::Tensor(tensor))).expect("TreatAsMissing token");
         assert_eq!(tokens, vec!["9007199254740993"]);
+    }
+
+    #[test]
+    fn empty_value_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![-7]), vec![1, 1]).expect("empty value");
+        tensor.data[0] = 99.0;
+
+        let value = value_to_f64(&Value::Tensor(tensor), "EmptyValue").expect("EmptyValue");
+        assert_eq!(value, -7.0);
     }
 
     #[test]
