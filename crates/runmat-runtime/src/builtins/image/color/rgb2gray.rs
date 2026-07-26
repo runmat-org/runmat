@@ -168,11 +168,12 @@ fn rgb2gray_tensor(rgb: &Tensor) -> BuiltinResult<Tensor> {
         unreachable!();
     };
     let pixels = rows * cols;
+    let values = common::tensor_values_f64(rgb);
     let mut data = vec![0.0; pixels];
     for (pixel, out) in data.iter_mut().enumerate() {
-        let r = common::unit_value(rgb.data[pixel], rgb.dtype);
-        let g = common::unit_value(rgb.data[pixel + pixels], rgb.dtype);
-        let b = common::unit_value(rgb.data[pixel + 2 * pixels], rgb.dtype);
+        let r = common::unit_value(values[pixel], rgb.dtype);
+        let g = common::unit_value(values[pixel + pixels], rgb.dtype);
+        let b = common::unit_value(values[pixel + 2 * pixels], rgb.dtype);
         let gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
         *out = common::unit_to_dtype(gray, rgb.dtype);
     }
@@ -184,9 +185,16 @@ fn rgb2gray_tensor(rgb: &Tensor) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn call(value: Value) -> Value {
         block_on(rgb2gray_builtin(value, Vec::new())).expect("rgb2gray")
+    }
+
+    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -196,6 +204,17 @@ mod tests {
         let Value::Int(value) = call(Value::Tensor(rgb)) else {
             panic!("expected scalar int");
         };
+        assert_eq!(value.to_i64(), 76);
+    }
+
+    #[test]
+    fn rgb2gray_reads_typed_integer_rgb_storage_exactly() {
+        let rgb = typed_tensor(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3]);
+
+        let Value::Int(value) = call(Value::Tensor(rgb)) else {
+            panic!("expected scalar int");
+        };
+
         assert_eq!(value.to_i64(), 76);
     }
 

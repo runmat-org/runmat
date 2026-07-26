@@ -191,21 +191,19 @@ async fn im2uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
 }
 
 fn im2uint16_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+    let values = common::tensor_values_f64(&tensor);
     let data = match tensor.dtype {
-        NumericDType::U16 => tensor.data,
-        NumericDType::I16 => tensor
-            .data
+        NumericDType::U16 => values.to_vec(),
+        NumericDType::I16 => values
             .iter()
             .map(|&value| value - i16::MIN as f64)
             .collect(),
-        NumericDType::U8 => tensor.data.iter().map(|&value| value * 257.0).collect(),
-        NumericDType::U32 => tensor
-            .data
+        NumericDType::U8 => values.iter().map(|&value| value * 257.0).collect(),
+        NumericDType::U32 => values
             .iter()
             .map(|&value| common::clamp_round(value / (u32::MAX as f64) * 65535.0, 65535.0))
             .collect(),
-        NumericDType::F32 | NumericDType::F64 => tensor
-            .data
+        NumericDType::F32 | NumericDType::F64 => values
             .iter()
             .map(|&value| common::unit_to_dtype(common::clamp01(value), NumericDType::U16))
             .collect(),
@@ -229,6 +227,12 @@ mod tests {
         block_on(im2uint16_builtin(value, Vec::new())).expect("im2uint16")
     }
 
+    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
+    }
+
     #[test]
     fn scales_double_to_uint16_image_range() {
         assert_eq!(call(Value::Num(1.0)), Value::Int(IntValue::U16(65535)));
@@ -242,6 +246,21 @@ mod tests {
         };
         assert_eq!(out.dtype, NumericDType::U16);
         assert_eq!(out.data, vec![0.0, 65535.0]);
+    }
+
+    #[test]
+    fn im2uint16_reads_typed_integer_tensor_storage_exactly() {
+        let input = typed_tensor(IntegerStorage::U8(vec![0, 255]), vec![1, 2]);
+
+        let Value::Tensor(out) = call(Value::Tensor(input)) else {
+            panic!("expected tensor");
+        };
+
+        assert_eq!(out.dtype, NumericDType::U16);
+        assert_eq!(
+            out.integer_storage(),
+            Some(&IntegerStorage::U16(vec![0, u16::MAX]))
+        );
     }
 
     #[test]

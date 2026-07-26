@@ -186,13 +186,14 @@ async fn im2double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
 
 fn im2double_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let scale = common::dtype_max(tensor.dtype);
+    let values = common::tensor_values_f64(&tensor);
     let data = if matches!(
         tensor.dtype,
         NumericDType::U8 | NumericDType::U16 | NumericDType::U32
     ) {
-        tensor.data.iter().map(|&value| value / scale).collect()
+        values.iter().map(|&value| value / scale).collect()
     } else {
-        tensor.data
+        values.to_vec()
     };
     common::tensor_with_dtype(data, tensor.shape, NumericDType::F64, NAME)
 }
@@ -201,10 +202,16 @@ fn im2double_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{IntegerStorage, LogicalArray};
 
     fn call(value: Value) -> Value {
         block_on(im2double_builtin(value, Vec::new())).expect("im2double")
+    }
+
+    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -214,6 +221,20 @@ mod tests {
         let Value::Tensor(out) = call(Value::Tensor(input)) else {
             panic!("expected tensor");
         };
+        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.data[0], 0.0);
+        assert!((out.data[1] - 128.0 / 255.0).abs() < 1e-12);
+        assert_eq!(out.data[2], 1.0);
+    }
+
+    #[test]
+    fn im2double_reads_typed_integer_tensor_storage_exactly() {
+        let input = typed_tensor(IntegerStorage::U8(vec![0, 128, 255]), vec![1, 3]);
+
+        let Value::Tensor(out) = call(Value::Tensor(input)) else {
+            panic!("expected tensor");
+        };
+
         assert_eq!(out.dtype, NumericDType::F64);
         assert_eq!(out.data[0], 0.0);
         assert!((out.data[1] - 128.0 / 255.0).abs() < 1e-12);
