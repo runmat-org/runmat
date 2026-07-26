@@ -1863,7 +1863,7 @@ async fn numeric_vector(name: &'static str, value: &Value) -> BuiltinResult<Vec<
         Value::Num(n) => Ok(vec![*n]),
         Value::Int(i) => Ok(vec![i.to_f64()]),
         Value::Bool(b) => Ok(vec![if *b { 1.0 } else { 0.0 }]),
-        Value::Tensor(t) => Ok(t.data.clone()),
+        Value::Tensor(t) => Ok(tensor::tensor_values_f64(t)),
         Value::LogicalArray(l) => Ok(l
             .data
             .iter()
@@ -1871,7 +1871,7 @@ async fn numeric_vector(name: &'static str, value: &Value) -> BuiltinResult<Vec<
             .collect()),
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(handle).await?;
-            Ok(tensor.data)
+            Ok(tensor::tensor_values_f64(&tensor))
         }
         _ => Err(invalid_argument(
             name,
@@ -2188,6 +2188,23 @@ mod tests {
             "movprod",
             MovingOp::Prod,
             vec![input, window, Value::from("omitnan")],
+        )
+        .expect("movprod");
+        let out = expect_tensor(result);
+        assert_eq!(out.data, vec![2.0, 2.0, 3.0, 12.0]);
+    }
+
+    #[test]
+    fn moving_window_vector_reads_typed_integer_storage_exactly() {
+        let input = tensor(vec![2., f64::NAN, 3., 4.], vec![1, 4]);
+        let mut window =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).expect("window");
+        window.data.fill(f64::NAN);
+
+        let result = call(
+            "movprod",
+            MovingOp::Prod,
+            vec![input, Value::Tensor(window), Value::from("omitnan")],
         )
         .expect("movprod");
         let out = expect_tensor(result);
