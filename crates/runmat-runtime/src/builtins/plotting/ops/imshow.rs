@@ -399,7 +399,8 @@ async fn display_range_for_input(
 fn finite_tensor_bounds(tensor: &Tensor) -> (f64, f64) {
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
-    for &value in &tensor.data {
+    let values = tensor::tensor_values_f64_cow(tensor);
+    for &value in values.iter() {
         if value.is_finite() {
             lo = lo.min(value);
             hi = hi.max(value);
@@ -492,15 +493,16 @@ fn build_truecolor_image_surface(
             )));
         }
     };
+    let values = tensor::tensor_values_f64_cow(&tensor);
     let mut grid = vec![vec![glam::Vec4::ZERO; image_rows]; image_cols];
     for row in 0..image_rows {
         for col in 0..image_cols {
             let base = row + image_rows * col;
-            let r = tensor.data[base] as f32 * scale;
-            let g = tensor.data[base + image_rows * image_cols] as f32 * scale;
-            let b = tensor.data[base + 2 * image_rows * image_cols] as f32 * scale;
+            let r = values[base] as f32 * scale;
+            let g = values[base + image_rows * image_cols] as f32 * scale;
+            let b = values[base + 2 * image_rows * image_cols] as f32 * scale;
             let a = if channels == 4 {
-                tensor.data[base + 3 * image_rows * image_cols] as f32 * scale
+                values[base + 3 * image_rows * image_cols] as f32 * scale
             } else {
                 1.0
             };
@@ -553,10 +555,11 @@ fn tensor_to_image_grid(
             cols
         )));
     }
+    let values = tensor::tensor_values_f64_cow(&tensor);
     let mut grid = vec![vec![0.0; rows]; cols];
     for row in 0..rows {
         for (col, col_vec) in grid.iter_mut().enumerate().take(cols) {
-            col_vec[row] = tensor.data[row + rows * col];
+            col_vec[row] = values[row + rows * col];
         }
     }
     Ok(grid)
@@ -752,7 +755,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{IntegerStorage, LogicalArray};
     use runmat_plot::plots::PlotElement;
 
     fn matrix(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
@@ -938,6 +941,30 @@ mod tests {
     }
 
     #[test]
+    fn imshow_grayscale_reads_typed_integer_storage_exactly() {
+        let _guard = reset();
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1000, 40000, 65535]), vec![2, 2])
+                .expect("typed grayscale image");
+        tensor.data.fill(f64::NAN);
+
+        futures::executor::block_on(imshow_builtin(vec![Value::Tensor(tensor)])).unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Surface(surface) = fig.plots().next().unwrap() else {
+            panic!("expected surface");
+        };
+        assert_eq!(surface.color_limits, Some((0.0, 65535.0)));
+        let z = surface.z_data.as_ref().expect("image z grid");
+        assert_eq!(z[0][0], 0.0);
+        assert_eq!(z[0][1], 1000.0);
+        assert_eq!(z[1][0], 40000.0);
+        assert_eq!(z[1][1], 65535.0);
+        let grid = surface.color_grid.as_ref().expect("grayscale color grid");
+        assert_eq!(grid[0][0], glam::Vec4::new(0.0, 0.0, 0.0, 1.0));
+        assert_eq!(grid[1][1], glam::Vec4::new(1.0, 1.0, 1.0, 1.0));
+    }
+
+    #[test]
     fn imshow_logical_image_uses_binary_limits() {
         let _guard = reset();
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -974,6 +1001,29 @@ mod tests {
         assert_eq!(grid.len(), 2);
         assert_eq!(grid[0].len(), 2);
         assert_eq!(surface.color_limits, None);
+    }
+
+    #[test]
+    fn imshow_truecolor_reads_typed_integer_storage_exactly() {
+        let _guard = reset();
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::U8(vec![255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255]),
+            vec![2, 2, 3],
+        )
+        .expect("typed truecolor image");
+        tensor.data.fill(f64::NAN);
+
+        futures::executor::block_on(imshow_builtin(vec![Value::Tensor(tensor)])).unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Surface(surface) = fig.plots().next().unwrap() else {
+            panic!("expected surface");
+        };
+        assert!(surface.image_mode);
+        let grid = surface.color_grid.as_ref().expect("color grid");
+        assert_eq!(grid[0][0], glam::Vec4::new(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(grid[0][1], glam::Vec4::new(0.0, 1.0, 0.0, 1.0));
+        assert_eq!(grid[1][0], glam::Vec4::new(0.0, 0.0, 1.0, 1.0));
+        assert_eq!(grid[1][1], glam::Vec4::new(1.0, 1.0, 1.0, 1.0));
     }
 
     #[test]
