@@ -239,8 +239,9 @@ async fn parse_display_range(value: Value) -> crate::BuiltinResult<DisplayRange>
     match host {
         Value::Tensor(tensor) if tensor.data.is_empty() => Ok(DisplayRange::Auto),
         Value::Tensor(tensor) if tensor.data.len() == 2 => {
-            let lo = tensor.data[0];
-            let hi = tensor.data[1];
+            let values = tensor::tensor_values_f64(&tensor);
+            let lo = values[0];
+            let hi = values[1];
             validate_display_limits(lo, hi)
         }
         _ => Err(imshow_error(
@@ -832,6 +833,18 @@ mod tests {
             dtype_default_limits(NumericDType::U64),
             (0.0, u64::MAX as f64)
         );
+    }
+
+    #[test]
+    fn display_range_reads_typed_integer_storage_exactly() {
+        let mut range =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1, 7]), vec![1, 2])
+                .expect("typed range");
+        range.data.fill(0.0);
+
+        let parsed =
+            futures::executor::block_on(parse_display_range(Value::Tensor(range))).unwrap();
+        assert_eq!(parsed, DisplayRange::Limits(1.0, 7.0));
     }
 
     #[test]
