@@ -2689,7 +2689,7 @@ async fn daysdif_builtin(
         .first()
         .map(|value| tensor_from_numeric(value.clone(), "daysdif"))
         .transpose()?
-        .and_then(|tensor| tensor.data.first().copied())
+        .and_then(|tensor| (tensor.data.len() == 1).then(|| tensor::tensor_value_f64(&tensor, 0)))
         .unwrap_or(0.0)
         .round() as i64;
     let starts = numeric_or_datetime_serial_tensor(start, "daysdif")?;
@@ -4004,6 +4004,19 @@ mod tests {
             ))
             .expect("daysdif"),
             Value::Num(3.0)
+        );
+        let mut typed_basis =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1]), vec![1, 1])
+                .expect("basis");
+        typed_basis.data[0] = 0.0;
+        assert_eq!(
+            futures::executor::block_on(daysdif_builtin(
+                Value::Num(serial_for_date(2024, 1, 30)),
+                Value::Num(serial_for_date(2024, 2, 29)),
+                vec![Value::Tensor(typed_basis)],
+            ))
+            .expect("daysdif typed basis"),
+            Value::Num(29.0)
         );
         assert_eq!(
             futures::executor::block_on(fbusdate_builtin(
