@@ -1170,7 +1170,7 @@ fn embedding_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResul
         Some(Value::Tensor(tensor))
             if tensor.rows == vocabulary.len() && tensor.cols == dimension =>
         {
-            tensor.data.clone()
+            tensor_utils::tensor_values_f64(tensor)
         }
         other => {
             return Err(embedding_error(
@@ -1775,7 +1775,7 @@ fn parse_positive_scalar(value: &Value, fn_name: &str, option: &str) -> BuiltinR
 
 fn parse_ngram_range(value: &Value) -> BuiltinResult<(usize, usize)> {
     let values = match value {
-        Value::Tensor(tensor) if tensor.data.len() == 2 => tensor.data.clone(),
+        Value::Tensor(tensor) if tensor.data.len() == 2 => tensor_utils::tensor_values_f64(tensor),
         other => {
             return Err(embedding_error(
                 "trainWordEmbedding",
@@ -2419,8 +2419,9 @@ pub(in crate::builtins::strings::text_analytics) fn build_word_lookup(
 }
 
 fn row_slice(tensor: &Tensor, row: usize) -> Vec<f64> {
+    let values = tensor_utils::tensor_values_f64_cow(tensor);
     (0..tensor.cols)
-        .map(|col| tensor.data[row + col * tensor.rows])
+        .map(|col| values[row + col * tensor.rows])
         .collect()
 }
 
@@ -2580,6 +2581,56 @@ mod tests {
         let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
         tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
+    }
+
+    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
+    }
+
+    #[test]
+    fn embedding_object_reader_reads_typed_integer_storage_exactly() {
+        let mut object = ObjectInstance::new(WORD_EMBEDDING_CLASS.to_string());
+        object.properties.insert(
+            "Vocabulary".to_string(),
+            Value::StringArray(
+                StringArray::new(vec!["alpha".to_string(), "beta".to_string()], vec![1, 2])
+                    .unwrap(),
+            ),
+        );
+        object
+            .properties
+            .insert("Dimension".to_string(), Value::Num(2.0));
+        object.properties.insert(
+            VECTOR_PROPERTY.to_string(),
+            Value::Tensor(poisoned_integer_tensor(
+                IntegerStorage::I16(vec![1, 2, 3, 4]),
+                vec![2, 2],
+            )),
+        );
+
+        let model = embedding_from_object(&object, "test").expect("embedding");
+        assert_eq!(model.vocabulary, vec!["alpha", "beta"]);
+        assert_eq!(model.dimension, 2);
+        assert_eq!(model.vectors, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn ngram_range_reads_typed_integer_storage_exactly() {
+        let tensor = poisoned_integer_tensor(IntegerStorage::U16(vec![1, 3]), vec![1, 2]);
+
+        assert_eq!(
+            parse_ngram_range(&Value::Tensor(tensor)).expect("range"),
+            (1, 3)
+        );
+    }
+
+    #[test]
+    fn row_slice_reads_typed_integer_storage_exactly() {
+        let tensor = poisoned_integer_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]);
+
+        assert_eq!(row_slice(&tensor, 1), vec![2.0, 4.0]);
     }
 
     #[test]
