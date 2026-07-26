@@ -401,6 +401,18 @@ mod tests {
         assert_eq!(compare_table_cells(&value, 0, 1).unwrap(), Ordering::Less);
         assert_eq!(group_atom_label(&second), (large + 1).to_string());
     }
+
+    #[test]
+    fn cell_key_string_reads_typed_integer_storage_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
+        tensor.data[0] = 1.0;
+
+        assert_eq!(
+            cell_key_string(&Value::Tensor(tensor), 0),
+            "9007199254740993"
+        );
+    }
 }
 
 fn format_integer_key(value: &IntValue) -> String {
@@ -557,10 +569,18 @@ pub(in crate::builtins::table) fn summarize_groups<'a>(
 
 pub(in crate::builtins::table) fn cell_key_string(value: &Value, row: usize) -> String {
     match value {
-        Value::Tensor(tensor) => tensor
-            .get2(row, 0)
-            .map(format_key_number)
-            .unwrap_or_default(),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .value_at(row)
+                    .map(|value| format_integer_key(&value))
+                    .unwrap_or_default();
+            }
+            tensor
+                .get2(row, 0)
+                .map(format_key_number)
+                .unwrap_or_default()
+        }
         Value::StringArray(array) => array.data.get(row).cloned().unwrap_or_default(),
         Value::LogicalArray(array) => array
             .data

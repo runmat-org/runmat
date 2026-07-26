@@ -1079,8 +1079,17 @@ impl RangeSpec {
             Value::StringArray(sa) if sa.data.len() == 1 => Self::parse_text(&sa.data[0]),
             Value::Tensor(t) if t.data.len() == 2 || t.data.len() == 4 => {
                 let mut indices = Vec::with_capacity(t.data.len());
-                for value in &t.data {
-                    indices.push(one_based_to_zero(*value, usize::MAX, "Range")?);
+                if let Some(storage) = t.integer_storage() {
+                    for idx in 0..t.data.len() {
+                        let value = storage
+                            .value_at(idx)
+                            .ok_or_else(|| invalid_index("table: Range index out of bounds"))?;
+                        indices.push(one_based_integer_to_zero(&value, "Range")?);
+                    }
+                } else {
+                    for value in &t.data {
+                        indices.push(one_based_to_zero(*value, usize::MAX, "Range")?);
+                    }
                 }
                 Ok(Self {
                     start_row: indices[0],
@@ -1119,6 +1128,20 @@ impl RangeSpec {
             end_col: end.and_then(|item| item.1),
         })
     }
+}
+
+fn one_based_integer_to_zero(
+    value: &runmat_builtins::IntValue,
+    context: &str,
+) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .and_then(|value| value.checked_sub(1))
+        .ok_or_else(|| {
+            invalid_index(format!(
+                "table: {context} indices must be positive finite integers"
+            ))
+        })
 }
 
 pub(in crate::builtins::table) fn parse_cell_ref(
@@ -1164,4 +1187,30 @@ pub(in crate::builtins::table) fn parse_cell_ref(
         Some(parsed - 1)
     };
     Ok((row, col))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn range_spec_reads_typed_integer_storage_exactly() {
+        let mut range =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 4, 5]), vec![1, 4]).unwrap();
+        range.data.fill(0.0);
+
+        let parsed = RangeSpec::parse(&Value::Tensor(range)).unwrap();
+        assert_eq!(parsed.start_row, 1);
+        assert_eq!(parsed.start_col, 2);
+        assert_eq!(parsed.end_row, Some(3));
+        assert_eq!(parsed.end_col, Some(4));
+    }
+
+    #[test]
+    fn range_spec_rejects_nonpositive_typed_integer_indices() {
+        let range = Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).unwrap();
+
+        assert!(RangeSpec::parse(&Value::Tensor(range)).is_err());
+    }
 }
