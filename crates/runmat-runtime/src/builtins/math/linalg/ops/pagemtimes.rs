@@ -367,15 +367,34 @@ impl PageInput {
     }
 
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        if !matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) {
+        let dtype = tensor.dtype;
+        if !matches!(
+            dtype,
+            NumericDType::F64
+                | NumericDType::F32
+                | NumericDType::I8
+                | NumericDType::I16
+                | NumericDType::I32
+                | NumericDType::I64
+                | NumericDType::U8
+                | NumericDType::U16
+                | NumericDType::U32
+                | NumericDType::U64
+        ) {
             return Err(pagemtimes_invalid_input(format!(
                 "pagemtimes: numeric class {} is not supported",
                 tensor.dtype.class_name()
             )));
         }
+        let output_dtype = if matches!(dtype, NumericDType::F32) {
+            NumericDType::F32
+        } else {
+            NumericDType::F64
+        };
         let shape = canonical_matrix_shape(&tensor.shape);
         let expected = checked_product(&shape)?;
-        if tensor.data.len() != expected {
+        let data = tensor::tensor_into_values_f64(tensor);
+        if data.len() != expected {
             return Err(pagemtimes_internal(
                 "pagemtimes: tensor data length does not match shape",
             ));
@@ -384,8 +403,8 @@ impl PageInput {
             rows: shape[0],
             cols: shape[1],
             page_dims: shape.get(2..).unwrap_or(&[]).to_vec(),
-            dtype: tensor.dtype,
-            data: PageData::Real(tensor.data),
+            dtype: output_dtype,
+            data: PageData::Real(data),
         })
     }
 
@@ -852,7 +871,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorStorage, HostTensorView, ProviderPrecision};
-    use runmat_builtins::{CharArray, IntValue};
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage};
 
     fn call(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(pagemtimes_builtin(first, rest))
@@ -903,6 +922,51 @@ mod tests {
             out.data,
             vec![70.0, 100.0, 150.0, 220.0, 670.0, 780.0, 910.0, 1060.0]
         );
+    }
+
+    #[test]
+    fn typed_integer_pages_read_exact_storage_and_return_double() {
+        let mut lhs = Tensor::new_integer(
+            IntegerStorage::I16(vec![
+                1, 2, 3, 4, // page 1
+                5, 6, 7, 8, // page 2
+            ]),
+            vec![2, 2, 2],
+        )
+        .unwrap();
+        let mut rhs = Tensor::new_integer(
+            IntegerStorage::U16(vec![
+                10, 20, 30, 40, // page 1
+                50, 60, 70, 80, // page 2
+            ]),
+            vec![2, 2, 2],
+        )
+        .unwrap();
+        lhs.data.fill(f64::NAN);
+        rhs.data.fill(f64::NAN);
+
+        let out = expect_tensor(call(Value::Tensor(lhs), vec![Value::Tensor(rhs)]).unwrap());
+        assert_eq!(out.shape, vec![2, 2, 2]);
+        assert_eq!(out.dtype, NumericDType::F64);
+        assert!(out.integer_storage().is_none());
+        assert_eq!(
+            out.data,
+            vec![70.0, 100.0, 150.0, 220.0, 670.0, 780.0, 910.0, 1060.0]
+        );
+    }
+
+    #[test]
+    fn mixed_single_and_integer_pages_return_double_from_exact_storage() {
+        let lhs = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], NumericDType::F32)
+            .unwrap();
+        let mut rhs =
+            Tensor::new_integer(IntegerStorage::U16(vec![5, 7, 6, 8]), vec![2, 2]).unwrap();
+        rhs.data.fill(f64::NAN);
+
+        let out = expect_tensor(call(Value::Tensor(lhs), vec![Value::Tensor(rhs)]).unwrap());
+        assert_eq!(out.shape, vec![2, 2]);
+        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.data, vec![26.0, 38.0, 30.0, 44.0]);
     }
 
     #[test]
@@ -1063,7 +1127,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_integer_inputs() {
+    fn rejects_integer_scalar_inputs() {
         let err = call(Value::Int(IntValue::I32(2)), vec![Value::Num(3.0)]).unwrap_err();
         assert_eq!(err.identifier(), PAGEMTIMES_ERROR_INVALID_INPUT.identifier);
     }
