@@ -343,9 +343,9 @@ async fn convert_value(value: Value) -> BuiltinResult<(PolyInput, bool)> {
 }
 
 fn convert_tensor(tensor: Tensor) -> BuiltinResult<PolyInput> {
-    let Tensor {
-        data, rows, cols, ..
-    } = tensor;
+    let rows = tensor.rows;
+    let cols = tensor.cols;
+    let data = tensor::tensor_into_values_f64(tensor);
     let len = data.len();
     let hint = classify_orientation(rows, cols, len);
     ensure_vector(hint)?;
@@ -577,7 +577,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_builtins::{builtin_function_by_name, IntegerStorage, ResolveContext, Type};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -585,6 +585,12 @@ pub(crate) mod tests {
 
     fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<DeconvEval> {
         block_on(super::evaluate(numerator, denominator))
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -639,6 +645,19 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor quotient, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn deconv_reads_typed_integer_coefficients_exactly() {
+        let numerator = integer_tensor(IntegerStorage::I16(vec![1, 3, 3, 1]), vec![1, 4]);
+        let denominator = integer_tensor(IntegerStorage::U16(vec![1, 1]), vec![1, 2]);
+
+        let eval =
+            evaluate(Value::Tensor(numerator), Value::Tensor(denominator)).expect("evaluate");
+
+        assert_eq!(real_vector(eval.quotient()), vec![1.0, 2.0, 1.0]);
+        assert_eq!(real_vector(eval.remainder()), vec![0.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
