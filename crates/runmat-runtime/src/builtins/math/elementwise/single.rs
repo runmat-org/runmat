@@ -285,12 +285,25 @@ async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 fn single_tensor_to_host(mut tensor: Tensor) -> BuiltinResult<Tensor> {
+    if tensor.integer_storage().is_some() {
+        tensor.data = tensor::tensor_values_f64(&tensor);
+        tensor.integer_data = None;
+    }
     cast_slice_to_single(&mut tensor.data);
     tensor.dtype = NumericDType::F32;
     Ok(tensor)
 }
 
 fn single_complex_tensor_to_host(mut tensor: ComplexTensor) -> BuiltinResult<ComplexTensor> {
+    if let Some(storage) = tensor.integer_data.take() {
+        let real = storage.real.exact_values();
+        let imag = storage.imag.exact_values();
+        tensor.data = real
+            .into_iter()
+            .zip(imag)
+            .map(|(re, im)| (re.to_f64(), im.to_f64()))
+            .collect();
+    }
     cast_complex_slice_to_single(&mut tensor.data);
     Ok(tensor)
 }
@@ -438,7 +451,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, SymbolicExpr, Type};
+    use runmat_builtins::{
+        IntegerComplexStorage, IntegerStorage, ResolveContext, SymbolicExpr, Type,
+    };
 
     fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::single_builtin(value, rest))
@@ -535,6 +550,25 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn single_tensor_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
+        tensor.data.fill(f64::NAN);
+
+        let result = single_builtin(Value::Tensor(tensor), Vec::new()).expect("single");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.dtype, NumericDType::F32);
+                assert_eq!(t.integer_storage(), None);
+                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn single_complex_tensor_rounds_both_components() {
         let tensor = ComplexTensor::new(
             vec![(1.234567, -9.876543), (0.3333333, 0.6666667)],
@@ -550,6 +584,28 @@ pub(crate) mod tests {
                     ((0.3333333f32) as f64, (0.6666667f32) as f64),
                 ];
                 assert_eq!(t.data, expected);
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn single_complex_tensor_reads_typed_integer_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, -2]),
+            IntegerStorage::I16(vec![3, -4]),
+        )
+        .expect("complex integer storage");
+        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
+        tensor.data.fill((f64::NAN, f64::NAN));
+
+        let result = single_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("single");
+        match result {
+            Value::ComplexTensor(t) => {
+                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.integer_data, None);
+                assert_eq!(t.data, vec![(1.0, 3.0), (-2.0, -4.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
