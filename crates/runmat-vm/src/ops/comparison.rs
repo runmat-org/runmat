@@ -115,6 +115,14 @@ fn complex_integer_element_equals_real_value(
     storage_imag.is_zero() && integer_value_equals_value(&storage_real, scalar)
 }
 
+fn real_tensor_element_value(tensor: &Tensor, index: usize) -> Value {
+    tensor
+        .integer_storage()
+        .and_then(|storage| storage.value_at(index))
+        .map(Value::Int)
+        .unwrap_or(Value::Num(tensor.data[index]))
+}
+
 fn tensor_element_pair(tensor: &ComplexTensor, index: usize) -> (f64, f64) {
     tensor
         .data
@@ -240,7 +248,7 @@ fn typed_complex_integer_comparison(
                     make(complex_integer_element_equals_real_value(
                         storage,
                         index,
-                        &Value::Num(real.data[index]),
+                        &real_tensor_element_value(real, index),
                     ))
                 })
                 .collect();
@@ -265,7 +273,7 @@ fn typed_complex_integer_comparison(
                     make(complex_integer_element_equals_real_value(
                         storage,
                         index,
-                        &Value::Num(real.data[index]),
+                        &real_tensor_element_value(real, index),
                     ))
                 })
                 .collect();
@@ -544,11 +552,13 @@ where
         let mut out = Vec::with_capacity(array.data.len());
         for i in 0..array.data.len() {
             let val = if array.data[i] != 0 { 1.0 } else { 0.0 };
-            out.push(if (val - tensor.data[i]).abs() < 1e-12 {
-                1
-            } else {
-                0
-            });
+            out.push(
+                if tensor_element_equals_scalar(tensor, i, &Value::Num(val)) {
+                    1
+                } else {
+                    0
+                },
+            );
         }
         push_logical(out, array.shape.clone(), stack)
     };
@@ -1021,11 +1031,56 @@ mod tests {
     }
 
     #[test]
+    fn logical_array_eq_typed_integer_tensor_reads_exact_storage() {
+        let mut integer = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 1, (1_u64 << 53) + 1]),
+            vec![1, 3],
+        )
+        .expect("integer tensor");
+        integer.data.fill(f64::NAN);
+        let mut stack = vec![logical_array(vec![0, 1, 1]), Value::Tensor(integer)];
+
+        block_on(equal(
+            &mut stack,
+            unreachable_call_method,
+            unreachable_call_builtin,
+            unreachable_logical_truth,
+        ))
+        .expect("eq");
+
+        assert_eq!(stack.len(), 1);
+        assert_logical_result(&stack[0], &[1, 1, 0]);
+    }
+
+    #[test]
     fn typed_complex_integer_eq_is_exact_above_f64_precision() {
         let large = (1_u64 << 53) + 1;
         let mut stack = vec![
             complex_uint64(vec![large, u64::MAX], vec![0, 7], vec![1, 2]),
             complex_uint64(vec![large, u64::MAX - 1], vec![0, 7], vec![1, 2]),
+        ];
+
+        block_on(equal(
+            &mut stack,
+            unreachable_call_method,
+            unreachable_call_builtin,
+            unreachable_logical_truth,
+        ))
+        .expect("eq");
+
+        assert_eq!(stack.len(), 1);
+        assert_tensor_result(&stack[0], &[1, 2], &[1.0, 0.0]);
+    }
+
+    #[test]
+    fn typed_complex_integer_eq_typed_real_tensor_reads_exact_storage() {
+        let large = (1_u64 << 53) + 1;
+        let mut real = Tensor::new_integer(IntegerStorage::U64(vec![large, u64::MAX]), vec![1, 2])
+            .expect("integer tensor");
+        real.data.fill(f64::NAN);
+        let mut stack = vec![
+            complex_uint64(vec![large, u64::MAX], vec![0, 1], vec![1, 2]),
+            Value::Tensor(real),
         ];
 
         block_on(equal(
