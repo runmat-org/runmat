@@ -4,7 +4,7 @@ use encoding_rs::{EncoderResult, Encoding, UTF_16BE, UTF_16LE, UTF_8};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, NumericDType, StringArray, Tensor, Value,
+    CharArray, IntegerStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -460,11 +460,7 @@ fn char_row_or_empty(array: &CharArray) -> String {
 
 fn bytes_to_uint8_row(bytes: Vec<u8>) -> BuiltinResult<Value> {
     let len = bytes.len();
-    let mut data = Vec::new();
-    data.try_reserve_exact(len)
-        .map_err(|_| unicode2native_error(&UNICODE2NATIVE_ERROR_INTERNAL))?;
-    data.extend(bytes.into_iter().map(f64::from));
-    let tensor = Tensor::new_with_dtype(data, vec![1, len], NumericDType::U8)
+    let tensor = Tensor::new_integer(IntegerStorage::U8(bytes), vec![1, len])
         .map_err(|_| unicode2native_error(&UNICODE2NATIVE_ERROR_INTERNAL))?;
     Ok(Value::Tensor(tensor))
 }
@@ -473,7 +469,7 @@ fn bytes_to_uint8_row(bytes: Vec<u8>) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{NumericDType, ResolveContext, Type};
 
     fn unicode2native_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::unicode2native_builtin(value, rest))
@@ -482,7 +478,10 @@ pub(crate) mod tests {
     fn tensor_bytes(value: Value) -> (Vec<u8>, Vec<usize>, NumericDType) {
         match value {
             Value::Tensor(tensor) => {
-                let bytes = tensor.data.iter().map(|value| *value as u8).collect();
+                let bytes = match tensor.integer_storage() {
+                    Some(IntegerStorage::U8(bytes)) => bytes.clone(),
+                    other => panic!("expected native uint8 storage, got {other:?}"),
+                };
                 (bytes, tensor.shape, tensor.dtype)
             }
             other => panic!("expected uint8 tensor, got {other:?}"),
