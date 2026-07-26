@@ -1725,6 +1725,26 @@ fn crossentropy_mask_reads_typed_integer_storage_exactly() {
 }
 
 #[test]
+fn crossentropy_payloads_read_typed_integer_storage_as_double_loss_inputs() {
+    let out = block_on(crossentropy_builtin(
+        poisoned_int_tensor(IntegerStorage::U8(vec![1, 0]), vec![1, 2], 0.5),
+        poisoned_int_tensor(IntegerStorage::U8(vec![1, 0]), vec![1, 2], 0.5),
+        vec![
+            Value::String("Reduction".into()),
+            Value::String("none".into()),
+        ],
+    ))
+    .expect("integer payload crossentropy");
+    let Value::Tensor(losses) = out else {
+        panic!("expected tensor");
+    };
+    assert_eq!(losses.dtype, NumericDType::F64);
+    assert!(losses.integer_storage().is_none());
+    assert!(losses.data[0].abs() < 1.0e-9);
+    assert_eq!(losses.data[1], 0.0);
+}
+
+#[test]
 fn crossentropy_rejects_incompatible_shapes_masks_and_formats() {
     let err = block_on(crossentropy_builtin(
         Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),

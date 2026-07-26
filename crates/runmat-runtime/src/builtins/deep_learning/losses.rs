@@ -364,25 +364,29 @@ impl LossPayload {
                 dlarray: false,
             }),
             Value::Tensor(tensor) => {
-                if !matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) {
-                    return Err(deep_learning_error(
-                        "crossentropy",
-                        format!(
-                            "crossentropy: {label} tensor must be double or single, got {}",
-                            tensor.dtype.class_name()
-                        ),
-                    ));
-                }
-                if tensor.data.iter().any(|value| !value.is_finite()) {
+                let output_dtype = match tensor.dtype {
+                    NumericDType::F64 => NumericDType::F64,
+                    NumericDType::F32 => NumericDType::F32,
+                    NumericDType::I8
+                    | NumericDType::I16
+                    | NumericDType::I32
+                    | NumericDType::I64
+                    | NumericDType::U8
+                    | NumericDType::U16
+                    | NumericDType::U32
+                    | NumericDType::U64 => NumericDType::F64,
+                };
+                let data = tensor::tensor_values_f64(tensor);
+                if data.iter().any(|value| !value.is_finite()) {
                     return Err(deep_learning_error(
                         "crossentropy",
                         format!("crossentropy: {label} must contain finite numeric values"),
                     ));
                 }
                 Ok(Self {
-                    data: tensor.data.clone(),
+                    data,
                     shape: tensor.shape.clone(),
-                    dtype: tensor.dtype,
+                    dtype: output_dtype,
                     format: None,
                     dlarray: false,
                 })
