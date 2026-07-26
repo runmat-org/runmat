@@ -222,7 +222,8 @@ fn inv_real_tensor_impl(matrix: &Tensor) -> BuiltinResult<Tensor> {
         return Tensor::new(Vec::new(), matrix.shape.clone())
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
-    let dm = DMatrix::from_column_slice(rows, cols, &matrix.data);
+    let values = tensor::tensor_values_f64_cow(matrix);
+    let dm = DMatrix::from_column_slice(rows, cols, &values);
     let inverse = dm.try_inverse().ok_or_else(|| {
         builtin_error(format!("{NAME}: matrix is singular to working precision."))
     })?;
@@ -310,7 +311,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -378,6 +379,26 @@ pub(crate) mod tests {
                         let expected = if r == c { 1.0 } else { 0.0 };
                         assert!((identity[(r, c)] - expected).abs() < 1e-12);
                     }
+                }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn inv_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![4, 1, 2, 3]), vec![2, 2]).unwrap();
+        tensor.data.fill(0.0);
+
+        let result = inv_builtin(Value::Tensor(tensor)).expect("inv");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                let expected = [0.3, -0.1, -0.2, 0.4];
+                for (actual, expected) in out.data.iter().zip(expected) {
+                    assert!((actual - expected).abs() < 1e-12);
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),

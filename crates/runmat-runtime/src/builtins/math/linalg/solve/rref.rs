@@ -296,8 +296,9 @@ impl RrefEval {
 
 fn rref_real_eval(matrix: Tensor, tol: Option<f64>) -> BuiltinResult<RrefEval> {
     let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
-    let tolerance = tol.unwrap_or_else(|| default_real_tolerance(&matrix.data, rows, cols));
-    let (reduced, pivots) = rref_real_impl(matrix.data, rows, cols, tolerance)?;
+    let data = tensor::tensor_into_values_f64(matrix);
+    let tolerance = tol.unwrap_or_else(|| default_real_tolerance(&data, rows, cols));
+    let (reduced, pivots) = rref_real_impl(data, rows, cols, tolerance)?;
     let reduced = Tensor::new(reduced, vec![rows, cols])
         .map_err(|e| internal_error(format!("{NAME}: {e}")))?;
     Ok(RrefEval {
@@ -610,7 +611,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -749,6 +750,23 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
                 assert_close(&out.data, &[1.0, 0.0, 0.0, 1.0, -1.0, 2.0], 1e-12);
+            }
+            other => panic!("expected tensor R, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rref_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 2, 4]), vec![2, 2]).unwrap();
+        tensor.data.fill(0.0);
+
+        let result = rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert_close(&out.data, &[1.0, 0.0, 2.0, 0.0], 1e-12);
             }
             other => panic!("expected tensor R, got {other:?}"),
         }

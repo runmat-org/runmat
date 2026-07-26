@@ -247,7 +247,8 @@ fn pinv_real_tensor_impl(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<Ten
         return Tensor::new(vec![0.0; cols * rows], vec![cols, rows])
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
-    let dm = DMatrix::from_column_slice(rows, cols, &matrix.data);
+    let values = tensor::tensor_values_f64_cow(matrix);
+    let dm = DMatrix::from_column_slice(rows, cols, &values);
     let pinv = pseudoinverse_real(&dm, tol)?;
     matrix_to_tensor(NAME, pinv)
 }
@@ -339,7 +340,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, ResolveContext, Type};
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -408,6 +409,23 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
                 approx_equal(&out.data, &[0.04, 0.08, 0.08, 0.16], 1e-12);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn pinv_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 0, 0, 4]), vec![2, 2]).unwrap();
+        tensor.data.fill(1.0);
+
+        let result = pinv_builtin(Value::Tensor(tensor), Vec::new()).expect("pinv");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                approx_equal(&out.data, &[0.5, 0.0, 0.0, 0.25], 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

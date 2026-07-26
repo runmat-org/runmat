@@ -284,7 +284,8 @@ fn rank_real_tensor_impl(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<usi
     if rows == 0 || cols == 0 {
         return Ok(0);
     }
-    let dm = DMatrix::from_column_slice(rows, cols, &matrix.data);
+    let values = tensor::tensor_values_f64_cow(matrix);
+    let dm = DMatrix::from_column_slice(rows, cols, &values);
     let svd = SVD::new(dm, false, false);
     let cutoff =
         tol.unwrap_or_else(|| svd_default_tolerance(svd.singular_values.as_slice(), rows, cols));
@@ -327,7 +328,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -380,6 +381,18 @@ pub(crate) mod tests {
         let result = rank_real_tensor_value(tensor, None).expect("rank");
         match result {
             Value::Num(r) => assert_eq!(r, 1.0),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rank_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, 0, 0, 1]), vec![2, 2])
+            .expect("integer");
+        tensor.data.fill(0.0);
+        let result = rank_real_tensor_value(tensor, None).expect("rank");
+        match result {
+            Value::Num(r) => assert_eq!(r, 2.0),
             other => panic!("expected scalar result, got {other:?}"),
         }
     }

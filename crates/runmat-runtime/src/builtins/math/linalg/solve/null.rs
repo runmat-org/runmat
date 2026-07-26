@@ -318,7 +318,8 @@ fn null_real_orthonormal_tensor(matrix: &Tensor, tol: Option<f64>) -> BuiltinRes
             .map_err(|e| internal_error(format!("{NAME}: {e}")));
     }
 
-    let (basis, basis_cols) = real_orthonormal_basis_from_svd(&matrix.data, rows, cols, tol)?;
+    let values = tensor::tensor_values_f64_cow(matrix);
+    let (basis, basis_cols) = real_orthonormal_basis_from_svd(&values, rows, cols, tol)?;
     Tensor::new(basis, vec![cols, basis_cols]).map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
@@ -356,8 +357,9 @@ fn null_complex_orthonormal_tensor(
 
 fn null_real_row_reduction_tensor(matrix: &Tensor) -> BuiltinResult<Tensor> {
     let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
-    let tolerance = default_real_tolerance(&matrix.data, rows, cols);
-    let (basis, basis_cols) = real_row_reduction_basis(matrix.data.clone(), rows, cols, tolerance)?;
+    let values = tensor::tensor_values_f64_cow(matrix);
+    let tolerance = default_real_tolerance(&values, rows, cols);
+    let (basis, basis_cols) = real_row_reduction_basis(values.into_owned(), rows, cols, tolerance)?;
     Tensor::new(basis, vec![cols, basis_cols]).map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
@@ -724,7 +726,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, ResolveContext, StringArray, Type};
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, ResolveContext, StringArray, Type};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -945,6 +947,25 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2]);
                 assert_close(&out.data, &[-2.0, 1.0, 0.0, -3.0, 0.0, 1.0], 1e-12);
+            }
+            other => panic!("expected tensor basis, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn null_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 2, 4]), vec![2, 2]).unwrap();
+        tensor.data.fill(0.0);
+        let chars = CharArray::new("r".chars().collect(), 1, 1).unwrap();
+
+        let result = null_builtin(Value::Tensor(tensor), vec![Value::CharArray(chars)])
+            .expect("null rref basis");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 1]);
+                assert_close(&out.data, &[-2.0, 1.0], 1e-12);
             }
             other => panic!("expected tensor basis, got {other:?}"),
         }

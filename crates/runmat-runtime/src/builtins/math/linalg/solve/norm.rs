@@ -9,7 +9,6 @@ use runmat_builtins::{
     ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
-use std::borrow::Cow;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -270,7 +269,7 @@ fn norm_complex_tensor(tensor: &ComplexTensor, order: NormOrder) -> BuiltinResul
 
 fn norm_real_tensor_impl(tensor: &Tensor, order: NormOrder) -> BuiltinResult<f64> {
     let kind = classify_tensor(&tensor.shape)?;
-    let values = real_tensor_values(tensor);
+    let values = tensor::tensor_values_f64_cow(tensor);
     let resolved = match order {
         NormOrder::Default => NormOrder::Two,
         other => other,
@@ -281,14 +280,6 @@ fn norm_real_tensor_impl(tensor: &Tensor, order: NormOrder) -> BuiltinResult<f64
             vector_norm_from_magnitudes(&magnitudes, resolved)
         }
         TensorKind::Matrix { rows, cols } => matrix_norm_real(&values, rows, cols, resolved),
-    }
-}
-
-fn real_tensor_values(tensor: &Tensor) -> Cow<'_, [f64]> {
-    if tensor.integer_storage().is_some() {
-        Cow::Owned(tensor::tensor_values_f64(tensor))
-    } else {
-        Cow::Borrowed(&tensor.data)
     }
 }
 

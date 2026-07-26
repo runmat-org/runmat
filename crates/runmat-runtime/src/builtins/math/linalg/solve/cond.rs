@@ -9,7 +9,6 @@ use runmat_builtins::{
     ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
-use std::borrow::Cow;
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::linalg::matrix_dimensions_for;
@@ -277,7 +276,7 @@ fn cond_complex_tensor_builtin(matrix: &ComplexTensor, norm: CondNorm) -> Builti
 
 fn cond_real_tensor(matrix: &Tensor, norm: CondNorm) -> BuiltinResult<f64> {
     let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
-    let values = real_tensor_values(matrix);
+    let values = tensor::tensor_values_f64_cow(matrix);
     if rows == 0 || cols == 0 {
         return Ok(0.0);
     }
@@ -295,14 +294,6 @@ fn cond_real_tensor(matrix: &Tensor, norm: CondNorm) -> BuiltinResult<f64> {
             }
             cond_inverse_based_real(&values, rows, norm)
         }
-    }
-}
-
-fn real_tensor_values(tensor: &Tensor) -> Cow<'_, [f64]> {
-    if tensor.integer_storage().is_some() {
-        Cow::Owned(tensor::tensor_values_f64(tensor))
-    } else {
-        Cow::Borrowed(&tensor.data)
     }
 }
 

@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::{borrow::Cow, convert::TryFrom};
 
 use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
 
@@ -98,6 +98,26 @@ pub fn tensor_values_f64(tensor: &Tensor) -> Vec<f64> {
                 .collect()
         })
         .unwrap_or_else(|| tensor.data.clone())
+}
+
+/// Return a borrowed view for ordinary double tensors and materialize exact
+/// f64 values only for typed integer storage.
+pub fn tensor_values_f64_cow(tensor: &Tensor) -> Cow<'_, [f64]> {
+    if tensor.integer_storage().is_some() {
+        Cow::Owned(tensor_values_f64(tensor))
+    } else {
+        Cow::Borrowed(&tensor.data)
+    }
+}
+
+/// Consume a tensor and return f64 values, preserving the fast path for
+/// ordinary double tensors while reading typed integer storage exactly.
+pub fn tensor_into_values_f64(tensor: Tensor) -> Vec<f64> {
+    if tensor.integer_storage().is_some() {
+        tensor_values_f64(&tensor)
+    } else {
+        tensor.data
+    }
 }
 
 /// Normalize typed integer tensors to f64 at builtin boundaries that
@@ -586,7 +606,7 @@ mod dtype_tests {
 mod dimension_tests {
     use super::{
         dimension_from_value_async, dims_from_value_async, integer_tensor_to_f64, parse_dimension,
-        tensor_values_f64,
+        tensor_into_values_f64, tensor_values_f64, tensor_values_f64_cow,
     };
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
@@ -704,6 +724,28 @@ mod dimension_tests {
                 IntValue::U64(wide).to_f64(),
                 IntValue::U64(wide - 1).to_f64()
             ]
+        );
+    }
+
+    #[test]
+    fn tensor_values_f64_cow_borrows_double_storage() {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+        match tensor_values_f64_cow(&tensor) {
+            std::borrow::Cow::Borrowed(values) => assert_eq!(values, &[1.0, 2.0]),
+            std::borrow::Cow::Owned(values) => panic!("expected borrowed values, got {values:?}"),
+        }
+    }
+
+    #[test]
+    fn tensor_into_values_f64_reads_typed_integer_storage_exactly() {
+        let wide = 9_007_199_254_740_993_u64;
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
+            .expect("integer tensor");
+        tensor.data.fill(0.0);
+
+        assert_eq!(
+            tensor_into_values_f64(tensor),
+            vec![IntValue::U64(wide).to_f64()]
         );
     }
 

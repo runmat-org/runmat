@@ -236,10 +236,11 @@ fn det_real_tensor(matrix: &Tensor) -> BuiltinResult<f64> {
     if rows == 0 && cols == 0 {
         return Ok(1.0);
     }
-    if matrix.data.len() == 1 {
-        return Ok(matrix.data[0]);
+    let values = tensor::tensor_values_f64_cow(matrix);
+    if values.len() == 1 {
+        return Ok(values[0]);
     }
-    let lu = LU::new(DMatrix::from_column_slice(rows, cols, &matrix.data));
+    let lu = LU::new(DMatrix::from_column_slice(rows, cols, &values));
     Ok(lu.determinant())
 }
 
@@ -548,7 +549,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -565,6 +566,18 @@ pub(crate) mod tests {
         let result = det_real_value(tensor).expect("det");
         match result {
             Value::Num(v) => assert!((v - 14.0).abs() < 1e-12),
+            other => panic!("expected scalar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn det_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![4, 1, 2, 3]), vec![2, 2])
+            .expect("integer");
+        tensor.data.fill(0.0);
+        let result = det_real_value(tensor).expect("det");
+        match result {
+            Value::Num(v) => assert!((v - 10.0).abs() < 1e-12),
             other => panic!("expected scalar, got {other:?}"),
         }
     }

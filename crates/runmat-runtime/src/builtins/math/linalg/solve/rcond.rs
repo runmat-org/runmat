@@ -312,10 +312,11 @@ fn rcond_real_tensor_impl(matrix: &Tensor) -> BuiltinResult<f64> {
     if rows == 0 {
         return Ok(f64::INFINITY);
     }
-    if matrix.data.len() == 1 {
-        return Ok(if matrix.data[0] == 0.0 { 0.0 } else { 1.0 });
+    let values = tensor::tensor_values_f64_cow(matrix);
+    if values.len() == 1 {
+        return Ok(if values[0] == 0.0 { 0.0 } else { 1.0 });
     }
-    let a = DMatrix::from_column_slice(rows, cols, &matrix.data);
+    let a = DMatrix::from_column_slice(rows, cols, &values);
     let svd = SVD::new(a, false, false);
     Ok(singular_value_rcond(svd.singular_values.as_slice()))
 }
@@ -391,7 +392,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -403,6 +404,18 @@ pub(crate) mod tests {
         let result = rcond_builtin(Value::Tensor(tensor)).expect("rcond");
         match result {
             Value::Num(value) => assert!((value - 1.0).abs() < 1e-12),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rcond_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 0, 0, 4]), vec![2, 2])
+            .expect("integer");
+        tensor.data.fill(1.0);
+        let result = rcond_builtin(Value::Tensor(tensor)).expect("rcond");
+        match result {
+            Value::Num(value) => assert!((value - 0.5).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
     }
