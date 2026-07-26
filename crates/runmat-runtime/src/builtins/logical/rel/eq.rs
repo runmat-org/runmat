@@ -250,7 +250,7 @@ fn scalar_numeric_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::Tensor(t) if t.data.len() == 1 => Some(tensor::tensor_values_f64(t)[0]),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
@@ -604,6 +604,19 @@ pub(crate) mod tests {
 
     fn run_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         block_on(super::eq_builtin(lhs, rhs))
+    }
+
+    #[test]
+    fn scalar_numeric_value_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("integer tensor");
+        tensor.data[0] = 0.0;
+
+        assert_eq!(
+            scalar_numeric_value(&Value::Tensor(tensor)),
+            Some(9_007_199_254_740_993_u64 as f64)
+        );
     }
 
     #[cfg(feature = "wgpu")]

@@ -2,6 +2,7 @@ use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, SparseTensor, Tens
 
 use crate::builtins::common::broadcast::{broadcast_shapes, BroadcastPlan};
 use crate::builtins::common::random_args::complex_tensor_into_value;
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const MAX_SPARSE_FULL_RESULT_ELEMENTS: usize = 10_000_000;
@@ -124,7 +125,7 @@ fn scalar_real(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::Tensor(t) if t.data.len() == 1 => Some(tensor::tensor_values_f64(t)[0]),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows.checked_mul(ca.cols) == Some(1) => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))

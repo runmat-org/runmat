@@ -1698,7 +1698,9 @@ async fn parse_variance_normalization(
         Value::Tensor(tensor) if tensor.data.is_empty() => {
             return Ok(Some(VarianceNormalization::Sample));
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => vec![tensor.data[0]],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            vec![tensor::tensor_values_f64(tensor)[0]]
+        }
         Value::Tensor(_) => {
             return Err(invalid_argument(
                 name,
@@ -1723,7 +1725,7 @@ async fn parse_variance_normalization(
                 return Ok(Some(VarianceNormalization::Sample));
             }
             if tensor.data.len() == 1 {
-                vec![tensor.data[0]]
+                vec![tensor::tensor_values_f64(&tensor)[0]]
             } else {
                 return Err(invalid_argument(
                     name,
@@ -1883,7 +1885,7 @@ fn scalar_f64(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Some(t.data[0]),
+        Value::Tensor(t) if t.data.len() == 1 => Some(tensor::tensor_values_f64(t)[0]),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         _ => None,
     }
@@ -2262,6 +2264,25 @@ mod tests {
         assert!((population.data[0] - 2.0).abs() < 1e-12);
         assert!((population.data[1] - (8.0_f64 / 3.0).sqrt()).abs() < 1e-12);
         assert!((population.data[2] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn movstd_normalization_reads_typed_integer_tensor_storage_exactly() {
+        let input = tensor(vec![4., 8., 6.], vec![1, 3]);
+        let mut normalization =
+            Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("integer tensor");
+        normalization.data[0] = 0.0;
+
+        let result = call(
+            "movstd",
+            MovingOp::Std,
+            vec![input, Value::Num(3.0), Value::Tensor(normalization)],
+        )
+        .expect("movstd population");
+        let output = expect_tensor(result);
+        assert!((output.data[0] - 2.0).abs() < 1e-12);
+        assert!((output.data[1] - (8.0_f64 / 3.0).sqrt()).abs() < 1e-12);
+        assert!((output.data[2] - 1.0).abs() < 1e-12);
     }
 
     #[test]

@@ -2151,7 +2151,7 @@ fn extract_scalar(v: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::Tensor(t) if t.data.len() == 1 => Some(tensor::tensor_values_f64(t)[0]),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         _ => None,
     }
@@ -2163,7 +2163,7 @@ fn gpu_tensor_is_scalar(handle: &GpuTensorHandle) -> bool {
 
 async fn gpu_tensor_scalar_value(handle: &GpuTensorHandle) -> Option<f64> {
     let tensor = gpu_helpers::gather_tensor_async(handle).await.ok()?;
-    tensor.data.first().copied()
+    tensor::tensor_values_f64(&tensor).first().copied()
 }
 
 fn gpu_mask_indices(
@@ -2211,7 +2211,7 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::Tensor(t) if t.data.len() == 1 => Some(tensor::tensor_values_f64(t)[0]),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         _ => None,
     }

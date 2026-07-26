@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::user_functions::resolve_semantic_function_by_name;
 use crate::{
     build_runtime_error, call_feval_async_with_outputs, gather_if_needed_async, BuiltinResult,
@@ -246,7 +247,9 @@ fn logicalize_callback_output(value: Value) -> BuiltinResult<Value> {
         Value::Bool(_) | Value::LogicalArray(_) => Ok(value),
         Value::Num(value) => Ok(Value::Bool(value != 0.0)),
         Value::Int(value) => Ok(Value::Bool(value.to_f64() != 0.0)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Value::Bool(tensor.data[0] != 0.0)),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(Value::Bool(tensor::tensor_values_f64(&tensor)[0] != 0.0))
+        }
         other => Err(bsxfun_error_with_detail(
             &BSXFUN_ERROR_FUNCTION_ERROR,
             format!("logical callback must return scalar logical values (got {other:?})"),
@@ -650,7 +653,7 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
         Value::Num(value) => Ok(ClassifiedValue::Double(*value)),
         Value::Int(value) => Ok(ClassifiedValue::Double(value.to_f64())),
         Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(ClassifiedValue::Double(tensor.data[0]))
+            Ok(ClassifiedValue::Double(tensor::tensor_values_f64(tensor)[0]))
         }
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
         Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
