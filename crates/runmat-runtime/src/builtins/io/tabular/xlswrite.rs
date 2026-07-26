@@ -18,6 +18,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::writecell::{self, CellTable, CellValue, RangeStart};
@@ -552,7 +553,7 @@ fn parse_range_start(value: &Value) -> BuiltinResult<RangeStart> {
         return parse_range_text(&text);
     }
     match value {
-        Value::Tensor(t) => parse_numeric_range(&t.data),
+        Value::Tensor(t) => parse_numeric_range(&tensor::tensor_values_f64(t)),
         Value::Num(n) => parse_numeric_range(&[*n]),
         _ => Err(xlswrite_error_with(
             &XLSWRITE_ERROR_RANGE,
@@ -1635,6 +1636,18 @@ mod tests {
         assert!(
             labels.contains(&"[status,message] = xlswrite(filename, A, sheet, range, '-basic')")
         );
+    }
+
+    #[test]
+    fn xlswrite_numeric_range_reads_typed_integer_storage_exactly() {
+        let mut range =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("range");
+        range.data.fill(f64::NAN);
+
+        let parsed = parse_range_start(&Value::Tensor(range)).expect("range");
+
+        assert_eq!(parsed.row, 1);
+        assert_eq!(parsed.col, 2);
     }
 
     #[test]

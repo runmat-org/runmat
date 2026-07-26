@@ -20,6 +20,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "csvread";
@@ -643,7 +644,7 @@ fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
 
 fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
     let elements = match value {
-        Value::Tensor(t) => t.data.clone(),
+        Value::Tensor(t) => tensor::tensor_values_f64(t),
         _ => {
             return Err(csvread_error_with(
                 &CSVREAD_ERROR_RANGE,
@@ -954,7 +955,7 @@ pub(crate) mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use runmat_builtins::{CharArray, IntValue, Tensor as BuiltinTensor};
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, Tensor as BuiltinTensor};
 
     fn csvread_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _provider_lock = runmat_filesystem::provider_override_lock();
@@ -1069,6 +1070,21 @@ pub(crate) mod tests {
             other => panic!("expected tensor, got {other:?}"),
         }
         fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn csvread_numeric_range_reads_typed_integer_storage_exactly() {
+        let mut range =
+            BuiltinTensor::new_integer(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![1, 4])
+                .expect("range");
+        range.data.fill(f64::NAN);
+
+        let parsed = parse_range_numeric(&Value::Tensor(range)).expect("range");
+
+        assert_eq!(parsed.start_row, 1);
+        assert_eq!(parsed.start_col, 2);
+        assert_eq!(parsed.end_row, Some(3));
+        assert_eq!(parsed.end_col, Some(4));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
