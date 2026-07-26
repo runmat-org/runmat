@@ -319,8 +319,7 @@ fn count_nonzero_value(value: &Value) -> BuiltinResult<usize> {
 }
 
 fn count_nonzero_tensor(tensor: &Tensor) -> usize {
-    tensor
-        .data
+    tensor::tensor_values_f64_cow(tensor)
         .iter()
         .copied()
         .filter(|value| is_nonzero_scalar(*value))
@@ -381,8 +380,8 @@ fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
     match value {
         Value::Tensor(tensor) => {
             let shape = canonical_shape(&tensor.shape, tensor.data.len());
-            let bits = tensor
-                .data
+            let values = tensor::tensor_values_f64_cow(tensor);
+            let bits = values
                 .iter()
                 .map(|&v| if is_nonzero_scalar(v) { 1u8 } else { 0u8 })
                 .collect();
@@ -698,7 +697,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray};
 
     fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
         error.identifier()
@@ -763,6 +762,15 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[test]
+    fn nnz_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, -3, 0]), vec![2, 2])
+            .expect("tensor");
+        tensor.data.fill(f64::NAN);
+        let result = nnz_host_value(Value::Tensor(tensor), None).expect("nnz");
+        assert_eq!(result, Value::Num(2.0));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_sparse_ignores_explicit_stored_zeros() {
@@ -782,6 +790,21 @@ pub(crate) mod tests {
     #[test]
     fn nnz_matrix_dimension_one() {
         let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 5.0], vec![2, 2]).unwrap();
+        let result = nnz_host_value(Value::Tensor(tensor), Some(1)).expect("nnz");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![1.0, 2.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nnz_dimension_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 2, 5]), vec![2, 2]).expect("tensor");
+        tensor.data.fill(f64::NAN);
         let result = nnz_host_value(Value::Tensor(tensor), Some(1)).expect("nnz");
         match result {
             Value::Tensor(out) => {

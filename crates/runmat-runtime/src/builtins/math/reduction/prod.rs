@@ -971,7 +971,8 @@ fn prod_tensor(
         }
     }
 
-    for (linear, &value) in tensor.data.iter().enumerate() {
+    let values = tensor::tensor_values_f64_cow(tensor);
+    for (linear, &value) in values.iter().enumerate() {
         linear_to_multi(linear, &shape, &mut coords);
         for (i, coord) in coords.iter().enumerate() {
             out_coords[i] = if reduce_mask[i] { 0 } else { *coord };
@@ -1226,7 +1227,7 @@ pub(crate) mod tests {
         HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
         IntegerElementType,
     };
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     fn prod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::prod_builtin(value, rest))
@@ -1312,6 +1313,23 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
                 assert_eq!(out.data, vec![6.0, 120.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prod_double_path_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
+                .expect("tensor");
+        tensor.data.fill(f64::NAN);
+
+        let result = prod_builtin(Value::Tensor(tensor), Vec::new()).expect("prod");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.data, vec![4.0, 10.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
