@@ -637,6 +637,7 @@ impl UniformCollector {
     }
 }
 
+#[derive(Debug, PartialEq)]
 enum ClassifiedValue {
     Logical(bool),
     Double(f64),
@@ -657,6 +658,19 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
         }
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
         Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
+            if let Some(storage) = tensor.integer_data.as_ref() {
+                let re = storage
+                    .real
+                    .value_at(0)
+                    .expect("one-element complex integer real storage")
+                    .to_f64();
+                let im = storage
+                    .imag
+                    .value_at(0)
+                    .expect("one-element complex integer imaginary storage")
+                    .to_f64();
+                return Ok(ClassifiedValue::Complex((re, im)));
+            }
             Ok(ClassifiedValue::Complex(tensor.data[0]))
         }
         Value::CharArray(array) if array.rows * array.cols == 1 => {
@@ -854,6 +868,22 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![2, 1]);
         assert_eq!(tensor.data, vec![(11.0, 2.0), (13.0, -1.0)]);
+    }
+
+    #[test]
+    fn bsxfun_callback_classifier_reads_typed_complex_integer_storage_exactly() {
+        let storage = runmat_builtins::IntegerComplexStorage::new(
+            runmat_builtins::IntegerStorage::I16(vec![8]),
+            runmat_builtins::IntegerStorage::I16(vec![-3]),
+        )
+        .expect("storage");
+        let mut complex = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
+        complex.data[0] = (f64::NAN, f64::NAN);
+
+        assert_eq!(
+            classify_value(&Value::ComplexTensor(complex)).expect("classify"),
+            ClassifiedValue::Complex((8.0, -3.0))
+        );
     }
 
     #[test]
