@@ -288,7 +288,9 @@ pub fn linsolve_host_real_for_provider(
     options: &ProviderLinsolveOptions,
 ) -> BuiltinResult<(Tensor, f64)> {
     let opts = SolveOptions::from(options);
-    solve_real(lhs.clone(), rhs.clone(), &opts)
+    let lhs = tensor::integer_tensor_to_f64(lhs.clone()).map_err(builtin_error)?;
+    let rhs = tensor::integer_tensor_to_f64(rhs.clone()).map_err(builtin_error)?;
+    solve_real(lhs, rhs, &opts)
 }
 
 /// Result wrapper that exposes both primary and secondary outputs.
@@ -486,7 +488,7 @@ fn parse_bool_field(name: &str, value: &Value) -> BuiltinResult<bool> {
         Value::Num(n) => Ok(*n != 0.0),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(match scalar_tensor_integer(t) {
             Some(value) => !value.is_zero(),
-            None => t.data[0] != 0.0,
+            None => tensor::tensor_values_f64(t)[0] != 0.0,
         }),
         Value::LogicalArray(arr) if arr.len() == 1 => Ok(arr.data[0] != 0),
         other => Err(argument_error(format!(
@@ -501,7 +503,7 @@ fn parse_scalar_f64(name: &str, value: &Value) -> BuiltinResult<f64> {
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(match scalar_tensor_integer(t) {
             Some(value) => value.to_f64(),
-            None => t.data[0],
+            None => tensor::tensor_values_f64(t)[0],
         }),
         other => Err(argument_error(format!(
             "linsolve: option '{name}' must be a scalar numeric value, got {other:?}"
@@ -573,6 +575,7 @@ async fn coerce_numeric_pair(lhs: Value, rhs: Value) -> BuiltinResult<NumericPai
 async fn coerce_numeric(value: Value) -> BuiltinResult<NumericInput> {
     match value {
         Value::Tensor(tensor) => {
+            let tensor = tensor::integer_tensor_to_f64(tensor).map_err(builtin_error)?;
             ensure_matrix_shape(NAME, &tensor.shape)?;
             Ok(NumericInput::Real(tensor))
         }
@@ -606,6 +609,7 @@ async fn coerce_numeric(value: Value) -> BuiltinResult<NumericInput> {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(map_control_flow)?;
+            let tensor = tensor::integer_tensor_to_f64(tensor).map_err(builtin_error)?;
             ensure_matrix_shape(NAME, &tensor.shape)?;
             Ok(NumericInput::Real(tensor))
         }
@@ -686,8 +690,15 @@ fn upload_tensor(
     provider: &'static dyn AccelProvider,
     tensor: &Tensor,
 ) -> BuiltinResult<GpuTensorHandle> {
+    let values;
+    let data = if tensor.integer_storage().is_some() {
+        values = tensor::tensor_values_f64(tensor);
+        values.as_slice()
+    } else {
+        tensor.data.as_slice()
+    };
     let view = HostTensorView {
-        data: &tensor.data,
+        data,
         shape: &tensor.shape,
     };
     provider
@@ -1233,6 +1244,42 @@ pub(crate) mod tests {
         approx_eq(t.data[1], 2.0);
     }
 
+    #[test]
+    fn linsolve_reads_typed_integer_tensor_storage_exactly() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
+        let mut a = Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 1, 2]), vec![2, 2])
+            .expect("integer lhs");
+        let mut b =
+            Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![2, 1]).expect("integer rhs");
+        a.data.fill(0.0);
+        b.data.fill(0.0);
+
+        let result =
+            linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("linsolve");
+        let tensor = test_support::gather(result).expect("gather");
+        assert_eq!(tensor.shape, vec![2, 1]);
+        approx_eq(tensor.data[0], 1.0);
+        approx_eq(tensor.data[1], 2.0);
+    }
+
+    #[test]
+    fn linsolve_provider_host_helper_reads_typed_integer_storage_exactly() {
+        let mut a = Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 1, 2]), vec![2, 2])
+            .expect("integer lhs");
+        let mut b =
+            Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![2, 1]).expect("integer rhs");
+        a.data.fill(0.0);
+        b.data.fill(0.0);
+
+        let (solution, _rcond) =
+            linsolve_host_real_for_provider(&a, &b, &ProviderLinsolveOptions::default())
+                .expect("provider helper");
+        assert_eq!(solution.shape, vec![2, 1]);
+        approx_eq(solution.data[0], 1.0);
+        approx_eq(solution.data[1], 2.0);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_lower_triangular_hint() {
@@ -1559,6 +1606,30 @@ pub(crate) mod tests {
             assert!(fallback_count(&telemetry, "linsolve:host_reupload") >= 1);
             assert!(telemetry.upload_bytes > 0);
             assert!(telemetry.download_bytes > 0);
+        });
+    }
+
+    #[test]
+    fn provider_upload_path_reads_typed_integer_storage_exactly() {
+        test_support::with_test_provider(|provider| {
+            provider.reset_telemetry();
+            let mut a = Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 1, 2]), vec![2, 2])
+                .expect("integer lhs");
+            let mut b = Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![2, 1])
+                .expect("integer rhs");
+            a.data.fill(0.0);
+            b.data.fill(0.0);
+
+            let result = linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new())
+                .expect("host provider linsolve");
+            let tensor = test_support::gather(result).expect("gather");
+            assert_eq!(tensor.shape, vec![2, 1]);
+            approx_eq(tensor.data[0], 1.0);
+            approx_eq(tensor.data[1], 2.0);
+
+            let telemetry = provider.telemetry_snapshot();
+            assert!(telemetry.linsolve.count >= 1);
+            assert!(fallback_count(&telemetry, "linsolve:host_reupload") >= 1);
         });
     }
 

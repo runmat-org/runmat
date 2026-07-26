@@ -9,6 +9,7 @@ use runmat_builtins::{
     ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use std::borrow::Cow;
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::linalg::matrix_dimensions_for;
@@ -276,27 +277,32 @@ fn cond_complex_tensor_builtin(matrix: &ComplexTensor, norm: CondNorm) -> Builti
 
 fn cond_real_tensor(matrix: &Tensor, norm: CondNorm) -> BuiltinResult<f64> {
     let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
+    let values = real_tensor_values(matrix);
     if rows == 0 || cols == 0 {
         return Ok(0.0);
     }
-    if matrix.data.len() == 1 {
-        return Ok(if matrix.data[0] == 0.0 {
-            f64::INFINITY
-        } else {
-            1.0
-        });
+    if values.len() == 1 {
+        return Ok(if values[0] == 0.0 { f64::INFINITY } else { 1.0 });
     }
 
     match norm {
-        CondNorm::Two => cond_two_norm_real(matrix, rows, cols),
+        CondNorm::Two => cond_two_norm_real(&values, rows, cols),
         _ => {
             if rows != cols {
                 return Err(builtin_error(format!(
                     "{NAME}: matrix must be square for the requested norm."
                 )));
             }
-            cond_inverse_based_real(matrix, rows, norm)
+            cond_inverse_based_real(&values, rows, norm)
         }
+    }
+}
+
+fn real_tensor_values(tensor: &Tensor) -> Cow<'_, [f64]> {
+    if tensor.integer_storage().is_some() {
+        Cow::Owned(tensor::tensor_values_f64(tensor))
+    } else {
+        Cow::Borrowed(&tensor.data)
     }
 }
 
@@ -324,8 +330,8 @@ fn cond_complex_tensor(matrix: &ComplexTensor, norm: CondNorm) -> BuiltinResult<
     }
 }
 
-fn cond_two_norm_real(matrix: &Tensor, rows: usize, cols: usize) -> BuiltinResult<f64> {
-    let a = DMatrix::from_column_slice(rows, cols, &matrix.data);
+fn cond_two_norm_real(values: &[f64], rows: usize, cols: usize) -> BuiltinResult<f64> {
+    let a = DMatrix::from_column_slice(rows, cols, values);
     let svd = SVD::new(a, false, false);
     Ok(singular_value_cond(svd.singular_values.as_slice()))
 }
@@ -341,10 +347,10 @@ fn cond_two_norm_complex(matrix: &ComplexTensor, rows: usize, cols: usize) -> Bu
     Ok(singular_value_cond(svd.singular_values.as_slice()))
 }
 
-fn cond_inverse_based_real(matrix: &Tensor, order: usize, norm: CondNorm) -> BuiltinResult<f64> {
-    let dm = DMatrix::from_column_slice(order, order, &matrix.data);
+fn cond_inverse_based_real(values: &[f64], order: usize, norm: CondNorm) -> BuiltinResult<f64> {
+    let dm = DMatrix::from_column_slice(order, order, values);
     if let Some(inv) = dm.try_inverse() {
-        let norm_a = matrix_norm_real(matrix.data.as_slice(), order, order, norm);
+        let norm_a = matrix_norm_real(values, order, order, norm);
         let norm_inv = matrix_norm_real(inv.as_slice(), order, order, norm);
         let cond = norm_a * norm_inv;
         if cond.is_finite() {
@@ -508,13 +514,7 @@ fn parse_norm_value(value: &Value) -> BuiltinResult<CondNorm> {
 }
 
 fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
-    if let Some(storage) = tensor.integer_storage() {
-        return storage
-            .value_at(0)
-            .expect("one-element integer storage")
-            .to_f64();
-    }
-    tensor.data[0]
+    tensor::tensor_values_f64(tensor)[0]
 }
 
 fn parse_norm_numeric(raw: f64) -> BuiltinResult<CondNorm> {
@@ -652,6 +652,18 @@ pub(crate) mod tests {
         let result = cond_builtin(Value::Tensor(tensor), Vec::new()).expect("cond");
         match result {
             Value::Num(value) => assert!(value.is_infinite()),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cond_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 0, 0, 4]), vec![2, 2])
+            .expect("integer");
+        tensor.data.fill(1.0);
+        let result = cond_builtin(Value::Tensor(tensor), Vec::new()).expect("cond");
+        match result {
+            Value::Num(value) => assert!((value - 2.0).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
     }

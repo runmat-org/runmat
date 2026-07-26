@@ -9,6 +9,7 @@ use runmat_builtins::{
     ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use std::borrow::Cow;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -269,16 +270,25 @@ fn norm_complex_tensor(tensor: &ComplexTensor, order: NormOrder) -> BuiltinResul
 
 fn norm_real_tensor_impl(tensor: &Tensor, order: NormOrder) -> BuiltinResult<f64> {
     let kind = classify_tensor(&tensor.shape)?;
+    let values = real_tensor_values(tensor);
     let resolved = match order {
         NormOrder::Default => NormOrder::Two,
         other => other,
     };
     match kind {
         TensorKind::Vector => {
-            let magnitudes: Vec<f64> = tensor.data.iter().map(|&v| v.abs()).collect();
+            let magnitudes: Vec<f64> = values.iter().map(|&v| v.abs()).collect();
             vector_norm_from_magnitudes(&magnitudes, resolved)
         }
-        TensorKind::Matrix { rows, cols } => matrix_norm_real(tensor, rows, cols, resolved),
+        TensorKind::Matrix { rows, cols } => matrix_norm_real(&values, rows, cols, resolved),
+    }
+}
+
+fn real_tensor_values(tensor: &Tensor) -> Cow<'_, [f64]> {
+    if tensor.integer_storage().is_some() {
+        Cow::Owned(tensor::tensor_values_f64(tensor))
+    } else {
+        Cow::Borrowed(&tensor.data)
     }
 }
 
@@ -412,12 +422,12 @@ pub(super) fn root_sum_of_squares(values: &[f64]) -> f64 {
 }
 
 fn matrix_norm_real(
-    tensor: &Tensor,
+    values: &[f64],
     rows: usize,
     cols: usize,
     order: NormOrder,
 ) -> BuiltinResult<f64> {
-    if tensor.data.iter().any(|v| v.is_nan()) {
+    if values.iter().any(|v| v.is_nan()) {
         return Ok(f64::NAN);
     }
     if rows == 0 || cols == 0 {
@@ -426,19 +436,19 @@ fn matrix_norm_real(
     match order {
         NormOrder::Default => unreachable!("resolved in caller"),
         NormOrder::One => {
-            let magnitudes: Vec<f64> = tensor.data.iter().map(|&v| v.abs()).collect();
+            let magnitudes: Vec<f64> = values.iter().map(|&v| v.abs()).collect();
             Ok(max_column_sum(&magnitudes, rows, cols))
         }
-        NormOrder::Two => spectral_norm_real(tensor, rows, cols),
+        NormOrder::Two => spectral_norm_real(values, rows, cols),
         NormOrder::Inf => {
-            let magnitudes: Vec<f64> = tensor.data.iter().map(|&v| v.abs()).collect();
+            let magnitudes: Vec<f64> = values.iter().map(|&v| v.abs()).collect();
             Ok(max_row_sum(&magnitudes, rows, cols))
         }
         NormOrder::Fro => {
-            let magnitudes: Vec<f64> = tensor.data.iter().map(|&v| v.abs()).collect();
+            let magnitudes: Vec<f64> = values.iter().map(|&v| v.abs()).collect();
             Ok(root_sum_of_squares(&magnitudes))
         }
-        NormOrder::Nuc => nuclear_norm_real(tensor, rows, cols),
+        NormOrder::Nuc => nuclear_norm_real(values, rows, cols),
         NormOrder::Zero => Err(argument_error(format!(
             "{NAME}: matrix norm order 0 is not supported; use 1, 2, Inf, 'fro', or 'nuc'."
         ))),
@@ -529,11 +539,11 @@ fn max_row_sum(magnitudes: &[f64], rows: usize, cols: usize) -> f64 {
     max_sum
 }
 
-fn spectral_norm_real(tensor: &Tensor, rows: usize, cols: usize) -> BuiltinResult<f64> {
+fn spectral_norm_real(values: &[f64], rows: usize, cols: usize) -> BuiltinResult<f64> {
     if rows == 0 || cols == 0 {
         return Ok(0.0);
     }
-    let matrix = DMatrix::from_column_slice(rows, cols, &tensor.data);
+    let matrix = DMatrix::from_column_slice(rows, cols, values);
     let svd = SVD::new(matrix, false, false);
     Ok(svd
         .singular_values
@@ -558,11 +568,11 @@ fn spectral_norm_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> Bu
         .fold(0.0, |acc, &value| if value > acc { value } else { acc }))
 }
 
-fn nuclear_norm_real(tensor: &Tensor, rows: usize, cols: usize) -> BuiltinResult<f64> {
+fn nuclear_norm_real(values: &[f64], rows: usize, cols: usize) -> BuiltinResult<f64> {
     if rows == 0 || cols == 0 {
         return Ok(0.0);
     }
-    let matrix = DMatrix::from_column_slice(rows, cols, &tensor.data);
+    let matrix = DMatrix::from_column_slice(rows, cols, values);
     let svd = SVD::new(matrix, false, false);
     Ok(svd.singular_values.iter().sum())
 }
@@ -634,13 +644,7 @@ fn parse_order_value(value: &Value) -> BuiltinResult<NormOrder> {
 }
 
 fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
-    if let Some(storage) = tensor.integer_storage() {
-        return storage
-            .value_at(0)
-            .expect("one-element integer storage")
-            .to_f64();
-    }
-    tensor.data[0]
+    tensor::tensor_values_f64(tensor)[0]
 }
 
 fn parse_numeric(raw: f64) -> BuiltinResult<NormOrder> {
@@ -808,6 +812,31 @@ pub(crate) mod tests {
         let value = norm_builtin(Value::Tensor(tensor), Vec::new()).expect("norm");
         match value {
             Value::Num(v) => assert_close(v, 5.0),
+            other => panic!("expected scalar value, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn norm_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![3, 4]), vec![2, 1]).expect("integer");
+        tensor.data.fill(0.0);
+        let value = norm_builtin(Value::Tensor(tensor), Vec::new()).expect("norm");
+        match value {
+            Value::Num(v) => assert_close(v, 5.0),
+            other => panic!("expected scalar value, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn norm_order_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new(vec![3.0, -4.0], vec![2, 1]).unwrap();
+        let mut order =
+            Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("integer");
+        order.data[0] = 0.0;
+        let value = norm_builtin(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("norm");
+        match value {
+            Value::Num(v) => assert_close(v, 7.0),
             other => panic!("expected scalar value, got {other:?}"),
         }
     }
