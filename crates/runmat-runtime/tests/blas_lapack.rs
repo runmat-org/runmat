@@ -1,6 +1,6 @@
 #![cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
 
-use runmat_builtins::{CellArray, Tensor as Matrix, Value};
+use runmat_builtins::{CellArray, IntegerStorage, Tensor as Matrix, Value};
 use runmat_runtime::{blas::*, call_builtin, lapack::*};
 
 #[test]
@@ -15,6 +15,18 @@ fn test_blas_matrix_multiplication() {
     assert_eq!(result.data, vec![4.0, 10.0, 5.0, 11.0]);
     assert_eq!(result.rows(), 2);
     assert_eq!(result.cols(), 2);
+}
+
+#[test]
+fn blas_matrix_multiplication_reads_typed_integer_storage_exactly() {
+    let mut a = Matrix::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
+    let mut b = Matrix::new_integer(IntegerStorage::I16(vec![2, 1, 1, 2]), vec![2, 2]).unwrap();
+    a.data.fill(f64::NAN);
+    b.data.fill(f64::NAN);
+
+    let result = blas_matrix_mul(&a, &b).unwrap();
+
+    assert_eq!(result.data, vec![4.0, 10.0, 5.0, 11.0]);
 }
 
 #[test]
@@ -70,6 +82,18 @@ fn test_lapack_linear_solve() {
     // Solution: x = 1.8, y = 1.4
 
     let a = Matrix::new_2d(vec![2.0, 1.0, 1.0, 3.0], 2, 2).unwrap();
+    let b = vec![5.0, 6.0];
+
+    let solution = lapack_solve_linear_system(&a, &b).unwrap();
+
+    assert!((solution[0] - 1.8).abs() < 1e-10);
+    assert!((solution[1] - 1.4).abs() < 1e-10);
+}
+
+#[test]
+fn lapack_linear_solve_reads_typed_integer_matrix_storage_exactly() {
+    let mut a = Matrix::new_integer(IntegerStorage::I16(vec![2, 1, 1, 3]), vec![2, 2]).unwrap();
+    a.data.fill(f64::NAN);
     let b = vec![5.0, 6.0];
 
     let solution = lapack_solve_linear_system(&a, &b).unwrap();

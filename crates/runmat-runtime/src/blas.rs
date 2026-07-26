@@ -3,12 +3,15 @@
 //! High-performance linear algebra using BLAS (Basic Linear Algebra Subprograms).
 use runmat_builtins::Tensor as Matrix;
 
+use crate::builtins::common::tensor;
+
 /// Helper function to transpose a matrix from row-major to column-major
 fn transpose_to_column_major(matrix: &Matrix) -> Vec<f64> {
-    let mut result = vec![0.0; matrix.data.len()];
+    let values = tensor::tensor_values_f64_cow(matrix);
+    let mut result = vec![0.0; values.len()];
     for i in 0..matrix.rows() {
         for j in 0..matrix.cols() {
-            result[j * matrix.rows() + i] = matrix.data[i * matrix.cols() + j];
+            result[j * matrix.rows() + i] = values[i * matrix.cols() + j];
         }
     }
     result
