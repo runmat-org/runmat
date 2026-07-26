@@ -288,8 +288,9 @@ async fn imfilter_gpu(
         other => {
             let tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, other)
                 .map_err(|err| imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, err))?;
+            let tensor_values = tensor::tensor_values_f64_cow(&tensor);
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor_values,
                 shape: &tensor.shape,
             };
             match provider.upload(&view) {
@@ -562,7 +563,8 @@ pub fn apply_imfilter_tensor(
     builtin: &str,
 ) -> BuiltinResult<Tensor> {
     let plan = build_imfilter_plan(&image.shape, kernel, options, builtin)?;
-    let data = plan.evaluate(&image.data, options);
+    let image_values = tensor::tensor_values_f64_cow(image);
+    let data = plan.evaluate(&image_values, options);
     Tensor::new(data, plan.final_shape.clone())
         .map_err(|e| filter_error(builtin, format!("{builtin}: {e}")))
 }
@@ -638,7 +640,8 @@ fn build_kernel_points(
 ) -> Vec<ImfilterKernelPoint> {
     let rank = kernel_shape.len();
     let strides = compute_strides(kernel_shape);
-    let total = kernel.data.len();
+    let values = tensor::tensor_values_f64_cow(kernel);
+    let total = values.len();
     let mut points = Vec::with_capacity(total);
     if total == 0 {
         return points;
@@ -648,9 +651,9 @@ fn build_kernel_points(
     for _ in 0..total {
         let linear = index_to_linear(&index, &strides);
         let value = match mode {
-            ImfilterMode::Correlation => kernel.data[linear],
+            ImfilterMode::Correlation => values[linear],
             ImfilterMode::Convolution => {
-                kernel.data[flipped_linear_index(&index, kernel_shape, &strides)]
+                values[flipped_linear_index(&index, kernel_shape, &strides)]
             }
         };
         let offsets = index
@@ -805,6 +808,12 @@ pub(crate) mod tests {
         Tensor::new(data.to_vec(), vec![rows, cols]).unwrap()
     }
 
+    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
+    }
+
     fn error_message(err: &crate::RuntimeError) -> String {
         err.message().to_string()
     }
@@ -901,6 +910,23 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn imfilter_reads_typed_integer_image_and_kernel_storage_exactly() {
+        let image = typed_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]);
+        let kernel = typed_tensor(IntegerStorage::I16(vec![2]), vec![1, 1]);
+
+        let result = apply_imfilter_tensor(
+            &image,
+            &kernel,
+            &ImfilterOptions::default(),
+            IMFILTER_BUILTIN,
+        )
+        .expect("imfilter");
+
+        assert_eq!(result.shape, vec![2, 2]);
+        assert_eq!(result.data, vec![2.0, 6.0, 4.0, 8.0]);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn circular_padding_wraps_indices() {
@@ -946,6 +972,31 @@ pub(crate) mod tests {
             for (got, exp) in gathered.data.iter().zip(expected.iter()) {
                 assert!((got - exp).abs() < 1e-12);
             }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gpu_image_host_typed_integer_kernel_uploads_exact_storage() {
+        test_support::with_test_provider(|provider| {
+            let image = simple_tensor(&[1.0, 4.0, 2.0, 5.0], 2, 2);
+            let image_view = HostTensorView {
+                data: &image.data,
+                shape: &image.shape,
+            };
+            let image_handle = provider.upload(&image_view).expect("upload image");
+            let kernel = typed_tensor(IntegerStorage::I16(vec![2]), vec![1, 1]);
+
+            let value = block_on(imfilter_builtin(
+                Value::GpuTensor(image_handle),
+                Value::Tensor(kernel),
+                Vec::new(),
+            ))
+            .expect("imfilter");
+            let gathered = test_support::gather(value).expect("gather");
+
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.data, vec![2.0, 8.0, 4.0, 10.0]);
         });
     }
 
