@@ -357,10 +357,13 @@ async fn value_to_input(value: Value) -> BuiltinResult<NumericInput> {
         .await
         .map_err(|err| normalize_internal(format!("normalize: {err}")))?;
     match value {
-        Value::Tensor(tensor) => Ok(NumericInput::Real {
-            shape: normalize_shape_for(&tensor.shape, tensor.data.len()),
-            data: tensor.data,
-        }),
+        Value::Tensor(tensor) => {
+            let shape = normalize_shape_for(&tensor.shape, tensor.data.len());
+            Ok(NumericInput::Real {
+                shape,
+                data: tensor::tensor_into_values_f64(tensor),
+            })
+        }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|err| normalize_internal(format!("normalize: {err}")))?;
@@ -674,7 +677,8 @@ async fn parse_range_bounds(rest: &[Value], idx: &mut usize) -> BuiltinResult<Ra
     let tensor = tensor::value_into_tensor_for("normalize", rest[*idx].clone())
         .map_err(|err| normalize_error(format!("normalize: {err}")))?;
     *idx += 1;
-    match tensor.data.as_slice() {
+    let values = tensor::tensor_values_f64(&tensor);
+    match values.as_slice() {
         [upper] => Ok(RangeBounds {
             lower: 0.0,
             upper: *upper,
@@ -1260,7 +1264,7 @@ fn normalize_scalar(value: f64, center: f64, scale: f64) -> f64 {
 fn real_param_values(param: &ParamReal) -> Vec<f64> {
     match param {
         ParamReal::Computed { data, .. } => data.clone(),
-        ParamReal::Explicit(tensor) => tensor.data.clone(),
+        ParamReal::Explicit(tensor) => tensor::tensor_values_f64(tensor),
     }
 }
 
@@ -1275,9 +1279,10 @@ fn real_param_shape(param: &ParamReal, len: usize) -> Vec<usize> {
 fn complex_param_values(param: &ParamComplex) -> Vec<(f64, f64)> {
     match param {
         ParamComplex::Computed { data, .. } => data.clone(),
-        ParamComplex::ExplicitReal(tensor) => {
-            tensor.data.iter().map(|value| (*value, 0.0)).collect()
-        }
+        ParamComplex::ExplicitReal(tensor) => tensor::tensor_values_f64(tensor)
+            .into_iter()
+            .map(|value| (value, 0.0))
+            .collect(),
         ParamComplex::ExplicitComplex(tensor) => tensor.data.clone(),
     }
 }
@@ -1355,6 +1360,7 @@ fn real_part_tensor(tensor: &ComplexTensor) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn call(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(normalize_builtin(value, rest))
@@ -1362,6 +1368,12 @@ mod tests {
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn expect_tensor(value: Value) -> Tensor {
@@ -1382,6 +1394,20 @@ mod tests {
     #[test]
     fn default_zscore_normalizes_first_non_singleton_dimension() {
         let out = expect_tensor(call(tensor(vec![1., 2., 3.], vec![3, 1]), vec![]).unwrap());
+        assert_close(out.data[0], -1.0);
+        assert_close(out.data[1], 0.0);
+        assert_close(out.data[2], 1.0);
+    }
+
+    #[test]
+    fn normalize_reads_typed_integer_input_storage_exactly() {
+        let out = expect_tensor(
+            call(
+                int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]),
+                vec![],
+            )
+            .unwrap(),
+        );
         assert_close(out.data[0], -1.0);
         assert_close(out.data[1], 0.0);
         assert_close(out.data[2], 1.0);
@@ -1409,6 +1435,21 @@ mod tests {
                 vec![
                     Value::from("range"),
                     Value::Tensor(Tensor::new(vec![-1.0, 1.0], vec![1, 2]).unwrap()),
+                ],
+            )
+            .unwrap(),
+        );
+        assert_eq!(out.data, vec![-1.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn normalize_reads_typed_integer_range_bounds_exactly() {
+        let out = expect_tensor(
+            call(
+                tensor(vec![2., 4., 6.], vec![3, 1]),
+                vec![
+                    Value::from("range"),
+                    int_tensor(IntegerStorage::I16(vec![-1, 1]), vec![1, 2]),
                 ],
             )
             .unwrap(),
@@ -1469,6 +1510,23 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(n.data, reused.data);
+    }
+
+    #[test]
+    fn normalize_reads_typed_integer_explicit_center_and_scale_exactly() {
+        let out = expect_tensor(
+            call(
+                int_tensor(IntegerStorage::I16(vec![2, 4, 6]), vec![3, 1]),
+                vec![
+                    Value::from("center"),
+                    int_tensor(IntegerStorage::I16(vec![2]), vec![1, 1]),
+                    Value::from("scale"),
+                    int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
+                ],
+            )
+            .unwrap(),
+        );
+        assert_eq!(out.data, vec![0.0, 1.0, 2.0]);
     }
 
     #[test]
