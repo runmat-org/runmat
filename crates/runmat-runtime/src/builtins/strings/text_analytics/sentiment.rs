@@ -581,7 +581,7 @@ fn numeric_vector(value: &Value, column_name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(value) => Ok(vec![*value]),
         Value::Int(value) => Ok(vec![int_value_to_f64(value)]),
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(tensor)),
         Value::Cell(cell) => cell
             .data
             .iter()
@@ -807,6 +807,18 @@ mod tests {
             )
             .expect("numeric"),
             -3.0
+        );
+    }
+
+    #[test]
+    fn numeric_vector_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![7, 11]), vec![1, 2])
+            .expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+
+        assert_eq!(
+            numeric_vector(&Value::Tensor(tensor), "SentimentScore").expect("numeric"),
+            vec![7.0, 11.0]
         );
     }
 
