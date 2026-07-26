@@ -197,17 +197,24 @@ fn realsqrt_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn realsqrt_tensor(tensor: Tensor) -> BuiltinResult<Value> {
-    ensure_nonnegative(&tensor.data)?;
-    let dtype = tensor.dtype;
-    let data: Vec<f64> = tensor
-        .data
-        .iter()
-        .map(|&value| canonical_zero(value.sqrt()))
+    let input_dtype = tensor.dtype;
+    let output_dtype = if matches!(input_dtype, runmat_builtins::NumericDType::F32) {
+        runmat_builtins::NumericDType::F32
+    } else {
+        runmat_builtins::NumericDType::F64
+    };
+    let shape = tensor.shape.clone();
+    let data = tensor::tensor_into_values_f64(tensor);
+    ensure_nonnegative(&data)?;
+    let data: Vec<f64> = data
+        .into_iter()
+        .map(|value| canonical_zero(value.sqrt()))
         .collect();
-    let out = Tensor::new_with_dtype(data, tensor.shape.clone(), dtype)
+    let out = Tensor::new_with_dtype(data, shape, output_dtype)
         .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))?;
     Ok(tensor_into_realsqrt_value(tensor::coerce_tensor_dtype(
-        out, dtype,
+        out,
+        output_dtype,
     )))
 }
 
@@ -223,11 +230,20 @@ fn realsqrt_char_array(chars: CharArray) -> BuiltinResult<Value> {
 }
 
 fn realsqrt_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
-    ensure_nonnegative(&sparse.values)?;
-    let values: Vec<f64> = sparse
-        .values
-        .iter()
-        .map(|&value| canonical_zero(value.sqrt()))
+    let values = sparse
+        .integer_storage()
+        .map(|storage| {
+            storage
+                .exact_values()
+                .into_iter()
+                .map(|value| value.to_f64())
+                .collect()
+        })
+        .unwrap_or_else(|| sparse.values.clone());
+    ensure_nonnegative(&values)?;
+    let values: Vec<f64> = values
+        .into_iter()
+        .map(|value| canonical_zero(value.sqrt()))
         .collect();
     SparseTensor::new(
         sparse.rows,
@@ -287,8 +303,8 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CharArray, ComplexTensor, IntValue, LogicalArray, NumericDType, ResolveContext,
-        SparseTensor, Type,
+        CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType,
+        ResolveContext, SparseTensor, Type,
     };
 
     use crate::builtins::common::test_support;
@@ -369,6 +385,32 @@ mod tests {
     }
 
     #[test]
+    fn dense_typed_integer_tensor_reads_storage_exactly_and_returns_double() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 4, 9]), vec![2, 2]).unwrap();
+        tensor.data.fill(f64::NAN);
+
+        match call(Value::Tensor(tensor)).unwrap() {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.dtype, NumericDType::F64);
+                assert!(out.integer_storage().is_none());
+                assert_eq!(out.data, vec![0.0, 1.0, 2.0, 3.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dense_typed_integer_negative_errors_from_exact_storage() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, -4]), vec![1, 2]).unwrap();
+        tensor.data.fill(4.0);
+
+        let err = call(Value::Tensor(tensor)).unwrap_err();
+        assert_eq!(err.identifier(), ERROR_DOMAIN.identifier);
+    }
+
+    #[test]
     fn single_tensor_preserves_dtype() {
         let tensor = Tensor::new_with_dtype(vec![2.0, 9.0], vec![1, 2], NumericDType::F32).unwrap();
         match call(Value::Tensor(tensor)).unwrap() {
@@ -438,6 +480,42 @@ mod tests {
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sparse_typed_integer_values_read_storage_exactly_and_return_double() {
+        let mut sparse = SparseTensor::new_integer(
+            3,
+            2,
+            vec![0, 2, 3],
+            vec![0, 2, 1],
+            IntegerStorage::U16(vec![4, 9, 16]),
+        )
+        .unwrap();
+        sparse.values.fill(f64::NAN);
+
+        match call(Value::SparseTensor(sparse)).unwrap() {
+            Value::SparseTensor(out) => {
+                assert_eq!(out.rows, 3);
+                assert_eq!(out.cols, 2);
+                assert_eq!(out.col_ptrs, vec![0, 2, 3]);
+                assert_eq!(out.row_indices, vec![0, 2, 1]);
+                assert_eq!(out.values, vec![2.0, 3.0, 4.0]);
+                assert!(out.integer_storage().is_none());
+            }
+            other => panic!("expected sparse tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sparse_typed_integer_negative_errors_from_exact_storage() {
+        let mut sparse =
+            SparseTensor::new_integer(2, 1, vec![0, 1], vec![1], IntegerStorage::I16(vec![-4]))
+                .unwrap();
+        sparse.values.fill(4.0);
+
+        let err = call(Value::SparseTensor(sparse)).unwrap_err();
+        assert_eq!(err.identifier(), ERROR_DOMAIN.identifier);
     }
 
     #[test]
