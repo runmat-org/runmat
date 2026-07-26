@@ -19,6 +19,7 @@ use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
 use crate::interpreter::dispatch::calls::normalize_requested_outputs;
 use runmat_builtins::{CellArray, SymbolicExpr, Value};
+use runmat_runtime::builtins::common::tensor::tensor_value_f64;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::future::Future;
 use std::pin::Pin;
@@ -195,7 +196,7 @@ async fn range_selector_scalar_to_f64(value: &Value) -> Result<f64, RuntimeError
             if t.data.len() == 1
                 && runmat_runtime::builtins::common::shape::is_scalar_shape(&t.shape) =>
         {
-            Ok(t.data[0])
+            Ok(tensor_value_f64(&t, 0))
         }
         _ => Err(crate::interpreter::errors::mex(
             "UnsupportedIndexType",
@@ -1020,7 +1021,7 @@ fn symbolic_scalar_from_value(value: &Value) -> Result<SymbolicExpr, RuntimeErro
         Value::Int(value) => Ok(SymbolicExpr::constant(value.to_f64())),
         Value::Bool(value) => Ok(SymbolicExpr::constant(if *value { 1.0 } else { 0.0 })),
         Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(SymbolicExpr::constant(tensor.data[0]))
+            Ok(SymbolicExpr::constant(tensor_value_f64(tensor, 0)))
         }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(SymbolicExpr::constant(if logical.data[0] != 0 {
@@ -2480,11 +2481,11 @@ mod tests {
     use super::{
         apply_cell_end_exprs_for_base, apply_cell_end_offsets_for_base,
         apply_end_offsets_to_numeric, map_slice_plan_error, range_selector_scalar_to_f64,
-        validate_expr_range_step_metadata, IndexContext,
+        symbolic_scalar_from_value, validate_expr_range_step_metadata, IndexContext,
     };
     use crate::bytecode::EndExpr;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, Value};
+    use runmat_builtins::{CellArray, IntegerStorage, SymbolicExpr, Tensor, Value};
 
     #[test]
     fn map_slice_plan_error_preserves_identifier_and_adds_context() {
@@ -2516,6 +2517,31 @@ mod tests {
         )))
         .expect_err("non-numeric range selector scalar should fail");
         assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+    }
+
+    #[test]
+    fn range_selector_scalar_to_f64_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
+                .expect("typed integer scalar");
+        tensor.data[0] = 0.0;
+
+        assert_eq!(
+            block_on(range_selector_scalar_to_f64(&Value::Tensor(tensor))).unwrap(),
+            9_007_199_254_740_992.0
+        );
+    }
+
+    #[test]
+    fn symbolic_scalar_from_value_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![42]), vec![1, 1])
+            .expect("typed integer scalar");
+        tensor.data[0] = 0.0;
+
+        assert_eq!(
+            symbolic_scalar_from_value(&Value::Tensor(tensor)).unwrap(),
+            SymbolicExpr::constant(42.0)
+        );
     }
 
     #[test]
