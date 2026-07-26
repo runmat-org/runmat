@@ -5,7 +5,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::BuiltinResult;
+use crate::{builtins::common::tensor, BuiltinResult};
 
 use super::{
     any_type, deep_learning_error, gather_args, numeric_scalar, object, parse_name_values,
@@ -1035,7 +1035,7 @@ impl LossMask {
                 array.data.iter().map(|value| f64::from(*value)).collect(),
                 array.shape.clone(),
             ),
-            Value::Tensor(tensor) => (tensor.data.clone(), tensor.shape.clone()),
+            Value::Tensor(tensor) => (tensor::tensor_values_f64(tensor), tensor.shape.clone()),
             other => {
                 return Err(deep_learning_error(
                     "crossentropy",
@@ -1069,7 +1069,7 @@ fn mask_values_for_layout(value: &Value, shape: &[usize], len: usize) -> Builtin
             array.data.iter().map(|value| f64::from(*value)).collect(),
             array.shape.clone(),
         ),
-        Value::Tensor(tensor) => (tensor.data.clone(), tensor.shape.clone()),
+        Value::Tensor(tensor) => (tensor::tensor_values_f64(tensor), tensor.shape.clone()),
         other => {
             return Err(deep_learning_error(
                 "crossentropy",

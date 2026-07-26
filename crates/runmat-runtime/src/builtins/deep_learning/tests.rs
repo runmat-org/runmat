@@ -1706,6 +1706,25 @@ fn crossentropy_supports_multilabel_reduction_none_and_mask_normalization() {
 }
 
 #[test]
+fn crossentropy_mask_reads_typed_integer_storage_exactly() {
+    let masked = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+        vec![
+            Value::String("Mask".into()),
+            poisoned_int_tensor(IntegerStorage::U8(vec![1, 0]), vec![1, 2], 2.0),
+            Value::String("NormalizationFactor".into()),
+            Value::String("mask-included".into()),
+        ],
+    ))
+    .expect("masked crossentropy");
+    let Value::Num(loss) = masked else {
+        panic!("expected scalar");
+    };
+    assert!((loss + 0.8_f64.ln()).abs() < 1.0e-12);
+}
+
+#[test]
 fn crossentropy_rejects_incompatible_shapes_masks_and_formats() {
     let err = block_on(crossentropy_builtin(
         Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
