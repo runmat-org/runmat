@@ -169,6 +169,9 @@ fn fix_numeric(value: Value) -> BuiltinResult<Value> {
 }
 
 fn fix_tensor(mut tensor: Tensor) -> BuiltinResult<Tensor> {
+    if tensor.integer_storage().is_some() {
+        return Ok(tensor);
+    }
     for value in &mut tensor.data {
         *value = fix_scalar(*value);
     }
@@ -215,7 +218,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, Type,
+    };
 
     fn fix_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::fix_builtin(value))
@@ -351,6 +356,32 @@ pub(crate) mod tests {
 
         let unsigned = Value::Int(IntValue::U64(u64::MAX));
         assert_eq!(fix_builtin(unsigned.clone()).expect("fix"), unsigned);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fix_read_typed_integer_storage_exactly() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MAX]), vec![1, 1]).expect("integer");
+        scalar.data[0] = 0.0;
+        assert_eq!(
+            fix_builtin(Value::Tensor(scalar)).expect("fix"),
+            Value::Int(IntValue::I64(i64::MAX))
+        );
+
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 3]), vec![1, 2])
+            .expect("integer");
+        tensor.data.fill(0.0);
+        match fix_builtin(Value::Tensor(tensor)).expect("fix") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![u64::MAX, 3]))
+                );
+            }
+            other => panic!("expected typed integer tensor, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

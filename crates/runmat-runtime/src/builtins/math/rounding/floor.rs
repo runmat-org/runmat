@@ -263,6 +263,18 @@ fn floor_numeric(value: Value, strategy: FloorStrategy) -> BuiltinResult<Value> 
 }
 
 fn floor_tensor(mut tensor: Tensor, strategy: FloorStrategy) -> BuiltinResult<Tensor> {
+    if tensor.integer_storage().is_some() {
+        if matches!(strategy, FloorStrategy::Integer) {
+            return Ok(tensor);
+        }
+        let shape = tensor.shape.clone();
+        let data = tensor::tensor_into_values_f64(tensor)
+            .into_iter()
+            .map(|value| apply_floor_scalar(value, strategy))
+            .collect::<Vec<_>>();
+        return Tensor::new(data, shape)
+            .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, err));
+    }
     for value in &mut tensor.data {
         *value = apply_floor_scalar(*value, strategy);
     }
@@ -404,6 +416,26 @@ fn parse_digits(value: &Value) -> BuiltinResult<i32> {
             } else {
                 0
             }
+        }
+        Value::Tensor(tensor) => {
+            if !tensor::is_scalar_tensor(tensor) {
+                return Err(err());
+            }
+            let value = tensor::tensor_value_f64(tensor, 0);
+            if !value.is_finite() {
+                return Err(err());
+            }
+            let rounded = value.round();
+            if (rounded - value).abs() > f64::EPSILON {
+                return Err(err());
+            }
+            if rounded > i64::MAX as f64 || rounded < i64::MIN as f64 {
+                return Err(builtin_error_with_detail(
+                    &FLOOR_ERROR_INVALID_DIGITS,
+                    "integer overflow in N",
+                ));
+            }
+            rounded as i64
         }
         other => {
             return Err(builtin_error_with_detail(
@@ -562,7 +594,9 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{
+        IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
+    };
 
     fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::floor_builtin(value, rest))
@@ -583,6 +617,20 @@ pub(crate) mod tests {
             -3
         );
         assert!(parse_digits(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+    }
+
+    #[test]
+    fn floor_digit_parser_reads_typed_integer_storage_exactly() {
+        let mut digits =
+            Tensor::new_integer(IntegerStorage::I16(vec![2]), vec![1, 1]).expect("digits");
+        digits.data[0] = -9.0;
+        assert_eq!(parse_digits(&Value::Tensor(digits)).expect("digits"), 2);
+
+        let mut wide =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("digits");
+        wide.data[0] = 1.0;
+        let err = parse_digits(&Value::Tensor(wide)).expect_err("overflow");
+        assert_error_contains(err, "integer overflow in N");
     }
 
     #[test]
@@ -698,6 +746,48 @@ pub(crate) mod tests {
         match result {
             Value::Int(IntValue::I32(v)) => assert_eq!(v, -4),
             other => panic!("expected int32 scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn floor_read_typed_integer_storage_exactly() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MAX]), vec![1, 1]).expect("integer");
+        scalar.data[0] = 0.0;
+        assert_eq!(
+            floor_builtin(Value::Tensor(scalar), Vec::new()).expect("floor"),
+            Value::Int(IntValue::I64(i64::MAX))
+        );
+
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 3]), vec![1, 2])
+            .expect("integer");
+        tensor.data.fill(0.0);
+        match floor_builtin(Value::Tensor(tensor), Vec::new()).expect("floor") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![u64::MAX, 3]))
+                );
+            }
+            other => panic!("expected typed integer tensor, got {other:?}"),
+        }
+
+        let mut digits_input =
+            Tensor::new_integer(IntegerStorage::I16(vec![123, -987]), vec![2, 1]).expect("integer");
+        digits_input.data.fill(f64::NAN);
+        let result = floor_builtin(
+            Value::Tensor(digits_input),
+            vec![Value::Int(IntValue::I32(-2))],
+        )
+        .expect("floor");
+        match result {
+            Value::Tensor(out) => {
+                assert!(out.integer_storage().is_none());
+                assert_eq!(out.data, vec![100.0, -1000.0]);
+            }
+            other => panic!("expected floating tensor, got {other:?}"),
         }
     }
 

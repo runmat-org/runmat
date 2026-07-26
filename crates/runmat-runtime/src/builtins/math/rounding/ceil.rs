@@ -263,6 +263,18 @@ fn ceil_numeric(value: Value, strategy: CeilStrategy) -> BuiltinResult<Value> {
 }
 
 fn ceil_tensor(mut tensor: Tensor, strategy: CeilStrategy) -> BuiltinResult<Tensor> {
+    if tensor.integer_storage().is_some() {
+        if matches!(strategy, CeilStrategy::Integer) {
+            return Ok(tensor);
+        }
+        let shape = tensor.shape.clone();
+        let data = tensor::tensor_into_values_f64(tensor)
+            .into_iter()
+            .map(|value| apply_ceil_scalar(value, strategy))
+            .collect::<Vec<_>>();
+        return Tensor::new(data, shape)
+            .map_err(|err| builtin_error_with_detail(&CEIL_ERROR_INTERNAL, err));
+    }
     for value in &mut tensor.data {
         *value = apply_ceil_scalar(*value, strategy);
     }
@@ -780,6 +792,49 @@ pub(crate) mod tests {
         match result {
             Value::Int(IntValue::I32(v)) => assert_eq!(v, -4),
             other => panic!("expected int32 scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn ceil_read_typed_integer_storage_exactly() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MAX]), vec![1, 1]).expect("integer");
+        scalar.data[0] = 0.0;
+        assert_eq!(
+            ceil_builtin(Value::Tensor(scalar), Vec::new()).expect("ceil"),
+            Value::Int(IntValue::I64(i64::MAX))
+        );
+
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 3]), vec![1, 2])
+            .expect("integer");
+        tensor.data.fill(0.0);
+        match ceil_builtin(Value::Tensor(tensor), Vec::new()).expect("ceil") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![u64::MAX, 3]))
+                );
+            }
+            other => panic!("expected typed integer tensor, got {other:?}"),
+        }
+
+        let mut digits_input =
+            Tensor::new_integer(IntegerStorage::I16(vec![123, -987]), vec![2, 1]).expect("integer");
+        digits_input.data.fill(f64::NAN);
+        let result = ceil_builtin(
+            Value::Tensor(digits_input),
+            vec![Value::Int(IntValue::I32(-2))],
+        )
+        .expect("ceil");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 1]);
+                assert!(out.integer_storage().is_none());
+                assert_eq!(out.data, vec![200.0, -900.0]);
+            }
+            other => panic!("expected floating tensor, got {other:?}"),
         }
     }
 
