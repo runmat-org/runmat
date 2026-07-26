@@ -327,9 +327,7 @@ async fn gather_tensor(value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(|err| invalid(format!("regress: {err}")))?;
-    let tensor = tensor::value_into_tensor_for(NAME, gathered)
-        .map_err(|err| invalid(format!("regress: {err}")))?;
-    tensor::integer_tensor_to_f64(tensor).map_err(|err| invalid(format!("regress: {err}")))
+    tensor::value_into_tensor_for(NAME, gathered).map_err(|err| invalid(format!("regress: {err}")))
 }
 
 async fn parse_alpha(value: &Value) -> BuiltinResult<f64> {
@@ -339,7 +337,16 @@ async fn parse_alpha(value: &Value) -> BuiltinResult<f64> {
     let alpha = match gathered {
         Value::Num(value) => value,
         Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(&tensor)[0],
+        Value::Tensor(tensor) => {
+            let values = tensor::tensor_values_f64(&tensor);
+            if values.len() != 1 {
+                return Err(invalid(format!(
+                    "regress: alpha must be a numeric scalar, got {:?}",
+                    Value::Tensor(tensor)
+                )));
+            }
+            values[0]
+        }
         other => {
             return Err(invalid(format!(
                 "regress: alpha must be a numeric scalar, got {other:?}"
@@ -582,10 +589,11 @@ fn vector_values(tensor: &Tensor) -> BuiltinResult<Vec<f64>> {
     if tensor.shape.len() > 2 || !(tensor.rows == 1 || tensor.cols == 1) {
         return Err(invalid("regress: y must be a vector"));
     }
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn complete_rows(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedData> {
+    let x_values = tensor::tensor_values_f64_cow(x);
     let mut rows = Vec::new();
     let mut y_values = Vec::new();
     for row in 0..x.rows {
@@ -594,7 +602,7 @@ fn complete_rows(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedData> {
         let mut has_inf = y_value.is_infinite();
         let start = rows.len();
         for col in 0..x.cols {
-            let value = matrix_value(x, row, col);
+            let value = matrix_value(&x_values, x.rows, row, col);
             has_nan |= value.is_nan();
             has_inf |= value.is_infinite();
             rows.push(value);
@@ -615,8 +623,8 @@ fn complete_rows(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedData> {
     })
 }
 
-fn matrix_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
-    tensor.data[row + col * tensor.rows]
+fn matrix_value(values: &[f64], rows: usize, row: usize, col: usize) -> f64 {
+    values[row + col * rows]
 }
 
 fn independent_columns(design: &DMatrix<f64>) -> BuiltinResult<Vec<usize>> {
@@ -835,8 +843,15 @@ mod tests {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
     }
 
-    fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).unwrap())
+    fn poisoned_int_tensor(
+        storage: IntegerStorage,
+        rows: usize,
+        cols: usize,
+        poison: f64,
+    ) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.fill(poison);
+        Value::Tensor(tensor)
     }
 
     fn outputs(value: Value) -> Vec<Value> {
@@ -886,8 +901,13 @@ mod tests {
     #[test]
     fn regress_accepts_typed_integer_design_and_response() {
         let _guard = crate::output_count::push_output_count(Some(1));
-        let y = int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1);
-        let x = int_tensor(IntegerStorage::I16(vec![1, 1, 1, 1, 0, 1, 2, 3]), 4, 2);
+        let y = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1, f64::NAN);
+        let x = poisoned_int_tensor(
+            IntegerStorage::I16(vec![1, 1, 1, 1, 0, 1, 2, 3]),
+            4,
+            2,
+            f64::NAN,
+        );
         let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
         let b = tensor_ref(&out[0]);
         assert_eq!(b.shape, vec![2, 1]);
@@ -897,9 +917,9 @@ mod tests {
 
     #[test]
     fn regress_rejects_typed_integer_alpha_boundaries() {
-        let y = int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1);
-        let x = int_tensor(IntegerStorage::I16(vec![1, 1, 1, 1, 0, 1, 2, 3]), 4, 2);
-        let alpha = int_tensor(IntegerStorage::U8(vec![1]), 1, 1);
+        let y = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1, 0.0);
+        let x = poisoned_int_tensor(IntegerStorage::I16(vec![1, 1, 1, 1, 0, 1, 2, 3]), 4, 2, 0.0);
+        let alpha = poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1, 0.5);
         let err = block_on(regress_builtin(y, x, vec![alpha])).unwrap_err();
         assert!(err.message.contains("alpha must be between 0 and 1"));
     }
