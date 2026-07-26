@@ -32,7 +32,7 @@ use crate::analysis::{
     AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendsQuery,
     FeaResolvedDocument,
 };
-use crate::builtins::common::json::int_value_to_json;
+use crate::builtins::common::{json::int_value_to_json, tensor as tensor_utils};
 use crate::builtins::geometry::{GEOMETRY_ASSET_CLASS, GEOMETRY_ASSET_JSON_PROPERTY};
 use crate::builtins::io::json::jsondecode::value_from_json;
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
@@ -3133,9 +3133,9 @@ fn string_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<
 
 fn usize_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(Tensor { data, .. }) => data
-            .iter()
-            .map(|value| usize_from_value(builtin, &Value::Num(*value)))
+        Value::Tensor(tensor) => tensor_utils::tensor_values_f64(tensor)
+            .into_iter()
+            .map(|value| usize_from_value(builtin, &Value::Num(value)))
             .collect(),
         Value::Cell(cell) => cell
             .data
@@ -3613,7 +3613,7 @@ mod tests {
 
     #[test]
     fn fea_usize_parsers_preserve_typed_bounds_and_reject_invalid_values() {
-        use runmat_builtins::IntValue;
+        use runmat_builtins::{IntValue, IntegerStorage};
 
         assert_eq!(
             usize_from_value(INTERFACE_NAME, &Value::Int(IntValue::U16(7))).unwrap(),
@@ -3626,6 +3626,13 @@ mod tests {
             &Value::Tensor(Tensor::new_2d(vec![1.0, -1.0], 1, 2).unwrap())
         )
         .is_err());
+        let mut typed_indices =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 4]), vec![1, 2]).unwrap();
+        typed_indices.data.fill(f64::NAN);
+        assert_eq!(
+            usize_vec_from_value(INTERFACE_NAME, &Value::Tensor(typed_indices)).unwrap(),
+            vec![2, 4]
+        );
 
         let maximum = usize_from_value(INTERFACE_NAME, &Value::Int(IntValue::U64(u64::MAX)));
         if usize::BITS == 64 {
