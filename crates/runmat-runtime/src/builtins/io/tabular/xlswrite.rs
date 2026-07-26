@@ -1273,12 +1273,29 @@ impl XlsTable {
         let cols = sparse.cols;
         checked_cell_count(rows, cols, "sparse array")?;
         let mut cells = vec![CellValue::Number(0.0); rows * cols];
-        for col in 0..cols {
-            let start = sparse.col_ptrs[col];
-            let end = sparse.col_ptrs[col + 1];
-            for entry in start..end {
-                let row = sparse.row_indices[entry];
-                cells[row * cols + col] = CellValue::Number(sparse.values[entry]);
+        if let Some(storage) = sparse.integer_storage() {
+            for col in 0..cols {
+                let start = sparse.col_ptrs[col];
+                let end = sparse.col_ptrs[col + 1];
+                for entry in start..end {
+                    let row = sparse.row_indices[entry];
+                    let value = storage.value_at(entry).ok_or_else(|| {
+                        xlswrite_error_with(
+                            &XLSWRITE_ERROR_DATA,
+                            format!("xlswrite: sparse integer value buffer missing entry {entry}"),
+                        )
+                    })?;
+                    cells[row * cols + col] = CellValue::Integer(value);
+                }
+            }
+        } else {
+            for col in 0..cols {
+                let start = sparse.col_ptrs[col];
+                let end = sparse.col_ptrs[col + 1];
+                for entry in start..end {
+                    let row = sparse.row_indices[entry];
+                    cells[row * cols + col] = CellValue::Number(sparse.values[entry]);
+                }
             }
         }
         Ok(Self { rows, cols, cells })
@@ -1727,6 +1744,27 @@ mod tests {
         assert_eq!(range.get((1, 0)), Some(&Data::Float(9.0)));
         assert_eq!(range.get((1, 1)), Some(&Data::Float(0.0)));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn xlswrite_preserves_sparse_integer_cells_exactly() {
+        let sparse = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![1, 0],
+            IntegerStorage::U64(vec![u64::MAX, (1_u64 << 53) + 1]),
+        )
+        .expect("integer sparse");
+        let mut sparse = sparse;
+        sparse.values = vec![0.0, 0.0];
+
+        let table = block_on(XlsTable::from_value(Value::SparseTensor(sparse))).expect("table");
+        let xml =
+            writecell::build_sheet_xml(&table.into_cell_table().unwrap(), RangeStart::default());
+
+        assert!(xml.contains("<v>18446744073709551615</v>"));
+        assert!(xml.contains("<v>9007199254740993</v>"));
     }
 
     #[test]
