@@ -577,10 +577,12 @@ async fn value_to_complex_buffer(name: &str, value: Value) -> BuiltinResult<Comp
         other => {
             let tensor = tensor::value_into_tensor_for(name, other)
                 .map_err(|err| descriptive_error(name, format!("{name}: {err}")))?;
-            Ok(ComplexBuffer {
-                shape: tensor::default_shape_for(&tensor.shape, tensor.data.len()),
-                data: tensor.data.into_iter().map(|value| (value, 0.0)).collect(),
-            })
+            let shape = tensor::default_shape_for(&tensor.shape, tensor.data.len());
+            let data = tensor::tensor_into_values_f64(tensor)
+                .into_iter()
+                .map(|value| (value, 0.0))
+                .collect();
+            Ok(ComplexBuffer { data, shape })
         }
     }
 }
@@ -1189,6 +1191,7 @@ pub mod tabulate {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     #[test]
     fn tabulate_labels_preserve_exact_uint64_text() {
@@ -1222,6 +1225,12 @@ mod tests {
             Value::Tensor(tensor) => (tensor.data, tensor.shape),
             other => panic!("expected numeric output, got {other:?}"),
         }
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -1311,6 +1320,22 @@ mod tests {
     fn rmse_broadcasts_and_reduces_residuals() {
         let x = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0], vec![3, 1]).unwrap());
         let y = Value::Num(1.0);
+        let out = block_on(rmse::rmse_builtin(
+            x,
+            y,
+            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+        ))
+        .unwrap();
+        assert_close(
+            tensor_values(out).0[0],
+            ((1.0 + 9.0 + 25.0) / 3.0_f64).sqrt(),
+        );
+    }
+
+    #[test]
+    fn rmse_reads_typed_integer_residual_inputs_exactly() {
+        let x = int_tensor(IntegerStorage::I16(vec![2, 4, 6]), vec![3, 1]);
+        let y = int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]);
         let out = block_on(rmse::rmse_builtin(
             x,
             y,
