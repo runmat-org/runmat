@@ -97,7 +97,7 @@ pub async fn query_points(value: Value, name: &'static str) -> BuiltinResult<Que
         .map_err(|err| interp_error(name, format!("{name}: {err}")))?;
     let shape = canonical_shape(&tensor.shape, tensor.data.len());
     Ok(QueryPoints {
-        values: tensor.data,
+        values: tensor::tensor_into_values_f64(tensor),
         shape,
     })
 }
@@ -116,7 +116,7 @@ pub async fn vector_from_value(
             format!("{name}: {label} must be a vector"),
         ));
     }
-    Ok(tensor.data)
+    Ok(tensor::tensor_into_values_f64(tensor))
 }
 
 pub async fn series_from_values(
@@ -179,7 +179,7 @@ fn series_from_tensor(
 
     Ok(NumericSeries {
         x,
-        y: y_tensor.data,
+        y: tensor::tensor_into_values_f64(y_tensor),
         series,
         trailing_shape,
     })

@@ -20,6 +20,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{
     build_runtime_error, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN,
     OBJECT_SUBSREF_METHOD,
@@ -553,7 +554,13 @@ fn numeric_tensor(value: Value, name: &str) -> BuiltinResult<Tensor> {
         Value::Tensor(tensor) if matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) => {
             Ok(tensor)
         }
-        Value::Tensor(_) => Err(invalid(format!("{name} must be a single or double array"))),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            tensor_utils::integer_tensor_to_f64(tensor)
+                .map_err(|err| invalid(format!("{name}: {err}")))
+        }
+        Value::Tensor(_) => Err(invalid(format!(
+            "{name} must be a single, double, or integer array"
+        ))),
         other => Err(invalid(format!(
             "{name} must be a real numeric array, got {other:?}"
         ))),
@@ -569,9 +576,14 @@ fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
         {
             Ok(tensor.data)
         }
-        Value::Tensor(tensor) if is_vector_shape(&tensor.shape) => {
-            Err(invalid(format!("{name} must be a single or double vector")))
+        Value::Tensor(tensor)
+            if is_vector_shape(&tensor.shape) && tensor.integer_storage().is_some() =>
+        {
+            Ok(tensor_utils::tensor_into_values_f64(tensor))
         }
+        Value::Tensor(tensor) if is_vector_shape(&tensor.shape) => Err(invalid(format!(
+            "{name} must be a single, double, or integer vector"
+        ))),
         Value::Tensor(_) => Err(invalid(format!("{name} must be a vector"))),
         other => Err(invalid(format!(
             "{name} must be a real numeric vector, got {other:?}"
@@ -664,11 +676,12 @@ fn full_grid_vectors(grids: Vec<Value>, values: &Tensor) -> BuiltinResult<Vec<Ve
     let mut vectors = Vec::with_capacity(grid_rank);
     for (dim, tensor) in tensors.iter().enumerate() {
         let len = grid_shape[dim];
+        let values = tensor_utils::tensor_values_f64_cow(tensor);
         let mut vector = Vec::with_capacity(len);
         for idx in 0..len {
             let mut subs = vec![0; grid_rank];
             subs[dim] = idx;
-            vector.push(tensor.data[column_major_offset(&subs, &tensor.shape)]);
+            vector.push(values[column_major_offset(&subs, &tensor.shape)]);
         }
         vectors.push(vector);
     }
@@ -689,7 +702,7 @@ fn validate_rectilinear_full_grids(
     for linear in 0..total {
         let subs = unravel_column_major(linear, shape);
         for (dim, tensor) in tensors.iter().enumerate() {
-            let actual = tensor.data[linear];
+            let actual = tensor_utils::tensor_value_f64(tensor, linear);
             let expected = vectors[dim][subs[dim]];
             if actual != expected {
                 return Err(invalid(
@@ -1019,10 +1032,11 @@ fn parse_query_plan(grid_vectors: &[Vec<f64>], args: Vec<Value>) -> BuiltinResul
             ));
         }
         let mut points = Vec::with_capacity(tensor.rows());
+        let values = tensor_utils::tensor_values_f64_cow(&tensor);
         for row in 0..tensor.rows() {
             let mut point = Vec::with_capacity(ndim);
             for col in 0..ndim {
-                point.push(tensor.data[row + col * tensor.rows()]);
+                point.push(values[row + col * tensor.rows()]);
             }
             points.push(point);
         }
@@ -1353,6 +1367,7 @@ fn extrap_method_name(method: ExtrapolationMethod) -> &'static str {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).unwrap())
@@ -1360,6 +1375,19 @@ mod tests {
 
     fn col(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
+    }
+
+    fn int_col(storage: IntegerStorage) -> Value {
+        let len = storage.len();
+        let mut tensor = Tensor::new_integer(storage, vec![len, 1]).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1435,6 +1463,37 @@ mod tests {
         let obj = call(vec![Value::Cell(grid), Value::Tensor(values)]).unwrap();
         match subsref(obj, vec![Value::Num(0.5), Value::Num(1.0)]).unwrap() {
             Value::Num(value) => assert_eq!(value, 15.0),
+            other => panic!("expected scalar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn grid_vectors_values_and_queries_read_typed_integer_storage_exactly() {
+        let grid = CellArray::new_with_shape(
+            vec![
+                int_col(IntegerStorage::I16(vec![0, 1])),
+                int_col(IntegerStorage::U16(vec![0, 2])),
+            ],
+            vec![1, 2],
+        )
+        .unwrap();
+        let values = int_tensor(IntegerStorage::I16(vec![0, 10, 20, 30]), vec![2, 2]);
+        let obj = call(vec![Value::Cell(grid), values]).unwrap();
+        let query = int_tensor(IntegerStorage::I16(vec![0, 1, 0, 2]), vec![2, 2]);
+        match subsref(obj, vec![query]).unwrap() {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.data, vec![0.0, 30.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+
+        let x_grid = int_tensor(IntegerStorage::I16(vec![0, 1, 0, 1]), vec![2, 2]);
+        let y_grid = int_tensor(IntegerStorage::U16(vec![0, 0, 2, 2]), vec![2, 2]);
+        let values = int_tensor(IntegerStorage::I16(vec![0, 10, 20, 30]), vec![2, 2]);
+        let obj = call(vec![x_grid, y_grid, values]).unwrap();
+        match subsref(obj, vec![Value::Num(1.0), Value::Num(2.0)]).unwrap() {
+            Value::Num(value) => assert_eq!(value, 30.0),
             other => panic!("expected scalar, got {other:?}"),
         }
     }

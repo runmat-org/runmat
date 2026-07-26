@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::Tensor;
 
@@ -294,7 +295,10 @@ async fn real_coordinate_data_from_value(
         Value::Num(value) => Ok((vec![value], vec![1, 1])),
         Value::Int(value) => Ok((vec![value.to_f64()], vec![1, 1])),
         Value::Bool(value) => Ok((vec![if value { 1.0 } else { 0.0 }], vec![1, 1])),
-        Value::Tensor(tensor) => Ok((tensor.data, tensor.shape)),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            Ok((tensor_utils::tensor_into_values_f64(tensor), shape))
+        }
         Value::LogicalArray(array) => Ok((
             array
                 .data
@@ -338,11 +342,17 @@ async fn numeric_data_from_value(
             vec![1, 1],
             false,
         )),
-        Value::Tensor(tensor) => Ok((
-            tensor.data.into_iter().map(|re| (re, 0.0)).collect(),
-            tensor.shape,
-            false,
-        )),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            Ok((
+                tensor_utils::tensor_into_values_f64(tensor)
+                    .into_iter()
+                    .map(|re| (re, 0.0))
+                    .collect(),
+                shape,
+                false,
+            ))
+        }
         Value::LogicalArray(array) => Ok((
             array
                 .data
@@ -472,6 +482,13 @@ mod tests {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).expect("tensor"))
     }
 
+    fn int_row(storage: IntegerStorage) -> Value {
+        let len = storage.len();
+        let mut tensor = Tensor::new_integer(storage, vec![1, len]).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
     #[test]
     fn interp1q_linearly_interpolates() {
         let out = block_on(interp1q_builtin(
@@ -485,6 +502,20 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![1, 2]);
         assert_eq!(tensor.data, vec![15.0, 30.0]);
+    }
+
+    #[test]
+    fn interp1q_reads_typed_integer_x_v_and_query_exactly() {
+        let out = block_on(interp1q_builtin(
+            int_row(IntegerStorage::I16(vec![1, 2, 3])),
+            int_row(IntegerStorage::U16(vec![10, 20, 40])),
+            int_row(IntegerStorage::I16(vec![1, 2])),
+        ))
+        .expect("interp1q");
+        let Value::Tensor(tensor) = out else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.data, vec![10.0, 20.0]);
     }
 
     #[test]
