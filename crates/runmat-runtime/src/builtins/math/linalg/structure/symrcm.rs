@@ -12,11 +12,11 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::type_resolvers::symrcm_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -204,7 +204,8 @@ async fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
 /// Compute the symmetric reverse Cuthill-McKee ordering for a real tensor.
 pub fn symrcm_host_real_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
-    symrcm_host_real_data(&tensor.shape, &tensor.data)
+    let values = tensor::tensor_values_f64_cow(tensor);
+    symrcm_host_real_data(&tensor.shape, &values)
 }
 
 /// Compute the symmetric reverse Cuthill-McKee ordering for a complex tensor.
@@ -379,7 +380,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LogicalArray, Type};
+    use runmat_builtins::{IntegerStorage, LogicalArray, Type};
 
     fn tensor_from_entries(rows: usize, cols: usize, entries: &[(usize, usize, f64)]) -> Tensor {
         let mut data = vec![0.0; rows * cols];
@@ -468,6 +469,32 @@ pub(crate) mod tests {
             (4, 3, 1.0),
         ];
         let tensor = tensor_from_entries(5, 5, &entries);
+        let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.data, vec![5.0, 4.0, 3.0, 2.0, 1.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn symrcm_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::I16(vec![
+                0, 1, 0, 0, 0, //
+                1, 0, 1, 0, 0, //
+                0, 1, 0, 1, 0, //
+                0, 0, 1, 0, 1, //
+                0, 0, 0, 1, 0,
+            ]),
+            vec![5, 5],
+        )
+        .expect("integer path graph");
+        tensor.data.fill(f64::NAN);
+
         let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {

@@ -331,7 +331,8 @@ pub fn bandwidth_host_complex_data(
 }
 
 pub fn bandwidth_host_real_tensor(tensor: &Tensor) -> BuiltinResult<(usize, usize)> {
-    bandwidth_host_real_data(&tensor.shape, &tensor.data)
+    let values = tensor::tensor_values_f64_cow(tensor);
+    bandwidth_host_real_data(&tensor.shape, &values)
 }
 
 pub fn bandwidth_host_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<(usize, usize)> {
@@ -395,7 +396,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, LogicalArray, ResolveContext, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -532,6 +533,23 @@ pub(crate) mod tests {
         let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
         match result {
             Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 0.0]),
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn bandwidth_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::I16(vec![1, 0, 7, 0, 2, 0, 0, 5, 3]),
+            vec![3, 3],
+        )
+        .expect("integer matrix");
+        tensor.data.fill(f64::NAN);
+
+        let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
+        match result {
+            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
