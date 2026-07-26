@@ -18,7 +18,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::writecell::{self, CellTable, CellValue, RangeStart};
@@ -1126,7 +1125,7 @@ impl XlsTable {
             Value::String(text) => Ok(Self::single(CellValue::Text(text))),
             Value::CharArray(chars) => Self::from_char_array(chars),
             Value::Num(value) => Ok(Self::single(CellValue::Number(value))),
-            Value::Int(value) => Ok(Self::single(CellValue::Number(value.to_f64()))),
+            Value::Int(value) => Ok(Self::single(CellValue::Integer(value))),
             Value::Bool(value) => Ok(Self::single(CellValue::Boolean(value))),
             Value::Complex(_, _) | Value::ComplexTensor(_) => Err(xlswrite_error_with(
                 &XLSWRITE_ERROR_DATA,
@@ -1252,9 +1251,18 @@ impl XlsTable {
         let cols = tensor.cols();
         checked_cell_count(rows, cols, "numeric array")?;
         let mut cells = Vec::with_capacity(rows * cols);
-        for row in 0..rows {
-            for col in 0..cols {
-                cells.push(CellValue::Number(tensor.data[row + col * rows]));
+        if let Some(storage) = tensor.integer_storage() {
+            let values = storage.exact_values();
+            for row in 0..rows {
+                for col in 0..cols {
+                    cells.push(CellValue::Integer(values[row + col * rows].clone()));
+                }
+            }
+        } else {
+            for row in 0..rows {
+                for col in 0..cols {
+                    cells.push(CellValue::Number(tensor.data[row + col * rows]));
+                }
             }
         }
         Ok(Self { rows, cols, cells })
@@ -1338,14 +1346,14 @@ impl XlsTable {
 fn cell_value_from_scalar(value: Value) -> BuiltinResult<CellValue> {
     match value {
         Value::Num(n) => Ok(CellValue::Number(n)),
-        Value::Int(i) => Ok(CellValue::Number(i.to_f64())),
+        Value::Int(i) => Ok(CellValue::Integer(i)),
         Value::Bool(b) => Ok(CellValue::Boolean(b)),
         Value::String(s) => Ok(CellValue::Text(s)),
         Value::CharArray(ca) if ca.rows == 1 => Ok(CellValue::Text(ca.data.iter().collect())),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(CellValue::Text(sa.data[0].clone())),
         Value::StringArray(sa) if sa.data.is_empty() => Ok(CellValue::Empty),
         Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(CellValue::Number(tensor::tensor_value_f64(&tensor, 0)))
+            writecell::scalar_tensor_cell_value(&tensor)
         }
         Value::Tensor(tensor) if tensor.data.is_empty() => Ok(CellValue::Empty),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
@@ -1671,6 +1679,25 @@ mod tests {
         assert_eq!(range.get((1, 0)), Some(&Data::Float(2026.0)));
         assert_eq!(range.get((1, 1)), Some(&Data::String("tail".to_string())));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn xlswrite_preserves_integer_cell_xml_exactly() {
+        let wide = (1_u64 << 53) + 1;
+        let mut typed =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide tensor");
+        typed.data[0] = 0.0;
+
+        let scalar = block_on(XlsTable::from_value(Value::Int(IntValue::U64(u64::MAX))))
+            .expect("scalar table");
+        let scalar_xml =
+            writecell::build_sheet_xml(&scalar.into_cell_table().unwrap(), RangeStart::default());
+        assert!(scalar_xml.contains("<v>18446744073709551615</v>"));
+
+        let tensor = block_on(XlsTable::from_value(Value::Tensor(typed))).expect("tensor table");
+        let tensor_xml =
+            writecell::build_sheet_xml(&tensor.into_cell_table().unwrap(), RangeStart::default());
+        assert!(tensor_xml.contains("<v>9007199254740993</v>"));
     }
 
     #[test]

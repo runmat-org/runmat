@@ -9,7 +9,7 @@ use futures::lock::Mutex as AsyncMutex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, Value,
+    CellArray, IntValue, Value,
 };
 use runmat_filesystem::{File, OpenOptions};
 use runmat_macros::runtime_builtin;
@@ -627,6 +627,7 @@ fn parse_a1_cell(value: &str) -> Option<RangeStart> {
 pub(super) enum CellValue {
     Empty,
     Number(f64),
+    Integer(IntValue),
     Boolean(bool),
     Text(String),
 }
@@ -707,15 +708,13 @@ fn ensure_cell_shape(cell: &CellArray) -> BuiltinResult<()> {
 fn cell_value_from_value(value: Value) -> BuiltinResult<CellValue> {
     match value {
         Value::Num(n) => Ok(CellValue::Number(n)),
-        Value::Int(i) => Ok(CellValue::Number(i.to_f64())),
+        Value::Int(i) => Ok(CellValue::Integer(i)),
         Value::Bool(b) => Ok(CellValue::Boolean(b)),
         Value::String(s) => Ok(CellValue::Text(s)),
         Value::CharArray(ca) if ca.rows == 1 => Ok(CellValue::Text(ca.data.iter().collect())),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(CellValue::Text(sa.data[0].clone())),
         Value::StringArray(sa) if sa.data.is_empty() => Ok(CellValue::Empty),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(CellValue::Number(tensor::tensor_value_f64(&tensor, 0)))
-        }
+        Value::Tensor(tensor) if tensor.data.len() == 1 => scalar_tensor_cell_value(&tensor),
         Value::Tensor(tensor) if tensor.data.is_empty() => Ok(CellValue::Empty),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(CellValue::Boolean(logical.data[0] != 0))
@@ -733,6 +732,17 @@ fn cell_value_from_value(value: Value) -> BuiltinResult<CellValue> {
             &WRITECELL_ERROR_DATA,
             format!("writecell: unsupported cell value {other:?}"),
         )),
+    }
+}
+
+pub(super) fn scalar_tensor_cell_value(
+    tensor: &runmat_builtins::Tensor,
+) -> BuiltinResult<CellValue> {
+    if let Some(storage) = tensor.integer_storage() {
+        let value = storage.value_at(0).expect("one-element integer storage");
+        Ok(CellValue::Integer(value))
+    } else {
+        Ok(CellValue::Number(tensor::tensor_value_f64(tensor, 0)))
     }
 }
 
@@ -1160,6 +1170,12 @@ pub(super) fn build_sheet_xml(table: &CellTable, start: RangeStart) -> String {
                         format_numeric(*value)
                     ));
                 }
+                CellValue::Integer(value) => {
+                    xml.push_str(&format!(
+                        "      <c r=\"{reference}\"><v>{}</v></c>\n",
+                        value.decimal_string()
+                    ));
+                }
                 CellValue::Boolean(value) => {
                     xml.push_str(&format!(
                         "      <c r=\"{reference}\" t=\"b\"><v>{}</v></c>\n",
@@ -1184,6 +1200,7 @@ fn format_cell_for_text(cell: &CellValue, options: &WriteCellOptions, delimiter:
     match cell {
         CellValue::Empty => String::new(),
         CellValue::Number(value) => format_numeric(*value),
+        CellValue::Integer(value) => value.decimal_string(),
         CellValue::Boolean(value) => {
             if *value {
                 "1".to_string()
@@ -1399,7 +1416,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use std::time::Duration;
 
-    use runmat_builtins::{CharArray, IntegerStorage, LogicalArray, Tensor};
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, LogicalArray, Tensor};
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -1640,6 +1657,28 @@ mod tests {
 
         let contents = fs::read_to_string(&path).expect("read contents");
         assert_eq!(contents, "\"name\",2026,0\n");
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn writecell_preserves_integer_cell_text_exactly() {
+        let path = temp_path("csv");
+        let filename = path.to_string_lossy().into_owned();
+        let wide = (1_u64 << 53) + 1;
+        let mut typed =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide tensor");
+        typed.data[0] = 0.0;
+        let values = cell(
+            vec![Value::Int(IntValue::U64(u64::MAX)), Value::Tensor(typed)],
+            1,
+            2,
+        );
+
+        block_on(writecell_builtin(values, vec![Value::from(filename)])).expect("writecell");
+
+        let contents = fs::read_to_string(&path).expect("read contents");
+        assert_eq!(contents, "18446744073709551615,9007199254740993\n");
         let _ = fs::remove_file(path);
     }
 
