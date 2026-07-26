@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::common::tensor as tensor_utils;
 
 pub(in crate::builtins::table) fn parse_row_selector(
     selector: Option<&Value>,
@@ -465,7 +466,7 @@ pub(in crate::builtins::table) fn selector_numeric_values(
     value: &Value,
 ) -> BuiltinResult<Vec<f64>> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(tensor)),
         Value::Num(value) => Ok(vec![*value]),
         Value::Int(value) => Ok(vec![value.to_f64()]),
         Value::Object(obj) if obj.is_class("datetime") => {
@@ -508,11 +509,17 @@ pub(in crate::builtins::table) fn value_is_missing_scalar(value: &Value) -> bool
             .map(|text| text.is_empty())
             .unwrap_or(true),
         Value::CharArray(array) => array.data.iter().all(|ch| ch.is_whitespace()),
-        Value::Tensor(tensor) => tensor
-            .data
-            .first()
-            .map(|value| value.is_nan())
-            .unwrap_or(true),
+        Value::Tensor(tensor) => {
+            if tensor.integer_storage().is_some() {
+                tensor.data.is_empty()
+            } else {
+                tensor
+                    .data
+                    .first()
+                    .map(|value| value.is_nan())
+                    .unwrap_or(true)
+            }
+        }
         Value::Object(obj) if obj.is_class("datetime") => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .ok()
@@ -628,5 +635,27 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("exceeds bounds"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn selector_numeric_values_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![7, 9]), vec![1, 2]).unwrap();
+        tensor.data.fill(f64::NAN);
+
+        assert_eq!(
+            selector_numeric_values(&Value::Tensor(tensor)).unwrap(),
+            vec![7.0, 9.0]
+        );
+    }
+
+    #[test]
+    fn value_is_missing_scalar_typed_integer_ignores_f64_mirror() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        tensor.data[0] = f64::NAN;
+
+        assert!(!value_is_missing_scalar(&Value::Tensor(tensor)));
+
+        let empty = Tensor::new_integer(IntegerStorage::I32(Vec::new()), vec![0, 1]).unwrap();
+        assert!(value_is_missing_scalar(&Value::Tensor(empty)));
     }
 }

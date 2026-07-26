@@ -341,14 +341,15 @@ struct NumericMatrix {
 fn numeric_matrix(value: Value, context: &str) -> BuiltinResult<NumericMatrix> {
     match value {
         Value::Tensor(tensor) => {
+            let len = tensor.data.len();
             let mut rows = tensor.rows();
             let mut cols = tensor.cols();
-            if rows == 1 && tensor.data.len() > 1 {
-                rows = tensor.data.len();
+            if rows == 1 && len > 1 {
+                rows = len;
                 cols = 1;
             }
             Ok(NumericMatrix {
-                data: tensor.data,
+                data: tensor_utils::tensor_into_values_f64(tensor),
                 rows,
                 cols,
             })
@@ -379,7 +380,7 @@ fn numeric_matrix(value: Value, context: &str) -> BuiltinResult<NumericMatrix> {
 fn matrix_from_table_column(value: &Value) -> BuiltinResult<NumericMatrix> {
     match value {
         Value::Tensor(tensor) if tensor.cols() == 1 => Ok(NumericMatrix {
-            data: tensor.data.clone(),
+            data: tensor_utils::tensor_values_f64(tensor),
             rows: tensor.rows(),
             cols: 1,
         }),
@@ -647,6 +648,31 @@ mod tests {
         alpha.data[0] = 0.25;
 
         assert_eq!(scalar_number(&Value::Tensor(alpha)), Some(1.0));
+    }
+
+    #[test]
+    fn numeric_matrix_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3]).unwrap();
+        tensor.data.fill(f64::NAN);
+
+        let matrix = numeric_matrix(Value::Tensor(tensor), "grpstats").unwrap();
+
+        assert_eq!(matrix.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(matrix.rows, 3);
+        assert_eq!(matrix.cols, 1);
+    }
+
+    #[test]
+    fn matrix_from_table_column_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![4, 5]), vec![2, 1]).unwrap();
+        tensor.data.fill(f64::NAN);
+
+        let matrix = matrix_from_table_column(&Value::Tensor(tensor)).unwrap();
+
+        assert_eq!(matrix.data, vec![4.0, 5.0]);
+        assert_eq!(matrix.rows, 2);
+        assert_eq!(matrix.cols, 1);
     }
 }
 
