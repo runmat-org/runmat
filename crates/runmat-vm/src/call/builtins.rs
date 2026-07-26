@@ -10,6 +10,7 @@ use crate::runtime::workspace::{
 use runmat_builtins::Value;
 use runmat_hir::{CallableIdentity, FunctionId, QualifiedName, SymbolName};
 use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
+use runmat_runtime::builtins::common::tensor::tensor_value_f64;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_thread_local::runmat_thread_local;
 use std::collections::{HashMap, HashSet};
@@ -225,7 +226,7 @@ fn parse_finite_arity_bound(
     let number = match value {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor_value_f64(tensor, 0),
         other => {
             return Err(mex(
                 &format!("{builtin}ArgumentInvalid"),
@@ -256,8 +257,8 @@ fn parse_max_arity_bound(value: &Value, builtin: &str) -> Result<ArityBound, Run
         }
         Value::Tensor(tensor)
             if tensor.data.len() == 1
-                && tensor.data[0].is_infinite()
-                && tensor.data[0].is_sign_positive() =>
+                && tensor_value_f64(tensor, 0).is_infinite()
+                && tensor_value_f64(tensor, 0).is_sign_positive() =>
         {
             Ok(ArityBound::Unbounded)
         }
@@ -1477,7 +1478,11 @@ pub fn rethrow_without_explicit_exception(
 
 #[cfg(test)]
 mod tests {
-    use super::{imported_builtin_qualified_name, rethrow_without_explicit_exception};
+    use super::{
+        imported_builtin_qualified_name, parse_finite_arity_bound,
+        rethrow_without_explicit_exception,
+    };
+    use runmat_builtins::{IntegerStorage, Tensor, Value};
 
     #[test]
     fn imported_builtin_qualified_name_uses_typed_segments() {
@@ -1511,6 +1516,17 @@ mod tests {
         .expect("rethrow should preserve prior exception");
         assert_eq!(err.identifier(), Some("RunMat:Original"));
         assert_eq!(err.message(), "boom");
+    }
+
+    #[test]
+    fn arity_bound_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("arity tensor");
+        tensor.data[0] = 0.0;
+        assert_eq!(
+            parse_finite_arity_bound(&Value::Tensor(tensor), "narginchk", "minArgs").unwrap(),
+            7
+        );
     }
 
     #[cfg(feature = "native-accel")]

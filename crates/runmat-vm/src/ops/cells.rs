@@ -1,5 +1,6 @@
 use crate::interpreter::errors::mex;
-use runmat_builtins::{CellArray, StructValue, Tensor, Value};
+use runmat_builtins::{CellArray, IntValue, StructValue, Tensor, Value};
+use runmat_runtime::builtins::common::tensor::tensor_value_f64;
 use runmat_runtime::RuntimeError;
 
 const CELL_END_PLUS_TAG_MASK: u64 = 0xffff_ffff_0000_0000;
@@ -30,6 +31,10 @@ fn exact_index_from_f64(value: f64) -> Option<i64> {
     Some(rounded as i64)
 }
 
+fn exact_index_from_int(value: &IntValue) -> Option<i64> {
+    value.try_to_i64()
+}
+
 fn parse_positive_cell_index(index: i64) -> Result<usize, RuntimeError> {
     if index < 1 {
         return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
@@ -41,10 +46,17 @@ fn parse_cell_index_value(value: &Value) -> Result<usize, RuntimeError> {
     let index = match value {
         Value::Num(n) => exact_index_from_f64(*n)
             .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?,
-        Value::Int(i) => i.to_i64(),
+        Value::Int(i) => exact_index_from_int(i)
+            .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?,
         Value::Tensor(t) if t.data.len() == 1 && t.shape.iter().product::<usize>() == 1 => {
-            exact_index_from_f64(t.data[0])
-                .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("scalar integer storage");
+                exact_index_from_int(&value)
+                    .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?
+            } else {
+                exact_index_from_f64(t.data[0])
+                    .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?
+            }
         }
         other => {
             let n: f64 = other
@@ -68,10 +80,11 @@ fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, Ru
             }
         }
         Value::Tensor(t) if t.data.len() == 1 && t.shape.iter().product::<usize>() == 1 => {
-            if let Some(idx) = resolve_cell_end_relative_index(t.data[0], len)? {
+            let scalar = tensor_value_f64(t, 0);
+            if let Some(idx) = resolve_cell_end_relative_index(scalar, len)? {
                 return Ok(idx);
             }
-            if t.data[0].is_nan() {
+            if scalar.is_nan() {
                 return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
             }
         }
@@ -82,15 +95,27 @@ fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, Ru
 
 fn parse_cell_index_values_for_assignment(value: &Value) -> Result<Vec<usize>, RuntimeError> {
     match value {
-        Value::Tensor(t) if t.data.len() > 1 => t
-            .data
-            .iter()
-            .map(|&raw| {
-                let idx = exact_index_from_f64(raw)
-                    .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?;
-                parse_positive_cell_index(idx)
-            })
-            .collect(),
+        Value::Tensor(t) if t.data.len() > 1 => {
+            if let Some(storage) = t.integer_storage() {
+                return storage
+                    .exact_values()
+                    .into_iter()
+                    .map(|raw| {
+                        let idx = exact_index_from_int(&raw)
+                            .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?;
+                        parse_positive_cell_index(idx)
+                    })
+                    .collect();
+            }
+            t.data
+                .iter()
+                .map(|&raw| {
+                    let idx = exact_index_from_f64(raw)
+                        .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?;
+                    parse_positive_cell_index(idx)
+                })
+                .collect()
+        }
         _ => Ok(vec![parse_cell_index_value(value)?]),
     }
 }
@@ -311,20 +336,34 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
                 let idx = parse_cell_index_value(&indices[0])?;
                 Ok(vec![index_cell_value(ca, &[idx])?])
             }
-            Value::Tensor(t) => t
-                .data
-                .iter()
-                .map(|&val| {
-                    if t.data.len() == 1 && t.shape.iter().product::<usize>() == 1 {
-                        let idx = parse_cell_index_value_for_len(&indices[0], ca.data.len())?;
-                        return index_cell_value(ca, &[idx]);
-                    }
-                    let idx = exact_index_from_f64(val)
-                        .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?;
-                    let idx = parse_positive_cell_index(idx)?;
-                    index_cell_value(ca, &[idx])
-                })
-                .collect(),
+            Value::Tensor(t) => {
+                if t.data.len() == 1 && t.shape.iter().product::<usize>() == 1 {
+                    let idx = parse_cell_index_value_for_len(&indices[0], ca.data.len())?;
+                    return Ok(vec![index_cell_value(ca, &[idx])?]);
+                }
+                if let Some(storage) = t.integer_storage() {
+                    return storage
+                        .exact_values()
+                        .into_iter()
+                        .map(|val| {
+                            let idx = exact_index_from_int(&val).ok_or_else(|| {
+                                mex("CellIndexType", "Unsupported cell index type")
+                            })?;
+                            let idx = parse_positive_cell_index(idx)?;
+                            index_cell_value(ca, &[idx])
+                        })
+                        .collect();
+                }
+                t.data
+                    .iter()
+                    .map(|&val| {
+                        let idx = exact_index_from_f64(val)
+                            .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?;
+                        let idx = parse_positive_cell_index(idx)?;
+                        index_cell_value(ca, &[idx])
+                    })
+                    .collect()
+            }
             _ => Err(mex("CellIndexType", "Unsupported cell index type")),
         },
         2 => {
@@ -686,7 +725,7 @@ fn assign_cell_paren_from_cell(
 #[cfg(test)]
 mod tests {
     use super::{assign_cell_member, expand_cell_indices, map_cell_shape_error};
-    use runmat_builtins::{CellArray, StructValue, Tensor, Value};
+    use runmat_builtins::{CellArray, IntegerStorage, StructValue, Tensor, Value};
 
     #[test]
     fn assign_cell_member_rejects_shape_mismatch_cell_rhs() {
@@ -764,6 +803,48 @@ mod tests {
         let values = expand_cell_indices(&cell, &[Value::Tensor(row), Value::Tensor(col)])
             .expect("scalar tensor selectors should index 2d cell expansion");
         assert_eq!(values, vec![Value::Num(21.0)]);
+    }
+
+    #[test]
+    fn expand_cell_indices_reads_scalar_typed_integer_storage_exactly() {
+        let cell = CellArray::new(
+            vec![
+                Value::Num(11.0),
+                Value::Num(12.0),
+                Value::Num(21.0),
+                Value::Num(22.0),
+            ],
+            2,
+            2,
+        )
+        .expect("2d cell");
+        let mut row =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("row selector");
+        row.data[0] = 1.0;
+        let mut col =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("col selector");
+        col.data[0] = 2.0;
+
+        let values = expand_cell_indices(&cell, &[Value::Tensor(row), Value::Tensor(col)])
+            .expect("typed integer selectors should use exact storage");
+        assert_eq!(values, vec![Value::Num(21.0)]);
+    }
+
+    #[test]
+    fn expand_cell_indices_reads_vector_typed_integer_storage_exactly() {
+        let cell = CellArray::new(
+            vec![Value::Num(10.0), Value::Num(20.0), Value::Num(30.0)],
+            1,
+            3,
+        )
+        .expect("cell");
+        let mut indices =
+            Tensor::new_integer(IntegerStorage::U16(vec![3, 1]), vec![1, 2]).expect("indices");
+        indices.data = vec![1.0, 2.0];
+
+        let values = expand_cell_indices(&cell, &[Value::Tensor(indices)])
+            .expect("typed integer vector indices should use exact storage");
+        assert_eq!(values, vec![Value::Num(30.0), Value::Num(10.0)]);
     }
 
     #[test]

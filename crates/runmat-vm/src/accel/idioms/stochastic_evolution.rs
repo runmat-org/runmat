@@ -1,6 +1,7 @@
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_residency;
 use runmat_builtins::Value;
+use runmat_runtime::builtins::common::tensor::tensor_value_f64;
 use runmat_runtime::RuntimeError;
 
 pub async fn execute_stochastic_evolution(
@@ -71,7 +72,7 @@ async fn scalar_from_value_scalar(value: &Value, label: &str) -> Result<f64, Run
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if t.data.len() == 1 => Ok(tensor_value_f64(t, 0)),
         Value::Tensor(t) => Err(format!(
             "{label}: expected scalar tensor, got {} elements",
             t.data.len()
@@ -84,7 +85,7 @@ async fn scalar_from_value_scalar(value: &Value, label: &str) -> Result<f64, Run
             match gathered {
                 Value::Num(n) => Ok(n),
                 Value::Int(i) => Ok(i.to_f64()),
-                Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+                Value::Tensor(t) if t.data.len() == 1 => Ok(tensor_value_f64(&t, 0)),
                 Value::Tensor(t) => Err(format!(
                     "{label}: expected scalar tensor, got {} elements",
                     t.data.len()
@@ -159,4 +160,23 @@ fn upload_tensor_view(
     provider
         .upload(&view)
         .map_err(|e| crate::interpreter::errors::mex("UploadFailed", &e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scalar_from_value_scalar;
+    use futures::executor::block_on;
+    use runmat_builtins::{IntegerStorage, Tensor, Value};
+
+    #[test]
+    fn scalar_from_value_scalar_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![-3]), vec![1, 1]).expect("scalar tensor");
+        tensor.data[0] = 0.0;
+
+        assert_eq!(
+            block_on(scalar_from_value_scalar(&Value::Tensor(tensor), "drift")).unwrap(),
+            -3.0
+        );
+    }
 }

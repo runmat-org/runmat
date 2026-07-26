@@ -14,6 +14,7 @@ use crate::runtime::workspace::{
 };
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{IntValue, ObjectInstance, StructValue, Tensor, Value};
+use runmat_runtime::builtins::common::tensor::tensor_value_f64;
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::collections::{HashMap, HashSet};
@@ -97,7 +98,7 @@ pub async fn logical_truth_from_value(value: &Value, label: &str) -> Result<bool
                 array.data.len()
             ),
         )),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0] != 0.0),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor_value_f64(tensor, 0) != 0.0),
         Value::Tensor(tensor) => Err(crate::interpreter::errors::mex(
             "InvalidConditionType",
             &format!(
@@ -2317,16 +2318,19 @@ pub async fn dispatch_instruction(
 #[cfg(test)]
 mod tests {
     use super::{
-        enforce_spawn_value_concurrency_policy, unwrap_spawned_value, wrap_spawned_value,
-        SPAWN_TASK_ID_FIELD, SPAWN_TASK_KIND_FIELD, SPAWN_TASK_KIND_VALUE,
+        enforce_spawn_value_concurrency_policy, logical_truth_from_value, unwrap_spawned_value,
+        wrap_spawned_value, SPAWN_TASK_ID_FIELD, SPAWN_TASK_KIND_FIELD, SPAWN_TASK_KIND_VALUE,
         SPAWN_TASK_PAYLOAD_FIELD,
     };
     use crate::bytecode::program::ExecutionContext;
+    use futures::executor::block_on;
     use runmat_accelerate_api::{
         AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView,
         SpawnHandleConcurrency, ThreadProviderGuard,
     };
-    use runmat_builtins::{CellArray, HandleRef, IntValue, StructValue, Value};
+    use runmat_builtins::{
+        CellArray, HandleRef, IntValue, IntegerStorage, StructValue, Tensor, Value,
+    };
 
     struct RejectSpawnProvider;
     static REJECT_PROVIDER: RejectSpawnProvider = RejectSpawnProvider;
@@ -2380,6 +2384,27 @@ mod tests {
         fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
             SpawnHandleConcurrency::ImmutableShare
         }
+    }
+
+    #[test]
+    fn logical_truth_reads_typed_integer_tensor_storage_exactly() {
+        let mut zero = Tensor::new_integer(IntegerStorage::U64(vec![0]), vec![1, 1])
+            .expect("zero integer tensor");
+        zero.data[0] = 1.0;
+        assert!(!block_on(logical_truth_from_value(
+            &Value::Tensor(zero),
+            "if condition"
+        ))
+        .unwrap());
+
+        let mut nonzero = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("nonzero integer tensor");
+        nonzero.data[0] = 0.0;
+        assert!(block_on(logical_truth_from_value(
+            &Value::Tensor(nonzero),
+            "if condition"
+        ))
+        .unwrap());
     }
 
     #[test]
