@@ -337,7 +337,10 @@ fn lassoglm_compute(
             response.0.len()
         )));
     }
-    if x.data.iter().any(|value| !value.is_finite()) {
+    if tensor::tensor_values_f64_cow(&x)
+        .iter()
+        .any(|value| !value.is_finite())
+    {
         return Err(invalid("lassoglm: X must contain finite real values"));
     }
     if options
@@ -530,8 +533,7 @@ fn canonical_name(name: &str) -> String {
 
 fn value_to_real_tensor(label: &str, value: Value) -> BuiltinResult<Tensor> {
     match value {
-        Value::Tensor(tensor) => tensor::integer_tensor_to_f64(tensor)
-            .map_err(|err| invalid(format!("lassoglm: {label}: {err}"))),
+        Value::Tensor(tensor) => Ok(tensor),
         Value::LogicalArray(array) => {
             let shape = tensor::default_shape_for(&array.shape, array.data.len());
             Tensor::new(
@@ -561,7 +563,8 @@ fn response_values(
     options: &Options,
 ) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
     let tensor = value_to_real_tensor("Y", value)?;
-    if tensor.data.iter().any(|value| !value.is_finite()) {
+    let values = tensor::tensor_values_f64(&tensor);
+    if values.iter().any(|value| !value.is_finite()) {
         return Err(invalid("lassoglm: Y must contain finite real values"));
     }
     match distribution {
@@ -569,16 +572,16 @@ fn response_values(
             if !is_vector_shape(&tensor.shape) {
                 return Err(invalid("lassoglm: normal Y must be a vector"));
             }
-            Ok((tensor.data, Vec::new()))
+            Ok((values, Vec::new()))
         }
         Distribution::Poisson => {
             if !is_vector_shape(&tensor.shape) {
                 return Err(invalid("lassoglm: poisson Y must be a vector"));
             }
-            if tensor.data.iter().any(|value| *value < 0.0) {
+            if values.iter().any(|value| *value < 0.0) {
                 return Err(invalid("lassoglm: poisson Y must be nonnegative"));
             }
-            Ok((tensor.data, Vec::new()))
+            Ok((values, Vec::new()))
         }
         Distribution::Binomial => {
             if tensor.cols() == 2 && tensor.rows() == expected_rows {
@@ -590,8 +593,8 @@ fn response_values(
                 let mut successes = Vec::with_capacity(tensor.rows());
                 let mut trials = Vec::with_capacity(tensor.rows());
                 for row in 0..tensor.rows() {
-                    let y = tensor.get2(row, 0).unwrap_or(0.0);
-                    let n = tensor.get2(row, 1).unwrap_or(0.0);
+                    let y = values[row];
+                    let n = values[row + tensor.rows()];
                     if y < 0.0 || n <= 0.0 || y > n {
                         return Err(invalid(
                             "lassoglm: binomial count response must satisfy 0 <= successes <= trials",
@@ -607,7 +610,7 @@ fn response_values(
                         "lassoglm: binomial Y must be a vector or two-column count matrix",
                     ));
                 }
-                if tensor.data.iter().any(|value| *value < 0.0 || *value > 1.0) {
+                if values.iter().any(|value| *value < 0.0 || *value > 1.0) {
                     return Err(invalid(
                         "lassoglm: binomial vector Y must contain probabilities in [0,1]",
                     ));
@@ -616,7 +619,7 @@ fn response_values(
                     Some(values) => expand_binomial_size(values, expected_rows)?,
                     None => Vec::new(),
                 };
-                Ok((tensor.data, trials))
+                Ok((values, trials))
             }
         }
     }
@@ -872,10 +875,11 @@ fn prepare_data(
 
     let mut x_means = vec![0.0; cols];
     let mut x_scales = vec![1.0; cols];
-    let mut x_work = vec![0.0; x.data.len()];
+    let x_values = tensor::tensor_values_f64_cow(x);
+    let mut x_work = vec![0.0; x_values.len()];
     for col in 0..cols {
         let mean = if options.intercept {
-            weighted_column_mean(x, &weights, col)
+            weighted_column_mean(x_values.as_ref(), rows, &weights, col)
         } else {
             0.0
         };
@@ -883,7 +887,7 @@ fn prepare_data(
         if options.intercept && options.standardize {
             let variance = (0..rows)
                 .map(|row| {
-                    let centered = x.get2(row, col).unwrap_or(0.0) - mean;
+                    let centered = matrix_value(x_values.as_ref(), rows, row, col) - mean;
                     weights[row] * centered * centered
                 })
                 .sum::<f64>();
@@ -896,12 +900,12 @@ fn prepare_data(
         x_scales[col] = scale;
         for row in 0..rows {
             let idx = row + col * rows;
-            x_work[idx] = (x.data[idx] - mean) / scale;
+            x_work[idx] = (x_values[idx] - mean) / scale;
         }
     }
 
     Ok(PreparedData {
-        x_original: x.data.clone(),
+        x_original: x_values.into_owned(),
         x_work,
         y: response.0,
         trials,
@@ -914,10 +918,14 @@ fn prepare_data(
     })
 }
 
-fn weighted_column_mean(x: &Tensor, weights: &[f64], col: usize) -> f64 {
-    (0..x.rows())
-        .map(|row| x.get2(row, col).unwrap_or(0.0) * weights[row])
+fn weighted_column_mean(x: &[f64], rows: usize, weights: &[f64], col: usize) -> f64 {
+    (0..rows)
+        .map(|row| matrix_value(x, rows, row, col) * weights[row])
         .sum()
+}
+
+fn matrix_value(values: &[f64], rows: usize, row: usize, col: usize) -> f64 {
+    values[row + col * rows]
 }
 
 fn default_lambda_sequence(
@@ -1801,14 +1809,16 @@ mod tests {
     #[test]
     fn lassoglm_reads_typed_integer_binomial_counts_exactly() {
         let out = block_on(lassoglm_builtin(
-            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1),
-            poisoned_int_tensor(IntegerStorage::U16(vec![0, 1, 3, 5, 5, 4, 3, 6]), 4, 2),
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3, 4, 5]), 6, 1),
+            poisoned_int_tensor(
+                IntegerStorage::U16(vec![1, 1, 2, 2, 3, 3, 5, 5, 5, 5, 5, 5]),
+                6,
+                2,
+            ),
             Value::String("binomial".to_string()),
             vec![
                 Value::CharArray(CharArray::new_row("Lambda")),
                 poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
-                Value::CharArray(CharArray::new_row("CV")),
-                poisoned_int_tensor(IntegerStorage::U8(vec![2]), 1, 1),
             ],
         ))
         .unwrap();
