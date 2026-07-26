@@ -146,8 +146,8 @@ fn nextpow2_host(value: Value) -> BuiltinResult<Value> {
 }
 
 fn nextpow2_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor
-        .data
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    let data = values
         .iter()
         .map(|&x| nextpow2_scalar(x))
         .collect::<Vec<_>>();
@@ -169,7 +169,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Type};
 
     #[test]
     fn nextpow2_descriptor_signatures_cover_core_forms() {
@@ -232,6 +232,19 @@ mod tests {
             Tensor::new(vec![0.0, 1.0, 3.0, 9.0], vec![4, 1]).unwrap(),
         )))
         .expect("nextpow2");
+        let Value::Tensor(t) = value else {
+            panic!("expected tensor")
+        };
+        assert_eq!(t.data, vec![0.0, 0.0, 2.0, 4.0]);
+    }
+
+    #[test]
+    fn nextpow2_tensor_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 3, 9]), vec![4, 1])
+            .expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+
+        let value = block_on(super::nextpow2_builtin(Value::Tensor(tensor))).expect("nextpow2");
         let Value::Tensor(t) = value else {
             panic!("expected tensor")
         };
