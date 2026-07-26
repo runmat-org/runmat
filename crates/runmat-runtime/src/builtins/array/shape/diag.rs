@@ -1329,8 +1329,12 @@ fn complex_tensor_from_value(value: Value) -> BuiltinResult<ComplexTensor> {
         Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
             .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}"))),
         Value::Tensor(tensor) => {
-            let data: Vec<(f64, f64)> = tensor.data.into_iter().map(|re| (re, 0.0)).collect();
-            ComplexTensor::new(data, tensor.shape)
+            let shape = tensor.shape.clone();
+            let data: Vec<(f64, f64)> = tensor::tensor_into_values_f64(tensor)
+                .into_iter()
+                .map(|re| (re, 0.0))
+                .collect();
+            ComplexTensor::new(data, shape)
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
         }
         Value::LogicalArray(array) => {
@@ -1634,6 +1638,26 @@ mod tests {
         assert_eq!(
             tensor.data,
             vec![(2.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+        );
+    }
+
+    #[test]
+    fn diag_like_complex_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I64(vec![-3, 5]), vec![1, 2]).expect("tensor");
+        tensor.data.fill(f64::NAN);
+        let out = run_diag(
+            Value::Tensor(tensor),
+            vec![Value::from("like"), Value::Complex(1.0, 2.0)],
+        )
+        .expect("diag");
+        let Value::ComplexTensor(tensor) = out else {
+            panic!("expected complex tensor output");
+        };
+        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(
+            tensor.data,
+            vec![(-3.0, 0.0), (0.0, 0.0), (0.0, 0.0), (5.0, 0.0)]
         );
     }
 

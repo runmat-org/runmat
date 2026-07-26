@@ -442,7 +442,8 @@ fn convert_real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(tensor) => {
-            let data: Vec<(f64, f64)> = tensor.data.iter().map(|&v| (v, 0.0)).collect();
+            let values = tensor::tensor_values_f64_cow(&tensor);
+            let data: Vec<(f64, f64)> = values.iter().map(|&v| (v, 0.0)).collect();
             let tensor = ComplexTensor::new(data, tensor.shape.clone())
                 .map_err(|e| atan_error_with_detail(&ATAN_ERROR_INTERNAL, e))?;
             Ok(complex_tensor_into_value(tensor))
@@ -622,6 +623,31 @@ pub(crate) mod tests {
                 assert!(out.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn atan_like_complex_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![-3, 0, 5]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+
+        let result = atan_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("like"), Value::Complex(0.0, 1.0)],
+        )
+        .expect("atan");
+        let Value::ComplexTensor(out) = result else {
+            panic!("expected complex tensor result");
+        };
+        assert_eq!(out.shape, vec![3, 1]);
+        let expected = [-3.0f64.atan(), 0.0f64.atan(), 5.0f64.atan()];
+        for (actual, expected) in out.data.iter().zip(expected) {
+            assert!((actual.0 - expected).abs() < 1e-12);
+            assert_eq!(actual.1, 0.0);
         }
     }
 

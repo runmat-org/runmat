@@ -1268,7 +1268,8 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(tensor) => {
-            let data: Vec<(f64, f64)> = tensor.data.iter().map(|&v| (v, 0.0)).collect();
+            let values = tensor::tensor_values_f64_cow(&tensor);
+            let data: Vec<(f64, f64)> = values.iter().map(|&v| (v, 0.0)).collect();
             let tensor = ComplexTensor::new(data, tensor.shape.clone())
                 .map_err(|e| std_internal_error(format!("std: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
@@ -1588,6 +1589,24 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn std_like_complex_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I64(vec![-3, 0, 5]), vec![3, 1]).expect("tensor");
+        tensor.data.fill(f64::NAN);
+
+        let result = std_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("like"), Value::Complex(0.0, 1.0)],
+        )
+        .expect("std");
+        let Value::Complex(re, im) = result else {
+            panic!("expected complex scalar result");
+        };
+        assert!((re - (49.0_f64 / 3.0).sqrt()).abs() < 1e-12);
+        assert_eq!(im, 0.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

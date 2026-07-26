@@ -267,11 +267,20 @@ async fn kron_gpu_mixed_right(left: Value, right: GpuTensorHandle) -> crate::Bui
 }
 
 fn kron_host(left: Value, right: Value) -> crate::BuiltinResult<Value> {
-    if let Some(result) = try_integer_kron(&left, &right)? {
-        return Ok(result);
+    if !contains_complex(&left) && !contains_complex(&right) {
+        if let Some(result) = try_integer_kron(&left, &right)? {
+            return Ok(result);
+        }
     }
     let numeric = compute_numeric(left, right)?;
     finalize_numeric(numeric, false)
+}
+
+fn contains_complex(value: &Value) -> bool {
+    match value {
+        Value::Complex(_, _) | Value::ComplexTensor(_) => true,
+        _ => false,
+    }
 }
 
 enum KronIntegerOperand<'a> {
@@ -516,7 +525,8 @@ fn char_array_to_tensor(chars: &CharArray) -> crate::BuiltinResult<Tensor> {
 }
 
 fn tensor_to_complex(tensor: &Tensor) -> crate::BuiltinResult<ComplexTensor> {
-    let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
+    let values = tensor::tensor_values_f64_cow(tensor);
+    let data: Vec<(f64, f64)> = values.iter().map(|&re| (re, 0.0)).collect();
     ComplexTensor::new(data, tensor.shape.clone())
         .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))
 }
@@ -844,6 +854,22 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn kron_complex_path_reads_typed_integer_storage_exactly() {
+        let mut left = Tensor::new_integer(IntegerStorage::I64(vec![-3, 5]), vec![1, 2])
+            .expect("integer tensor");
+        left.data.fill(f64::NAN);
+        let right = ComplexTensor::new(vec![(2.0, -1.0)], vec![1, 1]).unwrap();
+
+        let result = kron_builtin(Value::Tensor(left), Value::ComplexTensor(right), Vec::new())
+            .expect("kron");
+        let Value::ComplexTensor(out) = result else {
+            panic!("expected complex tensor result");
+        };
+        assert_eq!(out.shape, vec![1, 2]);
+        assert_eq!(out.data, vec![(-6.0, 3.0), (10.0, -5.0)]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -764,7 +764,8 @@ fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisDa
         let values = if tensor.integer_data.is_some() {
             Vec::new()
         } else {
-            tensor.data.iter().map(|&value| (value, 0.0)).collect()
+            let values = tensor::tensor_values_f64_cow(&tensor);
+            values.iter().map(|&value| (value, 0.0)).collect()
         };
         return Ok(AxisData {
             len: tensor.data.len(),
@@ -1460,7 +1461,8 @@ fn to_complex_gpu_tensor_value(tensor: ComplexTensor) -> crate::BuiltinResult<Va
 }
 
 fn tensor_to_complex_tensor(tensor: Tensor) -> crate::BuiltinResult<ComplexTensor> {
-    let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    let data: Vec<(f64, f64)> = values.iter().map(|&re| (re, 0.0)).collect();
     ComplexTensor::new(data, tensor.shape.clone())
         .map_err(|e| builtin_error(format!("meshgrid: {e}")))
 }
@@ -1710,6 +1712,17 @@ pub(crate) mod tests {
         assert!(error
             .message()
             .contains("complex output for typed integer axes is not supported"));
+    }
+
+    #[test]
+    fn meshgrid_tensor_to_complex_reads_typed_integer_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I64(vec![-3, 5]), vec![1, 2]).expect("tensor");
+        tensor.data.fill(f64::NAN);
+
+        let out = tensor_to_complex_tensor(tensor).expect("complex tensor");
+        assert_eq!(out.shape, vec![1, 2]);
+        assert_eq!(out.data, vec![(-3.0, 0.0), (5.0, 0.0)]);
     }
 
     fn tensor_from_vec(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
