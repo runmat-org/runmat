@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -163,9 +163,33 @@ fn angle_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn angle_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let Tensor { data, shape, .. } = tensor;
+    let Tensor {
+        data,
+        integer_data,
+        shape,
+        ..
+    } = tensor;
+    if let Some(storage) = integer_data {
+        let mapped: Vec<f64> = storage
+            .exact_values()
+            .into_iter()
+            .map(angle_exact_integer_scalar)
+            .collect();
+        return Tensor::new(mapped, shape)
+            .map_err(|e| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, e));
+    }
     let mapped: Vec<f64> = data.into_iter().map(|re| angle_scalar(re, 0.0)).collect();
     Tensor::new(mapped, shape).map_err(|e| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, e))
+}
+
+fn angle_exact_integer_scalar(value: IntValue) -> f64 {
+    match value {
+        IntValue::I8(value) => angle_scalar(value as f64, 0.0),
+        IntValue::I16(value) => angle_scalar(value as f64, 0.0),
+        IntValue::I32(value) => angle_scalar(value as f64, 0.0),
+        IntValue::I64(value) => angle_scalar(value as f64, 0.0),
+        IntValue::U8(_) | IntValue::U16(_) | IntValue::U32(_) | IntValue::U64(_) => 0.0,
+    }
 }
 
 fn angle_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -209,7 +233,7 @@ pub(crate) mod tests {
         .is_ok()
             && runmat_accelerate_api::provider().is_some()
     }
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, StringArray, Type};
+    use runmat_builtins::{IntegerStorage, LogicalArray, ResolveContext, StringArray, Type};
     use std::f64::consts::PI;
 
     fn angle_builtin(value: Value) -> BuiltinResult<Value> {
@@ -294,6 +318,49 @@ pub(crate) mod tests {
                 assert!((out.data[1] - PI).abs() < 1e-12);
                 assert_eq!(out.data[2], 0.0);
                 assert_eq!(out.data[3], 0.0);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn angle_real_tensor_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, -1, 0, i64::MAX]),
+            vec![2, 2],
+        )
+        .expect("tensor");
+        tensor.data = vec![f64::NAN, 1.0, -1.0, f64::INFINITY];
+
+        let result = angle_builtin(Value::Tensor(tensor)).expect("angle");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert!(out.integer_storage().is_none());
+                assert!((out.data[0] - PI).abs() < 1e-12);
+                assert!((out.data[1] - PI).abs() < 1e-12);
+                assert_eq!(out.data[2], 0.0);
+                assert_eq!(out.data[3], 0.0);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn angle_unsigned_integer_tensor_ignores_poisoned_f64_mirror() {
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 1_u64 << 63, u64::MAX]),
+            vec![3, 1],
+        )
+        .expect("tensor");
+        tensor.data = vec![f64::NAN, -1.0, f64::NEG_INFINITY];
+
+        let result = angle_builtin(Value::Tensor(tensor)).expect("angle");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                assert!(out.integer_storage().is_none());
+                assert!(out.data.iter().all(|&value| value == 0.0));
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
