@@ -679,14 +679,13 @@ async fn cov_host(args: CovArgs) -> BuiltinResult<Value> {
 }
 
 async fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
-    let tensor = match value {
+    match value {
         Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle).await,
         Value::LogicalArray(logical) => {
             tensor::logical_to_tensor(&logical).map_err(cov_internal_error)
         }
         other => tensor::value_into_tensor_for("cov", other).map_err(cov_internal_error),
-    }?;
-    tensor::integer_tensor_to_f64(tensor).map_err(cov_internal_error)
+    }
 }
 
 async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinResult<Vec<f64>> {
@@ -697,8 +696,6 @@ async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinRe
         }
         other => tensor::value_into_tensor_for("cov", other).map_err(cov_internal_error)?,
     };
-    let tensor = tensor::integer_tensor_to_f64(tensor).map_err(cov_internal_error)?;
-
     if tensor.shape.len() > 2 {
         return Err(cov_error_with_detail(
             &COV_ERROR_INVALID_ARGUMENT,
@@ -711,7 +708,8 @@ async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinRe
             format!("expected {expected_rows} elements"),
         ));
     }
-    for (idx, weight) in tensor.data.iter().enumerate() {
+    let values = tensor::tensor_into_values_f64(tensor);
+    for (idx, weight) in values.iter().enumerate() {
         if !weight.is_finite() || *weight < 0.0 {
             return Err(cov_error_with_detail(
                 &COV_ERROR_INVALID_ARGUMENT,
@@ -719,13 +717,13 @@ async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinRe
             ));
         }
     }
-    if tensor.data.is_empty() {
+    if values.is_empty() {
         return Err(cov_error_with_detail(
             &COV_ERROR_INVALID_ARGUMENT,
             "weight vector cannot be empty",
         ));
     }
-    Ok(tensor.data)
+    Ok(values)
 }
 
 fn parse_rows_option(value: &str) -> BuiltinResult<CovRows> {
@@ -880,10 +878,12 @@ impl Matrix {
                 format!("{name}: inputs must be 2-D matrices or vectors"),
             ));
         }
+        let rows = tensor.rows();
+        let cols = tensor.cols();
         Ok(Self {
-            rows: tensor.rows(),
-            cols: tensor.cols(),
-            data: tensor.data,
+            rows,
+            cols,
+            data: tensor::tensor_into_values_f64(tensor),
         })
     }
 
@@ -1262,8 +1262,10 @@ pub(crate) mod tests {
         }
     }
 
-    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        Tensor::new_integer(storage, shape).unwrap()
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(poison);
+        tensor
     }
 
     #[test]
@@ -1387,14 +1389,19 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_accepts_typed_integer_matrix_and_weights() {
-        let tensor = int_tensor(
+        let tensor = poisoned_int_tensor(
             IntegerStorage::I16(vec![
                 4, 4, 3, 4, 4, //
                 2, 2, 2, 2, 2,
             ]),
             vec![5, 2],
+            f64::NAN,
         );
-        let weights = int_tensor(IntegerStorage::U16(vec![1, 1, 1, 2, 2]), vec![5, 1]);
+        let weights = poisoned_int_tensor(
+            IntegerStorage::U16(vec![1, 1, 1, 2, 2]),
+            vec![5, 1],
+            f64::NAN,
+        );
         let result = block_on(cov_builtin(
             Value::Tensor(tensor),
             vec![Value::Tensor(weights)],
@@ -1416,8 +1423,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_rejects_negative_typed_integer_weights() {
-        let tensor = int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]);
-        let weights = int_tensor(IntegerStorage::I16(vec![1, -1]), vec![2, 1]);
+        let tensor = poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2], 0.0);
+        let weights = poisoned_int_tensor(IntegerStorage::I16(vec![1, -1]), vec![2, 1], 1.0);
         let err = block_on(cov_builtin(
             Value::Tensor(tensor),
             vec![Value::Tensor(weights)],
