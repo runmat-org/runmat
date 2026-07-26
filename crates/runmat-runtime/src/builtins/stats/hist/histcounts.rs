@@ -308,8 +308,9 @@ fn histcounts_from_tensor(
     let mut values = Vec::new();
     let mut min_val: Option<f64> = None;
     let mut max_val: Option<f64> = None;
+    let samples = tensor::tensor_values_f64_cow(&tensor);
 
-    for &sample in &tensor.data {
+    for &sample in samples.iter() {
         if sample.is_nan() {
             continue;
         }
@@ -1235,6 +1236,23 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0, 5.0, 7.0], vec![6, 1]).unwrap();
         let eval = block_on(evaluate(
             Value::Tensor(tensor),
+            &[Value::Int(IntValue::I32(3))],
+        ))
+        .expect("histcounts");
+        let (counts_val, edges_val) = eval.into_pair();
+        assert_eq!(values_from_tensor(counts_val), vec![3.0, 1.0, 2.0]);
+        assert_eq!(values_from_tensor(edges_val), vec![1.0, 3.0, 5.0, 7.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn histcounts_data_reads_typed_integer_storage_exactly() {
+        let eval = block_on(evaluate(
+            poisoned_int_tensor(
+                IntegerStorage::I16(vec![1, 2, 2, 4, 5, 7]),
+                vec![6, 1],
+                f64::NAN,
+            ),
             &[Value::Int(IntValue::I32(3))],
         ))
         .expect("histcounts");
