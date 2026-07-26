@@ -600,7 +600,12 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
             Value::Int(i) => out.push(i.decimal_string()),
             Value::Tensor(t) => {
                 if t.data.len() == 1 {
-                    out.push(format_numeric_token(t.data[0]));
+                    if let Some(storage) = t.integer_storage() {
+                        let value = storage.value_at(0).expect("one-element integer storage");
+                        out.push(value.decimal_string());
+                    } else {
+                        out.push(format_numeric_token(t.data[0]));
+                    }
                 } else {
                     return Err(readmatrix_error_with(
                         &READMATRIX_ERROR_OPTION_VALUE,
@@ -1620,6 +1625,19 @@ pub(crate) mod tests {
         let tokens = block_on(parse_treat_as_missing(&Value::Int(IntValue::U64(u64::MAX))))
             .expect("TreatAsMissing token");
         assert_eq!(tokens, vec!["18446744073709551615"]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn treat_as_missing_reads_typed_integer_tensor_storage_exactly() {
+        let wide = (1_u64 << 53) + 1;
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("token");
+        tensor.data[0] = 0.0;
+
+        let tokens =
+            block_on(parse_treat_as_missing(&Value::Tensor(tensor))).expect("TreatAsMissing token");
+        assert_eq!(tokens, vec!["9007199254740993"]);
     }
 
     #[test]
