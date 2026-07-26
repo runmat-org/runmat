@@ -7,6 +7,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::text_analytics::details::add_sentence_details_builtin;
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type_with_options, documents_from_object, options_from_document_object,
@@ -449,7 +450,7 @@ pub(in crate::builtins::strings::text_analytics) fn dependency_heads_from_object
                 format!("{fn_name}: tokenizedDocument object has invalid HeadDetails entry shape"),
             ));
         }
-        out.push(tensor.data.clone());
+        out.push(tensor_utils::tensor_values_f64(tensor));
     }
     Ok(Some(out))
 }
@@ -529,7 +530,7 @@ fn sentence_numbers_from_object(
                 ),
             ));
         }
-        out.push(tensor.data.clone());
+        out.push(tensor_utils::tensor_values_f64(tensor));
     }
     Ok(Some(out))
 }
@@ -540,6 +541,7 @@ mod tests {
     use crate::builtins::strings::text_analytics::details::token_details_builtin;
     use crate::builtins::strings::text_analytics::documents::tokenized_document_builtin;
     use crate::builtins::table::{table_variable_names_from_object, table_variables};
+    use runmat_builtins::IntegerStorage;
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(tokenized_document_builtin(args))
@@ -581,6 +583,52 @@ mod tests {
             Value::Tensor(tensor) => tensor.data,
             other => panic!("expected numeric column {name}, got {other:?}"),
         }
+    }
+
+    fn poisoned_integer_vector(storage: IntegerStorage, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![1, cols]).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn dependency_numeric_properties_read_typed_integer_storage_exactly() {
+        let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
+        object.properties.insert(
+            HEAD_DETAILS_PROPERTY.to_string(),
+            Value::Cell(
+                CellArray::new(
+                    vec![poisoned_integer_vector(IntegerStorage::U16(vec![0, 1]), 2)],
+                    1,
+                    1,
+                )
+                .unwrap(),
+            ),
+        );
+        object.properties.insert(
+            "SentenceNumbers".to_string(),
+            Value::Cell(
+                CellArray::new(
+                    vec![poisoned_integer_vector(IntegerStorage::I16(vec![1, 2]), 2)],
+                    1,
+                    1,
+                )
+                .unwrap(),
+            ),
+        );
+
+        assert_eq!(
+            dependency_heads_from_object(&object, "tokenDetails")
+                .expect("heads")
+                .expect("stored"),
+            vec![vec![0.0, 1.0]]
+        );
+        assert_eq!(
+            sentence_numbers_from_object(&object, "addDependencyDetails")
+                .expect("numbers")
+                .expect("stored"),
+            vec![vec![1.0, 2.0]]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

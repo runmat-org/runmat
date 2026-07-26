@@ -1136,7 +1136,7 @@ fn sentence_numbers_from_object(
                 format!("{fn_name}: tokenizedDocument object has invalid SentenceNumbers entry"),
             ));
         };
-        out.push(tensor.data.clone());
+        out.push(tensor_utils::tensor_values_f64(tensor));
     }
     Ok(Some(out))
 }
@@ -1224,6 +1224,12 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn poisoned_integer_vector(storage: IntegerStorage, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![1, cols]).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
     #[test]
     fn logical_scalar_reads_typed_integer_storage_exactly() {
         assert!(logical_scalar(
@@ -1236,6 +1242,29 @@ mod tests {
             "addSentenceDetails"
         )
         .expect("false"));
+    }
+
+    #[test]
+    fn sentence_numbers_from_object_reads_typed_integer_storage_exactly() {
+        let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
+        object.properties.insert(
+            SENTENCE_NUMBERS_PROPERTY.to_string(),
+            Value::Cell(
+                CellArray::new(
+                    vec![poisoned_integer_vector(IntegerStorage::I16(vec![2, 3]), 2)],
+                    1,
+                    1,
+                )
+                .unwrap(),
+            ),
+        );
+
+        assert_eq!(
+            sentence_numbers_from_object(&object, "tokenDetails")
+                .expect("numbers")
+                .expect("stored"),
+            vec![vec![2.0, 3.0]]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
