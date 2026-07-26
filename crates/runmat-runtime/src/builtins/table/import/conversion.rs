@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::common::tensor;
 
 pub(in crate::builtins::table) fn import_rows_to_cell(
     rows: Vec<Vec<ImportCell>>,
@@ -244,9 +245,9 @@ pub(in crate::builtins::table) fn import_numeric_column(
         let parsed = numeric_from_import_cell(value, options, dtype.class_name())?;
         numeric.push(cast_import_numeric(parsed, dtype));
     }
-    Tensor::new_with_dtype(numeric, vec![values.len(), 1], dtype)
-        .map(Value::Tensor)
-        .map_err(|err| invalid_variable(format!("readtable: {err}")))
+    let tensor = Tensor::new(numeric, vec![values.len(), 1])
+        .map_err(|err| invalid_variable(format!("readtable: {err}")))?;
+    Ok(Value::Tensor(tensor::coerce_tensor_dtype(tensor, dtype)))
 }
 
 pub(in crate::builtins::table) fn numeric_from_import_cell(
@@ -723,4 +724,52 @@ pub(in crate::builtins::table) fn unquote(token: &str) -> &str {
         }
     }
     token
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn import_numeric_column_materializes_unsigned_typed_integer_storage() {
+        let values = vec![
+            ImportCell::Number(-5.0),
+            ImportCell::Text("42.4".into()),
+            ImportCell::Text("999".into()),
+            ImportCell::Empty,
+        ];
+        let out = import_numeric_column(values, &ReadTableOptions::default(), NumericDType::U8)
+            .expect("uint8 import");
+        let Value::Tensor(tensor) = out else {
+            panic!("expected tensor, got {out:?}");
+        };
+        assert_eq!(tensor.shape, vec![4, 1]);
+        assert_eq!(tensor.dtype, NumericDType::U8);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U8(vec![0, 42, u8::MAX, 0]))
+        );
+    }
+
+    #[test]
+    fn import_numeric_column_materializes_signed_typed_integer_storage() {
+        let values = vec![
+            ImportCell::Text("-40000".into()),
+            ImportCell::Number(-7.6),
+            ImportCell::Logical(true),
+            ImportCell::Number(40000.0),
+        ];
+        let out = import_numeric_column(values, &ReadTableOptions::default(), NumericDType::I16)
+            .expect("int16 import");
+        let Value::Tensor(tensor) = out else {
+            panic!("expected tensor, got {out:?}");
+        };
+        assert_eq!(tensor.shape, vec![4, 1]);
+        assert_eq!(tensor.dtype, NumericDType::I16);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::I16(vec![i16::MIN, -8, 1, i16::MAX]))
+        );
+    }
 }
