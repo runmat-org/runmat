@@ -405,7 +405,7 @@ fn natural_frequency(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, Tensor};
+    use runmat_builtins::{builtin_function_by_name, IntegerStorage, Tensor};
 
     fn call(
         wp: Value,
@@ -433,6 +433,12 @@ mod tests {
             other => panic!("expected Wn, got {other:?}"),
         };
         (order, wn)
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -540,6 +546,24 @@ mod tests {
             Value::Num(20.0),
             Value::Num(1.0),
             Value::Num(40.0),
+            &[Value::from("s")],
+            Some(2),
+        )
+        .unwrap();
+        let (n, wn) = outputs(out);
+        assert_eq!(n, 5.0);
+        assert_eq!(wn.len(), 1);
+        assert!(wn[0] > 10.0);
+        assert!(wn[0] < 20.0);
+    }
+
+    #[test]
+    fn analog_lowpass_reads_typed_integer_design_args_exactly() {
+        let out = call(
+            Value::Tensor(integer_tensor(IntegerStorage::I16(vec![10]), vec![1, 1])),
+            Value::Tensor(integer_tensor(IntegerStorage::I16(vec![20]), vec![1, 1])),
+            Value::Tensor(integer_tensor(IntegerStorage::U16(vec![1]), vec![1, 1])),
+            Value::Tensor(integer_tensor(IntegerStorage::U16(vec![40]), vec![1, 1])),
             &[Value::from("s")],
             Some(2),
         )
