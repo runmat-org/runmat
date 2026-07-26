@@ -419,7 +419,19 @@ async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
 fn parse_fid(value: &Value) -> Result<i32, String> {
     let scalar = match value {
         Value::Num(n) => *n,
-        Value::Int(int) => int.to_f64(),
+        Value::Int(int) => {
+            return int
+                .try_to_i32()
+                .ok_or_else(|| "fwrite: file identifier is out of range".to_string());
+        }
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                return int
+                    .try_to_i32()
+                    .ok_or_else(|| "fwrite: file identifier is out of range".to_string());
+            }
+            t.data[0]
+        }
         _ => return Err("fwrite: file identifier must be numeric".to_string()),
     };
     if !scalar.is_finite() {
@@ -427,6 +439,9 @@ fn parse_fid(value: &Value) -> Result<i32, String> {
     }
     if scalar.fract().abs() > f64::EPSILON {
         return Err("fwrite: file identifier must be an integer".to_string());
+    }
+    if scalar < i32::MIN as f64 || scalar > i32::MAX as f64 {
+        return Err("fwrite: file identifier is out of range".to_string());
     }
     Ok(scalar as i32)
 }
@@ -541,24 +556,45 @@ fn parse_precision_string(raw: &str) -> Result<WriteSpec, String> {
 fn parse_skip(arg: Option<&Value>) -> Result<usize, String> {
     match arg {
         None => Ok(0),
+        Some(Value::Int(int)) => int_to_skip(int),
+        Some(Value::Tensor(t)) if t.data.len() == 1 => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                return int_to_skip(&int);
+            }
+            parse_skip_scalar(t.data[0])
+        }
         Some(value) => {
             let scalar = numeric_scalar(value, "fwrite: skip must be numeric")?;
-            if !scalar.is_finite() {
-                return Err("fwrite: skip value must be finite".to_string());
-            }
-            if scalar < 0.0 {
-                return Err("fwrite: skip value must be non-negative".to_string());
-            }
-            let rounded = scalar.round();
-            if (rounded - scalar).abs() > f64::EPSILON {
-                return Err("fwrite: skip value must be an integer".to_string());
-            }
-            if rounded > i64::MAX as f64 {
-                return Err("fwrite: skip value is too large".to_string());
-            }
-            Ok(rounded as usize)
+            parse_skip_scalar(scalar)
         }
     }
+}
+
+fn parse_skip_scalar(scalar: f64) -> Result<usize, String> {
+    if !scalar.is_finite() {
+        return Err("fwrite: skip value must be finite".to_string());
+    }
+    if scalar < 0.0 {
+        return Err("fwrite: skip value must be non-negative".to_string());
+    }
+    let rounded = scalar.round();
+    if (rounded - scalar).abs() > f64::EPSILON {
+        return Err("fwrite: skip value must be an integer".to_string());
+    }
+    if rounded > i64::MAX as f64 {
+        return Err("fwrite: skip value is too large".to_string());
+    }
+    Ok(rounded as usize)
+}
+
+fn int_to_skip(value: &IntValue) -> Result<usize, String> {
+    let Some(skip) = value.try_to_usize() else {
+        return Err("fwrite: skip value must be non-negative".to_string());
+    };
+    if skip > i64::MAX as usize {
+        return Err("fwrite: skip value is too large".to_string());
+    }
+    Ok(skip)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1128,6 +1164,38 @@ pub(crate) mod tests {
             numeric_scalar(&Value::Tensor(scalar), "scalar").expect("scalar"),
             7.0
         );
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn fwrite_skip_parses_integer_values_exactly() {
+        let exact = (1_u64 << 53) + 1;
+
+        assert_eq!(
+            parse_skip(Some(&Value::Int(IntValue::U64(exact)))).unwrap(),
+            exact as usize
+        );
+        assert!(parse_skip(Some(&Value::Int(IntValue::U64(u64::MAX)))).is_err());
+        assert!(parse_skip(Some(&Value::Int(IntValue::I8(-1)))).is_err());
+    }
+
+    #[test]
+    fn fwrite_fid_and_skip_read_typed_integer_storage_exactly() {
+        let mut fid =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("fid tensor");
+        fid.data[0] = 0.0;
+        assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
+        assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
+        assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+
+        let mut skip =
+            Tensor::new_integer(IntegerStorage::U16(vec![9]), vec![1, 1]).expect("skip tensor");
+        skip.data[0] = f64::NAN;
+        assert_eq!(parse_skip(Some(&Value::Tensor(skip))).unwrap(), 9);
+
+        let too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("skip");
+        assert!(parse_skip(Some(&Value::Tensor(too_large))).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

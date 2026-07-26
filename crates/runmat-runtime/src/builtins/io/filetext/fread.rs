@@ -6,7 +6,7 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntegerStorage, LogicalArray, Tensor, Value,
+    CharArray, IntValue, IntegerStorage, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -577,7 +577,19 @@ async fn gather_value(value: &Value) -> BuiltinResult<Value> {
 fn parse_fid(value: &Value) -> Result<i32, String> {
     let number = match value {
         Value::Num(n) => *n,
-        Value::Int(int) => int.to_f64(),
+        Value::Int(int) => {
+            return int
+                .try_to_i32()
+                .ok_or_else(|| "file identifier is out of range".to_string());
+        }
+        Value::Tensor(t) if t.data.len() == 1 => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                return int
+                    .try_to_i32()
+                    .ok_or_else(|| "file identifier is out of range".to_string());
+            }
+            t.data[0]
+        }
         _ => {
             return Err("file identifier must be numeric".to_string());
         }
@@ -763,6 +775,10 @@ fn parse_size(arg: Option<&Value>) -> Result<SizeSpec, String> {
         }
         Some(Value::StringArray(sa)) if sa.data.len() == 1 => parse_size_string(&sa.data[0]),
         Some(Value::Tensor(t)) => parse_size_tensor(t),
+        Some(Value::Int(int)) => Ok(SizeSpec::Count(int_to_usize(
+            int,
+            "size argument must be a non-negative integer",
+        )?)),
         Some(value) => {
             let scalar = value_to_scalar(value, "size argument must be numeric or a size vector")?;
             scalar_to_size(scalar)
@@ -1008,24 +1024,47 @@ fn parse_output_label(label: &str) -> Result<OutputKind, String> {
 fn parse_skip(arg: Option<&Value>) -> Result<usize, String> {
     match arg {
         None => Ok(0),
+        Some(Value::Int(int)) => int_to_skip(int),
+        Some(Value::Tensor(t)) if t.data.len() == 1 => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                return int_to_skip(&int);
+            }
+            parse_skip_scalar(t.data[0])
+        }
         Some(value) => {
             let scalar = value_to_scalar(value, "skip value must be numeric")?;
-            if !scalar.is_finite() {
-                return Err("skip value must be finite".to_string());
-            }
-            if scalar < 0.0 {
-                return Err("skip value must be non-negative".to_string());
-            }
-            let rounded = scalar.round();
-            if (rounded - scalar).abs() > f64::EPSILON {
-                return Err("skip value must be an integer".to_string());
-            }
-            if rounded > i64::MAX as f64 {
-                return Err("skip value is too large".to_string());
-            }
-            Ok(rounded as usize)
+            parse_skip_scalar(scalar)
         }
     }
+}
+
+fn parse_skip_scalar(scalar: f64) -> Result<usize, String> {
+    if !scalar.is_finite() {
+        return Err("skip value must be finite".to_string());
+    }
+    if scalar < 0.0 {
+        return Err("skip value must be non-negative".to_string());
+    }
+    let rounded = scalar.round();
+    if (rounded - scalar).abs() > f64::EPSILON {
+        return Err("skip value must be an integer".to_string());
+    }
+    if rounded > i64::MAX as f64 {
+        return Err("skip value is too large".to_string());
+    }
+    Ok(rounded as usize)
+}
+
+fn int_to_skip(value: &IntValue) -> Result<usize, String> {
+    let skip = int_to_usize(value, "skip value must be non-negative")?;
+    if skip > i64::MAX as usize {
+        return Err("skip value is too large".to_string());
+    }
+    Ok(skip)
+}
+
+fn int_to_usize(value: &IntValue, err: &str) -> Result<usize, String> {
+    value.try_to_usize().ok_or_else(|| err.to_string())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1667,6 +1706,42 @@ pub(crate) mod tests {
             value_to_scalar(&Value::Tensor(scalar), "scalar").expect("scalar"),
             7.0
         );
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn fread_scalar_size_and_skip_parse_integer_values_exactly() {
+        let exact = (1_u64 << 53) + 1;
+        match parse_size(Some(&Value::Int(IntValue::U64(exact)))).expect("size") {
+            SizeSpec::Count(value) => assert_eq!(value, exact as usize),
+            other => panic!("expected count size, got {other:?}"),
+        }
+
+        assert_eq!(
+            parse_skip(Some(&Value::Int(IntValue::U64(exact)))).unwrap(),
+            exact as usize
+        );
+        assert!(parse_skip(Some(&Value::Int(IntValue::U64(u64::MAX)))).is_err());
+        assert!(parse_size(Some(&Value::Int(IntValue::I8(-1)))).is_err());
+    }
+
+    #[test]
+    fn fread_fid_and_skip_read_typed_integer_storage_exactly() {
+        let mut fid =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("fid tensor");
+        fid.data[0] = 0.0;
+        assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
+        assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
+        assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+
+        let mut skip =
+            Tensor::new_integer(IntegerStorage::U16(vec![9]), vec![1, 1]).expect("skip tensor");
+        skip.data[0] = f64::NAN;
+        assert_eq!(parse_skip(Some(&Value::Tensor(skip))).unwrap(), 9);
+
+        let too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("skip");
+        assert!(parse_skip(Some(&Value::Tensor(too_large))).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
