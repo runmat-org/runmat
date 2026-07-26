@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, user_functions,
     BuiltinResult, RuntimeError,
@@ -763,11 +764,16 @@ impl ArrayData {
 
     fn value_at(&self, idx: usize) -> BuiltinResult<Value> {
         match self {
-            ArrayData::Tensor(t) => {
+            ArrayData::Tensor(t) if t.integer_storage().is_none() => {
                 Ok(Value::Num(*t.data.get(idx).ok_or_else(|| {
                     arrayfun_flow("arrayfun: index out of bounds")
                 })?))
             }
+            ArrayData::Tensor(t) => Ok(Value::Int(
+                t.integer_storage()
+                    .and_then(|storage| storage.value_at(idx))
+                    .ok_or_else(|| arrayfun_flow("arrayfun: index out of bounds"))?,
+            )),
             ArrayData::Logical(l) => Ok(Value::Bool(
                 *l.data
                     .get(idx)
@@ -1269,7 +1275,9 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
         Value::LogicalArray(la) if la.len() == 1 => Ok(ClassifiedValue::Logical(la.data[0] != 0)),
         Value::Int(i) => Ok(ClassifiedValue::Double(i.to_f64())),
         Value::Num(n) => Ok(ClassifiedValue::Double(*n)),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(ClassifiedValue::Double(t.data[0])),
+        Value::Tensor(t) if t.data.len() == 1 => {
+            Ok(ClassifiedValue::Double(tensor::tensor_values_f64(t)[0]))
+        }
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
         Value::ComplexTensor(t) if t.data.len() == 1 => Ok(ClassifiedValue::Complex(t.data[0])),
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
@@ -1363,11 +1371,43 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Tensor, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Tensor, Type, Value};
     use std::sync::Arc;
 
     fn call(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(arrayfun_builtin(func, rest))
+    }
+
+    #[test]
+    fn typed_integer_input_elements_are_extracted_from_exact_storage() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("integer tensor");
+        tensor.data[0] = 0.0;
+        let input = ArrayInput {
+            data: ArrayData::Tensor(tensor),
+            is_scalar: false,
+        };
+
+        assert_eq!(
+            input.value_at(0).expect("value"),
+            Value::Int(runmat_builtins::IntValue::U64(9_007_199_254_740_993))
+        );
+    }
+
+    #[test]
+    fn uniform_classifier_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("integer tensor");
+        tensor.data[0] = 0.0;
+
+        match classify_value(&Value::Tensor(tensor)).expect("classify") {
+            ClassifiedValue::Double(value) => {
+                assert_eq!(value, 9_007_199_254_740_993_u64 as f64);
+            }
+            _ => panic!("expected double classification"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

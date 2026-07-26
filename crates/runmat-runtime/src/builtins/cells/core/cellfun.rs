@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{
     build_runtime_error, call_builtin_async, gather_if_needed_async, make_cell_with_shape,
     user_functions, BuiltinResult, RuntimeError,
@@ -1012,7 +1013,9 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
         Value::Num(n) => Ok(ClassifiedValue::Double(*n)),
         Value::Int(iv) => Ok(ClassifiedValue::Double(iv.to_f64())),
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(ClassifiedValue::Double(t.data[0])),
+        Value::Tensor(t) if t.data.len() == 1 => {
+            Ok(ClassifiedValue::Double(tensor::tensor_values_f64(t)[0]))
+        }
         Value::LogicalArray(la) if la.data.len() == 1 => {
             Ok(ClassifiedValue::Logical(la.data[0] != 0))
         }
@@ -1030,12 +1033,27 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, StringArray};
+    use runmat_builtins::{IntValue, IntegerStorage, StringArray};
     use std::convert::TryInto;
     use std::sync::Arc;
 
     fn cellfun_builtin(func: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::cellfun_builtin(func, rest))
+    }
+
+    #[test]
+    fn uniform_classifier_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("integer tensor");
+        tensor.data[0] = 0.0;
+
+        match classify_value(&Value::Tensor(tensor)).expect("classify") {
+            ClassifiedValue::Double(value) => {
+                assert_eq!(value, 9_007_199_254_740_993_u64 as f64);
+            }
+            _ => panic!("expected double classification"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
