@@ -261,8 +261,9 @@ async fn factorial_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 fn factorial_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let mut data = Vec::with_capacity(tensor.data.len());
-    for &value in &tensor.data {
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    let mut data = Vec::with_capacity(values.len());
+    for &value in values.iter() {
         data.push(factorial_scalar(value));
     }
     Tensor::new(data, tensor.shape.clone())
@@ -427,7 +428,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type};
 
     fn factorial_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::factorial_builtin(value, rest))
@@ -494,6 +495,26 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![4, 1]);
                 assert_eq!(out.data, vec![1.0, 1.0, 6.0, 120.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn factorial_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![3, 5, 171]), vec![3, 1])
+            .expect("integer tensor");
+        tensor.data.fill(0.0);
+
+        let result = factorial_builtin(Value::Tensor(tensor), Vec::new()).expect("factorial");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.data[0], 6.0);
+                assert_eq!(out.data[1], 120.0);
+                assert!(out.data[2].is_infinite());
+                assert!(out.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
