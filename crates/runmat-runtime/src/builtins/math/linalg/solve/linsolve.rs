@@ -1057,7 +1057,8 @@ fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> BuiltinResult<Complex
 }
 
 fn promote_real_tensor(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
-    let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
+    let values = tensor::tensor_values_f64_cow(tensor);
+    let data: Vec<(f64, f64)> = values.iter().map(|&re| (re, 0.0)).collect();
     ComplexTensor::new(data, tensor.shape.clone())
         .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
@@ -1261,6 +1262,54 @@ pub(crate) mod tests {
         assert_eq!(tensor.shape, vec![2, 1]);
         approx_eq(tensor.data[0], 1.0);
         approx_eq(tensor.data[1], 2.0);
+    }
+
+    #[test]
+    fn linsolve_complex_promotion_reads_typed_integer_storage_exactly() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
+
+        let mut real_lhs = Tensor::new_integer(IntegerStorage::I64(vec![1, 0, 0, 1]), vec![2, 2])
+            .expect("integer lhs");
+        real_lhs.data.fill(0.0);
+        let complex_rhs = ComplexTensor::new(vec![(3.0, 4.0), (5.0, -6.0)], vec![2, 1]).unwrap();
+        let result = linsolve_builtin(
+            Value::Tensor(real_lhs),
+            Value::ComplexTensor(complex_rhs),
+            Vec::new(),
+        )
+        .expect("linsolve");
+        let Value::ComplexTensor(out) = result else {
+            panic!("expected complex tensor output");
+        };
+        assert_eq!(out.shape, vec![2, 1]);
+        approx_eq(out.data[0].0, 3.0);
+        approx_eq(out.data[0].1, 4.0);
+        approx_eq(out.data[1].0, 5.0);
+        approx_eq(out.data[1].1, -6.0);
+
+        let complex_lhs = ComplexTensor::new(
+            vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let mut real_rhs =
+            Tensor::new_integer(IntegerStorage::U64(vec![7, 11]), vec![2, 1]).expect("integer rhs");
+        real_rhs.data.fill(0.0);
+        let result = linsolve_builtin(
+            Value::ComplexTensor(complex_lhs),
+            Value::Tensor(real_rhs),
+            Vec::new(),
+        )
+        .expect("linsolve");
+        let Value::ComplexTensor(out) = result else {
+            panic!("expected complex tensor output");
+        };
+        assert_eq!(out.shape, vec![2, 1]);
+        approx_eq(out.data[0].0, 7.0);
+        approx_eq(out.data[0].1, 0.0);
+        approx_eq(out.data[1].0, 11.0);
+        approx_eq(out.data[1].1, 0.0);
     }
 
     #[test]
