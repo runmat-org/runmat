@@ -635,16 +635,18 @@ impl ResampleFilter {
     async fn host_values(&self) -> BuiltinResult<Vec<f64>> {
         match self {
             Self::Host(filter) => Ok(filter.clone()),
-            Self::Gpu { handle, .. } => Ok(gpu_helpers::gather_tensor_async(handle)
-                .await
-                .map_err(|err| {
-                    sample_error_with_detail(
-                        RESAMPLE_NAME,
-                        &SAMPLE_ERROR_GATHER_FAILED,
-                        err.message(),
-                    )
-                })?
-                .data),
+            Self::Gpu { handle, .. } => {
+                let tensor = gpu_helpers::gather_tensor_async(handle)
+                    .await
+                    .map_err(|err| {
+                        sample_error_with_detail(
+                            RESAMPLE_NAME,
+                            &SAMPLE_ERROR_GATHER_FAILED,
+                            err.message(),
+                        )
+                    })?;
+                Ok(tensor::tensor_into_values_f64(tensor))
+            }
         }
     }
 }
@@ -974,8 +976,10 @@ async fn parse_filter_vector(value: Value) -> BuiltinResult<ResampleFilter> {
     let tensor = tensor::value_into_tensor_for(RESAMPLE_NAME, value).map_err(|err| {
         sample_error_with_detail(RESAMPLE_NAME, &SAMPLE_ERROR_INVALID_OPTION, err)
     })?;
-    validate_filter_shape(tensor.data.len(), &tensor.shape)?;
-    Ok(ResampleFilter::Host(tensor.data))
+    let shape = tensor.shape.clone();
+    let values = tensor::tensor_into_values_f64(tensor);
+    validate_filter_shape(values.len(), &shape)?;
+    Ok(ResampleFilter::Host(values))
 }
 
 fn validate_filter_shape(len: usize, shape: &[usize]) -> BuiltinResult<()> {
@@ -1644,6 +1648,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -1988,6 +1993,31 @@ mod tests {
         };
         assert_eq!(downsampled.shape, vec![1, 3]);
         assert_eq!(downsampled.data, vec![1.0, 3.0, 5.0]);
+    }
+
+    #[test]
+    fn resample_filter_vector_reads_typed_integer_storage_exactly() {
+        let mut filter =
+            Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 0]), vec![1, 3]).unwrap();
+        filter.data = vec![f64::NAN, f64::NAN, f64::NAN];
+
+        let parsed = block_on(parse_filter_vector(Value::Tensor(filter))).unwrap();
+        let values = block_on(parsed.host_values()).unwrap();
+        assert_eq!(values, vec![0.0, 1.0, 0.0]);
+
+        let out = call_resample(vec![
+            tensor(vec![1.0, 2.0, 3.0], vec![1, 3]),
+            Value::Num(2.0),
+            Value::Num(1.0),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 0]), vec![1, 3]).unwrap(),
+            ),
+        ]);
+        let Value::Tensor(upsampled) = out else {
+            panic!("expected tensor");
+        };
+        assert_eq!(upsampled.shape, vec![1, 6]);
+        assert_eq!(upsampled.data, vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]);
     }
 
     #[test]
