@@ -1,6 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-use runmat_builtins::{builtin_functions, Tensor as Matrix, Value};
+use runmat_builtins::{builtin_functions, IntegerStorage, Tensor as Matrix, Value};
 use runmat_runtime::{
     builtins::common::{indexing::*, matrix::*},
     call_builtin,
@@ -80,6 +80,28 @@ fn test_comparison_operations() {
     // Test equality
     let eq_result = matrix_eq(&a, &b).unwrap();
     assert_eq!(eq_result.data, vec![0.0, 0.0, 1.0, 0.0]);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn matrix_comparisons_read_typed_integer_storage_exactly() {
+    let mut a = Matrix::new_integer(
+        IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_992, 4, 5]),
+        vec![2, 2],
+    )
+    .unwrap();
+    let mut b = Matrix::new_integer(
+        IntegerStorage::U64(vec![9_007_199_254_740_992, 9_007_199_254_740_992, 5, 4]),
+        vec![2, 2],
+    )
+    .unwrap();
+    a.data.fill(f64::NAN);
+    b.data.fill(f64::NAN);
+
+    assert_eq!(matrix_eq(&a, &b).unwrap().data, vec![0.0, 1.0, 0.0, 0.0]);
+    assert_eq!(matrix_ne(&a, &b).unwrap().data, vec![1.0, 0.0, 1.0, 1.0]);
+    assert_eq!(matrix_gt(&a, &b).unwrap().data, vec![1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(matrix_lt(&a, &b).unwrap().data, vec![0.0, 0.0, 1.0, 0.0]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

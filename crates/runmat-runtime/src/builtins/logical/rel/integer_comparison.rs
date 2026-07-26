@@ -60,7 +60,7 @@ fn compare_integer_operands(
         .map_err(|_| IntegerComparisonError::SizeMismatch)?;
     let mut data = Vec::with_capacity(plan.len());
     for (_, lhs_index, rhs_index) in plan.iter() {
-        let ordering = compare(lhs.value_at(lhs_index), rhs.value_at(rhs_index));
+        let ordering = compare_integer_values(lhs.value_at(lhs_index), rhs.value_at(rhs_index));
         data.push(matches_relation(ordering, operation) as u8);
     }
     logical_result(data, plan.output_shape().to_vec())
@@ -138,7 +138,7 @@ fn integer_operand(value: &Value) -> Option<IntegerOperand<'_>> {
     }
 }
 
-fn compare(lhs: IntValue, rhs: IntValue) -> Ordering {
+pub(crate) fn compare_integer_values(lhs: IntValue, rhs: IntValue) -> Ordering {
     match (signed_value(&lhs), signed_value(&rhs)) {
         (Some(lhs), Some(rhs)) => lhs.cmp(&rhs),
         (None, None) => unsigned_value(&lhs).cmp(&unsigned_value(&rhs)),
@@ -159,7 +159,7 @@ fn compare(lhs: IntValue, rhs: IntValue) -> Ordering {
     }
 }
 
-fn integer_f64_order(integer: IntValue, float: f64) -> Option<Ordering> {
+pub(crate) fn integer_f64_order(integer: IntValue, float: f64) -> Option<Ordering> {
     if float.is_nan() {
         return None;
     }
@@ -268,7 +268,7 @@ fn unsigned_value(value: &IntValue) -> u64 {
     }
 }
 
-fn storage_value(storage: &IntegerStorage, index: usize) -> IntValue {
+pub(crate) fn storage_value(storage: &IntegerStorage, index: usize) -> IntValue {
     match storage {
         IntegerStorage::I8(values) => IntValue::I8(values[index]),
         IntegerStorage::I16(values) => IntValue::I16(values[index]),
@@ -281,7 +281,7 @@ fn storage_value(storage: &IntegerStorage, index: usize) -> IntValue {
     }
 }
 
-fn matches_relation(ordering: Ordering, operation: IntegerComparisonOp) -> bool {
+pub(crate) fn matches_relation(ordering: Ordering, operation: IntegerComparisonOp) -> bool {
     match operation {
         IntegerComparisonOp::Eq => ordering == Ordering::Equal,
         IntegerComparisonOp::Ne => ordering != Ordering::Equal,
@@ -292,7 +292,10 @@ fn matches_relation(ordering: Ordering, operation: IntegerComparisonOp) -> bool 
     }
 }
 
-fn matches_optional_relation(ordering: Option<Ordering>, operation: IntegerComparisonOp) -> bool {
+pub(crate) fn matches_optional_relation(
+    ordering: Option<Ordering>,
+    operation: IntegerComparisonOp,
+) -> bool {
     match ordering {
         Some(ordering) => matches_relation(ordering, operation),
         None => matches!(operation, IntegerComparisonOp::Ne),
