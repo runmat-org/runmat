@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "pskmod";
@@ -586,10 +587,9 @@ fn scalar_number(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor
-            .integer_storage()
-            .and_then(|storage| storage.value_at(0))
-            .map_or(tensor.data[0], |value| value.to_f64())),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1055,6 +1055,10 @@ mod tests {
                 .unwrap(),
             4
         );
+
+        let mut phase = Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).unwrap();
+        phase.data[0] = f64::NAN;
+        assert_eq!(scalar_number(&Value::Tensor(phase), "phase").unwrap(), 3.0);
 
         let out = pskmod(
             integer_tensor(IntegerStorage::U64(vec![0, 1, 2, 3]), vec![1, 4]),

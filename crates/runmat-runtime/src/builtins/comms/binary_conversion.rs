@@ -6,7 +6,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::{gpu_helpers, tensor as tensor_utils};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BI2DE_NAME: &str = "bi2de";
@@ -1073,10 +1073,9 @@ fn scalar_number(value: &Value, builtin: &'static str, name: &str) -> BuiltinRes
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor
-            .integer_storage()
-            .and_then(|storage| storage.value_at(0))
-            .map_or(tensor.data[0], |value| value.to_f64())),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1681,6 +1680,13 @@ mod tests {
     fn bi2de_and_de2bi_typed_integer_tensors_remain_exact() {
         let digits = integer_tensor(IntegerStorage::U64(vec![1, 0, 1]), vec![1, 3]);
         assert_eq!(value_data(bi2de(digits, vec![])), vec![5.0]);
+
+        let mut width = Tensor::new_integer(IntegerStorage::U16(vec![12]), vec![1, 1]).unwrap();
+        width.data[0] = f64::NAN;
+        assert_eq!(
+            scalar_number(&Value::Tensor(width), DE2BI_NAME, "N").unwrap(),
+            12.0
+        );
 
         assert_eq!(
             block_on(decimal_vector_from_value(integer_tensor(
