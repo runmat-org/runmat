@@ -8,6 +8,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::reduction::{mean, median, min, std as std_reduction, sum, var};
 use crate::builtins::table::{
     is_tabular_object, select_rows, selected_row_names, table_from_columns_like, table_height,
@@ -2090,7 +2091,9 @@ fn numeric_scalar(value: &Value, context: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(f64::from(*b)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         other => Err(invalid_argument(format!(
             "{context}: expected numeric scalar, got {other:?}"
         ))),
@@ -2220,6 +2223,18 @@ mod tests {
         assert_eq!(
             scalar_usize(&scalar, "missing size").unwrap(),
             9_007_199_254_740_993
+        );
+    }
+
+    #[test]
+    fn missing_numeric_scalar_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+            .expect("typed numeric scalar");
+        tensor.data = vec![0.0];
+
+        assert_eq!(
+            numeric_scalar(&Value::Tensor(tensor), "fillmissing constant").unwrap(),
+            2026.0
         );
     }
 

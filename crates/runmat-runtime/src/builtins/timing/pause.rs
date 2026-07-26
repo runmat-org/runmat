@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
 use crate::builtins::plotting;
 use crate::builtins::timing::type_resolvers::pause_type;
@@ -435,7 +436,7 @@ fn parse_tensor(tensor: Tensor) -> Result<PauseArgument, RuntimeError> {
             &PAUSE_ERROR_INVALID_ARG,
         ));
     }
-    parse_numeric(tensor.data[0])
+    parse_numeric(tensor_utils::tensor_value_f64(&tensor, 0))
 }
 
 fn parse_logical(logical: LogicalArray) -> Result<PauseArgument, RuntimeError> {
@@ -482,7 +483,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LogicalArray, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Tensor};
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
@@ -571,6 +572,18 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => assert_eq!(t.data.len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pause_tensor_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+            .expect("typed pause tensor");
+        tensor.data = vec![0.0];
+
+        match parse_tensor(tensor).expect("pause tensor") {
+            PauseArgument::Wait(PauseWait::Seconds(seconds)) => assert_eq!(seconds, 2026.0),
+            other => panic!("expected wait seconds, got {other:?}"),
         }
     }
 

@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{broadcast, gpu_helpers};
+use crate::builtins::common::{broadcast, gpu_helpers, tensor as tensor_utils};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BLSPRICE: &str = "blsprice";
@@ -1185,7 +1185,9 @@ fn scalar_numeric(builtin: &'static str, value: &Value, name: &str) -> BuiltinRe
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(flag) => Ok(if *flag { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         Value::LogicalArray(logical) if logical.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1254,6 +1256,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new_2d(data, rows, cols).unwrap())
@@ -1582,6 +1585,18 @@ mod tests {
         ))
         .unwrap();
         assert!(as_scalar(&out).is_nan());
+    }
+
+    #[test]
+    fn finance_scalar_numeric_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+            .expect("typed finance scalar");
+        tensor.data = vec![0.0];
+
+        assert_eq!(
+            scalar_numeric(BLSIMPV, &Value::Tensor(tensor), "Limit").expect("scalar numeric"),
+            2026.0
+        );
     }
 
     #[test]

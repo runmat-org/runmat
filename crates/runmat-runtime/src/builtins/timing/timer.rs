@@ -27,6 +27,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const TIMER_CLASS: &str = "timer";
@@ -779,7 +780,7 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(value.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(value) if value.data.len() == 1 => Ok(tensor::tensor_value_f64(value, 0)),
         other => Err(timer_error(
             &TIMER_ERROR_INVALID_INPUT,
             format!("timer: {name} must be a numeric scalar, got {other:?}"),
@@ -1208,7 +1209,7 @@ pub(crate) fn reset_timer_state_for_tests() {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::CharArray;
+    use runmat_builtins::{CharArray, IntegerStorage, Tensor};
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -1347,6 +1348,18 @@ mod tests {
         assert_eq!(
             err.identifier().map(str::to_string),
             Some("RunMat:timer:InvalidProperty".to_string())
+        );
+    }
+
+    #[test]
+    fn timer_numeric_scalar_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+            .expect("typed timer scalar");
+        tensor.data = vec![0.0];
+
+        assert_eq!(
+            numeric_scalar(&Value::Tensor(tensor), "StartDelay").expect("numeric scalar"),
+            2026.0
         );
     }
 

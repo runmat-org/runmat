@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::image::color::common;
 use crate::builtins::image::type_resolvers::imhist_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -724,7 +725,9 @@ fn scalar_number(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Some(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     }
 }
@@ -945,6 +948,15 @@ mod tests {
 
         assert!(indexed.zero_based);
         assert_eq!(indexed.values, vec![0.0, 1.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn scalar_number_reads_typed_integer_storage_exactly() {
+        let mut bins = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+            .expect("typed bin count");
+        bins.data = vec![0.0];
+
+        assert_eq!(scalar_number(&Value::Tensor(bins)), Some(2026.0));
     }
 
     #[test]
