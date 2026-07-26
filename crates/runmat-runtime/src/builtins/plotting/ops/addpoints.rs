@@ -11,6 +11,7 @@ use super::op_common::line_inputs::NumericInput;
 use super::plotting_error;
 use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{append_points_to_animated_line, PlotChildHandleState};
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::set_type;
 use crate::BuiltinResult;
 
@@ -161,7 +162,7 @@ async fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
     if !is_vector_tensor(&tensor) {
         return Err(addpoints_err(format!("{name} must be a scalar or vector")));
     }
-    Ok(tensor.data)
+    Ok(tensor_utils::tensor_into_values_f64(tensor))
 }
 
 fn is_vector_tensor(tensor: &Tensor) -> bool {
@@ -277,6 +278,31 @@ mod tests {
         assert!(err.message.contains("animatedline handle"));
     }
 
+    #[test]
+    fn addpoints_reads_typed_integer_coordinates_exactly() {
+        let _guard = setup();
+        let handle = block_on(animatedline_builtin(Vec::new())).unwrap();
+        block_on(addpoints_builtin(vec![
+            handle.clone(),
+            integer_vector(&[1, 2]),
+            integer_vector(&[10, 20]),
+            integer_vector(&[100, 200]),
+        ]))
+        .unwrap();
+        assert_eq!(
+            tensor_data(get_builtin(vec![handle.clone(), Value::String("XData".into())]).unwrap()),
+            vec![1.0, 2.0]
+        );
+        assert_eq!(
+            tensor_data(get_builtin(vec![handle.clone(), Value::String("YData".into())]).unwrap()),
+            vec![10.0, 20.0]
+        );
+        assert_eq!(
+            tensor_data(get_builtin(vec![handle, Value::String("ZData".into())]).unwrap()),
+            vec![100.0, 200.0]
+        );
+    }
+
     fn vector(values: &[f64]) -> Value {
         Value::Tensor(Tensor {
             data: values.to_vec(),
@@ -286,6 +312,16 @@ mod tests {
             shape: vec![1, values.len()],
             dtype: runmat_builtins::NumericDType::F64,
         })
+    }
+
+    fn integer_vector(values: &[i16]) -> Value {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(values.to_vec()),
+            vec![1, values.len()],
+        )
+        .unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn tensor_data(value: Value) -> Vec<f64> {

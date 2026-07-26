@@ -2,6 +2,7 @@
 
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::common::{gather_tensor_from_gpu_async, numeric_pair};
 use crate::builtins::plotting::plotting_error;
 use crate::{BuiltinResult, RuntimeError};
@@ -37,7 +38,7 @@ pub(crate) fn evaluate_theta_rho_tensors(
     }
 
     if tensor_is_vector(&theta) {
-        let theta_vec = theta.data;
+        let theta_vec = tensor_utils::tensor_into_values_f64(theta);
         let rho_rows = tensor_rows(&rho);
         if theta_vec.len() != rho_rows {
             return Err(polar_data_err(
@@ -55,7 +56,7 @@ pub(crate) fn evaluate_theta_rho_tensors(
     }
 
     if tensor_is_vector(&rho) {
-        let rho_vec = rho.data;
+        let rho_vec = tensor_utils::tensor_into_values_f64(rho);
         let theta_rows = tensor_rows(&theta);
         if rho_vec.len() != theta_rows {
             return Err(polar_data_err(
@@ -122,12 +123,14 @@ pub(crate) fn implicit_theta(len: usize) -> Vec<f64> {
 
 pub(crate) fn tensor_columns(tensor: &Tensor) -> Vec<Vec<f64>> {
     if tensor_is_vector(tensor) {
-        return vec![tensor.data.clone()];
+        return vec![tensor_utils::tensor_values_f64(tensor)];
     }
     (0..tensor.cols)
         .map(|col| {
             let start = col * tensor.rows;
-            tensor.data[start..start + tensor.rows].to_vec()
+            (start..start + tensor.rows)
+                .map(|idx| tensor_utils::tensor_value_f64(tensor, idx))
+                .collect()
         })
         .collect()
 }
@@ -184,4 +187,47 @@ pub(crate) fn scalar_tensor(value: f64) -> Tensor {
 
 fn polar_data_err(builtin: &'static str, msg: impl Into<String>) -> RuntimeError {
     plotting_error(builtin, format!("{builtin}: {}", msg.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tensor_columns_read_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![1, 2, 3, 4]),
+            vec![2, 2],
+        )
+        .unwrap();
+        tensor.data.fill(f64::NAN);
+
+        assert_eq!(
+            tensor_columns(&tensor),
+            vec![vec![1.0, 2.0], vec![3.0, 4.0]]
+        );
+        assert_eq!(tensor_rows(&tensor), 2);
+        assert_eq!(tensor_cols(&tensor), 2);
+    }
+
+    #[test]
+    fn evaluate_theta_rho_reads_vector_typed_integer_storage_exactly() {
+        let mut theta =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![0, 1]), vec![1, 2])
+                .unwrap();
+        let mut rho = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![10, 20, 30, 40]),
+            vec![2, 2],
+        )
+        .unwrap();
+        theta.data.fill(f64::NAN);
+        rho.data.fill(f64::NAN);
+
+        let evaluated = evaluate_theta_rho_tensors(theta, rho, "polarplot").unwrap();
+        assert_eq!(evaluated.len(), 2);
+        assert_eq!(evaluated[0].theta, vec![0.0, 1.0]);
+        assert_eq!(evaluated[0].rho, vec![10.0, 20.0]);
+        assert_eq!(evaluated[1].theta, vec![0.0, 1.0]);
+        assert_eq!(evaluated[1].rho, vec![30.0, 40.0]);
+    }
 }

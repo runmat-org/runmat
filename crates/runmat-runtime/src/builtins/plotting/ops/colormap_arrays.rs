@@ -9,6 +9,7 @@ use runmat_macros::runtime_builtin;
 use runmat_plot::plots::surface::ColorMap;
 
 use super::state::current_colormap_length;
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const MAX_COLORMAP_LENGTH: usize = 1_000_000;
@@ -333,9 +334,9 @@ pub(crate) fn parse_rgb_colormap_tensor(
     let mut colors = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
         let color = [
-            tensor.data[row],
-            tensor.data[tensor.rows + row],
-            tensor.data[2 * tensor.rows + row],
+            tensor_utils::tensor_value_f64(tensor, row),
+            tensor_utils::tensor_value_f64(tensor, tensor.rows + row),
+            tensor_utils::tensor_value_f64(tensor, 2 * tensor.rows + row),
         ];
         if !color.iter().all(|value| value.is_finite()) {
             return Err(invalid(builtin, "RGB colormap entries must be finite"));
@@ -604,6 +605,16 @@ mod tests {
             dtype: NumericDType::F64,
         };
         let (map, len) = parse_rgb_colormap_tensor(&custom, "colormap").expect("parse custom");
+        assert_eq!(len, 2);
+        assert!(matches!(map, ColorMap::Listed(_)));
+
+        let mut typed = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U8(vec![0, 1, 0, 1, 1, 0]),
+            vec![2, 3],
+        )
+        .expect("typed RGB colormap");
+        typed.data.fill(f64::NAN);
+        let (map, len) = parse_rgb_colormap_tensor(&typed, "colormap").expect("parse typed");
         assert_eq!(len, 2);
         assert!(matches!(map, ColorMap::Listed(_)));
     }

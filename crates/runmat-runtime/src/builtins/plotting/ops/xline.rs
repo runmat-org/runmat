@@ -12,6 +12,7 @@ use super::style::{
     color_from_token, looks_like_option_name, parse_line_style_args, value_as_bool, value_as_f64,
     value_as_string, LineAppearance, LineStyleParseOptions,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::BuiltinResult;
 
@@ -383,13 +384,14 @@ fn coordinates_from_value(value: &Value, builtin: &'static str) -> BuiltinResult
             "coordinate vector cannot be empty",
         ));
     }
-    if tensor.data.iter().any(|value| !value.is_finite()) {
+    let values = tensor_utils::tensor_into_values_f64(tensor);
+    if values.iter().any(|value| !value.is_finite()) {
         return Err(reference_line_error(
             builtin,
             "coordinate values must be finite",
         ));
     }
-    Ok(tensor.data)
+    Ok(values)
 }
 
 fn reference_line_error(builtin: &'static str, msg: impl Into<String>) -> crate::RuntimeError {
@@ -416,6 +418,16 @@ mod tests {
 
     fn tensor(data: &[f64]) -> Tensor {
         Tensor::new_2d(data.to_vec(), 1, data.len()).unwrap()
+    }
+
+    fn integer_tensor(data: &[i16]) -> Tensor {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(data.to_vec()),
+            vec![1, data.len()],
+        )
+        .unwrap();
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     #[test]
@@ -474,6 +486,14 @@ mod tests {
     fn xline_vector_returns_handle_vector() {
         let _guard = setup();
         let handles = xline_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))]).unwrap();
+        let tensor = Tensor::try_from(&handles).unwrap();
+        assert_eq!(tensor.data.len(), 3);
+    }
+
+    #[test]
+    fn xline_reads_typed_integer_coordinates_exactly() {
+        let _guard = setup();
+        let handles = xline_builtin(vec![Value::Tensor(integer_tensor(&[1, 2, 3]))]).unwrap();
         let tensor = Tensor::try_from(&handles).unwrap();
         assert_eq!(tensor.data.len(), 3);
     }

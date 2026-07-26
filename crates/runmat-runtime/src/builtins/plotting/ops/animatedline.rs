@@ -23,6 +23,7 @@ use super::state::{
 use super::style::{
     parse_line_style_args, value_as_f64, value_as_string, LineAppearance, LineStyleParseOptions,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::BuiltinResult;
 
@@ -337,7 +338,7 @@ async fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
             "{name} must be a scalar or vector"
         )));
     }
-    Ok(tensor.data)
+    Ok(tensor_utils::tensor_into_values_f64(tensor))
 }
 
 fn is_numeric_value(value: &Value) -> bool {
@@ -478,6 +479,29 @@ mod tests {
     }
 
     #[test]
+    fn animatedline_reads_typed_integer_constructor_data_exactly() {
+        let _guard = setup();
+        let handle = block_on(animatedline_builtin(vec![
+            integer_vector(&[1, 2]),
+            integer_vector(&[10, 20]),
+            integer_vector(&[100, 200]),
+        ]))
+        .unwrap();
+        assert_eq!(
+            tensor_data(get_builtin(vec![handle.clone(), Value::String("XData".into())]).unwrap()),
+            vec![1.0, 2.0]
+        );
+        assert_eq!(
+            tensor_data(get_builtin(vec![handle.clone(), Value::String("YData".into())]).unwrap()),
+            vec![10.0, 20.0]
+        );
+        assert_eq!(
+            tensor_data(get_builtin(vec![handle, Value::String("ZData".into())]).unwrap()),
+            vec![100.0, 200.0]
+        );
+    }
+
+    #[test]
     fn animatedline_rejects_3d_marker_constructor() {
         let _guard = setup();
         let err = block_on(animatedline_builtin(vec![
@@ -500,6 +524,16 @@ mod tests {
             shape: vec![1, values.len()],
             dtype: runmat_builtins::NumericDType::F64,
         })
+    }
+
+    fn integer_vector(values: &[i16]) -> Value {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(values.to_vec()),
+            vec![1, values.len()],
+        )
+        .unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn tensor_data(value: Value) -> Vec<f64> {

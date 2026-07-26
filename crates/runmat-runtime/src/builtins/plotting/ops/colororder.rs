@@ -15,6 +15,7 @@ use super::state::{
     set_color_order_for_figure, FigureHandle,
 };
 use super::style::{color_from_name_or_token, value_as_string};
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::get_type;
 use crate::BuiltinResult;
 
@@ -210,9 +211,9 @@ fn colors_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec4>> {
     }
     if tensor.data.len() == 3 && (tensor.rows == 1 || tensor.cols == 1) {
         return Ok(vec![rgb_triplet(
-            tensor.data[0],
-            tensor.data[1],
-            tensor.data[2],
+            tensor_utils::tensor_value_f64(tensor, 0),
+            tensor_utils::tensor_value_f64(tensor, 1),
+            tensor_utils::tensor_value_f64(tensor, 2),
         )?]);
     }
     if tensor.cols != 3 {
@@ -220,9 +221,9 @@ fn colors_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec4>> {
     }
     let mut colors = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
-        let r = tensor.data[row];
-        let g = tensor.data[tensor.rows + row];
-        let b = tensor.data[2 * tensor.rows + row];
+        let r = tensor_utils::tensor_value_f64(tensor, row);
+        let g = tensor_utils::tensor_value_f64(tensor, tensor.rows + row);
+        let b = tensor_utils::tensor_value_f64(tensor, 2 * tensor.rows + row);
         colors.push(rgb_triplet(r, g, b)?);
     }
     Ok(colors)
@@ -420,6 +421,13 @@ mod tests {
         })
     }
 
+    fn integer_rgb_matrix(data: Vec<u8>, rows: usize) -> Value {
+        let mut tensor =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(data), vec![rows, 3]).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
     fn tensor_data(value: Value) -> Vec<f64> {
         Tensor::try_from(&value).unwrap().data
     }
@@ -439,6 +447,14 @@ mod tests {
         assert_eq!(tensor_data(set), vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0]);
         let queried = colororder_builtin(Vec::new()).unwrap();
         assert_eq!(tensor_data(queried), vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn colororder_reads_typed_integer_rgb_storage_exactly() {
+        let _guard = setup_plot_tests();
+        let colors = integer_rgb_matrix(vec![1, 0, 0, 0, 1, 0], 2);
+        let set = colororder_builtin(vec![colors]).unwrap();
+        assert_eq!(tensor_data(set), vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
     }
 
     #[test]
