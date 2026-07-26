@@ -17,7 +17,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "xlsread";
@@ -823,7 +822,13 @@ fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
             parse_range_string(&value_to_string_scalar(value)?)
         }
-        Value::Tensor(t) => parse_numeric_range(tensor::tensor_values_f64(t).as_slice()),
+        Value::Tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                parse_integer_range(&storage.exact_values())
+            } else {
+                parse_numeric_range(t.data.as_slice())
+            }
+        }
         _ => Err(xlsread_error_with(
             &XLSREAD_ERROR_RANGE,
             "xlsread: range must be a string or numeric vector",
@@ -913,6 +918,36 @@ fn parse_numeric_range(values: &[f64]) -> BuiltinResult<RangeSpec> {
     Ok(spec)
 }
 
+fn parse_integer_range(values: &[IntValue]) -> BuiltinResult<RangeSpec> {
+    if values.len() != 2 && values.len() != 4 {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_RANGE,
+            "xlsread: numeric range must contain 2 or 4 one-based indices",
+        ));
+    }
+    let indices = values
+        .iter()
+        .enumerate()
+        .map(|(idx, value)| positive_integer_index(value, idx))
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let spec = RangeSpec {
+        start_row: indices[0],
+        start_col: indices[1],
+        end_row: if indices.len() == 4 {
+            Some(indices[2])
+        } else {
+            None
+        },
+        end_col: if indices.len() == 4 {
+            Some(indices[3])
+        } else {
+            None
+        },
+    };
+    spec.validate()?;
+    Ok(spec)
+}
+
 fn positive_index(value: f64, position: usize) -> BuiltinResult<usize> {
     if !value.is_finite() || value < 1.0 || (value.round() - value).abs() > f64::EPSILON {
         return Err(xlsread_error_with(
@@ -931,6 +966,21 @@ fn positive_index(value: f64, position: usize) -> BuiltinResult<usize> {
         xlsread_error_with(
             &XLSREAD_ERROR_RANGE,
             "xlsread: range indices must be one-based",
+        )
+    })
+}
+
+fn positive_integer_index(value: &IntValue, position: usize) -> BuiltinResult<usize> {
+    let one_based = value.try_to_usize().ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_RANGE,
+            "xlsread: range indices must be positive integers",
+        )
+    })?;
+    one_based.checked_sub(1).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_RANGE,
+            format!("xlsread: range index {} must be one-based", position + 1),
         )
     })
 }
@@ -1490,6 +1540,14 @@ mod tests {
             .expect("typed invalid range");
         invalid.data = vec![2.0, 3.0];
         assert!(parse_range(&Value::Tensor(invalid)).is_err());
+
+        let mut too_large = Tensor::new_integer(
+            IntegerStorage::U64(vec![MAX_EXCEL_ROW_INDEX as u64 + 2, 1]),
+            vec![1, 2],
+        )
+        .expect("typed excessive range");
+        too_large.data = vec![1.0, 1.0];
+        assert!(parse_range(&Value::Tensor(too_large)).is_err());
     }
     use futures::executor::block_on;
     use std::fs;
