@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod descriptors;
@@ -1158,7 +1159,7 @@ fn dense_matrix_from_value(value: &Value, label: &str) -> BuiltinResult<DenseMat
             Ok(DenseMatrix {
                 rows: tensor.rows(),
                 cols: tensor.cols(),
-                data: tensor.data.clone(),
+                data: tensor_utils::tensor_values_f64(tensor),
             })
         }
         Value::SparseTensor(sparse) => {
@@ -1811,7 +1812,7 @@ fn sparse_from_integer_triplets(
 
 fn numeric_triplet_array(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(tensor)),
         Value::SparseTensor(sparse) => {
             let total_elements = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
                 sparse_error(
@@ -1928,7 +1929,7 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
             if !is_vector_shape(&tensor.shape) {
                 return Err(numeric_vector_error(value, name));
             }
-            Ok(tensor.data.clone())
+            Ok(tensor_utils::tensor_values_f64(tensor))
         }
         Value::SparseTensor(sparse) => {
             let shape = [sparse.rows, sparse.cols];
@@ -1981,7 +1982,7 @@ fn numeric_vector_for_label(value: &Value, name: &str, label: &str) -> BuiltinRe
             if !is_vector_shape(&tensor.shape) {
                 return Err(numeric_vector_label_error(value, name, label));
             }
-            Ok(tensor.data.clone())
+            Ok(tensor_utils::tensor_values_f64(tensor))
         }
         Value::SparseTensor(sparse) => {
             let shape = [sparse.rows, sparse.cols];
@@ -2175,6 +2176,12 @@ pub(crate) mod tests {
         }
     }
 
+    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
+    }
+
     fn expect_tensor(value: Value) -> Tensor {
         match value {
             Value::Tensor(tensor) => tensor,
@@ -2347,6 +2354,29 @@ pub(crate) mod tests {
         assert_eq!(sparse.nnz(), 2);
         assert_eq!(sparse.get(0, 0), Some(7.0));
         assert_eq!(sparse.get(1, 2), Some(9.0));
+    }
+
+    #[test]
+    fn sparse_numeric_helpers_read_typed_integer_storage_before_float_boundary() {
+        let vector = Value::Tensor(poisoned_integer_tensor(
+            IntegerStorage::I16(vec![1, -2, 3]),
+            vec![3, 1],
+        ));
+        assert_eq!(
+            numeric_vector(&vector, "i").expect("numeric vector"),
+            vec![1.0, -2.0, 3.0]
+        );
+        assert_eq!(
+            numeric_triplet_array(&vector, "v").expect("numeric triplet array"),
+            vec![1.0, -2.0, 3.0]
+        );
+
+        let matrix = Value::Tensor(poisoned_integer_tensor(
+            IntegerStorage::I16(vec![10, 20, 0, 1, 2, 0]),
+            vec![3, 2],
+        ));
+        let dense = dense_matrix_from_value(&matrix, "spdiags").expect("dense matrix");
+        assert_eq!(dense.data, vec![10.0, 20.0, 0.0, 1.0, 2.0, 0.0]);
     }
 
     #[test]
@@ -2771,6 +2801,32 @@ pub(crate) mod tests {
         assert_eq!(replaced.get(1, 1), Some(7.0));
         assert_eq!(replaced.get(2, 2), Some(6.0));
         assert_eq!(replaced.get(1, 2), Some(2.0));
+    }
+
+    #[test]
+    fn spdiags_reads_typed_integer_bin_and_offsets_exactly_at_float_boundary() {
+        let bin = poisoned_integer_tensor(
+            IntegerStorage::I16(vec![
+                10, 20, 0, // -1 source column
+                0, 1, 2, // +1 source column
+            ]),
+            vec![3, 2],
+        );
+        let offsets = poisoned_integer_tensor(IntegerStorage::I16(vec![-1, 1]), vec![1, 2]);
+        let sparse = expect_sparse(
+            spdiags_builtin(vec![
+                Value::Tensor(bin),
+                Value::Tensor(offsets),
+                Value::Num(3.0),
+                Value::Num(3.0),
+            ])
+            .expect("spdiags"),
+        );
+        assert_eq!(sparse.integer_storage(), None);
+        assert_eq!(sparse.get(1, 0), Some(10.0));
+        assert_eq!(sparse.get(2, 1), Some(20.0));
+        assert_eq!(sparse.get(0, 1), Some(1.0));
+        assert_eq!(sparse.get(1, 2), Some(2.0));
     }
 
     #[test]
