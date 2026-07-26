@@ -776,36 +776,59 @@ fn numeric_vector_usize(
     builtin: &'static str,
     label: &str,
 ) -> BuiltinResult<Vec<usize>> {
-    let numbers = match value {
-        Value::Num(v) => vec![*v],
-        Value::Int(v) => vec![v.to_f64()],
-        Value::Tensor(t) => t.data.clone(),
-        _ => {
-            return Err(hdf5_error(
-                builtin,
-                &ERR_ARGUMENT,
-                format!("{builtin}: expected {label} as a numeric vector"),
-            ))
-        }
-    };
-    numbers
-        .into_iter()
-        .map(|value| {
-            if !value.is_finite()
-                || value < 1.0
-                || value > usize::MAX as f64
-                || value.fract() != 0.0
-            {
-                Err(hdf5_error(
-                    builtin,
-                    &ERR_ARGUMENT,
-                    format!("{builtin}: {label} entries must be positive finite integers"),
-                ))
+    match value {
+        Value::Num(v) => Ok(vec![numeric_usize_entry(*v, builtin, label)?]),
+        Value::Int(v) => Ok(vec![int_usize_entry(v, builtin, label)?]),
+        Value::Tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                storage
+                    .exact_values()
+                    .iter()
+                    .map(|value| int_usize_entry(value, builtin, label))
+                    .collect()
             } else {
-                Ok(value as usize)
+                t.data
+                    .iter()
+                    .map(|value| numeric_usize_entry(*value, builtin, label))
+                    .collect()
             }
-        })
-        .collect()
+        }
+        _ => Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!("{builtin}: expected {label} as a numeric vector"),
+        )),
+    }
+}
+
+fn int_usize_entry(value: &IntValue, builtin: &'static str, label: &str) -> BuiltinResult<usize> {
+    let Some(parsed) = value.try_to_usize() else {
+        return Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!("{builtin}: {label} entries must be positive finite integers"),
+        ));
+    };
+    if parsed == 0 {
+        return Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!("{builtin}: {label} entries must be positive finite integers"),
+        ));
+    }
+    Ok(parsed)
+}
+
+fn numeric_usize_entry(value: f64, builtin: &'static str, label: &str) -> BuiltinResult<usize> {
+    if !value.is_finite() || value < 1.0 || value > usize::MAX as f64 || value.fract() != 0.0 {
+        Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!("{builtin}: {label} entries must be positive finite integers"),
+        ))
+    } else {
+        Ok(value as usize)
+    }
 }
 
 fn col_major_to_row_major<T: Clone>(data: &[T], shape: &[usize]) -> Vec<T> {
@@ -2226,6 +2249,29 @@ mod tests {
         .expect_err("typed complex integer HDF5 writes are unsupported");
 
         assert_eq!(err.identifier(), Some("RunMat:hdf5:UnsupportedType"));
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn hdf5_selection_vectors_read_integer_storage_exactly() {
+        let exact = (1_u64 << 53) + 1;
+
+        assert_eq!(
+            numeric_vector_usize(&Value::Int(IntValue::U64(exact)), H5READ_NAME, "start")
+                .expect("scalar vector"),
+            vec![exact as usize]
+        );
+
+        let mut vector =
+            Tensor::new_integer(IntegerStorage::U64(vec![exact, 3]), vec![1, 2]).expect("vector");
+        vector.data.fill(f64::NAN);
+        assert_eq!(
+            numeric_vector_usize(&Value::Tensor(vector), H5WRITE_NAME, "count").expect("vector"),
+            vec![exact as usize, 3]
+        );
+
+        assert!(numeric_vector_usize(&Value::Int(IntValue::U8(0)), H5READ_NAME, "start").is_err());
+        assert!(numeric_vector_usize(&Value::Int(IntValue::I8(-1)), H5READ_NAME, "start").is_err());
     }
 
     #[test]
