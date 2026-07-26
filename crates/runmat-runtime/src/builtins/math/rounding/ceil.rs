@@ -417,7 +417,7 @@ fn parse_digits_inner(value: &Value) -> BuiltinResult<i32> {
                     "N must be an integer scalar",
                 ));
             }
-            return digits_from_f64(tensor.data[0]);
+            return digits_from_f64(tensor::tensor_value_f64(tensor, 0));
         }
         Value::LogicalArray(logical) => {
             if logical.len() != 1 {
@@ -616,7 +616,9 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{
+        CharArray, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
+    };
 
     fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::ceil_builtin(value, rest))
@@ -637,6 +639,32 @@ pub(crate) mod tests {
             -3
         );
         assert!(parse_digits_inner(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+    }
+
+    #[test]
+    fn ceil_digit_parser_reads_typed_integer_storage_exactly() {
+        let mut digits =
+            Tensor::new_integer(IntegerStorage::I16(vec![2]), vec![1, 1]).expect("digits");
+        digits.data[0] = -9.0;
+        assert_eq!(
+            parse_digits_inner(&Value::Tensor(digits.clone())).expect("digits"),
+            2
+        );
+
+        let result = ceil_builtin(Value::Num(1.234), vec![Value::Tensor(digits)]).expect("ceil");
+        match result {
+            Value::Num(v) => assert!((v - 1.24).abs() < 1e-12),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ceil_digit_parser_rejects_typed_integer_tensor_overflow() {
+        let mut digits =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("digits");
+        digits.data[0] = 1.0;
+        let err = parse_digits_inner(&Value::Tensor(digits)).expect_err("overflow");
+        assert_error_contains(err, "integer overflow in N");
     }
 
     #[test]
