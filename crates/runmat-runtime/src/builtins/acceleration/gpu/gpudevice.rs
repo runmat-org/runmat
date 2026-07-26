@@ -287,7 +287,10 @@ fn parse_device_index(value: &Value) -> BuiltinResult<Option<u32>> {
         }
         Value::Tensor(t) => match t.data.len() {
             0 => Ok(None),
-            1 => num_to_index(t.data[0]),
+            1 => match t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                Some(value) => integer_to_index(&value),
+                None => num_to_index(t.data[0]),
+            },
             _ => Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into()),
         },
         Value::LogicalArray(la) => match la.data.len() {
@@ -315,6 +318,15 @@ fn int_to_index(raw: i64) -> BuiltinResult<Option<u32>> {
     Ok(Some(raw as u32))
 }
 
+fn integer_to_index(value: &IntValue) -> BuiltinResult<Option<u32>> {
+    value
+        .try_to_u64()
+        .and_then(|raw| u32::try_from(raw).ok())
+        .filter(|raw| *raw > 0)
+        .map(Some)
+        .ok_or_else(|| gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into())
+}
+
 fn num_to_index(raw: f64) -> BuiltinResult<Option<u32>> {
     if !raw.is_finite() {
         return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
@@ -332,7 +344,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Tensor, Type};
 
     fn call(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(gpu_device_builtin(args))
@@ -375,6 +387,24 @@ pub(crate) mod tests {
                 let value = call(vec![case]).expect("gpuDevice");
                 assert!(matches!(value, Value::Struct(_)));
             }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gpu_device_index_parser_reads_typed_integer_storage_exactly() {
+        test_support::with_test_provider(|_| {
+            let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1])
+                .expect("integer tensor");
+            tensor.data[0] = f64::NAN;
+
+            let value = call(vec![Value::Tensor(tensor)]).expect("gpuDevice");
+            assert!(matches!(value, Value::Struct(_)));
+
+            let negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+                .expect("integer tensor");
+            let err = call(vec![Value::Tensor(negative)]).unwrap_err().to_string();
+            assert_eq!(err, GPU_DEVICE_ERROR_INVALID_INDEX.message);
         });
     }
 
