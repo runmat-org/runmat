@@ -258,23 +258,24 @@ async fn value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(|err| corr_error(format!("corr: {err}")))?;
-    let tensor = tensor::value_into_tensor_for(NAME, gathered)
-        .map_err(|err| corr_error(format!("corr: {err}")))?;
-    tensor::integer_tensor_to_f64(tensor).map_err(|err| corr_error(format!("corr: {err}")))
+    tensor::value_into_tensor_for(NAME, gathered).map_err(|err| corr_error(format!("corr: {err}")))
 }
 
 fn matrix_shape(tensor: &Tensor) -> (usize, usize) {
-    let shape = tensor::default_shape_for(&tensor.shape, tensor.data.len());
+    let len = tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len());
+    let shape = tensor::default_shape_for(&tensor.shape, len);
     match shape.as_slice() {
         [] => (1, 1),
-        [_] => (tensor.data.len(), 1),
+        [_] => (len, 1),
         [rows, cols, ..] => (*rows, *cols),
     }
 }
 
-fn column(tensor: &Tensor, rows: usize, col: usize) -> Vec<f64> {
+fn column(values: &[f64], rows: usize, col: usize) -> Vec<f64> {
     let start = col * rows;
-    tensor.data[start..start + rows].to_vec()
+    values[start..start + rows].to_vec()
 }
 
 fn corr_compute(args: CorrArgs) -> BuiltinResult<Value> {
@@ -286,19 +287,26 @@ fn corr_compute(args: CorrArgs) -> BuiltinResult<Value> {
             "corr: X and Y must have the same number of observations",
         ));
     }
+    let left_values = tensor::tensor_values_f64_cow(&args.left);
+    let right_values_owned = args.right.as_ref().map(tensor::tensor_values_f64_cow);
+    let right_values = right_values_owned.as_deref().unwrap_or(&left_values);
     let mut rho_data = Vec::with_capacity(left_cols * right_cols);
     let mut p_data = Vec::with_capacity(left_cols * right_cols);
     let complete_mask = match args.rows {
         RowsMode::Complete => Some(complete_rows(
-            &args.left, right, left_rows, left_cols, right_cols,
+            &left_values,
+            right_values,
+            left_rows,
+            left_cols,
+            right_cols,
         )),
         RowsMode::All | RowsMode::Pairwise => None,
     };
     let all_mask = vec![true; left_rows];
     for right_col in 0..right_cols {
-        let y = column(right, right_rows, right_col);
+        let y = column(right_values, right_rows, right_col);
         for left_col in 0..left_cols {
-            let x = column(&args.left, left_rows, left_col);
+            let x = column(&left_values, left_rows, left_col);
             let pair = match complete_mask.as_ref() {
                 Some(mask) => corr_pair_masked(&x, &y, mask, args.corr_type, RowsMode::All),
                 None => corr_pair_masked(&x, &y, &all_mask, args.corr_type, args.rows),
@@ -335,8 +343,8 @@ fn corr_compute(args: CorrArgs) -> BuiltinResult<Value> {
 }
 
 fn complete_rows(
-    left: &Tensor,
-    right: &Tensor,
+    left: &[f64],
+    right: &[f64],
     rows: usize,
     left_cols: usize,
     right_cols: usize,
@@ -344,12 +352,12 @@ fn complete_rows(
     let mut mask = vec![true; rows];
     for row in 0..rows {
         for col in 0..left_cols {
-            if left.data[col * rows + row].is_nan() {
+            if left[col * rows + row].is_nan() {
                 mask[row] = false;
             }
         }
         for col in 0..right_cols {
-            if right.data[col * rows + row].is_nan() {
+            if right[col * rows + row].is_nan() {
                 mask[row] = false;
             }
         }
@@ -558,8 +566,10 @@ mod tests {
         Value::Tensor(Tensor::new(data, shape).unwrap())
     }
 
-    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(poison);
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -584,7 +594,7 @@ mod tests {
     #[test]
     fn corr_accepts_typed_integer_matrix_inputs() {
         let out = block_on(corr_builtin(
-            int_tensor(IntegerStorage::I16(vec![1, 2, 1, 4]), vec![2, 2]),
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 1, 4]), vec![2, 2], 0.0),
             Vec::new(),
         ))
         .unwrap();
@@ -593,6 +603,31 @@ mod tests {
                 assert_eq!(tensor.shape, vec![2, 2]);
                 assert!((tensor.data[0] - 1.0).abs() < 1.0e-12);
                 assert!((tensor.data[3] - 1.0).abs() < 1.0e-12);
+            }
+            other => panic!("expected tensor correlation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn corr_complete_rows_reads_typed_integer_storage() {
+        let x = poisoned_int_tensor(
+            IntegerStorage::I16(vec![1, 2, 3, 2, 4, 6]),
+            vec![3, 2],
+            f64::NAN,
+        );
+        let y = poisoned_int_tensor(IntegerStorage::U16(vec![5, 10, 15]), vec![3, 1], f64::NAN);
+
+        let out = block_on(corr_builtin(
+            x,
+            vec![y, Value::from("Rows"), Value::from("complete")],
+        ))
+        .unwrap();
+
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 1]);
+                assert!((tensor.data[0] - 1.0).abs() < 1.0e-12);
+                assert!((tensor.data[1] - 1.0).abs() < 1.0e-12);
             }
             other => panic!("expected tensor correlation, got {other:?}"),
         }
