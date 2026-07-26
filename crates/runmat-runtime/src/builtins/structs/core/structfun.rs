@@ -4,6 +4,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::structs::type_resolvers::structfun_type;
 use crate::{
     build_runtime_error, call_feval_async_with_outputs, current_requested_outputs,
@@ -651,9 +652,9 @@ fn classify_uniform_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
         Value::Num(value) => Ok(ClassifiedValue::Double(*value)),
         Value::Int(value) => Ok(ClassifiedValue::Double(value.to_f64())),
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(ClassifiedValue::Double(tensor.data[0]))
-        }
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(ClassifiedValue::Double(
+            tensor::tensor_values_f64(tensor)[0],
+        )),
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok(ClassifiedValue::Logical(array.data[0] != 0))
         }
@@ -689,11 +690,26 @@ fn structfun_error(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, Tensor};
+    use runmat_builtins::{CellArray, IntegerStorage, Tensor};
     use std::sync::Arc;
 
     fn call(func: Value, st: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(structfun_builtin(func, st, rest))
+    }
+
+    #[test]
+    fn uniform_classifier_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("integer tensor");
+        tensor.data[0] = 0.0;
+
+        match classify_uniform_value(&Value::Tensor(tensor)).expect("classify") {
+            ClassifiedValue::Double(value) => {
+                assert_eq!(value, 9_007_199_254_740_993_u64 as f64);
+            }
+            _ => panic!("expected double classification"),
+        }
     }
 
     fn sample_struct() -> StructValue {
