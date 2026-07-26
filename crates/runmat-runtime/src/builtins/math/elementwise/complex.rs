@@ -391,8 +391,9 @@ fn upload_real_tensor(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     tensor: &Tensor,
 ) -> BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
+    let data = tensor::tensor_values_f64_cow(tensor);
     let view = runmat_accelerate_api::HostTensorView {
-        data: &tensor.data,
+        data: &data,
         shape: &tensor.shape,
     };
     let handle = provider
@@ -727,6 +728,36 @@ pub(crate) mod tests {
                 .unwrap()
             )
         );
+    }
+
+    #[test]
+    fn complex_mixed_gpu_path_uploads_typed_integer_storage_exactly() {
+        test_support::with_test_provider(|provider| {
+            let mut real = Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![1, 2])
+                .expect("typed integer tensor");
+            real.data = vec![99.0, 101.0];
+            let imag = Tensor::new(vec![10.0, 20.0], vec![1, 2]).expect("imag tensor");
+            let imag_handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &imag.data,
+                    shape: &imag.shape,
+                })
+                .expect("upload imag");
+
+            let result = complex_call(Value::Tensor(real), vec![Value::GpuTensor(imag_handle)])
+                .expect("complex");
+
+            let Value::GpuTensor(out) = result else {
+                panic!("expected resident complex gpuArray");
+            };
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(out))).expect("gather");
+            let Value::ComplexTensor(ct) = gathered else {
+                panic!("expected gathered complex tensor");
+            };
+            assert_eq!(ct.shape, vec![1, 2]);
+            assert_eq!(ct.data, vec![(2.0, 10.0), (4.0, 20.0)]);
+        });
     }
 
     #[test]
