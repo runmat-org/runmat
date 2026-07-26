@@ -807,7 +807,7 @@ fn numeric_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Numer
             shape: vec![1, 1],
         }),
         Value::Tensor(tensor) => Ok(NumericInput {
-            values: tensor.data.clone(),
+            values: tensor_utils::tensor_values_f64(tensor),
             shape: tensor.shape.clone(),
         }),
         other => Err(encoding_error(
@@ -926,6 +926,12 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn poisoned_integer_vector(storage: IntegerStorage, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![1, cols]).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
     fn tokenized_document_object(rows: Vec<Vec<&str>>) -> ObjectInstance {
         let values = rows
             .into_iter()
@@ -970,6 +976,18 @@ mod tests {
             "wordEncoding"
         )
         .expect("bool"));
+    }
+
+    #[test]
+    fn numeric_input_reads_typed_integer_storage_exactly() {
+        let input = numeric_input_from_value(
+            &poisoned_integer_vector(IntegerStorage::I16(vec![2, 3]), 2),
+            "ind2word",
+        )
+        .expect("numeric");
+
+        assert_eq!(input.values, vec![2.0, 3.0]);
+        assert_eq!(input.shape, vec![1, 2]);
     }
 
     #[tokio::test]

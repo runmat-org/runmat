@@ -11,6 +11,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::html::{extract_html_text_value, ExtractionMethod};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
@@ -258,7 +259,7 @@ fn nonempty_source(value: &str) -> BuiltinResult<String> {
 fn parse_pages(value: &Value) -> BuiltinResult<Vec<usize>> {
     let raw = match value {
         Value::Num(value) => vec![*value],
-        Value::Tensor(tensor) => tensor.data.clone(),
+        Value::Tensor(tensor) => tensor_utils::tensor_values_f64(tensor),
         other => {
             return Err(extract_error(
                 &ERROR_INVALID_INPUT,
@@ -477,7 +478,7 @@ fn xml_unescape(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CellArray, Tensor};
+    use runmat_builtins::{CellArray, IntegerStorage, Tensor};
     use runmat_time::unix_timestamp_ms;
     use std::io::Write;
 
@@ -502,6 +503,18 @@ mod tests {
             Value::String(text) => text,
             other => panic!("expected string, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_pages_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 5]), vec![1, 2])
+            .expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+
+        assert_eq!(
+            parse_pages(&Value::Tensor(tensor)).expect("pages"),
+            vec![2, 5]
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]

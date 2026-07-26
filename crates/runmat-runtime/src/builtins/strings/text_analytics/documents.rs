@@ -1323,7 +1323,7 @@ fn parse_remove_words_selector(value: &Value) -> BuiltinResult<RemoveWordsSelect
 fn parse_remove_words_indices(value: &Value) -> BuiltinResult<Vec<usize>> {
     let raw = match value {
         Value::Num(value) => vec![*value],
-        Value::Tensor(tensor) => tensor.data.clone(),
+        Value::Tensor(tensor) => tensor_utils::tensor_values_f64(tensor),
         other => {
             return Err(text_analytics_error(
                 "removeWords",
@@ -2536,9 +2536,10 @@ fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinRes
         keep_cols.len(),
         "bagOfWords",
     )?);
+    let values = tensor_utils::tensor_values_f64_cow(&tensor);
     for col in keep_cols {
         for row in 0..tensor.rows {
-            filtered_counts.push(tensor.data[row + col * tensor.rows]);
+            filtered_counts.push(values[row + col * tensor.rows]);
         }
     }
     bag_object(vocabulary, filtered_counts, tensor.rows)
@@ -2634,10 +2635,11 @@ fn filter_bag_columns(
         .collect::<Vec<_>>();
     let mut new_vocab = Vec::with_capacity(keep.len());
     let mut new_counts = Vec::with_capacity(counts.rows * keep.len());
+    let count_values = tensor_utils::tensor_values_f64_cow(&counts);
     for col in keep {
         new_vocab.push(vocabulary[col].clone());
         for row in 0..counts.rows {
-            new_counts.push(counts.data[row + col * counts.rows]);
+            new_counts.push(count_values[row + col * counts.rows]);
         }
     }
     bag_object(new_vocab, new_counts, counts.rows)
@@ -2805,6 +2807,12 @@ mod tests {
         let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
         tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
+    }
+
+    fn poisoned_integer_vector(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        tensor
     }
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -3672,5 +3680,47 @@ mod tests {
         ] {
             assert!(parse_positive_integer(&value, "test").is_err());
         }
+    }
+
+    #[test]
+    fn remove_words_indices_read_typed_integer_storage_exactly() {
+        let tensor = poisoned_integer_vector(IntegerStorage::U16(vec![1, 3]), vec![1, 2]);
+
+        assert_eq!(
+            parse_remove_words_indices(&Value::Tensor(tensor)).expect("indices"),
+            vec![0, 2]
+        );
+    }
+
+    #[test]
+    fn bag_column_filters_read_typed_integer_storage_exactly() {
+        let mut bag = ObjectInstance::new(BAG_OF_WORDS_CLASS.to_string());
+        bag.properties.insert(
+            "Vocabulary".to_string(),
+            Value::StringArray(
+                StringArray::new(vec!["keep".to_string(), "drop".to_string()], vec![1, 2]).unwrap(),
+            ),
+        );
+        bag.properties.insert(
+            "Counts".to_string(),
+            Value::Tensor(poisoned_integer_vector(
+                IntegerStorage::U16(vec![1, 2, 3, 4]),
+                vec![2, 2],
+            )),
+        );
+        bag.properties
+            .insert("NumWords".to_string(), Value::Num(2.0));
+        bag.properties
+            .insert("NumDocuments".to_string(), Value::Num(2.0));
+
+        let filtered = object(
+            run_remove_words(vec![Value::Object(bag), Value::String("drop".to_string())])
+                .expect("filtered"),
+        );
+
+        assert_eq!(string_array_property(&filtered, "Vocabulary"), vec!["keep"]);
+        let counts = tensor_property(&filtered, "Counts");
+        assert_eq!(counts.shape, vec![2, 1]);
+        assert_eq!(counts.data, vec![1.0, 2.0]);
     }
 }

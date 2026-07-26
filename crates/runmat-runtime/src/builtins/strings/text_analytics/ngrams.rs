@@ -11,6 +11,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::common::is_missing_string;
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
@@ -323,7 +324,7 @@ fn parse_options(args: &[Value], start: usize) -> BuiltinResult<Option<Vec<usize
 fn parse_lengths(value: &Value) -> BuiltinResult<Vec<usize>> {
     let raw = match value {
         Value::Num(n) => vec![*n],
-        Value::Tensor(tensor) if !tensor.data.is_empty() => tensor.data.clone(),
+        Value::Tensor(tensor) if !tensor.data.is_empty() => tensor_utils::tensor_values_f64(tensor),
         other => {
             return Err(ngrams_error(format!(
             "bagOfNgrams: NgramLengths must be a positive integer scalar or vector, got {other:?}"
@@ -691,7 +692,7 @@ fn vocabulary_array(ngrams: &[Vec<String>]) -> BuiltinResult<StringArray> {
 mod tests {
     use super::*;
     use crate::builtins::strings::text_analytics::documents::TOKENIZED_DOCUMENT_CLASS;
-    use runmat_builtins::CellArray;
+    use runmat_builtins::{CellArray, IntegerStorage};
 
     fn run(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(bag_of_ngrams_builtin(args))
@@ -725,6 +726,18 @@ mod tests {
             Value::Cell(CellArray::new(values, rows, 1).unwrap()),
         );
         Value::Object(object)
+    }
+
+    #[test]
+    fn parse_lengths_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![1, 3]), vec![1, 2])
+            .expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+
+        assert_eq!(
+            parse_lengths(&Value::Tensor(tensor)).expect("lengths"),
+            vec![1, 3]
+        );
     }
 
     fn string_array_property(object: &ObjectInstance, name: &str) -> StringArray {
