@@ -1091,6 +1091,12 @@ fn coerce_host_value(value: Value) -> BuiltinResult<Tensor> {
 }
 
 fn cast_tensor(mut tensor: Tensor, dtype: DataClass) -> BuiltinResult<(Tensor, bool)> {
+    if tensor.integer_storage().is_some() {
+        tensor = tensor::integer_tensor_to_f64(tensor).map_err(|err| {
+            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
+        })?;
+    }
+
     let logical = match dtype {
         DataClass::Logical => {
             convert_to_logical(&mut tensor.data)?;
@@ -1297,6 +1303,34 @@ pub(crate) mod tests {
                     u64::MAX,
                 ]))
             );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gpu_array_noninteger_class_uploads_read_typed_integer_storage_exactly() {
+        test_support::with_test_provider(|_| {
+            for (class_name, expected, logical) in [
+                ("double", vec![2.0, 4.0], false),
+                ("single", vec![2.0, 4.0], false),
+                ("logical", vec![1.0, 1.0], true),
+            ] {
+                let mut tensor = Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![1, 2])
+                    .expect("integer tensor");
+                tensor.data = vec![99.0, 101.0];
+
+                let uploaded = call(Value::Tensor(tensor), vec![Value::from(class_name)])
+                    .expect("gpuArray class upload");
+                let Value::GpuTensor(handle) = uploaded else {
+                    panic!("expected gpu tensor for {class_name}");
+                };
+                assert_eq!(runmat_accelerate_api::handle_is_logical(&handle), logical);
+                assert!(runmat_accelerate_api::handle_integer_type(&handle).is_none());
+                let gathered =
+                    test_support::gather(Value::GpuTensor(handle)).expect("gather uploaded tensor");
+                assert_eq!(gathered.shape, vec![1, 2]);
+                assert_eq!(gathered.data, expected, "{class_name}");
+            }
         });
     }
 
