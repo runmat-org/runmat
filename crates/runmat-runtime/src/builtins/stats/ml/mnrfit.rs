@@ -519,9 +519,10 @@ fn design_matrix(x: &Tensor, constant: bool) -> BuiltinResult<Vec<f64>> {
         }
         out_col = 1;
     }
+    let values = tensor::tensor_values_f64_cow(x);
     for col in 0..x_cols {
         for row in 0..rows {
-            design[row + (out_col + col) * rows] = x.data[row + col * rows];
+            design[row + (out_col + col) * rows] = values[row + col * rows];
         }
     }
     Ok(design)
@@ -535,9 +536,10 @@ fn compact_complete_cases(
     weights: &mut Vec<f64>,
 ) -> BuiltinResult<usize> {
     let rows = x.rows();
+    let values = tensor::tensor_values_f64_cow(x);
     let keep = (0..rows)
         .filter(|row| {
-            let x_complete = (0..x.cols()).all(|col| x.data[row + col * rows].is_finite());
+            let x_complete = (0..x.cols()).all(|col| values[*row + col * rows].is_finite());
             let y_complete = weights[*row].is_finite()
                 && weights[*row] > 0.0
                 && outcomes.iter().all(|outcome| outcome[*row].is_finite());
@@ -886,9 +888,8 @@ fn scalar_text(value: &Value) -> Option<String> {
 }
 
 fn numeric_tensor(label: &str, value: Value) -> BuiltinResult<Tensor> {
-    let tensor = tensor::value_into_tensor_for(label, value)
-        .map_err(|_| invalid(format!("mnrfit: {label} must be numeric")))?;
-    tensor::integer_tensor_to_f64(tensor).map_err(|err| invalid(format!("mnrfit: {label}: {err}")))
+    tensor::value_into_tensor_for(label, value)
+        .map_err(|_| invalid(format!("mnrfit: {label} must be numeric")))
 }
 
 fn numeric_vector(value: Value, label: &str) -> BuiltinResult<Vec<f64>> {
@@ -896,12 +897,13 @@ fn numeric_vector(value: Value, label: &str) -> BuiltinResult<Vec<f64>> {
     if tensor.shape.iter().copied().filter(|dim| *dim > 1).count() > 1 {
         return Err(invalid(format!("mnrfit: {label} must be a vector")));
     }
-    if tensor.data.iter().any(|value| !value.is_finite()) {
+    let values = tensor::tensor_values_f64(&tensor);
+    if values.iter().any(|value| !value.is_finite()) {
         return Err(invalid(format!(
             "mnrfit: {label} must contain finite values"
         )));
     }
-    Ok(tensor::tensor_values_f64(&tensor))
+    Ok(values)
 }
 
 fn numeric_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
