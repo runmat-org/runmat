@@ -1254,8 +1254,10 @@ pub(crate) mod tests {
         let _guard = random::test_lock().lock().unwrap();
         reset_rng_clean();
         let lower = u64::MAX - 4;
-        let bounds = Tensor::new_integer(IntegerStorage::U64(vec![lower, u64::MAX]), vec![1, 2])
-            .expect("uint64 bounds");
+        let mut bounds =
+            Tensor::new_integer(IntegerStorage::U64(vec![lower, u64::MAX]), vec![1, 2])
+                .expect("uint64 bounds");
+        bounds.data = vec![1.0, 1.0];
         let result = block_on(randi_builtin(vec![
             Value::Tensor(bounds),
             Value::Num(1.0),

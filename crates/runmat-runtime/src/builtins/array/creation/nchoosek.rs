@@ -754,20 +754,22 @@ mod tests {
 
         for storage in storages {
             let values = storage.exact_values();
-            let scalar = Tensor::new_integer(
+            let mut scalar = Tensor::new_integer(
                 storage
                     .from_exact_values_like(vec![values[0].clone()])
                     .expect("scalar storage"),
                 vec![1, 1],
             )
             .expect("scalar tensor");
-            let k = Tensor::new_integer(
+            scalar.data = vec![0.0];
+            let mut k = Tensor::new_integer(
                 storage
                     .from_exact_values_like(vec![one_like(&values[0])])
                     .expect("k storage"),
                 vec![1, 1],
             )
             .expect("k tensor");
+            k.data = vec![0.0];
             assert_eq!(
                 call(Value::Tensor(scalar), Value::Tensor(k)).expect("scalar coefficient"),
                 Value::Int(values[0].clone())
@@ -783,7 +785,9 @@ mod tests {
                     values[2].clone(),
                 ])
                 .expect("expected combinations");
-            let input = Tensor::new_integer(storage.clone(), vec![1, 3]).expect("integer vector");
+            let mut input =
+                Tensor::new_integer(storage.clone(), vec![1, 3]).expect("integer vector");
+            input.data = vec![0.0; 3];
             let Value::Tensor(output) =
                 call(Value::Tensor(input), Value::Num(2.0)).expect("combinations")
             else {

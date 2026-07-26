@@ -11,6 +11,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::table::{
     categorical_label_at, is_tabular_object, select_rows, table_from_columns, table_height,
     table_variable_names_from_object, table_variables, value_row_count,
@@ -1836,7 +1837,9 @@ fn value_as_numeric_scalar(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Some(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Some(if array.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -2016,14 +2019,18 @@ mod tests {
 
     #[test]
     fn accumarray_accepts_exact_integer_subscripts_data_and_size_vectors() {
-        let subs = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::U16(vec![1, 3, 4, 2]), vec![4, 1]).unwrap(),
-        );
-        let data = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::I16(vec![10, 20, 30, 40]), vec![4, 1]).unwrap(),
-        );
-        let size =
-            Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![4, 1]), vec![1, 2]).unwrap());
+        let mut subs_tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 3, 4, 2]), vec![4, 1]).unwrap();
+        subs_tensor.data = vec![0.0; 4];
+        let subs = Value::Tensor(subs_tensor);
+        let mut data_tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![10, 20, 30, 40]), vec![4, 1]).unwrap();
+        data_tensor.data = vec![0.0; 4];
+        let data = Value::Tensor(data_tensor);
+        let mut size_tensor =
+            Tensor::new_integer(IntegerStorage::U8(vec![4, 1]), vec![1, 2]).unwrap();
+        size_tensor.data = vec![0.0; 2];
+        let size = Value::Tensor(size_tensor);
 
         let out = block_on(accumarray_builtin(subs, data, vec![size])).unwrap();
 
@@ -2034,6 +2041,17 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn grouping_numeric_scalar_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1]).unwrap();
+        tensor.data = vec![0.0];
+
+        assert_eq!(
+            value_as_numeric_scalar(&Value::Tensor(tensor)),
+            Some(2026.0)
+        );
     }
 
     #[test]
