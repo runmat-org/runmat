@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::stats::summary::distribution_math::student_t_inv;
 
 pub(in crate::builtins::table) fn grpstats_impl(
@@ -194,7 +195,9 @@ fn scalar_number(value: &Value) -> Option<f64> {
     match value {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Some(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     }
 }
@@ -630,6 +633,20 @@ impl GroupSummary {
             vec![groups, self.cols, self.depth]
         };
         Tensor::new(self.data, shape).map_err(invalid_variable)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
+
+    #[test]
+    fn scalar_number_reads_typed_integer_storage_exactly() {
+        let mut alpha = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        alpha.data[0] = 0.25;
+
+        assert_eq!(scalar_number(&Value::Tensor(alpha)), Some(1.0));
     }
 }
 

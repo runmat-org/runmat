@@ -259,29 +259,22 @@ async fn positive_integer_arg(value: &Value, label: &str) -> BuiltinResult<usize
                 )
             });
     }
-    let raw = match gathered {
-        Value::Num(value) => value,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+    let Some(position) = (match gathered {
+        Value::Num(value) => position_value_to_usize(value),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => position_tensor_to_usize(&tensor),
         _ => {
             return Err(opentoline_error(
                 &ERROR_POSITION,
                 format!("opentoline: {label} must be a numeric scalar"),
             ))
         }
-    };
-    if !raw.is_finite() || raw < 1.0 || raw.fract().abs() > f64::EPSILON {
+    }) else {
         return Err(opentoline_error(
             &ERROR_POSITION,
             format!("opentoline: {label} must be a positive integer scalar"),
         ));
-    }
-    if raw > usize::MAX as f64 {
-        return Err(opentoline_error(
-            &ERROR_POSITION,
-            format!("opentoline: {label} is too large"),
-        ));
-    }
-    Ok(raw as usize)
+    };
+    Ok(position)
 }
 
 fn text_without_gather(value: &Value) -> Option<String> {
@@ -314,6 +307,26 @@ fn parse_positive_integer_text(text: &str, label: &str) -> BuiltinResult<usize> 
         ));
     }
     Ok(value)
+}
+
+fn position_value_to_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 1.0 || value.fract().abs() > f64::EPSILON {
+        return None;
+    }
+    if value > usize::MAX as f64 {
+        return None;
+    }
+    Some(value as usize)
+}
+
+fn position_tensor_to_usize(tensor: &Tensor) -> Option<usize> {
+    if let Some(storage) = tensor.integer_storage() {
+        return storage
+            .value_at(0)
+            .and_then(|value| value.try_to_usize())
+            .filter(|position| *position > 0);
+    }
+    position_value_to_usize(tensor.data[0])
 }
 
 async fn resolve_file(name: &str) -> BuiltinResult<PathBuf> {
@@ -406,6 +419,23 @@ mod tests {
         } else {
             assert!(parsed.is_err());
         }
+    }
+
+    #[test]
+    fn opentoline_tensor_positions_read_integer_storage_exactly() {
+        let mut line =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![9]), vec![1, 1]).unwrap();
+        line.data[0] = 0.0;
+
+        assert_eq!(
+            block_on(positive_integer_arg(&Value::Tensor(line), "line")).unwrap(),
+            9
+        );
+
+        let mut zero =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
+        zero.data[0] = 9.0;
+        assert!(block_on(positive_integer_arg(&Value::Tensor(zero), "line")).is_err());
     }
 
     #[test]

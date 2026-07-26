@@ -2507,8 +2507,9 @@ async fn holidays_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         1 => {
             let tensor = tensor_from_numeric(args[0].clone(), "holidays");
             if let Ok(tensor) = tensor {
-                if tensor.data.len() == 1 && (1000.0..=9999.0).contains(&tensor.data[0]) {
-                    let keys = market_holiday_keys_for_year(tensor.data[0].round() as i32)?;
+                let year = (tensor.data.len() == 1).then(|| tensor::tensor_value_f64(&tensor, 0));
+                if let Some(year) = year.filter(|year| (1000.0..=9999.0).contains(year)) {
+                    let keys = market_holiday_keys_for_year(year.round() as i32)?;
                     let len = keys.len();
                     return datetime_object_from_serials(
                         keys.into_iter().map(|key| key as f64).collect(),
@@ -4025,6 +4026,16 @@ mod tests {
 
         let holidays = futures::executor::block_on(holidays_builtin(vec![Value::Num(2024.0)]))
             .expect("holidays");
+        let serials = serials_from_datetime_value(&holidays).expect("holiday serials");
+        assert!(serials.data.contains(&serial_for_date(2024, 1, 1)));
+
+        let mut typed_year =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2024]), vec![1, 1])
+                .unwrap();
+        typed_year.data[0] = 0.0;
+        let holidays =
+            futures::executor::block_on(holidays_builtin(vec![Value::Tensor(typed_year)]))
+                .expect("holidays from typed year");
         let serials = serials_from_datetime_value(&holidays).expect("holiday serials");
         assert!(serials.data.contains(&serial_for_date(2024, 1, 1)));
     }
