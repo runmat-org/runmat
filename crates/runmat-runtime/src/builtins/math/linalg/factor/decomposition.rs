@@ -1273,7 +1273,22 @@ fn complex_scalar(value: &Value, label: &str) -> BuiltinResult<(f64, f64)> {
         Value::Tensor(tensor) if tensor.data.len() == 1 => {
             Ok((tensor::tensor_value_f64(tensor, 0), 0.0))
         }
-        Value::ComplexTensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
+            if let Some(storage) = tensor.integer_data.as_ref() {
+                let re = storage
+                    .real
+                    .value_at(0)
+                    .expect("one-element complex integer real storage")
+                    .to_f64();
+                let im = storage
+                    .imag
+                    .value_at(0)
+                    .expect("one-element complex integer imaginary storage")
+                    .to_f64();
+                return Ok((re, im));
+            }
+            Ok(tensor.data[0])
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok((if array.data[0] != 0 { 1.0 } else { 0.0 }, 0.0))
         }
@@ -1542,6 +1557,19 @@ mod tests {
         assert_eq!(
             complex_scalar(&Value::Tensor(scale), "scale").unwrap(),
             (3.0, 0.0)
+        );
+
+        let storage = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![4]),
+            IntegerStorage::I16(vec![-2]),
+        )
+        .expect("typed complex storage");
+        let mut complex_scale =
+            ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex scale");
+        complex_scale.data[0] = (f64::NAN, f64::NAN);
+        assert_eq!(
+            complex_scalar(&Value::ComplexTensor(complex_scale), "scale").unwrap(),
+            (4.0, -2.0)
         );
     }
 
