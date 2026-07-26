@@ -223,7 +223,7 @@ async fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalB
             shape: vec![1, 1],
         }),
         Value::Int(i) => Ok(LogicalBuffer {
-            data: vec![if i.to_i64() != 0 { 1 } else { 0 }],
+            data: vec![u8::from(!i.is_zero())],
             shape: vec![1, 1],
         }),
         Value::Complex(re, im) => Ok(LogicalBuffer {
@@ -251,8 +251,21 @@ async fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalB
 }
 
 fn tensor_to_logical_buffer(tensor: Tensor) -> BuiltinResult<LogicalBuffer> {
-    let Tensor { data, shape, .. } = tensor;
-    let mapped = data.into_iter().map(logical_from_f64).collect();
+    let shape = tensor.shape.clone();
+    let mapped = if let Some(storage) = tensor.integer_storage() {
+        (0..storage.len())
+            .map(|index| {
+                u8::from(
+                    !storage
+                        .value_at(index)
+                        .expect("typed integer storage is structurally valid")
+                        .is_zero(),
+                )
+            })
+            .collect()
+    } else {
+        tensor.data.into_iter().map(logical_from_f64).collect()
+    };
     Ok(LogicalBuffer {
         data: mapped,
         shape,
@@ -343,7 +356,7 @@ pub(crate) mod tests {
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -419,6 +432,30 @@ pub(crate) mod tests {
             }
             other => panic!("expected logical array, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn xor_reads_typed_integer_storage_exactly_for_truth_values() {
+        let lhs = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+            vec![1, 3],
+        )
+        .unwrap();
+        let rhs = Tensor::new_integer(IntegerStorage::I16(vec![0, -2, -3]), vec![1, 3]).unwrap();
+        let result = run_xor(Value::Tensor(lhs), Value::Tensor(rhs)).unwrap();
+        match result {
+            Value::LogicalArray(array) => {
+                assert_eq!(array.shape, vec![1, 3]);
+                assert_eq!(array.data, vec![0, 0, 0]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+
+        assert_eq!(
+            run_xor(Value::Int(IntValue::U64(u64::MAX)), Value::Bool(false)).unwrap(),
+            Value::Bool(true)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
