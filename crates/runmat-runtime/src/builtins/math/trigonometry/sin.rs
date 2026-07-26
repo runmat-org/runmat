@@ -442,7 +442,8 @@ async fn convert_to_gpu_complex(value: Value) -> BuiltinResult<Value> {
         }
         Value::Num(n) => convert_to_gpu_complex(Value::Complex(n, 0.0)).await,
         Value::Tensor(tensor) => {
-            let data = tensor.data.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
+            let values = tensor::tensor_values_f64_cow(&tensor);
+            let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
             let complex = ComplexTensor::new(data, tensor.shape.clone())
                 .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
             convert_to_gpu_complex(Value::ComplexTensor(complex)).await
@@ -477,7 +478,8 @@ async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(tensor) => {
-            let data = tensor.data.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
+            let values = tensor::tensor_values_f64_cow(&tensor);
+            let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
             let complex = ComplexTensor::new(data, tensor.shape.clone())
                 .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
             Ok(complex_tensor_into_value(complex))
@@ -601,6 +603,24 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sin_host_complex_conversion_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![-3, 0, 5]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+
+        let result =
+            block_on(convert_to_host_complex(Value::Tensor(tensor))).expect("complex conversion");
+        let Value::ComplexTensor(out) = result else {
+            panic!("expected complex tensor result");
+        };
+        assert_eq!(out.shape, vec![3, 1]);
+        assert_eq!(out.data, vec![(-3.0, 0.0), (0.0, 0.0), (5.0, 0.0)]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
