@@ -1243,8 +1243,16 @@ fn optional_finite_scalar(
     match value {
         Value::Num(n) if n.is_finite() => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 && tensor.data[0].is_finite() => {
-            Ok(tensor.data[0])
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            let n = crate::builtins::common::tensor::tensor_value_f64(tensor, 0);
+            if n.is_finite() {
+                Ok(n)
+            } else {
+                Err(deep_learning_error(
+                    "adamupdate",
+                    format!("adamupdate: {label} must be a finite numeric scalar, got {value:?}"),
+                ))
+            }
         }
         other => Err(deep_learning_error(
             "adamupdate",

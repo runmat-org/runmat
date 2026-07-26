@@ -285,8 +285,16 @@ fn logical_scalar(value: &Value, function: &'static str, label: &str) -> Builtin
                 ))
             }
         }
-        Value::Tensor(t) if t.data.len() == 1 && (t.data[0] == 0.0 || t.data[0] == 1.0) => {
-            Ok(t.data[0] != 0.0)
+        Value::Tensor(t) if t.data.len() == 1 => {
+            let n = crate::builtins::common::tensor::tensor_value_f64(t, 0);
+            if n == 0.0 || n == 1.0 {
+                Ok(n != 0.0)
+            } else {
+                Err(deep_learning_error(
+                    function,
+                    format!("{function}: {label} must be logical scalar true or false"),
+                ))
+            }
         }
         other => Err(deep_learning_error(
             function,

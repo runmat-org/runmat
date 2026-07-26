@@ -10,8 +10,8 @@ use super::training::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::{handle_precision, handle_storage, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
-    CellArray, IntValue, LogicalArray, NumericDType, ObjectInstance, StringArray, StructValue,
-    Tensor, Value,
+    CellArray, IntValue, IntegerStorage, LogicalArray, NumericDType, ObjectInstance, StringArray,
+    StructValue, Tensor, Value,
 };
 
 #[runmat_macros::runtime_builtin(
@@ -44,6 +44,12 @@ async fn deep_learning_network_grad_helper(net: Value, x: Value) -> crate::Built
     let y = forward_builtin(net.clone(), x, vec![]).await?;
     let loss = super::autodiff::dlarray_sum_builtin(y, vec![Value::String("all".into())])?;
     super::autodiff::dlgradient_builtin(loss, vec![net]).await
+}
+
+fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
+    let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+    tensor.data.fill(poison);
+    Value::Tensor(tensor)
 }
 
 #[test]
@@ -115,6 +121,28 @@ fn layer_constructors_preserve_core_properties_and_name_values() {
 }
 
 #[test]
+fn layer_constructors_read_typed_integer_size_storage_exactly() {
+    let output_size = poisoned_int_tensor(IntegerStorage::U16(vec![10]), vec![1, 1], -1.0);
+    let fc = block_on(fully_connected_layer_builtin(output_size, vec![])).unwrap();
+    let Value::Object(object) = &fc else {
+        panic!("expected object");
+    };
+    assert_eq!(object.properties.get("OutputSize"), Some(&Value::Num(10.0)));
+
+    let input_size = poisoned_int_tensor(IntegerStorage::U16(vec![2, 3]), vec![1, 2], f64::NAN);
+    let input = block_on(feature_input_layer_builtin(input_size, vec![])).unwrap();
+    let Value::Object(object) = &input else {
+        panic!("expected object");
+    };
+    assert_eq!(
+        object.properties.get("InputSize"),
+        Some(&Value::Tensor(
+            Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()
+        ))
+    );
+}
+
+#[test]
 fn recurrent_and_input_layers_accept_common_shapes() {
     let input = block_on(sequence_input_layer_builtin(
         Value::Tensor(Tensor::new(vec![4.0, 2.0], vec![1, 2]).unwrap()),
@@ -182,6 +210,26 @@ fn training_options_and_layer_graph_materialize_metadata() {
         panic!("expected names");
     };
     assert_eq!(names.data, vec!["relu"]);
+}
+
+#[test]
+fn dlnetwork_initialize_option_reads_typed_integer_storage_exactly() {
+    let relu = block_on(relu_layer_builtin(vec![
+        Value::String("Name".into()),
+        Value::String("relu".into()),
+    ]))
+    .unwrap();
+    let initialize = poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1], 1.0);
+    let net = block_on(dlnetwork_builtin(vec![
+        Value::Cell(CellArray::new(vec![relu], 1, 1).unwrap()),
+        Value::String("Initialize".into()),
+        initialize,
+    ]))
+    .unwrap();
+    let Value::Object(object) = net else {
+        panic!("expected network object");
+    };
+    assert_eq!(object.class_name, "dlnetwork");
 }
 
 #[test]
@@ -648,6 +696,26 @@ fn export_onnx_network_writes_supported_feedforward_graph() {
             "missing ONNX payload string {needle}"
         );
     }
+}
+
+#[test]
+fn export_onnx_options_read_typed_integer_storage_exactly() {
+    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("typed-options.onnx");
+    let result = block_on(export_onnx_network_builtin(vec![
+        net,
+        Value::String(path.to_string_lossy().into_owned()),
+        Value::String("OpsetVersion".into()),
+        poisoned_int_tensor(IntegerStorage::U16(vec![14]), vec![1, 1], -1.0),
+        Value::String("BatchSize".into()),
+        poisoned_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1], -1.0),
+        Value::String("Verbose".into()),
+        poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1], 1.0),
+    ]))
+    .unwrap();
+    assert_eq!(result, Value::OutputList(Vec::new()));
+    assert!(path.exists());
 }
 
 #[test]
@@ -1814,6 +1882,25 @@ fn adamupdate_accepts_zero_decay_and_rejects_integer_tensor_state() {
     ]))
     .unwrap_err();
     assert!(err.to_string().contains("double or single"));
+}
+
+#[test]
+fn adamupdate_hyperparameters_read_typed_integer_storage_exactly() {
+    let out = block_on(adamupdate_builtin(vec![
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.1], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        poisoned_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1], f64::NAN),
+        poisoned_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1], f64::NAN),
+        poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1], f64::NAN),
+        poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1], f64::NAN),
+    ]))
+    .expect("adamupdate");
+    let Value::Tensor(parameters) = out else {
+        panic!("expected tensor parameters");
+    };
+    assert!((parameters.data[0] - 0.0000001).abs() < 1.0e-9);
 }
 
 #[test]
