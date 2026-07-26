@@ -592,8 +592,8 @@ fn parse_cost(value: &Value) -> BuiltinResult<[[f64; 2]; 2]> {
     if tensor.shape.as_slice() != [2, 2] {
         return Err(invalid("perfcurve: Cost must be a 2-by-2 numeric matrix"));
     }
-    if tensor
-        .data
+    let values = tensor::tensor_values_f64(tensor);
+    if values
         .iter()
         .any(|value| !value.is_finite() || *value < 0.0)
     {
@@ -601,17 +601,14 @@ fn parse_cost(value: &Value) -> BuiltinResult<[[f64; 2]; 2]> {
             "perfcurve: Cost entries must be finite and nonnegative",
         ));
     }
-    Ok([
-        [tensor.data[0], tensor.data[2]],
-        [tensor.data[1], tensor.data[3]],
-    ])
+    Ok([[values[0], values[2]], [values[1], values[3]]])
 }
 
 fn score_vector(value: Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
             ensure_vector_shape(&tensor.shape, "scores")?;
-            Ok(tensor.data)
+            Ok(tensor::tensor_into_values_f64(tensor))
         }
         Value::Num(value) => Ok(vec![value]),
         Value::Int(value) => Ok(vec![value.to_f64()]),
@@ -625,7 +622,7 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
             ensure_vector_shape(&tensor.shape, name)?;
-            Ok(tensor.data.clone())
+            Ok(tensor::tensor_values_f64(tensor))
         }
         Value::Num(value) => Ok(vec![*value]),
         Value::Int(value) => Ok(vec![value.to_f64()]),
@@ -1531,7 +1528,9 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, shape: &[usize]) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, shape.to_vec()).unwrap())
+        let mut tensor = Tensor::new_integer(storage, shape.to_vec()).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn output_tensor(value: &Value, index: usize) -> &Tensor {
@@ -1591,6 +1590,10 @@ mod tests {
             vec![
                 Value::String("Weights".into()),
                 int_tensor(IntegerStorage::U8(vec![1, 2, 1, 1]), &[4, 1]),
+                Value::String("Prior".into()),
+                int_tensor(IntegerStorage::U8(vec![1, 1]), &[1, 2]),
+                Value::String("Cost".into()),
+                int_tensor(IntegerStorage::U8(vec![0, 1, 1, 0]), &[2, 2]),
             ],
         )
         .await

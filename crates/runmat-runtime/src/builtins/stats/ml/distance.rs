@@ -416,8 +416,7 @@ async fn value_to_matrix(name: &'static str, value: Value) -> BuiltinResult<Tens
             format!("{name}: input must be a numeric vector or 2-D matrix"),
         ));
     }
-    tensor::integer_tensor_to_f64(tensor)
-        .map_err(|err| distance_error(name, format!("{name}: {err}")))
+    Ok(tensor)
 }
 
 async fn gather_value(name: &'static str, value: Value) -> BuiltinResult<Value> {
@@ -569,7 +568,7 @@ async fn vector_parameter(
             format!("{name}: {label} length must match the number of columns"),
         ));
     }
-    Ok(tensor.data)
+    Ok(tensor::tensor_into_values_f64(tensor))
 }
 
 async fn matrix_parameter(
@@ -585,7 +584,7 @@ async fn matrix_parameter(
             format!("{name}: {label} must be a square matrix matching the number of columns"),
         ));
     }
-    Ok(tensor.data)
+    Ok(tensor::tensor_into_values_f64(tensor))
 }
 
 fn split_pdist2_options(args: Vec<Value>) -> BuiltinResult<(Vec<Value>, Option<Selection>)> {
@@ -964,7 +963,7 @@ fn row_distance(
 }
 
 fn row_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
-    tensor.data[col * tensor.rows + row]
+    tensor::tensor_value_f64(tensor, col * tensor.rows + row)
 }
 
 fn row_has_nan(tensor: &Tensor, row: usize) -> bool {
@@ -1530,7 +1529,7 @@ fn vector_to_square(tensor: Tensor) -> BuiltinResult<Tensor> {
     let mut idx = 0usize;
     for col in 0..size {
         for row in (col + 1)..size {
-            let value = tensor.data[idx];
+            let value = tensor::tensor_value_f64(&tensor, idx);
             out[col * size + row] = value;
             out[row * size + col] = value;
             idx += 1;
@@ -1955,5 +1954,21 @@ mod tests {
                 20.0_f64.sqrt(),
             ]
         );
+    }
+
+    #[test]
+    fn squareform_reads_typed_integer_storage_exactly() {
+        let vector = poisoned_int_tensor(IntegerStorage::U8(vec![5, 4, 2]), 1, 3);
+        let matrix = tensor_out(block_on(squareform_builtin(vector, Vec::new())).unwrap());
+        assert_eq!(matrix.shape, vec![3, 3]);
+        assert_eq!(
+            matrix.data,
+            vec![0.0, 5.0, 4.0, 5.0, 0.0, 2.0, 4.0, 2.0, 0.0]
+        );
+
+        let matrix = poisoned_int_tensor(IntegerStorage::U8(vec![0, 5, 4, 5, 0, 2, 4, 2, 0]), 3, 3);
+        let vector = tensor_out(block_on(squareform_builtin(matrix, Vec::new())).unwrap());
+        assert_eq!(vector.shape, vec![1, 3]);
+        assert_eq!(vector.data, vec![5.0, 4.0, 2.0]);
     }
 }
