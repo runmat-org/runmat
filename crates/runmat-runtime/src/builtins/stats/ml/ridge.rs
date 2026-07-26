@@ -180,7 +180,16 @@ async fn parse_scaled(value: &Value) -> BuiltinResult<bool> {
         Value::Bool(value) => return Ok(value),
         Value::Num(value) => value,
         Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) => {
+            let values = tensor::tensor_values_f64(&tensor);
+            if values.len() != 1 {
+                return Err(invalid_argument(format!(
+                    "ridge: scaled must be 0, 1, false, or true, got {:?}",
+                    Value::Tensor(tensor)
+                )));
+            }
+            values[0]
+        }
         other => {
             return Err(invalid_argument(format!(
                 "ridge: scaled must be 0, 1, false, or true, got {other:?}"
@@ -273,13 +282,14 @@ fn ridge_parameters(tensor: &Tensor) -> BuiltinResult<Vec<f64>> {
 fn prepare_data(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedRidge> {
     let rows = x.rows;
     let cols = x.cols;
+    let x_values = tensor::tensor_values_f64_cow(x);
     let mut clean_rows = Vec::with_capacity(rows);
     for row in 0..rows {
         let y_value = y[row];
         let mut has_nan = y_value.is_nan();
         let mut has_nonfinite = y_value.is_infinite();
         for col in 0..cols {
-            let value = x_value(x, row, col);
+            let value = x_value(&x_values, rows, row, col);
             has_nan |= value.is_nan();
             has_nonfinite |= value.is_infinite();
         }
@@ -303,7 +313,7 @@ fn prepare_data(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedRidge> {
     for &row in &clean_rows {
         y_mean += y[row];
         for (col, mean) in x_means.iter_mut().enumerate().take(cols) {
-            *mean += x_value(x, row, col);
+            *mean += x_value(&x_values, rows, row, col);
         }
     }
     y_mean /= n as f64;
@@ -313,7 +323,7 @@ fn prepare_data(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedRidge> {
     let mut x_stds = vec![0.0; cols];
     for &row in &clean_rows {
         for (col, std) in x_stds.iter_mut().enumerate().take(cols) {
-            let diff = x_value(x, row, col) - x_means[col];
+            let diff = x_value(&x_values, rows, row, col) - x_means[col];
             *std += diff * diff;
         }
     }
@@ -332,7 +342,7 @@ fn prepare_data(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedRidge> {
         .map_err(|_| internal_error("ridge: standardized design matrix allocation failed"))?;
     for col in 0..cols {
         for &row in &clean_rows {
-            z_data.push((x_value(x, row, col) - x_means[col]) / x_stds[col]);
+            z_data.push((x_value(&x_values, rows, row, col) - x_means[col]) / x_stds[col]);
         }
     }
     let y_centered = clean_rows
@@ -381,8 +391,8 @@ fn solve_ridge(data: &PreparedRidge, lambda: f64) -> BuiltinResult<DVector<f64>>
     Ok(beta)
 }
 
-fn x_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
-    tensor.data[col * tensor.rows + row]
+fn x_value(values: &[f64], rows: usize, row: usize, col: usize) -> f64 {
+    values[col * rows + row]
 }
 
 #[cfg(test)]
@@ -395,8 +405,15 @@ mod tests {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
     }
 
-    fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).unwrap())
+    fn poisoned_int_tensor(
+        storage: IntegerStorage,
+        rows: usize,
+        cols: usize,
+        poison: f64,
+    ) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.fill(poison);
+        Value::Tensor(tensor)
     }
 
     fn tensor_out(value: Value) -> Tensor {
@@ -419,10 +436,11 @@ mod tests {
 
     #[test]
     fn ridge_accepts_typed_integer_response_design_and_k() {
-        let y = int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1);
-        let x = int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1);
-        let k = int_tensor(IntegerStorage::U8(vec![0, 1]), 1, 2);
-        let out = block_on(ridge_builtin(y, x, k, vec![Value::Num(0.0)])).unwrap();
+        let y = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1, f64::NAN);
+        let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1, f64::NAN);
+        let k = poisoned_int_tensor(IntegerStorage::U8(vec![0, 1]), 1, 2, f64::NAN);
+        let scaled = poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1, 1.0);
+        let out = block_on(ridge_builtin(y, x, k, vec![scaled])).unwrap();
         let out = tensor_out(out);
         assert_eq!(out.shape, vec![2, 2]);
         assert!((out.data[0] - 1.0).abs() < 1.0e-10);
