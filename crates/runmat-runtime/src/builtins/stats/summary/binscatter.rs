@@ -352,7 +352,9 @@ fn numeric_selector_index(selector: &Value) -> BuiltinResult<Option<usize>> {
     }
     let raw = match selector {
         Value::Num(value) => Some(*value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Some(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     };
     let Some(value) = raw else {
@@ -594,7 +596,7 @@ fn option_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor::tensor_value_f64(tensor, 0)),
         _ => Err(invalid(format!("binscatter: {name} must be a scalar"))),
     }
 }
@@ -931,7 +933,9 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     #[test]
