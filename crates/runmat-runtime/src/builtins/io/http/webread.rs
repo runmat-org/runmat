@@ -20,6 +20,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::io::json::jsondecode::decode_json_text;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -714,7 +715,7 @@ fn numeric_scalar(value: &Value, context: &str) -> BuiltinResult<f64> {
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(tensor) => {
             if tensor.data.len() == 1 {
-                Ok(tensor.data[0])
+                Ok(tensor_utils::tensor_value_f64(tensor, 0))
             } else {
                 Err(webread_error(context))
             }
@@ -742,7 +743,13 @@ fn value_to_query_string(value: &Value, name: &str) -> BuiltinResult<String> {
         Value::Bool(b) => Ok(if *b { "true".into() } else { "false".into() }),
         Value::Tensor(tensor) => {
             if tensor.data.len() == 1 {
-                Ok(format!("{}", tensor.data[0]))
+                Ok(tensor
+                    .integer_storage()
+                    .and_then(|storage| storage.value_at(0))
+                    .map_or_else(
+                        || format!("{}", tensor.data[0]),
+                        |value| value.decimal_string(),
+                    ))
             } else {
                 Err(webread_error(format!(
                     "webread: query parameter '{}' must be scalar",
@@ -861,6 +868,29 @@ pub(crate) mod tests {
             value_to_query_string(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX)), "id")
                 .expect("query text"),
             "18446744073709551615"
+        );
+    }
+
+    #[test]
+    fn query_text_and_numeric_scalar_read_typed_integer_storage_exactly() {
+        let mut query = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+            vec![1, 1],
+        )
+        .expect("typed query tensor");
+        query.data = vec![0.0];
+        assert_eq!(
+            value_to_query_string(&Value::Tensor(query), "id").expect("query text"),
+            "18446744073709551615"
+        );
+
+        let mut timeout =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2026]), vec![1, 1])
+                .expect("typed timeout tensor");
+        timeout.data = vec![0.0];
+        assert_eq!(
+            numeric_scalar(&Value::Tensor(timeout), "timeout").expect("numeric scalar"),
+            2026.0
         );
     }
 

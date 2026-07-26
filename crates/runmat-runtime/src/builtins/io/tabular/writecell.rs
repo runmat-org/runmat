@@ -19,6 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "writecell";
@@ -712,7 +713,9 @@ fn cell_value_from_value(value: Value) -> BuiltinResult<CellValue> {
         Value::CharArray(ca) if ca.rows == 1 => Ok(CellValue::Text(ca.data.iter().collect())),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(CellValue::Text(sa.data[0].clone())),
         Value::StringArray(sa) if sa.data.is_empty() => Ok(CellValue::Empty),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(CellValue::Number(tensor.data[0])),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(CellValue::Number(tensor::tensor_value_f64(&tensor, 0)))
+        }
         Value::Tensor(tensor) if tensor.data.is_empty() => Ok(CellValue::Empty),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(CellValue::Boolean(logical.data[0] != 0))
@@ -1396,7 +1399,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use std::time::Duration;
 
-    use runmat_builtins::{CharArray, LogicalArray, Tensor};
+    use runmat_builtins::{CharArray, IntegerStorage, LogicalArray, Tensor};
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -1620,10 +1623,13 @@ mod tests {
     fn writecell_accepts_scalar_char_tensor_and_logical_cells() {
         let path = temp_path("csv");
         let filename = path.to_string_lossy().into_owned();
+        let mut typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+            .expect("typed scalar tensor");
+        typed.data = vec![0.0];
         let values = cell(
             vec![
                 Value::CharArray(CharArray::new_row("name")),
-                Value::Tensor(Tensor::new(vec![42.0], vec![1, 1]).expect("scalar tensor")),
+                Value::Tensor(typed),
                 Value::LogicalArray(LogicalArray::new(vec![0], vec![1, 1]).expect("logical")),
             ],
             1,
@@ -1633,7 +1639,7 @@ mod tests {
         block_on(writecell_builtin(values, vec![Value::from(filename)])).expect("writecell");
 
         let contents = fs::read_to_string(&path).expect("read contents");
-        assert_eq!(contents, "\"name\",42,0\n");
+        assert_eq!(contents, "\"name\",2026,0\n");
         let _ = fs::remove_file(path);
     }
 

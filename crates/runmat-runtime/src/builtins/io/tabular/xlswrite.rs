@@ -18,6 +18,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::writecell::{self, CellTable, CellValue, RangeStart};
@@ -1343,7 +1344,9 @@ fn cell_value_from_scalar(value: Value) -> BuiltinResult<CellValue> {
         Value::CharArray(ca) if ca.rows == 1 => Ok(CellValue::Text(ca.data.iter().collect())),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(CellValue::Text(sa.data[0].clone())),
         Value::StringArray(sa) if sa.data.is_empty() => Ok(CellValue::Empty),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(CellValue::Number(tensor.data[0])),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(CellValue::Number(tensor::tensor_value_f64(&tensor, 0)))
+        }
         Value::Tensor(tensor) if tensor.data.is_empty() => Ok(CellValue::Empty),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(CellValue::Boolean(logical.data[0] != 0))
@@ -1558,7 +1561,7 @@ mod tests {
     use super::*;
     use calamine::{open_workbook_auto, open_workbook_auto_from_rs, Data, Reader};
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, SparseTensor};
+    use runmat_builtins::{IntegerStorage, SparseTensor};
     use runmat_time::unix_timestamp_ms;
     use std::fs;
     use std::io::Cursor;
@@ -1639,11 +1642,14 @@ mod tests {
     fn xlswrite_accepts_cell_strings_logicals_and_ints() {
         let path = temp_path("xls");
         let filename = path.to_string_lossy().into_owned();
+        let mut typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+            .expect("typed scalar tensor");
+        typed.data = vec![0.0];
         let values = cell(
             vec![
                 Value::from("name"),
                 Value::Bool(true),
-                Value::Int(IntValue::I32(7)),
+                Value::Tensor(typed),
                 Value::from("tail"),
             ],
             2,
@@ -1662,7 +1668,7 @@ mod tests {
         let range = workbook.worksheet_range("Sheet1").expect("worksheet");
         assert_eq!(range.get((0, 0)), Some(&Data::String("name".to_string())));
         assert_eq!(range.get((0, 1)), Some(&Data::Bool(true)));
-        assert_eq!(range.get((1, 0)), Some(&Data::Float(7.0)));
+        assert_eq!(range.get((1, 0)), Some(&Data::Float(2026.0)));
         assert_eq!(range.get((1, 1)), Some(&Data::String("tail".to_string())));
         let _ = fs::remove_file(path);
     }
