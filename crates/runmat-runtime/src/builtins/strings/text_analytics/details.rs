@@ -9,6 +9,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::dependencies::{
     dependency_details_from_object, dependency_heads_from_object,
@@ -1144,14 +1145,16 @@ fn logical_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.data[0] {
-            0.0 => Ok(false),
-            1.0 => Ok(true),
-            other => Err(text_analytics_error(
-                fn_name,
-                format!("{fn_name}: logical scalar option must be true or false, got {other}"),
-            )),
-        },
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            match tensor_utils::tensor_value_f64(tensor, 0) {
+                0.0 => Ok(false),
+                1.0 => Ok(true),
+                other => Err(text_analytics_error(
+                    fn_name,
+                    format!("{fn_name}: logical scalar option must be true or false, got {other}"),
+                )),
+            }
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         other => Err(text_analytics_error(
             fn_name,
@@ -1167,7 +1170,7 @@ mod tests {
     use crate::builtins::table::{
         categorical_from_args, table_variable_names_from_object, table_variables,
     };
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{IntegerStorage, LogicalArray};
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(tokenized_document_builtin(args))
@@ -1213,6 +1216,26 @@ mod tests {
             Value::Tensor(tensor) => tensor.data,
             other => panic!("expected numeric column {name}, got {other:?}"),
         }
+    }
+
+    fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn logical_scalar_reads_typed_integer_storage_exactly() {
+        assert!(logical_scalar(
+            &poisoned_integer_scalar(IntegerStorage::U64(vec![1])),
+            "addSentenceDetails"
+        )
+        .expect("true"));
+        assert!(!logical_scalar(
+            &poisoned_integer_scalar(IntegerStorage::I16(vec![0])),
+            "addSentenceDetails"
+        )
+        .expect("false"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

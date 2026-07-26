@@ -15,6 +15,7 @@ use runmat_builtins::{
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
     document_shape_from_object, documents_from_object, TOKENIZED_DOCUMENT_CLASS,
@@ -1803,7 +1804,9 @@ fn parse_ngram_range(value: &Value) -> BuiltinResult<(usize, usize)> {
 fn numeric_scalar(value: &Value, fn_name: &str, option: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         other => Err(embedding_error(
             fn_name,
             format!("{fn_name}: {option} must be a numeric scalar, got {other:?}"),
@@ -2341,7 +2344,9 @@ fn parse_numeric_scalar(value: &Value, fn_name: &str, option_name: &str) -> Buil
     let n = match value {
         Value::Num(value) => *value,
         Value::Int(value) => int_value_to_f64(value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            tensor_utils::tensor_value_f64(tensor, 0)
+        }
         other => {
             return Err(embedding_error(
                 fn_name,
@@ -2463,14 +2468,16 @@ fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.data[0] {
-            0.0 => Ok(false),
-            1.0 => Ok(true),
-            other => Err(embedding_error(
-                fn_name,
-                format!("{fn_name}: logical scalar option must be true or false, got {other}"),
-            )),
-        },
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            match tensor_utils::tensor_value_f64(tensor, 0) {
+                0.0 => Ok(false),
+                1.0 => Ok(true),
+                other => Err(embedding_error(
+                    fn_name,
+                    format!("{fn_name}: logical scalar option must be true or false, got {other}"),
+                )),
+            }
+        }
         other => Err(embedding_error(
             fn_name,
             format!("{fn_name}: logical scalar option must be true or false, got {other:?}"),
@@ -2495,7 +2502,9 @@ fn parse_positive_integer(value: &Value, fn_name: &str) -> BuiltinResult<usize> 
     let parsed = match value {
         Value::Num(value) => positive_platform_usize(*value),
         Value::Int(value) => value.try_to_usize().filter(|value| *value > 0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => positive_platform_usize(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            positive_platform_usize(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     };
     parsed.ok_or_else(|| {
@@ -2562,10 +2571,16 @@ fn embedding_error_with_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::CellArray;
+    use runmat_builtins::{CellArray, IntegerStorage};
     use std::fs::File as StdFile;
     use std::io::Write;
     use tempfile::tempdir;
+
+    fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
 
     #[test]
     fn parses_glove_text_embedding() {
@@ -3390,6 +3405,37 @@ mod tests {
             parse_positive_integer(&Value::Int(runmat_builtins::IntValue::U16(3)), "test").unwrap(),
             3
         );
+        assert_eq!(
+            parse_positive_integer(
+                &poisoned_integer_scalar(IntegerStorage::U64(vec![7])),
+                "test"
+            )
+            .unwrap(),
+            7
+        );
+        assert_eq!(
+            parse_numeric_scalar(
+                &poisoned_integer_scalar(IntegerStorage::I16(vec![-4])),
+                "test",
+                "PaddingValue"
+            )
+            .unwrap(),
+            -4.0
+        );
+        assert_eq!(
+            numeric_scalar(
+                &poisoned_integer_scalar(IntegerStorage::U16(vec![11])),
+                "test",
+                "GradientThreshold"
+            )
+            .unwrap(),
+            11.0
+        );
+        assert!(parse_bool_scalar(
+            &poisoned_integer_scalar(IntegerStorage::U8(vec![1])),
+            "test"
+        )
+        .unwrap());
         for value in [
             Value::Int(runmat_builtins::IntValue::I8(-1)),
             Value::Num(1.5),

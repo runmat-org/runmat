@@ -13,6 +13,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::stopwords::{
@@ -2232,14 +2233,16 @@ fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.data[0] {
-            0.0 => Ok(false),
-            1.0 => Ok(true),
-            other => Err(text_analytics_error(
-                fn_name,
-                format!("{fn_name}: logical scalar option must be true or false, got {other}"),
-            )),
-        },
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            match tensor_utils::tensor_value_f64(tensor, 0) {
+                0.0 => Ok(false),
+                1.0 => Ok(true),
+                other => Err(text_analytics_error(
+                    fn_name,
+                    format!("{fn_name}: logical scalar option must be true or false, got {other}"),
+                )),
+            }
+        }
         other => Err(text_analytics_error(
             fn_name,
             format!("{fn_name}: logical scalar option must be true or false, got {other:?}"),
@@ -2769,7 +2772,9 @@ fn parse_positive_integer(value: &Value, fn_name: &str) -> BuiltinResult<usize> 
     let parsed = match value {
         Value::Num(value) => positive_platform_usize(*value),
         Value::Int(value) => value.try_to_usize().filter(|value| *value > 0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => positive_platform_usize(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            positive_platform_usize(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     };
     parsed.ok_or_else(|| {
@@ -2794,6 +2799,13 @@ fn positive_platform_usize(value: f64) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::builtins::table::table_from_columns;
+    use runmat_builtins::IntegerStorage;
+
+    fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(tokenized_document_builtin(args))
@@ -3635,6 +3647,24 @@ mod tests {
             parse_positive_integer(&Value::Int(runmat_builtins::IntValue::U16(3)), "test").unwrap(),
             3
         );
+        assert_eq!(
+            parse_positive_integer(
+                &poisoned_integer_scalar(IntegerStorage::U64(vec![9])),
+                "test"
+            )
+            .unwrap(),
+            9
+        );
+        assert!(parse_bool_scalar(
+            &poisoned_integer_scalar(IntegerStorage::U8(vec![1])),
+            "test"
+        )
+        .unwrap());
+        assert!(!parse_bool_scalar(
+            &poisoned_integer_scalar(IntegerStorage::I16(vec![0])),
+            "test"
+        )
+        .unwrap());
         for value in [
             Value::Int(runmat_builtins::IntValue::I8(-1)),
             Value::Num(1.5),

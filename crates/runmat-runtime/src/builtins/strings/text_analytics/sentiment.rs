@@ -10,6 +10,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type, documents_from_object, text_analytics_error, tokenized_document_language,
@@ -596,7 +597,9 @@ fn numeric_scalar(value: &Value, column_name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(int_value_to_f64(value)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         other => Err(sentiment_error(format!(
             "vaderSentimentScores: {column_name} entries must be numeric scalars, got {other:?}"
         ))),
@@ -783,10 +786,28 @@ static DEFAULT_NEGATIONS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, StructValue};
+    use runmat_builtins::{CellArray, IntegerStorage, StructValue};
+
+    fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
 
     fn run(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(vader_sentiment_scores_builtin(args))
+    }
+
+    #[test]
+    fn numeric_scalar_reads_typed_integer_storage_exactly() {
+        assert_eq!(
+            numeric_scalar(
+                &poisoned_integer_scalar(IntegerStorage::I16(vec![-3])),
+                "Positive"
+            )
+            .expect("numeric"),
+            -3.0
+        );
     }
 
     fn documents(docs: Vec<Vec<&str>>) -> Value {
