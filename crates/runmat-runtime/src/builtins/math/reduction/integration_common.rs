@@ -347,7 +347,7 @@ fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, RuntimeError
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
         Value::Tensor(t) => {
             if t.data.len() == 1 {
-                Ok(Some(t.data[0]))
+                Ok(Some(tensor::tensor_value_f64(t, 0)))
             } else {
                 Ok(None)
             }
@@ -368,10 +368,8 @@ fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, RuntimeError
 
 fn real_tensor_to_complex(name: &str, tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
     let shape = canonical_shape_tensor(tensor);
-    let data = tensor
-        .data
-        .iter()
-        .copied()
+    let data = real_tensor_values(tensor)
+        .into_iter()
         .map(|value| (value, 0.0))
         .collect();
     ComplexTensor::new(data, shape).map_err(|err| integration_error(name, format!("{name}: {err}")))
@@ -418,5 +416,32 @@ mod tests {
         let spec = SpacingSpec::Tensor(spacing);
 
         assert_eq!(interval_width(&spec, 1, 2, 1), 2.0);
+    }
+
+    #[test]
+    fn scalar_spacing_reads_typed_integer_storage_exactly() {
+        let mut spacing =
+            Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("spacing");
+        spacing.data[0] = 0.0;
+
+        let spec =
+            spacing_from_value("trapz", Some(Value::Tensor(spacing)), &[1, 4], 2).expect("spacing");
+
+        match spec {
+            SpacingSpec::Scalar(value) => assert_eq!(value, 3.0),
+            _ => panic!("expected scalar spacing"),
+        }
+    }
+
+    #[test]
+    fn real_tensor_to_complex_reads_typed_integer_storage_exactly() {
+        let mut real =
+            Tensor::new_integer(IntegerStorage::I16(vec![-2, 5]), vec![1, 2]).expect("real input");
+        real.data = vec![0.0, 0.0];
+
+        let complex = value_into_complex_tensor("trapz", Value::Tensor(real)).expect("complex");
+
+        assert_eq!(complex.shape, vec![1, 2]);
+        assert_eq!(complex.data, vec![(-2.0, 0.0), (5.0, 0.0)]);
     }
 }
