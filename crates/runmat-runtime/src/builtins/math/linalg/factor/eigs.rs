@@ -968,8 +968,7 @@ fn dense_complex_matrix(value: Value) -> BuiltinResult<DenseComplexMatrix> {
         Value::Tensor(tensor) => Ok(DenseComplexMatrix {
             rows: tensor.rows(),
             cols: tensor.cols(),
-            data: tensor
-                .data
+            data: tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|re| Complex64::new(re, 0.0))
                 .collect(),
@@ -1465,6 +1464,30 @@ mod tests {
             )
             .unwrap(),
         );
+        assert_eq!(out.data, vec![2.0]);
+    }
+
+    #[test]
+    fn eigs_cholesky_factor_reads_typed_integer_storage_exactly() {
+        let a = real_matrix(vec![2.0, 0.0, 0.0, 9.0], 2, 2);
+        let mut r = Tensor::new_integer(IntegerStorage::U16(vec![1, 0, 0, 2]), vec![2, 2]).unwrap();
+        r.data.fill(f64::NAN);
+        let mut opts = StructValue::new();
+        opts.insert("IsCholesky", Value::Bool(true));
+
+        let out = tensor(
+            call(
+                a,
+                vec![
+                    Value::Tensor(r),
+                    Value::Num(1.0),
+                    Value::CharArray(CharArray::new_row("smallestreal")),
+                    Value::Struct(opts),
+                ],
+            )
+            .unwrap(),
+        );
+
         assert_eq!(out.data, vec![2.0]);
     }
 
