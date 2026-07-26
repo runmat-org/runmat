@@ -726,7 +726,8 @@ fn parse_sample(tensor: Tensor, options: FitOptions) -> BuiltinResult<WeightedSa
     let mut values = Vec::new();
     let mut weights = Vec::new();
     let mut total_weight = 0.0;
-    for (value, weight) in tensor.data.iter().copied().zip(frequency) {
+    let sample_values = tensor::tensor_values_f64(&tensor);
+    for (value, weight) in sample_values.into_iter().zip(frequency) {
         if weight.is_nan() || weight < 0.0 {
             return Err(invalid(
                 "fitdist: Frequency values must be nonnegative finite numbers",
