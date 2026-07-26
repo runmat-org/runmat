@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, PagefunOp, PagefunRequest};
 use runmat_builtins::{
@@ -712,7 +713,8 @@ impl PageInput {
 
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
         let shape = canonical_matrix_shape(&tensor.shape);
-        if tensor.data.len() != shape.iter().copied().product::<usize>() {
+        let data = tensor_utils::tensor_into_values_f64(tensor);
+        if data.len() != shape.iter().copied().product::<usize>() {
             return Err(pagefun_error_with_detail(
                 &PAGEFUN_ERROR_INTERNAL,
                 "tensor data does not match its shape",
@@ -729,7 +731,7 @@ impl PageInput {
             page_dims,
             rows,
             cols,
-            data: PageData::Real(tensor.data),
+            data: PageData::Real(data),
         })
     }
 
@@ -857,13 +859,14 @@ fn tensor_matrix_data(value: Value) -> BuiltinResult<(Vec<f64>, usize, usize)> {
             let canonical = canonical_matrix_shape(&t.shape);
             let rows = canonical[0];
             let cols = canonical[1];
-            if rows * cols != t.data.len() {
+            let data = tensor_utils::tensor_into_values_f64(t);
+            if rows * cols != data.len() {
                 return Err(pagefun_error_with_detail(
                     &PAGEFUN_ERROR_RESULT_SHAPE,
                     "result size mismatch",
                 ));
             }
-            Ok((t.data, rows, cols))
+            Ok((data, rows, cols))
         }
         Value::Num(n) => Ok((vec![n], 1, 1)),
         Value::Int(i) => Ok((vec![i.to_f64()], 1, 1)),
@@ -1082,7 +1085,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, ResolveContext, StringArray, Type};
+    use runmat_builtins::{CharArray, IntegerStorage, ResolveContext, StringArray, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1102,6 +1105,46 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn pagefun_real_inputs_read_typed_integer_storage_exactly() {
+        let mut lhs =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]).unwrap();
+        let mut rhs =
+            Tensor::new_integer(IntegerStorage::U16(vec![5, 7, 6, 8]), vec![2, 2]).unwrap();
+        lhs.data.fill(f64::NAN);
+        rhs.data.fill(f64::NAN);
+
+        let result = pagefun_builtin(
+            Value::FunctionHandle("mtimes".into()),
+            Value::Tensor(lhs),
+            vec![Value::Tensor(rhs)],
+        );
+        let result = block_on(result).expect("pagefun");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn pagefun_matrix_result_reader_uses_typed_integer_storage_exactly() {
+        let mut result = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, 7]),
+            vec![1, 2],
+        )
+        .unwrap();
+        result.data.fill(f64::NAN);
+
+        let (data, rows, cols) = tensor_matrix_data(Value::Tensor(result)).expect("matrix data");
+        assert_eq!(data, vec![9_007_199_254_740_992.0, 7.0]);
+        assert_eq!((rows, cols), (1, 2));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
