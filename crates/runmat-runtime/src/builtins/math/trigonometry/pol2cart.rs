@@ -387,7 +387,10 @@ fn prepare_gpu_input(
             let data = [*value];
             upload_gpu_input(provider, &data, &[1, 1])
         }
-        Value::Tensor(tensor) => upload_gpu_input(provider, &tensor.data, &tensor.shape),
+        Value::Tensor(tensor) => {
+            let data = tensor::tensor_values_f64_cow(tensor);
+            upload_gpu_input(provider, &data, &tensor.shape)
+        }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(pol2cart_error(&ERROR_COMPLEX_UNSUPPORTED, "complex input"))
         }
@@ -621,25 +624,29 @@ fn compute_pol2cart(
         )?),
         None => None,
     };
+    let theta_data = tensor::tensor_values_f64_cow(theta);
+    let rho_data = tensor::tensor_values_f64_cow(rho);
+    let z_data = z.map(tensor::tensor_values_f64_cow);
 
     let mut x = vec![0.0; len];
     let mut y = vec![0.0; len];
     for out_idx in 0..len {
         let theta_idx = theta_plan.index(out_idx);
         let rho_idx = rho_plan.index(out_idx);
-        let angle = theta.data[theta_idx];
-        let radius = rho.data[rho_idx];
+        let angle = theta_data[theta_idx];
+        let radius = rho_data[rho_idx];
         x[out_idx] = radius * angle.cos();
         y[out_idx] = radius * angle.sin();
     }
 
     let z_output = match (z, z_plan, include_z_output) {
         (_, _, false) => None,
-        (Some(z_tensor), Some(plan), true) => {
+        (Some(_), Some(plan), true) => {
             let mut values = vec![0.0; len];
+            let z_data = z_data.as_ref().expect("z values");
             for out_idx in 0..len {
                 let z_idx = plan.index(out_idx);
-                values[out_idx] = z_tensor.data[z_idx];
+                values[out_idx] = z_data[z_idx];
             }
             Some(
                 Tensor::new(values, final_shape.clone())
@@ -797,7 +804,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Type};
 
     use crate::builtins::common::test_support;
 
@@ -1068,6 +1075,32 @@ mod tests {
     }
 
     #[test]
+    fn typed_integer_host_inputs_read_exact_storage() {
+        let mut theta =
+            Tensor::new_integer(IntegerStorage::I16(vec![0, 0]), vec![1, 2]).expect("theta");
+        let mut rho =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("rho");
+        let mut z = Tensor::new_integer(IntegerStorage::U16(vec![7, 8]), vec![1, 2]).expect("z");
+        theta.data.fill(f64::NAN);
+        rho.data.fill(0.0);
+        z.data.fill(0.0);
+
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let outputs = output_list(
+            call(
+                Value::Tensor(theta),
+                Value::Tensor(rho),
+                vec![Value::Tensor(z)],
+            )
+            .expect("pol2cart"),
+        );
+
+        assert_close(&data(&outputs[0]), &[2.0, 3.0]);
+        assert_close(&data(&outputs[1]), &[0.0, 0.0]);
+        assert_close(&data(&outputs[2]), &[7.0, 8.0]);
+    }
+
+    #[test]
     fn gpu_inputs_keep_resident_outputs() {
         test_support::with_test_provider(|provider| {
             let theta_view = HostTensorView {
@@ -1088,6 +1121,66 @@ mod tests {
             assert!(matches!(outputs[1], Value::GpuTensor(_)));
             assert_close(&data(&outputs[0]), &[2.0, 0.0]);
             assert_close(&data(&outputs[1]), &[0.0, 3.0]);
+        });
+    }
+
+    #[test]
+    fn mixed_gpu_typed_integer_inputs_upload_exact_storage() {
+        test_support::with_test_provider(|provider| {
+            let theta_view = HostTensorView {
+                data: &[0.0, 0.0],
+                shape: &[1, 2],
+            };
+            let theta = provider.upload(&theta_view).expect("upload theta");
+
+            let mut rho =
+                Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("rho");
+            let mut z =
+                Tensor::new_integer(IntegerStorage::U16(vec![7, 8]), vec![1, 2]).expect("z");
+            rho.data.fill(0.0);
+            z.data.fill(0.0);
+
+            let _guard = crate::output_count::push_output_count(Some(3));
+            let outputs = output_list(
+                call(
+                    Value::GpuTensor(theta),
+                    Value::Tensor(rho),
+                    vec![Value::Tensor(z)],
+                )
+                .expect("pol2cart"),
+            );
+
+            assert!(matches!(outputs[0], Value::GpuTensor(_)));
+            assert!(matches!(outputs[1], Value::GpuTensor(_)));
+            assert!(matches!(outputs[2], Value::GpuTensor(_)));
+            assert_close(&data(&outputs[0]), &[2.0, 3.0]);
+            assert_close(&data(&outputs[1]), &[0.0, 0.0]);
+            assert_close(&data(&outputs[2]), &[7.0, 8.0]);
+        });
+    }
+
+    #[test]
+    fn mixed_gpu_typed_integer_theta_upload_reads_exact_storage() {
+        test_support::with_test_provider(|provider| {
+            let rho_view = HostTensorView {
+                data: &[2.0, 3.0],
+                shape: &[1, 2],
+            };
+            let rho = provider.upload(&rho_view).expect("upload rho");
+
+            let mut theta =
+                Tensor::new_integer(IntegerStorage::I16(vec![0, 0]), vec![1, 2]).expect("theta");
+            theta.data.fill(f64::NAN);
+
+            let _guard = crate::output_count::push_output_count(Some(2));
+            let outputs = output_list(
+                call(Value::Tensor(theta), Value::GpuTensor(rho), Vec::new()).expect("pol2cart"),
+            );
+
+            assert!(matches!(outputs[0], Value::GpuTensor(_)));
+            assert!(matches!(outputs[1], Value::GpuTensor(_)));
+            assert_close(&data(&outputs[0]), &[2.0, 3.0]);
+            assert_close(&data(&outputs[1]), &[0.0, 0.0]);
         });
     }
 
