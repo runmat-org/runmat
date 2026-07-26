@@ -367,8 +367,9 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
         Value::Tensor(tensor) => {
+            let data = tensor::tensor_values_f64_cow(&tensor);
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &data,
                 shape: &tensor.shape,
             };
             let handle = provider
@@ -473,7 +474,10 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
+            let data: Vec<(f64, f64)> = tensor::tensor_values_f64_cow(&t)
+                .iter()
+                .map(|&v| (v, 0.0))
+                .collect();
             let tensor = ComplexTensor::new(data, t.shape.clone())
                 .map_err(|e| builtin_error(format!("minus: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
@@ -940,6 +944,23 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn minus_like_complex_conversion_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![-2, 3]), vec![1, 2]).unwrap();
+        tensor.data.fill(0.0);
+
+        let result =
+            block_on(super::real_to_complex(Value::Tensor(tensor))).expect("complex conversion");
+
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![(-2.0, 0.0), (3.0, 0.0)]);
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn minus_typed_sparse_int64_uses_exact_sparse_route() {
         let lhs = SparseTensor::new_integer(
             2,
@@ -1137,6 +1158,32 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected GPU tensor result, got {other:?}"),
             }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn minus_like_gpu_prototype_uploads_typed_integer_storage_exactly() {
+        test_support::with_test_provider(|provider| {
+            let mut lhs =
+                Tensor::new_integer(IntegerStorage::I16(vec![10, 20]), vec![2, 1]).unwrap();
+            lhs.data.fill(0.0);
+            let proto_view = HostTensorView {
+                data: &[0.0],
+                shape: &[1, 1],
+            };
+            let proto = provider.upload(&proto_view).expect("upload");
+
+            let result = minus_builtin(
+                Value::Tensor(lhs),
+                Value::Num(3.0),
+                vec![Value::from("like"), Value::GpuTensor(proto)],
+            )
+            .expect("minus like gpu");
+
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 1]);
+            assert_eq!(gathered.data, vec![7.0, 17.0]);
         });
     }
 

@@ -339,8 +339,9 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
         Value::Tensor(tensor) => {
+            let data = tensor::tensor_values_f64_cow(&tensor);
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &data,
                 shape: &tensor.shape,
             };
             let handle = provider
@@ -448,7 +449,10 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
+            let data: Vec<(f64, f64)> = tensor::tensor_values_f64_cow(&t)
+                .iter()
+                .map(|&v| (v, 0.0))
+                .collect();
             let tensor = ComplexTensor::new(data, t.shape.clone())
                 .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
@@ -898,6 +902,23 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn rdivide_like_complex_conversion_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I32(vec![-4, 5]), vec![1, 2]).unwrap();
+        tensor.data.fill(0.0);
+
+        let result =
+            block_on(super::real_to_complex(Value::Tensor(tensor))).expect("complex conversion");
+
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![(-4.0, 0.0), (5.0, 0.0)]);
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rdivide_matrix_scalar() {
@@ -1143,6 +1164,32 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rdivide_like_gpu_prototype_uploads_typed_integer_storage_exactly() {
+        test_support::with_test_provider(|provider| {
+            let mut lhs =
+                Tensor::new_integer(IntegerStorage::U32(vec![10, 20]), vec![2, 1]).unwrap();
+            lhs.data.fill(0.0);
+            let proto_view = HostTensorView {
+                data: &[0.0],
+                shape: &[1, 1],
+            };
+            let proto = provider.upload(&proto_view).expect("upload");
+
+            let result = rdivide_builtin(
+                Value::Tensor(lhs),
+                Value::Num(2.0),
+                vec![Value::from("like"), Value::GpuTensor(proto)],
+            )
+            .expect("rdivide like gpu");
+
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 1]);
+            assert_eq!(gathered.data, vec![5.0, 10.0]);
         });
     }
 
