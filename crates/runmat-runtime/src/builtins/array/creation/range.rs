@@ -426,7 +426,8 @@ fn parse_dim_spec(value: &Value) -> crate::BuiltinResult<DimSelection> {
 }
 
 fn parse_dim_tensor(tensor: &Tensor) -> crate::BuiltinResult<DimSelection> {
-    if tensor.data.is_empty() {
+    let values = tensor::tensor_values_f64_cow(tensor);
+    if values.is_empty() {
         return Ok(DimSelection::Auto);
     }
     if !is_vector_shape(&tensor.shape) {
@@ -434,8 +435,8 @@ fn parse_dim_tensor(tensor: &Tensor) -> crate::BuiltinResult<DimSelection> {
             "range: dimension vector must be a row or column vector",
         ));
     }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &value in &tensor.data {
+    let mut dims = Vec::with_capacity(values.len());
+    for &value in values.iter() {
         if !value.is_finite() {
             return Err(builtin_error("range: dimensions must be finite"));
         }
@@ -697,11 +698,12 @@ fn compute_range_tensor(
     if shape.is_empty() {
         shape = vec![tensor.rows, tensor.cols];
     }
+    let values = tensor::tensor_values_f64_cow(tensor);
 
     if dims.dims_in_bounds.is_empty() {
         let output_shape = shape.clone();
-        let mut output = Vec::with_capacity(tensor.data.len());
-        for &value in &tensor.data {
+        let mut output = Vec::with_capacity(values.len());
+        for &value in values.iter() {
             if value.is_nan() {
                 output.push(f64::NAN);
             } else {
@@ -737,7 +739,7 @@ fn compute_range_tensor(
         }
     }
 
-    for (linear, &value) in tensor.data.iter().enumerate() {
+    for (linear, &value) in values.iter().enumerate() {
         linear_to_multi(linear, &shape, &mut coords);
         for (i, coord) in coords.iter().enumerate() {
             out_coords[i] = if reduce_mask[i] { 0 } else { *coord };
@@ -824,7 +826,7 @@ pub(crate) mod tests {
         block_on(super::range_builtin(value, rest))
     }
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -980,6 +982,62 @@ pub(crate) mod tests {
                 assert_eq!(t.data, vec![11.0, 11.0]);
             }
             other => panic!("expected 1x1x2 tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn range_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![4, 9, 7, 20]), vec![2, 2])
+            .expect("integer input");
+        tensor.data.fill(0.0);
+
+        let result = range_builtin(Value::Tensor(tensor), Vec::new()).expect("range");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![5.0, 13.0]);
+                assert!(out.integer_storage().is_none());
+            }
+            other => panic!("expected tensor output, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn range_dimension_vector_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new(
+            (1..=24).map(|v| v as f64).collect::<Vec<_>>(),
+            vec![3, 4, 2],
+        )
+        .expect("tensor");
+        let mut dims =
+            Tensor::new_integer(IntegerStorage::U64(vec![1, 2]), vec![1, 2]).expect("dims");
+        dims.data.fill(3.0);
+
+        let result = range_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)])
+            .expect("range over typed dims");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 1, 2]);
+                assert_eq!(out.data, vec![11.0, 11.0]);
+            }
+            other => panic!("expected tensor output, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn range_dim_beyond_ndims_reads_typed_integer_values_for_zero_range() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![-2, 7, 4]), vec![1, 3])
+            .expect("integer input");
+        tensor.data.fill(f64::NAN);
+
+        let result = range_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(3))])
+            .expect("range");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.data, vec![0.0, 0.0, 0.0]);
+            }
+            other => panic!("expected tensor output, got {other:?}"),
         }
     }
 
