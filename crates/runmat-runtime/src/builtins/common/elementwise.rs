@@ -4,6 +4,7 @@
 //! These operations work element-by-element on matrices and support scalar broadcasting.
 
 use crate::builtins::common::matrix::matrix_power;
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
@@ -31,7 +32,7 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::Tensor(t) if t.data.len() == 1 => Some(tensor_utils::tensor_value_f64(t, 0)),
         _ => None,
     }
 }
@@ -959,11 +960,24 @@ mod tests {
             power(&Value::Int(IntValue::U64(u64::MAX)), &Value::Num(1.0)).expect("scalar power");
         assert_eq!(scalar_power, Value::Int(IntValue::U64(u64::MAX)));
 
-        let scalar_tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
-            .expect("scalar tensor");
+        let mut scalar_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .expect("scalar tensor");
+        scalar_tensor.data[0] = 0.0;
         let scalar_tensor_power =
             power(&Value::Tensor(scalar_tensor), &Value::Num(1.0)).expect("tensor scalar power");
         assert_eq!(scalar_tensor_power, Value::Int(IntValue::U64(u64::MAX)));
+
+        let mut complex_base =
+            Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).expect("complex base");
+        complex_base.data[0] = 0.0;
+        let complex_power = power(&Value::Tensor(complex_base), &Value::Complex(1.0, 0.0))
+            .expect("complex exponent power");
+        let Value::Complex(re, im) = complex_power else {
+            panic!("expected complex scalar");
+        };
+        assert!((re - 3.0).abs() < 1e-12);
+        assert_eq!(im, 0.0);
 
         let base =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 2]), vec![1, 2]).expect("base");
