@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_helpers;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -584,12 +585,13 @@ fn vertices_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec3>> {
             "patch: Vertices must be an N-by-2 or N-by-3 matrix",
         ));
     }
+    let values = tensor_helpers::tensor_values_f64(tensor);
     let mut out = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
-        let x = tensor.data[row];
-        let y = tensor.data[row + tensor.rows];
+        let x = values[row];
+        let y = values[row + tensor.rows];
         let z = if tensor.cols >= 3 {
-            tensor.data[row + 2 * tensor.rows]
+            values[row + 2 * tensor.rows]
         } else {
             0.0
         };
@@ -602,11 +604,12 @@ fn faces_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec<usize>>> {
     if tensor.rows == 0 || tensor.cols == 0 {
         return Err(patch_invalid("patch: Faces must not be empty"));
     }
+    let values = tensor_helpers::tensor_values_f64(tensor);
     let mut faces = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
         let mut face = Vec::new();
         for col in 0..tensor.cols {
-            let value = tensor.data[row + col * tensor.rows];
+            let value = values[row + col * tensor.rows];
             if value.is_nan() {
                 continue;
             }
@@ -646,9 +649,9 @@ fn vertices_faces_from_xyz(opts: &PatchOptions) -> BuiltinResult<(Vec<Vec3>, Vec
         }
     }
     if is_vector_tensor(x) && is_vector_tensor(y) {
-        let x_values = x.data.clone();
-        let y_values = y.data.clone();
-        let z_values = opts.z_data.as_ref().map(|z| z.data.clone());
+        let x_values = tensor_helpers::tensor_values_f64(x);
+        let y_values = tensor_helpers::tensor_values_f64(y);
+        let z_values = opts.z_data.as_ref().map(tensor_helpers::tensor_values_f64);
         if x_values.len() != y_values.len()
             || z_values
                 .as_ref()
@@ -675,13 +678,16 @@ fn vertices_faces_from_xyz(opts: &PatchOptions) -> BuiltinResult<(Vec<Vec3>, Vec
     }
     let mut vertices = Vec::new();
     let mut faces = Vec::new();
+    let x_values = tensor_helpers::tensor_values_f64(x);
+    let y_values = tensor_helpers::tensor_values_f64(y);
+    let z_values = opts.z_data.as_ref().map(tensor_helpers::tensor_values_f64);
     for col in 0..x.cols {
         let mut face = Vec::new();
         for row in 0..x.rows {
             let idx = row + col * x.rows;
-            let xv = x.data[idx];
-            let yv = y.data[idx];
-            let zv = opts.z_data.as_ref().map(|z| z.data[idx]).unwrap_or(0.0);
+            let xv = x_values[idx];
+            let yv = y_values[idx];
+            let zv = z_values.as_ref().map(|z| z[idx]).unwrap_or(0.0);
             if xv.is_nan() || yv.is_nan() || zv.is_nan() {
                 continue;
             }
@@ -727,7 +733,7 @@ mod tests {
     use super::*;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_builtins::NumericDType;
+    use runmat_builtins::{IntegerStorage, NumericDType};
 
     fn tensor(rows: usize, cols: usize, data: &[f64]) -> Value {
         Value::Tensor(Tensor {
@@ -738,6 +744,13 @@ mod tests {
             integer_data: None,
             dtype: NumericDType::F64,
         })
+    }
+
+    fn int_tensor(rows: usize, cols: usize, storage: IntegerStorage) -> Value {
+        let len = storage.len();
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
+        tensor.data = vec![-999.0; len];
+        Value::Tensor(tensor)
     }
 
     fn setup_plot_test() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -801,6 +814,20 @@ mod tests {
     }
 
     #[test]
+    fn patch_xyz_vectors_read_typed_integer_storage_exactly() {
+        let plot = parse_patch_plot(vec![
+            int_tensor(3, 1, IntegerStorage::I16(vec![0, 1, 0])),
+            int_tensor(3, 1, IntegerStorage::I16(vec![0, 0, 1])),
+            int_tensor(3, 1, IntegerStorage::I16(vec![2, 3, 4])),
+        ])
+        .unwrap();
+        assert_eq!(plot.faces(), &[vec![0, 1, 2]]);
+        assert_eq!(plot.vertices()[0], Vec3::new(0.0, 0.0, 2.0));
+        assert_eq!(plot.vertices()[1], Vec3::new(1.0, 0.0, 3.0));
+        assert_eq!(plot.vertices()[2], Vec3::new(0.0, 1.0, 4.0));
+    }
+
+    #[test]
     fn patch_xyz_accepts_trailing_name_value_pairs() {
         let plot = parse_patch_plot(vec![
             tensor(3, 1, &[0.0, 1.0, 0.0]),
@@ -844,6 +871,21 @@ mod tests {
         .unwrap();
         assert_eq!(plot.faces(), &[vec![0, 1, 2]]);
         assert_eq!(plot.edge_color_mode(), PatchEdgeColorMode::None);
+    }
+
+    #[test]
+    fn patch_faces_vertices_read_typed_integer_storage_exactly() {
+        let plot = parse_patch_plot(vec![
+            Value::String("Faces".into()),
+            int_tensor(1, 3, IntegerStorage::I16(vec![1, 2, 3])),
+            Value::String("Vertices".into()),
+            int_tensor(3, 2, IntegerStorage::I16(vec![0, 1, 0, 0, 0, 1])),
+        ])
+        .unwrap();
+        assert_eq!(plot.faces(), &[vec![0, 1, 2]]);
+        assert_eq!(plot.vertices()[0], Vec3::new(0.0, 0.0, 0.0));
+        assert_eq!(plot.vertices()[1], Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(plot.vertices()[2], Vec3::new(0.0, 1.0, 0.0));
     }
 
     #[test]
