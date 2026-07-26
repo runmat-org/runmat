@@ -212,7 +212,9 @@ fn scalar_f64(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Some(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     }
 }
@@ -413,6 +415,7 @@ fn sum_squared_column_correlations(data: &[f64], n: usize, p: usize) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(value: Value) -> Tensor {
         match value {
@@ -425,6 +428,12 @@ mod tests {
         let guard = random::test_lock().lock().unwrap();
         random::reset_rng();
         guard
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -478,6 +487,28 @@ mod tests {
         assert_eq!(tensor.shape, vec![8, 3]);
         for value in tensor.data {
             let scaled = value * 8.0;
+            assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn typed_integer_scalar_arguments_are_exact() {
+        let _guard = reset_rng();
+        let out = block_on(lhsdesign_builtin(vec![
+            poisoned_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
+            poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
+            Value::from("Smooth"),
+            poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+            Value::from("Criterion"),
+            Value::from("correlation"),
+            Value::from("Iterations"),
+            poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+        ]))
+        .expect("lhsdesign");
+        let tensor = tensor(out);
+        assert_eq!(tensor.shape, vec![4, 2]);
+        for value in tensor.data {
+            let scaled = value * 4.0;
             assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
         }
     }
