@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_helpers;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "optimizableVariable";
@@ -345,7 +346,8 @@ impl OptimizableRange {
     fn parse(value: Value, explicit_type: Option<VariableType>) -> BuiltinResult<Self> {
         match value {
             Value::Tensor(tensor) => {
-                Self::numeric_from_values(Value::Tensor(tensor.clone()), &tensor.data)
+                let values = tensor_helpers::tensor_values_f64(&tensor);
+                Self::numeric_from_values(Value::Tensor(tensor), &values)
             }
             Value::Num(n) => Self::numeric_from_values(
                 Value::Tensor(Tensor::new(vec![n], vec![1, 1]).unwrap()),
@@ -594,12 +596,20 @@ fn remap_flow(err: RuntimeError, label: &str) -> RuntimeError {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn object(value: Value) -> ObjectInstance {
         let Value::Object(object) = value else {
             panic!("expected object");
         };
         object
+    }
+
+    fn typed_integer_range(storage: IntegerStorage) -> Value {
+        let len = storage.len();
+        let mut tensor = Tensor::new_integer(storage, vec![1, len]).expect("integer range");
+        tensor.data = vec![-999.0; len];
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -652,6 +662,35 @@ mod tests {
             Some(&Value::String("log".into()))
         );
         assert_eq!(object.properties.get("Optimize"), Some(&Value::Bool(false)));
+    }
+
+    #[test]
+    fn typed_integer_range_bounds_are_read_from_exact_storage() {
+        let range = typed_integer_range(IntegerStorage::I16(vec![0, 1000]));
+        let out = block_on(optimizable_variable_builtin(
+            Value::String("trees".into()),
+            range,
+            vec![
+                Value::String("Type".into()),
+                Value::String("integer".into()),
+                Value::String("Transform".into()),
+                Value::String("log".into()),
+            ],
+        ))
+        .expect("optimizableVariable integer");
+        let object = object(out);
+        assert_eq!(
+            object.properties.get("Type"),
+            Some(&Value::String("integer".into()))
+        );
+        let Some(Value::Tensor(range)) = object.properties.get("Range") else {
+            panic!("expected tensor Range");
+        };
+        assert_eq!(
+            range.integer_storage(),
+            Some(&IntegerStorage::I16(vec![0, 1000]))
+        );
+        assert_eq!(range.data, vec![-999.0, -999.0]);
     }
 
     #[test]
