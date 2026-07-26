@@ -479,14 +479,15 @@ fn parse_host_spacing_argument(value: &Value, dim_len: usize) -> BuiltinResult<G
         ));
     }
 
-    if tensor.data.len() == 1 {
-        let spacing = tensor.data[0];
+    let spacing_values = tensor::tensor_into_values_f64(tensor);
+    if spacing_values.len() == 1 {
+        let spacing = spacing_values[0];
         validate_scalar_spacing(spacing)?;
         return Ok(GradientSpacing::Scalar(spacing));
     }
 
-    validate_coordinate_spacing(&tensor.data, dim_len)?;
-    Ok(GradientSpacing::Coordinates(tensor.data))
+    validate_coordinate_spacing(&spacing_values, dim_len)?;
+    Ok(GradientSpacing::Coordinates(spacing_values))
 }
 
 fn validate_scalar_spacing(spacing: f64) -> BuiltinResult<()> {
@@ -861,7 +862,7 @@ mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_builtins::{IntegerStorage, NumericDType, Tensor};
 
     fn gradient_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::gradient_builtin(value, rest))
@@ -948,6 +949,21 @@ mod tests {
     }
 
     #[test]
+    fn gradient_scalar_spacing_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
+        let mut spacing =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("spacing");
+        spacing.data[0] = 0.0;
+
+        let result = gradient_builtin(Value::Tensor(tensor), vec![Value::Tensor(spacing)])
+            .expect("gradient");
+        match result {
+            Value::Tensor(out) => assert_eq!(out.data, vec![1.5, 2.0, 2.5]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn gradient_preserves_single_precision_host_tensor() {
         let tensor =
             Tensor::new_with_dtype(vec![1.0, 4.0, 9.0], vec![1, 3], NumericDType::F32).unwrap();
@@ -975,6 +991,24 @@ mod tests {
     fn gradient_coordinate_vector_spacing_for_row_vector() {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
         let spacing = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
+        let result = gradient_builtin(Value::Tensor(tensor), vec![Value::Tensor(spacing)])
+            .expect("gradient");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.data, vec![3.0, 8.0 / 3.0, 2.5]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gradient_coordinate_vector_spacing_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
+        let mut spacing =
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]).expect("spacing");
+        spacing.data.fill(f64::NAN);
+
         let result = gradient_builtin(Value::Tensor(tensor), vec![Value::Tensor(spacing)])
             .expect("gradient");
         match result {
