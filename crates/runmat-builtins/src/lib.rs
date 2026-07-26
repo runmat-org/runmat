@@ -590,6 +590,14 @@ impl IntegerStorage {
         }
     }
 
+    /// Applies a structural reorder while preserving this exact storage class.
+    pub fn reorder(
+        &self,
+        reorder: impl Fn(&[IntValue]) -> Result<Vec<IntValue>, String>,
+    ) -> Result<Self, String> {
+        self.from_exact_values_like(reorder(&self.exact_values())?)
+    }
+
     /// Allocates zeros while preserving this integer class.
     pub fn zeros_like(&self, len: usize) -> Self {
         match self {

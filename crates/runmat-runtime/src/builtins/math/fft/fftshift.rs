@@ -270,8 +270,32 @@ async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
 }
 
 fn fftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
-    let Tensor { data, shape, .. } = tensor;
+    let Tensor {
+        data,
+        integer_data,
+        shape,
+        ..
+    } = tensor;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Fft);
+    if let Some(storage) = integer_data {
+        let rotated = storage
+            .reorder(|values| {
+                apply_shift(BUILTIN_NAME, values, &plan.ext_shape, &plan.positive)
+                    .map_err(|error| error.to_string())
+            })
+            .map_err(|source| {
+                fftshift_error_with_detail(
+                    &FFTSHIFT_ERROR_INTERNAL,
+                    format!("integer shift failed: {source}"),
+                )
+            })?;
+        return Tensor::new_integer(rotated, shape).map_err(|source| {
+            fftshift_error_with_detail(
+                &FFTSHIFT_ERROR_INTERNAL,
+                format!("integer tensor reconstruction failed: {source}"),
+            )
+        });
+    }
     if data.is_empty() || plan.is_noop() {
         return Tensor::new(data, shape).map_err(|source| {
             fftshift_error_with_detail(
@@ -638,6 +662,25 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![4, 1_u64 << 63, u64::MAX, 2, 3])
         );
         assert_eq!(storage.imag, IntegerStorage::U64(vec![40, 50, 10, 20, 30]));
+    }
+
+    #[test]
+    fn fftshift_preserves_typed_real_integer_storage_exactly_at_u64_boundaries() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 2, 3, 4, 1_u64 << 63]),
+            vec![5, 1],
+        )
+        .expect("tensor");
+
+        let Value::Tensor(result) =
+            fftshift_builtin(Value::Tensor(tensor), Vec::new()).expect("fftshift")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![4, 1_u64 << 63, u64::MAX, 2, 3]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

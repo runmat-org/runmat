@@ -272,8 +272,32 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
 }
 
 fn ifftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
-    let Tensor { data, shape, .. } = tensor;
+    let Tensor {
+        data,
+        integer_data,
+        shape,
+        ..
+    } = tensor;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
+    if let Some(storage) = integer_data {
+        let rotated = storage
+            .reorder(|values| {
+                apply_shift(BUILTIN_NAME, values, &plan.ext_shape, &plan.positive)
+                    .map_err(|error| error.to_string())
+            })
+            .map_err(|source| {
+                ifftshift_error_with_detail(
+                    &IFFTSHIFT_ERROR_INTERNAL,
+                    format!("integer shift failed: {source}"),
+                )
+            })?;
+        return Tensor::new_integer(rotated, shape).map_err(|source| {
+            ifftshift_error_with_detail(
+                &IFFTSHIFT_ERROR_INTERNAL,
+                format!("integer tensor reconstruction failed: {source}"),
+            )
+        });
+    }
     if data.is_empty() || plan.is_noop() {
         return Tensor::new(data, shape).map_err(|source| {
             ifftshift_error_with_detail(
@@ -675,6 +699,25 @@ pub(crate) mod tests {
         assert_eq!(
             storage.imag,
             IntegerStorage::I64(vec![-30, -40, -50, -10, -20])
+        );
+    }
+
+    #[test]
+    fn ifftshift_preserves_typed_real_integer_storage_exactly_at_i64_boundaries() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, 2, 3, 4, i64::MAX]),
+            vec![5, 1],
+        )
+        .expect("tensor");
+
+        let Value::Tensor(result) =
+            ifftshift_builtin(Value::Tensor(tensor), Vec::new()).expect("ifftshift")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I64(vec![3, 4, i64::MAX, i64::MIN, 2]))
         );
     }
 
