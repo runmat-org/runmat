@@ -586,6 +586,9 @@ fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
             array.data.iter().map(|text| is_missing_text(text)),
             array.shape.clone(),
         ),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            logical_from_iter(vec![false; tensor.data.len()], tensor.shape.clone())
+        }
         Value::Tensor(tensor) => logical_from_iter(
             tensor.data.iter().map(|value| value.is_nan()),
             tensor.shape.clone(),
@@ -599,10 +602,12 @@ fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
         ),
         Value::SparseTensor(tensor) => {
             let mut data = vec![0u8; tensor.rows * tensor.cols];
-            for col in 0..tensor.cols {
-                for idx in tensor.col_ptrs[col]..tensor.col_ptrs[col + 1] {
-                    if tensor.values[idx].is_nan() {
-                        data[tensor.row_indices[idx] + col * tensor.rows] = 1;
+            if tensor.integer_storage().is_none() {
+                for col in 0..tensor.cols {
+                    for idx in tensor.col_ptrs[col]..tensor.col_ptrs[col + 1] {
+                        if tensor.values[idx].is_nan() {
+                            data[tensor.row_indices[idx] + col * tensor.rows] = 1;
+                        }
                     }
                 }
             }
@@ -896,6 +901,19 @@ fn remove_missing_tensor(
     tensor: Tensor,
     options: RemoveOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
+    if tensor.integer_storage().is_some() {
+        let rows = tensor.rows();
+        let cols = tensor.cols();
+        let mask = if rows == 1 || cols == 1 {
+            LogicalArray::new(vec![0; tensor.data.len()], vec![1, tensor.data.len()])
+        } else if matches!(options.dim, RemoveDim::Columns) {
+            LogicalArray::new(vec![0; cols], vec![1, cols])
+        } else {
+            LogicalArray::new(vec![0; rows], vec![rows, 1])
+        }
+        .map_err(internal_error)?;
+        return Ok((Value::Tensor(tensor), mask));
+    }
     if tensor.rows() == 1 || tensor.cols() == 1 {
         let mut data = Vec::new();
         let mut removed = Vec::with_capacity(tensor.data.len());
@@ -1371,6 +1389,12 @@ fn fill_missing_tensor(
 ) -> BuiltinResult<(Value, LogicalArray)> {
     let rows = tensor.rows();
     let cols = tensor.cols();
+    if tensor.integer_storage().is_some() {
+        return Ok((
+            Value::Tensor(tensor),
+            LogicalArray::new(vec![0; rows * cols], vec![rows, cols]).map_err(internal_error)?,
+        ));
+    }
     let dim = options
         .dim
         .unwrap_or_else(|| first_nonsingleton_dim(rows, cols));
@@ -1918,7 +1942,7 @@ fn collect_indicators(value: &Value, set: &mut IndicatorSet) -> BuiltinResult<()
         Value::String(s) => set.text.push(s.clone()),
         Value::StringArray(array) => set.text.extend(array.data.iter().cloned()),
         Value::CharArray(array) => set.text.extend(char_rows(array)),
-        Value::Tensor(tensor) => set.numeric.extend(tensor.data.iter().copied()),
+        Value::Tensor(tensor) => set.numeric.extend(tensor_utils::tensor_values_f64(tensor)),
         Value::Cell(cell) => {
             for item in &cell.data {
                 collect_indicators(item, set)?;
@@ -1935,6 +1959,7 @@ fn collect_indicators(value: &Value, set: &mut IndicatorSet) -> BuiltinResult<()
 
 fn standardize_missing_value(value: Value, indicators: &IndicatorSet) -> BuiltinResult<Value> {
     match value {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => Ok(Value::Tensor(tensor)),
         Value::Tensor(mut tensor) => {
             for value in &mut tensor.data {
                 if indicators
@@ -2056,20 +2081,31 @@ fn broadcast_pairwise_numeric(
     op: impl Fn(f64, f64) -> f64,
 ) -> BuiltinResult<(Vec<f64>, Vec<usize>, runmat_builtins::NumericDType)> {
     if left.data.len() == right.data.len() && left.shape == right.shape {
-        let data = left
-            .data
+        let left_values = tensor_utils::tensor_values_f64_cow(left);
+        let right_values = tensor_utils::tensor_values_f64_cow(right);
+        let data = left_values
             .iter()
-            .zip(right.data.iter())
+            .zip(right_values.iter())
             .map(|(a, b)| op(*a, *b))
             .collect();
         return Ok((data, left.shape.clone(), left.dtype));
     }
     if left.data.len() == 1 {
-        let data = right.data.iter().map(|b| op(left.data[0], *b)).collect();
+        let left_values = tensor_utils::tensor_values_f64_cow(left);
+        let right_values = tensor_utils::tensor_values_f64_cow(right);
+        let data = right_values
+            .iter()
+            .map(|b| op(left_values[0], *b))
+            .collect();
         return Ok((data, right.shape.clone(), right.dtype));
     }
     if right.data.len() == 1 {
-        let data = left.data.iter().map(|a| op(*a, right.data[0])).collect();
+        let left_values = tensor_utils::tensor_values_f64_cow(left);
+        let right_values = tensor_utils::tensor_values_f64_cow(right);
+        let data = left_values
+            .iter()
+            .map(|a| op(*a, right_values[0]))
+            .collect();
         return Ok((data, left.shape.clone(), left.dtype));
     }
     Err(invalid_argument(
@@ -2265,6 +2301,20 @@ mod tests {
     }
 
     #[test]
+    fn ismissing_typed_integer_tensor_ignores_f64_mirror() {
+        let mut input = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3])
+            .expect("integer tensor");
+        input.data.fill(f64::NAN);
+
+        let result = block_on(ismissing_builtin(Value::Tensor(input))).unwrap();
+
+        assert!(matches!(
+            result,
+            Value::LogicalArray(mask) if mask.data == vec![0, 0, 0] && mask.shape == vec![1, 3]
+        ));
+    }
+
+    #[test]
     fn rmmissing_removes_rows_and_columns() {
         let value = tensor(vec![1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0], vec![3, 2]);
         let result = block_on(rmmissing_builtin(value, Vec::new())).unwrap();
@@ -2277,6 +2327,30 @@ mod tests {
         assert!(
             matches!(result, Value::Tensor(t) if t.shape == vec![3, 1] && t.data == vec![4.0, 5.0, 6.0])
         );
+    }
+
+    #[test]
+    fn rmmissing_typed_integer_tensor_preserves_storage_and_reports_no_missing() {
+        let expected = IntegerStorage::U64(vec![1, u64::MAX, 3, 4]);
+        let mut input = Tensor::new_integer(expected.clone(), vec![2, 2]).expect("integer tensor");
+        input.data.fill(f64::NAN);
+
+        let result = remove_missing_tensor(
+            input,
+            RemoveOptions {
+                dim: RemoveDim::Rows,
+            },
+        )
+        .unwrap();
+
+        match result {
+            (Value::Tensor(tensor), mask) => {
+                assert_eq!(tensor.integer_storage(), Some(&expected));
+                assert_eq!(mask.data, vec![0, 0]);
+                assert_eq!(mask.shape, vec![2, 1]);
+            }
+            other => panic!("expected tensor and mask, got {other:?}"),
+        }
     }
 
     #[test]
@@ -2337,6 +2411,31 @@ mod tests {
     }
 
     #[test]
+    fn fillmissing_typed_integer_tensor_preserves_storage_and_reports_no_missing() {
+        let expected = IntegerStorage::I32(vec![10, 20, 30]);
+        let mut input = Tensor::new_integer(expected.clone(), vec![3, 1]).expect("integer tensor");
+        input.data.fill(f64::NAN);
+
+        let result = fill_missing_tensor(
+            input,
+            &FillOptions {
+                method: FillMethod::Constant(Value::Num(0.0)),
+                dim: None,
+            },
+        )
+        .unwrap();
+
+        match result {
+            (Value::Tensor(tensor), mask) => {
+                assert_eq!(tensor.integer_storage(), Some(&expected));
+                assert_eq!(mask.data, vec![0, 0, 0]);
+                assert_eq!(mask.shape, vec![3, 1]);
+            }
+            other => panic!("expected tensor and mask, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn fillmissing_nearest_uses_original_neighbors() {
         let value = tensor(vec![1.0, f64::NAN, f64::NAN, 4.0], vec![1, 4]);
         let result = block_on(fillmissing_builtin(value, vec![Value::from("nearest")])).unwrap();
@@ -2368,6 +2467,29 @@ mod tests {
     }
 
     #[test]
+    fn standardize_missing_reads_indicator_storage_and_does_not_nan_integer_targets() {
+        let marker = Tensor::new_integer(IntegerStorage::I16(vec![-99]), vec![1, 1])
+            .expect("integer marker");
+        let expected = IntegerStorage::I16(vec![-99, 2]);
+        let mut input = Tensor::new_integer(expected.clone(), vec![1, 2]).expect("integer input");
+        input.data = vec![0.0, 2.0];
+
+        let result = block_on(standardize_missing_builtin(
+            Value::Tensor(input),
+            vec![Value::Tensor(marker)],
+        ))
+        .unwrap();
+
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.integer_storage(), Some(&expected));
+                assert_eq!(tensor.data, vec![0.0, 2.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn nanmean_alias_uses_omitnan() {
         let result = block_on(nanmean_builtin(
             tensor(vec![1.0, f64::NAN, 3.0], vec![1, 3]),
@@ -2385,6 +2507,17 @@ mod tests {
         ))
         .unwrap();
         assert!(matches!(result, Value::Tensor(t) if t.data == vec![2.0, 4.0, 3.0]));
+    }
+
+    #[test]
+    fn nanmin_pairwise_reads_typed_integer_storage_exactly() {
+        let mut left = Tensor::new_integer(IntegerStorage::U16(vec![9, 4, 3]), vec![1, 3]).unwrap();
+        left.data.fill(f64::NAN);
+        let right = tensor(vec![2.0, f64::NAN, 5.0], vec![1, 3]);
+
+        let result = block_on(nanmin_builtin(Value::Tensor(left), vec![right])).unwrap();
+
+        assert!(matches!(result, Value::Tensor(tensor) if tensor.data == vec![2.0, 4.0, 3.0]));
     }
 
     #[test]
