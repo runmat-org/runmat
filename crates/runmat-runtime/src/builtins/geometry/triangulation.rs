@@ -11,6 +11,7 @@ use runmat_builtins::{
 use runmat_geometry_ops::{boundary_edges, delaunay_2d, nearest_neighbor_indices, point_locations};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{
     build_runtime_error, current_requested_outputs, gather_if_needed_async, BuiltinResult,
 };
@@ -498,10 +499,11 @@ fn matrix_points(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<[f64
             "{builtin}: points must be an N-by-2 matrix"
         )));
     }
+    let values = tensor_utils::tensor_values_f64_cow(&tensor);
     let mut points = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
-        let x = tensor.data[row];
-        let y = tensor.data[row + tensor.rows];
+        let x = values[row];
+        let y = values[row + tensor.rows];
         if !x.is_finite() || !y.is_finite() {
             return Err(invalid(format!("{builtin}: points must be finite")));
         }
@@ -518,9 +520,11 @@ fn vector_points(x: &Value, y: &Value, builtin: &'static str) -> BuiltinResult<V
             "{builtin}: x and y must be vectors with the same length"
         )));
     }
-    x.data
+    let x_values = tensor_utils::tensor_values_f64_cow(&x);
+    let y_values = tensor_utils::tensor_values_f64_cow(&y);
+    x_values
         .iter()
-        .zip(&y.data)
+        .zip(y_values.iter())
         .map(|(x, y)| {
             if !x.is_finite() || !y.is_finite() {
                 Err(invalid(format!("{builtin}: points must be finite")))
@@ -539,11 +543,12 @@ fn constraints_from_value(value: &Value) -> BuiltinResult<Vec<[usize; 2]>> {
     if tensor.cols != 2 {
         return Err(invalid("DelaunayTri: constraints must be an M-by-2 matrix"));
     }
+    let values = tensor_utils::tensor_values_f64_cow(&tensor);
     let mut constraints = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
         constraints.push([
-            positive_index(tensor.data[row], usize::MAX)?,
-            positive_index(tensor.data[row + tensor.rows], usize::MAX)?,
+            positive_index(values[row], usize::MAX)?,
+            positive_index(values[row + tensor.rows], usize::MAX)?,
         ]);
     }
     Ok(constraints)
@@ -557,12 +562,13 @@ fn connectivity_from_value(
     if tensor.cols != 3 {
         return Err(invalid("DelaunayTri connectivity must be an M-by-3 matrix"));
     }
+    let values = tensor_utils::tensor_values_f64_cow(&tensor);
     let mut triangles = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
         triangles.push([
-            positive_index(tensor.data[row], usize::MAX)? - 1,
-            positive_index(tensor.data[row + tensor.rows], usize::MAX)? - 1,
-            positive_index(tensor.data[row + 2 * tensor.rows], usize::MAX)? - 1,
+            positive_index(values[row], usize::MAX)? - 1,
+            positive_index(values[row + tensor.rows], usize::MAX)? - 1,
+            positive_index(values[row + 2 * tensor.rows], usize::MAX)? - 1,
         ]);
     }
     if let Some(point_count) = point_count {
@@ -686,6 +692,7 @@ fn error(
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor {
@@ -696,6 +703,12 @@ mod tests {
             shape: vec![rows, cols],
             dtype: NumericDType::F64,
         })
+    }
+
+    fn poisoned_integer_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn object(value: Value) -> ObjectInstance {
@@ -754,6 +767,42 @@ mod tests {
         };
         assert_eq!(points.rows, 3);
         assert_eq!(points.cols, 2);
+    }
+
+    #[test]
+    fn point_parsers_read_typed_integer_storage_exactly() {
+        let points = matrix_points(
+            &poisoned_integer_tensor(IntegerStorage::U16(vec![0, 1, 0, 0, 0, 1]), 3, 2),
+            BUILTIN_NAME,
+        )
+        .expect("matrix points");
+        assert_eq!(points, vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]);
+
+        let vector_points = vector_points(
+            &poisoned_integer_tensor(IntegerStorage::I16(vec![0, 1, 0]), 1, 3),
+            &poisoned_integer_tensor(IntegerStorage::I16(vec![0, 0, 1]), 1, 3),
+            BUILTIN_NAME,
+        )
+        .expect("vector points");
+        assert_eq!(vector_points, vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]);
+    }
+
+    #[test]
+    fn topology_parsers_read_typed_integer_storage_exactly() {
+        let constraints = constraints_from_value(&poisoned_integer_tensor(
+            IntegerStorage::U16(vec![1, 2, 2, 3]),
+            2,
+            2,
+        ))
+        .expect("constraints");
+        assert_eq!(constraints, vec![[1, 2], [2, 3]]);
+
+        let connectivity = connectivity_from_value(
+            &poisoned_integer_tensor(IntegerStorage::U16(vec![1, 2, 3]), 1, 3),
+            Some(3),
+        )
+        .expect("connectivity");
+        assert_eq!(connectivity, vec![[0, 1, 2]]);
     }
 
     #[test]
