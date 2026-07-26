@@ -474,7 +474,7 @@ where
     let shape = normalize_shape(&input);
     let axes = resolved_axes(&shape, options.axes);
     if axes.is_empty() {
-        return Tensor::new(input.data, shape)
+        return Tensor::new(tensor::tensor_into_values_f64(input), shape)
             .map(tensor::tensor_into_value)
             .map_err(|err| descriptive_error(name, format!("{name}: {err}")));
     }
@@ -489,7 +489,10 @@ where
     let in_strides = strides_for(&padded_shape);
     let out_strides = strides_for(&out_shape);
     let mut buckets = vec![Vec::<f64>::new(); out_len.max(1)];
-    for (linear, value) in input.data.into_iter().enumerate() {
+    for (linear, value) in tensor::tensor_into_values_f64(input)
+        .into_iter()
+        .enumerate()
+    {
         let mut dst = 0usize;
         for dim in 0..rank {
             let coord = (linear / in_strides[dim]) % padded_shape[dim];
@@ -616,22 +619,24 @@ fn weight_spec_for(
     input_shape: &[usize],
     axes: &[usize],
 ) -> BuiltinResult<WeightSpec> {
-    if weights.data.iter().any(|value| *value < 0.0) {
+    let weight_len = weights.data.len();
+    let weight_values = tensor::tensor_into_values_f64(weights);
+    if weight_values.iter().any(|value| *value < 0.0) {
         return Err(descriptive_error(
             name,
             format!("{name}: weights must be nonnegative"),
         ));
     }
-    if weights.data.len() == 1 {
-        return Ok(WeightSpec::Scalar(weights.data[0]));
+    if weight_len == 1 {
+        return Ok(WeightSpec::Scalar(weight_values[0]));
     }
-    if weights.data.len() == tensor::element_count(input_shape) {
-        return Ok(WeightSpec::Elementwise(weights.data));
+    if weight_len == tensor::element_count(input_shape) {
+        return Ok(WeightSpec::Elementwise(weight_values));
     }
-    if axes.len() == 1 && weights.data.len() == input_shape[axes[0]] {
+    if axes.len() == 1 && weight_len == input_shape[axes[0]] {
         return Ok(WeightSpec::Axis {
             axis: axes[0],
-            weights: weights.data,
+            weights: weight_values,
         });
     }
     Err(descriptive_error(
@@ -675,7 +680,10 @@ fn weighted_rmse_tensor(
     let out_strides = strides_for(&out_shape);
     let weight_spec = weight_spec_for(name, weights, &padded_shape, &axes)?;
     let mut buckets = vec![Vec::<(f64, f64)>::new(); out_len.max(1)];
-    for (linear, value) in input.data.into_iter().enumerate() {
+    for (linear, value) in tensor::tensor_into_values_f64(input)
+        .into_iter()
+        .enumerate()
+    {
         let mut dst = 0usize;
         let mut axis_coord = 0usize;
         for dim in 0..rank {
@@ -837,8 +845,7 @@ where
 }
 
 fn numeric_tabulate(name: &str, tensor: Tensor) -> BuiltinResult<Value> {
-    let mut values = tensor
-        .data
+    let mut values = tensor::tensor_into_values_f64(tensor)
         .into_iter()
         .filter(|value| !value.is_nan())
         .collect::<Vec<_>>();
@@ -1268,6 +1275,33 @@ mod tests {
     }
 
     #[test]
+    fn descriptive_reductions_read_typed_integer_storage_exactly() {
+        let x = int_tensor(IntegerStorage::U16(vec![1, 4, 9]), vec![1, 3]);
+        let all = vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))];
+
+        let geometric = block_on(geomean::geomean_builtin(x.clone(), all.clone())).unwrap();
+        assert_close(tensor_values(geometric).0[0], (36.0_f64).powf(1.0 / 3.0));
+
+        let harmonic = block_on(harmmean::harmmean_builtin(x.clone(), all.clone())).unwrap();
+        assert_close(tensor_values(harmonic).0[0], 3.0 / (1.0 + 0.25 + 1.0 / 9.0));
+
+        let rms = block_on(rms::rms_builtin(x.clone(), all.clone())).unwrap();
+        assert_close(
+            tensor_values(rms).0[0],
+            ((1.0 + 16.0 + 81.0) / 3.0_f64).sqrt(),
+        );
+
+        let mad = block_on(mad::mad_builtin(x.clone(), all.clone())).unwrap();
+        assert_close(tensor_values(mad).0[0], 3.0);
+
+        let skew = block_on(skewness::skewness_builtin(x.clone(), all.clone())).unwrap();
+        assert_close(tensor_values(skew).0[0], 0.294_799_620_144_828_63);
+
+        let kurt = block_on(kurtosis::kurtosis_builtin(x, all)).unwrap();
+        assert_close(tensor_values(kurt).0[0], 1.5);
+    }
+
+    #[test]
     fn mad_supports_median_default_and_mean_flag_modes() {
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 10.0], vec![1, 3]).unwrap());
         let default_mad = block_on(mad::mad_builtin(
@@ -1370,6 +1404,27 @@ mod tests {
     }
 
     #[test]
+    fn weighted_rmse_reads_typed_integer_storage_exactly() {
+        let x = int_tensor(IntegerStorage::I16(vec![2, 4, 6]), vec![3, 1]);
+        let y = int_tensor(IntegerStorage::I16(vec![1]), vec![1, 1]);
+        let weights = int_tensor(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]);
+        let out = block_on(rmse::rmse_builtin(
+            x,
+            y,
+            vec![
+                Value::Num(1.0),
+                Value::CharArray(runmat_builtins::CharArray::new_row("Weights")),
+                weights,
+            ],
+        ))
+        .unwrap();
+        assert_close(
+            tensor_values(out).0[0],
+            ((1.0 + 18.0 + 75.0) / 6.0_f64).sqrt(),
+        );
+    }
+
+    #[test]
     fn flagged_moments_omit_nans_by_default() {
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, f64::NAN], vec![1, 3]).unwrap());
         let mad_out = block_on(mad::mad_builtin(
@@ -1441,6 +1496,19 @@ mod tests {
     #[test]
     fn tabulate_expands_positive_integer_levels() {
         let x = Value::Tensor(Tensor::new(vec![1.0, 3.0, 3.0], vec![1, 3]).unwrap());
+        let out = block_on(tabulate::tabulate_builtin(x)).unwrap();
+        let (data, shape) = tensor_values(out);
+        assert_eq!(shape, vec![3, 3]);
+        assert_eq!(&data[0..3], &[1.0, 2.0, 3.0]);
+        assert_eq!(&data[3..6], &[1.0, 0.0, 2.0]);
+        assert_close(data[6], 100.0 / 3.0);
+        assert_close(data[7], 0.0);
+        assert_close(data[8], 200.0 / 3.0);
+    }
+
+    #[test]
+    fn tabulate_numeric_reads_typed_integer_storage_exactly() {
+        let x = int_tensor(IntegerStorage::U8(vec![1, 3, 3]), vec![1, 3]);
         let out = block_on(tabulate::tabulate_builtin(x)).unwrap();
         let (data, shape) = tensor_values(out);
         assert_eq!(shape, vec![3, 3]);
