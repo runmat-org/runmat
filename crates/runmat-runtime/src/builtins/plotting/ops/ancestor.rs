@@ -10,6 +10,7 @@ use super::state::{
     axes_metadata_snapshot, encode_axes_handle, figure_has_sg_title, legend_entries_snapshot,
     FigureHandle, PlotObjectKind,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_array_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -141,15 +142,15 @@ fn ancestor_array(
     types: &TypeSelector,
     toplevel: bool,
 ) -> crate::BuiltinResult<Value> {
+    let values = tensor_utils::tensor_values_f64_cow(tensor);
     if tensor.data.len() == 1 {
-        return Ok(match ancestor_scalar(tensor.data[0], types, toplevel) {
+        return Ok(match ancestor_scalar(values[0], types, toplevel) {
             Some(handle) => Value::Num(handle),
             None => empty_handle_array(),
         });
     }
 
-    let data: Vec<f64> = tensor
-        .data
+    let data: Vec<f64> = values
         .iter()
         .filter_map(|&handle| ancestor_scalar(handle, types, toplevel))
         .collect();
@@ -326,7 +327,9 @@ fn scalar_handle(value: &Value) -> Option<f64> {
     match value {
         Value::Num(v) => Some(*v),
         Value::Int(i) => Some(i.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Some(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     }
 }
@@ -598,6 +601,20 @@ mod tests {
         let _guard = setup();
         assert_eq!(
             ancestor_builtin(vec![Value::Num(0.0), Value::String("root".into())]).unwrap(),
+            Value::Num(0.0)
+        );
+    }
+
+    #[test]
+    fn typed_integer_tensor_handle_reads_storage_exactly() {
+        let _guard = setup();
+        let mut handle =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![0]), vec![1, 1])
+                .expect("typed handle");
+        handle.data[0] = f64::NAN;
+
+        assert_eq!(
+            ancestor_builtin(vec![Value::Tensor(handle), Value::String("root".into())]).unwrap(),
             Value::Num(0.0)
         );
     }
