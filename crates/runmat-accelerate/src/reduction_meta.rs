@@ -155,6 +155,7 @@ fn parse_single_int(int_val: &IntValue) -> Option<Vec<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::IntegerStorage;
 
     #[test]
     fn reduction_dimension_preserves_representable_uint64_values() {
@@ -164,6 +165,27 @@ mod tests {
             expected.map(|value| vec![value])
         );
         assert_eq!(parse_single_int(&IntValue::I64(-1)), None);
+    }
+
+    #[test]
+    fn reduction_tensor_dims_read_typed_integer_storage_exactly() {
+        let mut dims =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("dims");
+        dims.data.fill(f64::NAN);
+
+        assert_eq!(parse_tensor_dims(&dims), Some(vec![2, 3]));
+    }
+
+    #[test]
+    fn reduction_tensor_dims_reject_invalid_typed_integer_storage() {
+        let mut zero = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("zero");
+        zero.data[0] = 1.0;
+        assert_eq!(parse_tensor_dims(&zero), None);
+
+        let mut negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative");
+        negative.data[0] = 1.0;
+        assert_eq!(parse_tensor_dims(&negative), None);
     }
 }
 
@@ -181,6 +203,19 @@ fn parse_single_float(value: f64) -> Option<Vec<usize>> {
 fn parse_tensor_dims(tensor: &Tensor) -> Option<Vec<usize>> {
     if tensor.data.is_empty() {
         return None;
+    }
+    if let Some(storage) = tensor.integer_storage() {
+        let mut dims = Vec::with_capacity(storage.len());
+        for index in 0..storage.len() {
+            let parsed = storage.value_at(index).and_then(|value| {
+                value
+                    .try_to_usize()
+                    .filter(|raw| *raw >= 1)
+                    .map(|raw| vec![raw])
+            })?;
+            dims.extend(parsed);
+        }
+        return if dims.is_empty() { None } else { Some(dims) };
     }
     let mut dims = Vec::with_capacity(tensor.data.len());
     for value in &tensor.data {
