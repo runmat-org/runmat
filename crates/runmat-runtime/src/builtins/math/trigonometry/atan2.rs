@@ -206,9 +206,11 @@ fn compute_atan2_tensor(y: &Tensor, x: &Tensor) -> BuiltinResult<Value> {
             .map_err(|e| atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(empty));
     }
+    let y_data = tensor::tensor_values_f64_cow(y);
+    let x_data = tensor::tensor_values_f64_cow(x);
     let mut out = vec![0.0f64; plan.len()];
     for (out_index, idx_y, idx_x) in plan.iter() {
-        out[out_index] = y.data[idx_y].atan2(x.data[idx_x]);
+        out[out_index] = y_data[idx_y].atan2(x_data[idx_x]);
     }
     let tensor = Tensor::new(out, plan.output_shape().to_vec())
         .map_err(|e| atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, e))?;
@@ -257,7 +259,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, LogicalArray, ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{
+        CharArray, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
+    };
     use std::f64::consts::PI;
 
     const EPS: f64 = 1e-12;
@@ -355,6 +359,32 @@ pub(crate) mod tests {
         let y = Tensor::new(vec![1.0, -1.0, 2.0, -2.0], vec![2, 2]).unwrap();
         let x = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
         let result = atan2_builtin(Value::Tensor(y), Value::Tensor(x)).expect("row broadcast");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                let expected = [
+                    (1.0f64).atan2(1.0),
+                    (-1.0f64).atan2(1.0),
+                    (2.0f64).atan2(1.0),
+                    (-2.0f64).atan2(1.0),
+                ];
+                for (actual, expect) in t.data.iter().zip(expected.iter()) {
+                    assert!((actual - expect).abs() < EPS);
+                }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn atan2_typed_integer_tensors_read_exact_storage() {
+        let mut y =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, -1, 2, -2]), vec![2, 2]).unwrap();
+        let mut x = Tensor::new_integer(IntegerStorage::I16(vec![1, 1]), vec![1, 2]).unwrap();
+        y.data.fill(0.0);
+        x.data.fill(0.0);
+
+        let result = atan2_builtin(Value::Tensor(y), Value::Tensor(x)).expect("atan2");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -535,6 +565,56 @@ pub(crate) mod tests {
             let expected = [(1.0f64).atan2(2.0), (2.0f64).atan2(2.0)];
             for (actual, expect) in gathered.data.iter().zip(expected.iter()) {
                 assert!((actual - expect).abs() < EPS);
+            }
+        });
+    }
+
+    #[test]
+    fn atan2_gpu_host_mix_reads_typed_integer_rhs_exactly() {
+        test_support::with_test_provider(|provider| {
+            let y = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+            let hy = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &y.data,
+                    shape: &y.shape,
+                })
+                .expect("upload y");
+            let mut x = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap();
+            x.data.fill(0.0);
+
+            let result = atan2_builtin(Value::GpuTensor(hy), Value::Tensor(x)).expect("atan2");
+            match result {
+                Value::Tensor(t) => {
+                    assert_eq!(t.shape, vec![2, 1]);
+                    assert!((t.data[0] - 1.0f64.atan2(1.0)).abs() < EPS);
+                    assert!((t.data[1] - 2.0f64.atan2(2.0)).abs() < EPS);
+                }
+                other => panic!("expected host fallback tensor, got {other:?}"),
+            }
+        });
+    }
+
+    #[test]
+    fn atan2_gpu_host_mix_reads_typed_integer_lhs_exactly() {
+        test_support::with_test_provider(|provider| {
+            let x = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+            let hx = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &x.data,
+                    shape: &x.shape,
+                })
+                .expect("upload x");
+            let mut y = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap();
+            y.data.fill(0.0);
+
+            let result = atan2_builtin(Value::Tensor(y), Value::GpuTensor(hx)).expect("atan2");
+            match result {
+                Value::Tensor(t) => {
+                    assert_eq!(t.shape, vec![2, 1]);
+                    assert!((t.data[0] - 1.0f64.atan2(1.0)).abs() < EPS);
+                    assert!((t.data[1] - 2.0f64.atan2(2.0)).abs() < EPS);
+                }
+                other => panic!("expected host fallback tensor, got {other:?}"),
             }
         });
     }
