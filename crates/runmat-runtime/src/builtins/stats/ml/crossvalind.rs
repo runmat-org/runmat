@@ -627,7 +627,7 @@ fn scalar_number(value: &Value, label: &str) -> BuiltinResult<f64> {
         Value::Num(number) => Ok(*number),
         Value::Int(integer) => Ok(integer.to_f64()),
         Value::Bool(flag) => Ok(if *flag { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor::tensor_value_f64(tensor, 0)),
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok(if array.data[0] == 0 { 0.0 } else { 1.0 })
         }
@@ -671,6 +671,7 @@ fn logical_value(data: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
         let _guard = crate::output_count::push_output_count(outputs);
@@ -697,6 +698,12 @@ mod tests {
             Value::OutputList(values) => values,
             other => panic!("expected output list, got {other:?}"),
         }
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -806,19 +813,33 @@ mod tests {
     fn typed_integer_partition_counts_are_exact_and_lossy_f64_is_rejected() {
         let typed_six = Value::Int(runmat_builtins::IntValue::U16(6));
         assert_eq!(observation_count(&typed_six).unwrap(), 6);
+        let typed_tensor_six = poisoned_int_tensor(IntegerStorage::U16(vec![6]), 1, 1);
+        assert_eq!(observation_count(&typed_tensor_six).unwrap(), 6);
         assert_eq!(
             positive_integer(&Value::Int(runmat_builtins::IntValue::U8(3)), "KFold").unwrap(),
+            3
+        );
+        assert_eq!(
+            positive_integer(
+                &poisoned_int_tensor(IntegerStorage::U8(vec![3]), 1, 1),
+                "KFold"
+            )
+            .unwrap(),
             3
         );
         assert_eq!(
             holdout_count(&Value::Int(runmat_builtins::IntValue::U8(2)), 6).unwrap(),
             2
         );
+        assert_eq!(
+            holdout_count(&poisoned_int_tensor(IntegerStorage::U8(vec![2]), 1, 1), 6).unwrap(),
+            2
+        );
 
         let folds = crossvalind_compute(vec![
             Value::from("KFold"),
-            typed_six,
-            Value::Int(runmat_builtins::IntValue::U8(3)),
+            typed_tensor_six,
+            poisoned_int_tensor(IntegerStorage::U8(vec![3]), 1, 1),
         ])
         .unwrap();
         let PartitionOutput::Folds(Value::Tensor(folds)) = folds else {

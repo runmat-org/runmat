@@ -9,6 +9,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const CVPARTITION_NAME: &str = "cvpartition";
@@ -395,7 +396,7 @@ impl PartitionInput {
                 labels: None,
             }),
             Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Self {
-                n: positive_integer_number(tensor.data[0], "n")?,
+                n: positive_integer_number(tensor::tensor_value_f64(&tensor, 0), "n")?,
                 labels: None,
             }),
             Value::Tensor(tensor) => numeric_labels(tensor),
@@ -750,9 +751,9 @@ fn custom_numeric_partition(tensor: Tensor) -> BuiltinResult<PartitionSpec> {
         return custom_partition(Value::LogicalArray(array));
     }
 
-    if tensor.data.iter().any(|value| (*value - 0.0).abs() <= EPS) {
-        let data = tensor
-            .data
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    if values.iter().any(|value| (*value - 0.0).abs() <= EPS) {
+        let data = values
             .iter()
             .map(|value| {
                 if (*value - 0.0).abs() <= EPS {
@@ -766,14 +767,14 @@ fn custom_numeric_partition(tensor: Tensor) -> BuiltinResult<PartitionSpec> {
                 }
             })
             .collect::<BuiltinResult<Vec<_>>>()?;
-        let array = LogicalArray::new(data, vec![tensor.data.len(), 1])
+        let array = LogicalArray::new(data, vec![values.len(), 1])
             .map_err(|err| internal_error(format!("cvpartition: {err}")))?;
         return custom_partition(Value::LogicalArray(array));
     }
 
-    let mut ids = Vec::with_capacity(tensor.data.len());
+    let mut ids = Vec::with_capacity(values.len());
     let mut max_id = 0usize;
-    for value in &tensor.data {
+    for value in values.iter() {
         if !value.is_finite() || value.fract() != 0.0 || *value < 1.0 || *value > usize::MAX as f64
         {
             return Err(invalid_argument(
@@ -953,7 +954,7 @@ fn selected_indices(value: &Value, cols: usize) -> BuiltinResult<Vec<usize>> {
     }
     let raw = match value {
         Value::Num(number) => vec![*number],
-        Value::Tensor(tensor) => tensor.data.clone(),
+        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor),
         Value::LogicalArray(array) => array
             .data
             .iter()
@@ -1106,7 +1107,7 @@ fn scalar_number(value: &Value, label: &str) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_value_f64(tensor, 0),
         Value::LogicalArray(array) if array.data.len() == 1 => {
             if array.data[0] == 0 {
                 0.0
@@ -1191,6 +1192,7 @@ fn canonical(text: &str) -> String {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -1198,6 +1200,12 @@ mod tests {
 
     fn logical(data: Vec<u8>, shape: Vec<usize>) -> Value {
         Value::LogicalArray(LogicalArray::new(data, shape).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
     }
 
     fn cv(first: Value, second: Value, rest: Vec<Value>) -> Value {
@@ -1336,6 +1344,30 @@ mod tests {
     }
 
     #[test]
+    fn custom_integer_vector_reads_typed_integer_storage_exactly() {
+        let partition = cv(
+            Value::String("CustomPartition".into()),
+            poisoned_int_tensor(IntegerStorage::U8(vec![1, 2, 2, 1]), vec![1, 4]),
+            Vec::new(),
+        );
+        let all = logical_output(
+            block_on(test_builtin(partition, vec![Value::String("all".into())]))
+                .expect("custom integer all"),
+        );
+        assert_eq!(all.shape, vec![4, 2]);
+        assert_eq!(all.data, vec![1, 0, 0, 1, 0, 1, 1, 0]);
+
+        let partition = cv(
+            Value::String("CustomPartition".into()),
+            poisoned_int_tensor(IntegerStorage::U8(vec![1, 0, 1, 0]), vec![1, 4]),
+            Vec::new(),
+        );
+        let mask = logical_output(block_on(test_builtin(partition, Vec::new())).expect("test"));
+        assert_eq!(mask.shape, vec![4, 1]);
+        assert_eq!(mask.data, vec![1, 0, 1, 0]);
+    }
+
+    #[test]
     fn custom_logical_row_vector_is_single_test_set() {
         let partition = cv(
             Value::String("CustomPartition".into()),
@@ -1426,8 +1458,22 @@ mod tests {
         let input =
             PartitionInput::from_value(Value::Int(runmat_builtins::IntValue::U16(6))).unwrap();
         assert_eq!(input.n, 6);
+        let input = PartitionInput::from_value(poisoned_int_tensor(
+            IntegerStorage::U16(vec![6]),
+            vec![1, 1],
+        ))
+        .unwrap();
+        assert_eq!(input.n, 6);
         assert_eq!(
             positive_integer(&Value::Int(runmat_builtins::IntValue::U8(3)), "KFold").unwrap(),
+            3
+        );
+        assert_eq!(
+            positive_integer(
+                &poisoned_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1]),
+                "KFold"
+            )
+            .unwrap(),
             3
         );
         assert_eq!(
@@ -1435,19 +1481,35 @@ mod tests {
             2
         );
         assert_eq!(
+            holdout_count(
+                &poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+                6
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
             selected_indices(&Value::Int(runmat_builtins::IntValue::U8(3)), 3).unwrap(),
+            vec![2]
+        );
+        assert_eq!(
+            selected_indices(
+                &poisoned_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1]),
+                3
+            )
+            .unwrap(),
             vec![2]
         );
 
         let partition = cv(
-            Value::Int(runmat_builtins::IntValue::U16(6)),
+            poisoned_int_tensor(IntegerStorage::U16(vec![6]), vec![1, 1]),
             Value::from("KFold"),
-            vec![Value::Int(runmat_builtins::IntValue::U8(3))],
+            vec![poisoned_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1])],
         );
         let selected = logical_output(
             block_on(test_builtin(
                 partition,
-                vec![Value::Int(runmat_builtins::IntValue::U8(3))],
+                vec![poisoned_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1])],
             ))
             .unwrap(),
         );
