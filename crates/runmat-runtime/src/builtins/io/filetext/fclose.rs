@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::{
     helpers::{char_array_value, extract_scalar_string},
     registry,
@@ -334,7 +335,7 @@ fn collect_file_ids(value: &Value) -> BuiltinResult<Vec<i32>> {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(vec![parse_scalar_fid(value)?]),
         Value::Tensor(t) => {
             let mut ids = Vec::with_capacity(t.data.len());
-            for &n in &t.data {
+            for n in tensor::tensor_values_f64(t) {
                 ids.push(parse_fid_from_f64(n)?);
             }
             Ok(ids)
@@ -431,7 +432,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fopen, registry};
-    use runmat_builtins::{CellArray, IntValue, LogicalArray, StringArray, Tensor};
+    use runmat_builtins::{CellArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor};
     use runmat_time::system_time_now;
     use std::future::Future;
     use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
@@ -611,6 +612,20 @@ pub(crate) mod tests {
     fn typed_file_identifier_parser_rejects_unrepresentable_uint64() {
         assert_eq!(parse_scalar_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
         assert!(parse_scalar_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+    }
+
+    #[test]
+    fn fclose_vector_parser_reads_typed_integer_storage_exactly() {
+        let mut ids =
+            Tensor::new_integer(IntegerStorage::U16(vec![7, 9]), vec![1, 2]).expect("typed fids");
+        ids.data = vec![99.0, 101.0];
+
+        assert_eq!(collect_file_ids(&Value::Tensor(ids)).unwrap(), vec![7, 9]);
+
+        let mut too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed fid");
+        too_large.data = vec![7.0];
+        assert!(collect_file_ids(&Value::Tensor(too_large)).is_err());
     }
 
     fn unique_path(prefix: &str) -> PathBuf {

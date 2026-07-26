@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::{helpers::decode_bytes, registry};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -1465,7 +1466,7 @@ fn nonnegative_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
     let raw = match value {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_i64() as f64,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_value_f64(tensor, 0),
         _ => {
             return Err(textscan_error_with(
                 &TEXTSCAN_ERROR_ARGUMENT,
@@ -1486,7 +1487,7 @@ fn numeric_fid(value: &Value) -> Option<i32> {
     let raw = match value {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_i64() as f64,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_value_f64(tensor, 0),
         _ => return None,
     };
     if raw.is_finite() && raw.fract() == 0.0 && raw >= i32::MIN as f64 && raw <= i32::MAX as f64 {
@@ -1504,6 +1505,7 @@ fn is_numeric_scalar(value: &Value) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::{IntegerStorage, Tensor};
     use runmat_filesystem::OpenOptions;
     use std::sync::{Arc, Mutex as StdMutex};
 
@@ -1551,6 +1553,33 @@ mod tests {
             .collect();
         assert!(labels.contains(&"C = textscan(textOrFileID, formatSpec)"));
         assert!(labels.contains(&"C = textscan(textOrFileID, formatSpec, args...)"));
+    }
+
+    #[test]
+    fn textscan_scalar_parsers_read_typed_integer_storage_exactly() {
+        let mut header = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1])
+            .expect("typed header lines");
+        header.data = vec![0.0];
+        assert_eq!(
+            nonnegative_usize(&Value::Tensor(header), "HeaderLines").unwrap(),
+            2
+        );
+
+        let mut invalid = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("typed invalid count");
+        invalid.data = vec![2.0];
+        assert!(nonnegative_usize(&Value::Tensor(invalid), "HeaderLines").is_err());
+
+        let mut fid =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed fid");
+        fid.data = vec![99.0];
+        assert_eq!(numeric_fid(&Value::Tensor(fid)), Some(7));
+
+        let mut fid_too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .expect("typed fid");
+        fid_too_large.data = vec![7.0];
+        assert_eq!(numeric_fid(&Value::Tensor(fid_too_large)), None);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

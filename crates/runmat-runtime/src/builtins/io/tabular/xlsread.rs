@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "xlsread";
@@ -822,7 +823,7 @@ fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
             parse_range_string(&value_to_string_scalar(value)?)
         }
-        Value::Tensor(t) => parse_numeric_range(&t.data),
+        Value::Tensor(t) => parse_numeric_range(tensor::tensor_values_f64(t).as_slice()),
         _ => Err(xlsread_error_with(
             &XLSREAD_ERROR_RANGE,
             "xlsread: range must be a string or numeric vector",
@@ -1471,6 +1472,24 @@ mod tests {
         let negative =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative");
         assert!(parse_sheet_selector(&Value::Tensor(negative)).is_err());
+    }
+
+    #[test]
+    fn xlsread_numeric_range_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 4, 5]), vec![1, 4])
+            .expect("typed range tensor");
+        tensor.data = vec![99.0, 99.0, 99.0, 99.0];
+
+        let range = parse_range(&Value::Tensor(tensor)).expect("numeric range");
+        assert_eq!(range.start_row, 1);
+        assert_eq!(range.start_col, 2);
+        assert_eq!(range.end_row, Some(3));
+        assert_eq!(range.end_col, Some(4));
+
+        let mut invalid = Tensor::new_integer(IntegerStorage::I16(vec![-1, 1]), vec![1, 2])
+            .expect("typed invalid range");
+        invalid.data = vec![2.0, 3.0];
+        assert!(parse_range(&Value::Tensor(invalid)).is_err());
     }
     use futures::executor::block_on;
     use std::fs;
