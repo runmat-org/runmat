@@ -322,7 +322,7 @@ fn mrdivide_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Tensor> {
     ensure_matrix_shape(NAME, &rhs.shape)?;
 
     if tensor::is_scalar_tensor(rhs) {
-        let divisor = rhs.data[0];
+        let divisor = tensor::tensor_value_f64(rhs, 0);
         let scaled = linalg::scalar_mul_real(lhs, divisor.recip());
         return Ok(scaled);
     }
@@ -337,8 +337,10 @@ fn mrdivide_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Tensor> {
         return Ok(result);
     }
 
-    let lhs_matrix = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), &lhs.data);
-    let rhs_matrix = DMatrix::from_column_slice(rhs.rows(), rhs.cols(), &rhs.data);
+    let lhs_values = tensor::tensor_values_f64_cow(lhs);
+    let rhs_values = tensor::tensor_values_f64_cow(rhs);
+    let lhs_matrix = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), lhs_values.as_ref());
+    let rhs_matrix = DMatrix::from_column_slice(rhs.rows(), rhs.cols(), rhs_values.as_ref());
     let solution = solve_real_matrix(&lhs_matrix, &rhs_matrix)?;
     matrix_real_to_tensor(solution)
 }
@@ -684,6 +686,21 @@ pub(crate) mod tests {
         assert!((out.data[0].1 - 2.0).abs() < 1e-12);
         assert!((out.data[1].0 - 1.0).abs() < 1e-12);
         assert!((out.data[1].1 + 4.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn mrdivide_host_real_reads_typed_integer_storage_exactly() {
+        let mut lhs =
+            Tensor::new_integer(IntegerStorage::I16(vec![6, 10]), vec![1, 2]).expect("typed lhs");
+        let mut rhs =
+            Tensor::new_integer(IntegerStorage::I16(vec![2]), vec![1, 1]).expect("typed divisor");
+        lhs.data.fill(f64::NAN);
+        rhs.data.fill(f64::NAN);
+
+        let out = mrdivide_host_real_for_provider(&lhs, &rhs).expect("host mrdivide");
+
+        assert_eq!(out.data, vec![3.0, 5.0]);
+        assert!(out.integer_storage().is_none());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
