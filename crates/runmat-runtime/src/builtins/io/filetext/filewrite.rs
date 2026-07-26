@@ -582,6 +582,23 @@ fn string_array_to_text(sa: &StringArray) -> Vec<char> {
 
 fn tensor_to_bytes(tensor: &Tensor) -> BuiltinResult<Vec<u8>> {
     let mut out = Vec::with_capacity(tensor.data.len());
+    if let Some(storage) = tensor.integer_storage() {
+        for idx in 0..tensor.data.len() {
+            let value = storage
+                .value_at(idx)
+                .expect("integer storage mirrors tensor shape");
+            match float_to_byte(value.to_f64()) {
+                Ok(byte) => out.push(byte),
+                Err(msg) => {
+                    return Err(filewrite_error_with_detail(
+                        &FILEWRITE_ERROR_INVALID_DATA,
+                        format!("numeric element {} {}", idx, msg),
+                    ));
+                }
+            }
+        }
+        return Ok(out);
+    }
     for (idx, value) in tensor.data.iter().enumerate() {
         match float_to_byte(*value) {
             Ok(byte) => out.push(byte),
@@ -784,6 +801,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
+    use runmat_builtins::IntegerStorage;
     use runmat_time::unix_timestamp_ms;
     use std::io::Read;
 
@@ -895,6 +913,27 @@ pub(crate) mod tests {
             .expect("open raw file")
             .read_to_end(&mut bytes)
             .expect("read raw file");
+        assert_eq!(bytes, vec![0u8, 127u8, 255u8]);
+
+        let _ = test_support::fs::remove_file(&path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn filewrite_writes_raw_bytes_from_typed_integer_storage() {
+        let path = unique_path("filewrite_typed_raw_bytes");
+        let mut tensor = Tensor::new_integer(IntegerStorage::U8(vec![0, 127, 255]), vec![3, 1])
+            .expect("typed byte tensor");
+        tensor.data.fill(42.0);
+
+        run_filewrite(
+            Value::from(path.to_string_lossy().to_string()),
+            Value::Tensor(tensor),
+            vec![Value::from("Encoding"), Value::from("raw")],
+        )
+        .expect("filewrite typed raw");
+
+        let bytes = test_support::fs::read(&path).expect("read typed raw file");
         assert_eq!(bytes, vec![0u8, 127u8, 255u8]);
 
         let _ = test_support::fs::remove_file(&path);

@@ -607,8 +607,13 @@ impl MatrixData {
             MatrixData::Numeric(tensor) => {
                 let rows = tensor.rows();
                 let idx = row + col * rows;
-                let value = tensor.data[idx];
-                format_numeric(value, options.decimal_separator)
+                if let Some(storage) = tensor.integer_storage() {
+                    return storage
+                        .value_at(idx)
+                        .expect("integer storage mirrors tensor shape")
+                        .decimal_string();
+                }
+                format_numeric(tensor.data[idx], options.decimal_separator)
             }
             MatrixData::Text { rows, data, .. } => {
                 if *rows == 0 {
@@ -876,7 +881,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{StringArray, Tensor};
+    use runmat_builtins::{IntegerStorage, StringArray, Tensor};
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -940,6 +945,29 @@ pub(crate) mod tests {
 
         let contents = fs::read_to_string(&path).expect("read contents");
         assert_eq!(contents, "1,2,3\n");
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn writematrix_preserves_typed_integer_matrix_values_exactly() {
+        let path = temp_path("csv");
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 17, (1_u64 << 53) + 1, 29]),
+            vec![2, 2],
+        )
+        .expect("typed integer matrix");
+        tensor.data.fill(0.0);
+        let filename = path.to_string_lossy().into_owned();
+
+        block_on(writematrix_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from(filename)],
+        ))
+        .expect("writematrix");
+
+        let contents = fs::read_to_string(&path).expect("read contents");
+        assert_eq!(contents, "18446744073709551615,9007199254740993\n17,29\n");
         let _ = fs::remove_file(path);
     }
 
