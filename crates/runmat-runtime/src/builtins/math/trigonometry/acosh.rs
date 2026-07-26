@@ -197,15 +197,16 @@ fn acosh_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn acosh_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
-    if tensor.data.is_empty() {
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    if values.is_empty() {
         return Ok(tensor::tensor_into_value(tensor));
     }
 
     let mut requires_complex = false;
-    let mut real_data = Vec::with_capacity(tensor.data.len());
-    let mut complex_data = Vec::with_capacity(tensor.data.len());
+    let mut real_data = Vec::with_capacity(values.len());
+    let mut complex_data = Vec::with_capacity(values.len());
 
-    for &x in &tensor.data {
+    for &x in values.iter() {
         if x.is_nan() {
             real_data.push(f64::NAN);
             complex_data.push((f64::NAN, 0.0));
@@ -393,6 +394,48 @@ pub(crate) mod tests {
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn acosh_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![1, 2, 3]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+        tensor.data.fill(1.0);
+
+        match acosh_builtin(Value::Tensor(tensor)).expect("acosh") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                let expected = [0.0, 2.0f64.acosh(), 3.0f64.acosh()];
+                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                    assert!((actual - expected).abs() < 1e-12);
+                }
+                assert!(out.integer_storage().is_none());
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn acosh_below_domain_typed_integer_promotes_from_storage() {
+        let mut tensor =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![0, 2]), vec![1, 2])
+                .expect("integer tensor");
+        tensor.data.fill(2.0);
+
+        match acosh_builtin(Value::Tensor(tensor)).expect("acosh") {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data[0], (0.0, std::f64::consts::FRAC_PI_2));
+                assert!((out.data[1].0 - 2.0f64.acosh()).abs() < 1e-12);
+                assert_eq!(out.data[1].1, 0.0);
+            }
+            other => panic!("expected complex tensor result, got {other:?}"),
         }
     }
 

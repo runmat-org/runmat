@@ -226,7 +226,8 @@ fn acos_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn acos_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
-    let len = tensor.data.len();
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    let len = values.len();
     if len == 0 {
         return Ok(tensor::tensor_into_value(tensor));
     }
@@ -235,7 +236,7 @@ fn acos_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
     let mut real_data = Vec::with_capacity(len);
     let mut complex_data = Vec::with_capacity(len);
 
-    for &v in &tensor.data {
+    for &v in values.iter() {
         let (re, im) = acos_real_matlab(v);
         let re = zero_small(re);
         let im = zero_small(im);
@@ -480,6 +481,70 @@ pub(crate) mod tests {
                 }
             }
             other => panic!("unexpected result {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn acos_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-1, 0, 1]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+        tensor.data.fill(0.0);
+
+        match acos_builtin(Value::Tensor(tensor)).expect("acos") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                let expected = [std::f64::consts::PI, std::f64::consts::FRAC_PI_2, 0.0];
+                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                    assert!((actual - expected).abs() < 1e-12);
+                }
+                assert!(out.integer_storage().is_none());
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn acos_outside_domain_typed_integer_promotes_from_storage() {
+        let mut tensor =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![2, 0]), vec![1, 2])
+                .expect("integer tensor");
+        tensor.data.fill(0.0);
+
+        match acos_builtin(Value::Tensor(tensor)).expect("acos") {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                let expected = acos_real_matlab(2.0);
+                assert!((out.data[0].0 - expected.0).abs() < 1e-12);
+                assert!((out.data[0].1 - expected.1).abs() < 1e-12);
+                assert_eq!(out.data[1], (std::f64::consts::FRAC_PI_2, 0.0));
+            }
+            other => panic!("expected complex tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn acos_wide_unsigned_integer_tensor_uses_storage_not_mirror() {
+        let value = u64::MAX;
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![value]),
+            vec![1, 1],
+        )
+        .expect("integer tensor");
+        tensor.data.fill(0.0);
+
+        match acos_builtin(Value::Tensor(tensor)).expect("acos") {
+            Value::Complex(re, im) => {
+                let expected = acos_real_matlab(value as f64);
+                assert!((re - expected.0).abs() < 1e-12);
+                assert!((im - expected.1).abs() < 1e-12);
+            }
+            other => panic!("expected complex tensor result, got {other:?}"),
         }
     }
 

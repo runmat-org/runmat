@@ -235,15 +235,16 @@ fn atanh_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn atanh_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
-    if tensor.data.is_empty() {
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    if values.is_empty() {
         return Ok(tensor::tensor_into_value(tensor));
     }
 
     let mut requires_complex = false;
-    let mut real_values = Vec::with_capacity(tensor.data.len());
-    let mut complex_values = Vec::with_capacity(tensor.data.len());
+    let mut real_values = Vec::with_capacity(values.len());
+    let mut complex_values = Vec::with_capacity(values.len());
 
-    for &x in &tensor.data {
+    for &x in values.iter() {
         if x.is_finite() && x.abs() <= 1.0 {
             let re = zero_small(x.atanh());
             real_values.push(re);
@@ -435,6 +436,48 @@ pub(crate) mod tests {
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn atanh_reads_typed_integer_tensor_storage_exactly() {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-1, 0, 1]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+        tensor.data.fill(0.0);
+
+        match atanh_builtin(Value::Tensor(tensor)).expect("atanh") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                assert!(out.data[0].is_infinite() && out.data[0].is_sign_negative());
+                assert_eq!(out.data[1], 0.0);
+                assert!(out.data[2].is_infinite() && out.data[2].is_sign_positive());
+                assert!(out.integer_storage().is_none());
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn atanh_outside_domain_typed_integer_promotes_from_storage() {
+        let mut tensor =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![2, 0]), vec![1, 2])
+                .expect("integer tensor");
+        tensor.data.fill(0.0);
+
+        match atanh_builtin(Value::Tensor(tensor)).expect("atanh") {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                let expected = atanh_real_outside_domain(2.0);
+                assert!((out.data[0].0 - expected.0).abs() < 1e-12);
+                assert!((out.data[0].1 - expected.1).abs() < 1e-12);
+                assert_eq!(out.data[1], (0.0, 0.0));
+            }
+            other => panic!("expected complex tensor result, got {other:?}"),
         }
     }
 
