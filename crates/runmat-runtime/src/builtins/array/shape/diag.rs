@@ -584,7 +584,7 @@ async fn try_parse_offset(value: &Value) -> BuiltinResult<Option<isize>> {
 fn is_scalar_offset_candidate(value: &Value) -> bool {
     match value {
         Value::Int(_) | Value::Num(_) | Value::Bool(_) => true,
-        Value::Tensor(t) => t.data.len() == 1,
+        Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(array) => array.data.len() == 1,
         _ => false,
     }
@@ -1437,6 +1437,18 @@ mod tests {
         let err = scalar_to_isize(&Value::Tensor(typed_err))
             .expect_err("unrepresentable typed tensor offset must not saturate");
         assert_eq!(err.identifier(), MESSAGE_ID_INVALID_OFFSET.identifier);
+    }
+
+    #[test]
+    fn diag_offset_candidate_reads_typed_integer_storage_without_mirror() {
+        let mut typed_offset =
+            Tensor::new_integer(IntegerStorage::I16(vec![-2]), vec![1, 1]).expect("typed offset");
+        typed_offset.data.clear();
+
+        let offset = block_on(try_parse_offset(&Value::Tensor(typed_offset)))
+            .expect("offset parse")
+            .expect("typed integer scalar should be an offset candidate");
+        assert_eq!(offset, -2);
     }
 
     #[test]

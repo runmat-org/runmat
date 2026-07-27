@@ -426,7 +426,7 @@ pub fn value_is_empty(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => tensor_len(t) == 0,
         Value::SparseTensor(t) => t.rows == 0 || t.cols == 0,
-        Value::ComplexTensor(t) => t.data.is_empty(),
+        Value::ComplexTensor(t) => tensor::complex_tensor_element_len(t) == 0,
         Value::LogicalArray(a) => a.data.is_empty(),
         Value::StringArray(s) => s.data.is_empty(),
         Value::CharArray(c) => c.rows == 0 || c.cols == 0,
@@ -1141,6 +1141,23 @@ mod tests {
         let empty =
             Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 0]).expect("empty tensor");
         assert!(value_is_empty(&Value::Tensor(empty)));
+
+        let mut complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![1]), IntegerStorage::I16(vec![0]))
+                .expect("complex integer storage"),
+            vec![1, 1],
+        )
+        .expect("complex integer tensor");
+        complex.data.clear();
+        assert!(!value_is_empty(&Value::ComplexTensor(complex)));
+
+        let empty_complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![]), IntegerStorage::I16(vec![]))
+                .expect("empty complex integer storage"),
+            vec![0, 0],
+        )
+        .expect("empty complex integer tensor");
+        assert!(value_is_empty(&Value::ComplexTensor(empty_complex)));
     }
 
     #[test]
