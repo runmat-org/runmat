@@ -562,7 +562,7 @@ fn parse_header_lines(value: &Value) -> BuiltinResult<usize> {
     let raw = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_i64() as f64,
-        Value::Tensor(t) if t.data.len() == 1 => tensor::tensor_values_f64(t)[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_value_f64(t, 0),
         _ => {
             return Err(importdata_error_with(
                 &IMPORTDATA_ERROR_ARGUMENT,
@@ -753,7 +753,7 @@ mod tests {
         let mut header_lines =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2]), vec![1, 1])
                 .expect("header lines");
-        header_lines.data[0] = 1.5;
+        header_lines.data.clear();
         assert_eq!(
             parse_header_lines(&Value::Tensor(header_lines)).expect("header lines"),
             2
