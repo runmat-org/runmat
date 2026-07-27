@@ -546,7 +546,7 @@ async fn scalar_parameter(name: &'static str, value: &Value, label: &str) -> Bui
         Value::Num(value) => Ok(value),
         Value::Int(value) => Ok(value.to_f64()),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
-            Ok(tensor::tensor_values_f64(&tensor)[0])
+            Ok(tensor::tensor_value_f64(&tensor, 0))
         }
         other => Err(distance_error(
             name,
@@ -634,7 +634,7 @@ fn parse_positive_integer(name: &'static str, value: &Value, label: &str) -> Bui
             }
         }
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            tensor::tensor_values_f64(tensor)[0]
+            tensor::tensor_value_f64(tensor, 0)
         }
         Value::LogicalArray(array) if array.data.len() == 1 => f64::from(array.data[0] != 0),
         other => {
@@ -771,7 +771,7 @@ fn parse_logical_scalar(value: &Value, label: &str) -> BuiltinResult<bool> {
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
         Value::Int(value) if value.to_i64() == 0 || value.to_i64() == 1 => Ok(value.to_i64() != 0),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            let raw = tensor::tensor_values_f64(tensor)[0];
+            let raw = tensor::tensor_value_f64(tensor, 0);
             if raw == 0.0 || raw == 1.0 {
                 Ok(raw != 0.0)
             } else {
@@ -1615,6 +1615,12 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
     fn tensor_out(value: Value) -> Tensor {
         match value {
             Value::Tensor(tensor) => tensor,
@@ -1671,7 +1677,7 @@ mod tests {
             x,
             vec![
                 Value::from("minkowski"),
-                poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+                cleared_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
             ],
         ))
         .unwrap();
@@ -1750,7 +1756,7 @@ mod tests {
             vec![
                 Value::from("euclidean"),
                 Value::from("Smallest"),
-                poisoned_int_tensor(IntegerStorage::U64(vec![1]), 1, 1),
+                cleared_int_tensor(IntegerStorage::U64(vec![1]), 1, 1),
             ],
         ))
         .unwrap();
@@ -1829,15 +1835,15 @@ mod tests {
             poisoned_int_tensor(IntegerStorage::I16(vec![1, 4, 0, 0]), 2, 2),
             vec![
                 Value::from("K"),
-                poisoned_int_tensor(IntegerStorage::U16(vec![2]), 1, 1),
+                cleared_int_tensor(IntegerStorage::U16(vec![2]), 1, 1),
                 Value::from("IncludeTies"),
-                poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+                cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
                 Value::from("SortIndices"),
-                poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+                cleared_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
                 Value::from("CacheSize"),
-                poisoned_int_tensor(IntegerStorage::U32(vec![16]), 1, 1),
+                cleared_int_tensor(IntegerStorage::U32(vec![16]), 1, 1),
                 Value::from("BucketSize"),
-                poisoned_int_tensor(IntegerStorage::U32(vec![8]), 1, 1),
+                cleared_int_tensor(IntegerStorage::U32(vec![8]), 1, 1),
             ],
         ))
         .unwrap();
