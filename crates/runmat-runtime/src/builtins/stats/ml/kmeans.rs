@@ -417,14 +417,14 @@ fn scalar_number(value: &Value) -> Option<f64> {
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            Some(tensor::tensor_values_f64(tensor)[0])
+            Some(tensor::tensor_value_f64(tensor, 0))
         }
         _ => None,
     }
 }
 
 fn is_empty_numeric(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor.data.is_empty())
+    matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0)
 }
 
 fn apply_options_struct(options: &mut Options, value: &StructValue) -> BuiltinResult<()> {
@@ -479,7 +479,7 @@ fn apply_options_struct(options: &mut Options, value: &StructValue) -> BuiltinRe
 
 fn is_empty_option_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),
         Value::Cell(cell) => cell.data.is_empty(),
         Value::StringArray(array) => array.data.is_empty(),
@@ -494,7 +494,7 @@ fn bool_option(value: &Value) -> BuiltinResult<bool> {
         Value::Num(value) => Ok(*value != 0.0),
         Value::Int(value) => Ok(value.to_f64() != 0.0),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            Ok(tensor::tensor_values_f64(tensor)[0] != 0.0)
+            Ok(tensor::tensor_value_f64(tensor, 0) != 0.0)
         }
         other => Err(invalid(format!(
             "kmeans: option value must be a logical scalar, got {other:?}"
@@ -1169,6 +1169,12 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
     fn outputs(value: Value) -> Vec<Value> {
         match value {
             Value::OutputList(values) => values,
@@ -1225,15 +1231,15 @@ mod tests {
         let mut statset = StructValue::new();
         statset.insert(
             "MaxIter",
-            poisoned_int_tensor(IntegerStorage::U16(vec![20]), 1, 1),
+            cleared_int_tensor(IntegerStorage::U16(vec![20]), 1, 1),
         );
         statset.insert(
             "TolFun",
-            poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+            cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
         );
         statset.insert(
             "UseParallel",
-            poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+            cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
         );
 
         let _guard = crate::output_count::push_output_count(Some(2));
@@ -1259,6 +1265,16 @@ mod tests {
             Value::Tensor(centers) => assert_eq!(centers.data, vec![0.0, 10.0]),
             other => panic!("centers {other:?}"),
         }
+    }
+
+    #[test]
+    fn kmeans_empty_option_helpers_use_typed_integer_storage_len() {
+        let mut empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
+        empty.data = vec![1.0];
+        let empty = Value::Tensor(empty);
+
+        assert!(is_empty_numeric(&empty));
+        assert!(is_empty_option_value(&empty));
     }
 
     #[test]
