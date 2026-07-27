@@ -702,11 +702,9 @@ fn tensor_from_numeric(value: Value, context: &str) -> BuiltinResult<Tensor> {
 fn serial_tensor_from_value(value: Value, context: &str) -> BuiltinResult<Tensor> {
     let tensor = tensor::integer_tensor_to_f64(tensor_from_numeric(value, context)?)
         .map_err(|err| datetime_error(format!("datetime: {err}")))?;
-    Tensor::new(
-        tensor.data.clone(),
-        tensor::default_shape_for(&tensor.shape, tensor.data.len()),
-    )
-    .map_err(|err| datetime_error(format!("datetime: {err}")))
+    let shape = tensor::default_shape_for(&tensor.shape, tensor::tensor_element_len(&tensor));
+    let values = tensor::tensor_into_values_f64(tensor);
+    Tensor::new(values, shape).map_err(|err| datetime_error(format!("datetime: {err}")))
 }
 
 fn format_for_object(obj: &ObjectInstance) -> String {
@@ -1003,7 +1001,7 @@ fn broadcast_component_data(
     let mut target_len = 1usize;
 
     for array in arrays {
-        let len = array.data.len();
+        let len = tensor::tensor_element_len(array);
         if len > 1 {
             let shape = tensor::default_shape_for(&array.shape, len);
             if target_len == 1 {
@@ -1019,10 +1017,11 @@ fn broadcast_component_data(
 
     let mut broadcasted = Vec::with_capacity(arrays.len());
     for (idx, array) in arrays.iter().enumerate() {
-        if array.data.len() == 1 {
-            broadcasted.push(vec![array.data[0]; target_len]);
-        } else if array.data.len() == target_len {
-            broadcasted.push(array.data.clone());
+        let len = tensor::tensor_element_len(array);
+        if len == 1 {
+            broadcasted.push(vec![tensor::tensor_value_f64(array, 0); target_len]);
+        } else if len == target_len {
+            broadcasted.push(tensor::tensor_values_f64(array));
         } else {
             return Err(datetime_error(format!(
                 "datetime: {} input size does not match the other components",
@@ -1037,11 +1036,9 @@ fn broadcast_component_data(
 fn component_tensor(value: Value, context: &str) -> BuiltinResult<Tensor> {
     let tensor = tensor::integer_tensor_to_f64(tensor_from_numeric(value, context)?)
         .map_err(|err| datetime_error(format!("datetime: {err}")))?;
-    Tensor::new(
-        tensor.data.clone(),
-        tensor::default_shape_for(&tensor.shape, tensor.data.len()),
-    )
-    .map_err(|err| datetime_error(format!("datetime: {err}")))
+    let shape = tensor::default_shape_for(&tensor.shape, tensor::tensor_element_len(&tensor));
+    let values = tensor::tensor_into_values_f64(tensor);
+    Tensor::new(values, shape).map_err(|err| datetime_error(format!("datetime: {err}")))
 }
 
 fn build_from_components(args: Vec<Value>, format: Option<String>) -> BuiltinResult<Value> {
@@ -1171,10 +1168,11 @@ fn calendar_duration_unit_value(
     }
 
     let numeric = component_tensor(value, unit_name)?;
-    let shape = tensor::default_shape_for(&numeric.shape, numeric.data.len());
-    let mut months = Vec::with_capacity(numeric.data.len());
-    let mut days = Vec::with_capacity(numeric.data.len());
-    for value in &numeric.data {
+    let values = tensor::tensor_values_f64_cow(&numeric);
+    let shape = tensor::default_shape_for(&numeric.shape, values.len());
+    let mut months = Vec::with_capacity(values.len());
+    let mut days = Vec::with_capacity(values.len());
+    for value in values.iter().copied() {
         if !value.is_finite() {
             return Err(datetime_error(format!(
                 "{unit_name}: values must be finite"
@@ -1297,11 +1295,12 @@ pub fn datetime_string_array(value: &Value) -> BuiltinResult<Option<StringArray>
     }
     let serials = serial_tensor_for_object(obj)?;
     let format = format_for_object(obj);
-    let mut strings = Vec::with_capacity(serials.data.len());
-    for serial in &serials.data {
-        strings.push(format_serial(*serial, &format)?);
+    let values = tensor::tensor_values_f64_cow(&serials);
+    let mut strings = Vec::with_capacity(values.len());
+    for serial in values.iter().copied() {
+        strings.push(format_serial(serial, &format)?);
     }
-    let shape = tensor::default_shape_for(&serials.shape, serials.data.len());
+    let shape = tensor::default_shape_for(&serials.shape, values.len());
     let array = StringArray::new(strings, shape)
         .map_err(|err| datetime_error(format!("datetime: {err}")))?;
     Ok(Some(array))
@@ -1353,10 +1352,10 @@ pub fn datetime_summary(value: &Value) -> BuiltinResult<Option<String>> {
         return Ok(None);
     }
     let serials = serial_tensor_for_object(obj)?;
-    if serials.data.len() == 1 {
+    if tensor::tensor_element_len(&serials) == 1 {
         return datetime_display_text(value);
     }
-    let shape = tensor::default_shape_for(&serials.shape, serials.data.len());
+    let shape = tensor::default_shape_for(&serials.shape, tensor::tensor_element_len(&serials));
     Ok(Some(format!(
         "[{} datetime]",
         shape
@@ -1373,15 +1372,16 @@ fn component_tensor_from_datetime(
     extractor: impl Fn(&NaiveDateTime) -> f64,
 ) -> BuiltinResult<Value> {
     let serials = serials_from_datetime_value(value)?;
-    let mut out = Vec::with_capacity(serials.data.len());
-    for serial in &serials.data {
-        let naive = naive_from_datenum(*serial)?;
+    let values = tensor::tensor_values_f64_cow(&serials);
+    let mut out = Vec::with_capacity(values.len());
+    for serial in values.iter().copied() {
+        let naive = naive_from_datenum(serial)?;
         out.push(extractor(&naive));
     }
     if out.len() == 1 {
         Ok(Value::Num(out[0]))
     } else {
-        let shape = tensor::default_shape_for(&serials.shape, serials.data.len());
+        let shape = tensor::default_shape_for(&serials.shape, values.len());
         let tensor =
             Tensor::new(out, shape).map_err(|err| datetime_error(format!("{label}: {err}")))?;
         Ok(Value::Tensor(tensor))
@@ -1460,7 +1460,8 @@ fn days_in_month(year: i32, month: u32) -> BuiltinResult<u32> {
 fn tensor_from_datevec_like(value: Value, context: &str) -> BuiltinResult<Tensor> {
     let tensor = tensor::integer_tensor_to_f64(tensor_from_numeric(value, context)?)
         .map_err(|err| datetime_error(format!("{context}: {err}")))?;
-    let shape = tensor::default_shape_for(&tensor.shape, tensor.data.len());
+    let shape = tensor::default_shape_for(&tensor.shape, tensor::tensor_element_len(&tensor));
+    let values = tensor::tensor_into_values_f64(tensor);
     let normalize = |rows: usize, cols: usize, data: Vec<f64>| -> BuiltinResult<Tensor> {
         if cols == 6 {
             return Tensor::new(data, vec![rows, 6])
@@ -1475,14 +1476,14 @@ fn tensor_from_datevec_like(value: Value, context: &str) -> BuiltinResult<Tensor
         Tensor::new(padded, vec![rows, 6])
             .map_err(|err| datetime_error(format!("{context}: {err}")))
     };
-    if tensor.data.len() == 3 {
-        return normalize(1, 3, tensor.data);
+    if values.len() == 3 {
+        return normalize(1, 3, values);
     }
-    if tensor.data.len() == 6 {
-        return normalize(1, 6, tensor.data);
+    if values.len() == 6 {
+        return normalize(1, 6, values);
     }
     if shape.len() >= 2 && (shape[1] == 3 || shape[1] == 6) {
-        return normalize(shape[0], shape[1], tensor.data);
+        return normalize(shape[0], shape[1], values);
     }
     Err(datetime_error(format!(
         "{context}: expected a date vector with three or six columns"
@@ -1538,14 +1539,15 @@ fn broadcast_three_numeric_tensors(
     let mut output_shape = Vec::new();
     let mut output_len = 1usize;
     for operand in [a, b, c] {
-        if operand.data.len() == 1 {
+        let len = tensor::tensor_element_len(operand);
+        if len == 1 {
             continue;
         }
-        let shape = tensor::default_shape_for(&operand.shape, operand.data.len());
+        let shape = tensor::default_shape_for(&operand.shape, len);
         if output_shape.is_empty() {
-            output_len = operand.data.len();
+            output_len = len;
             output_shape = shape;
-        } else if operand.data.len() != output_len || shape != output_shape {
+        } else if len != output_len || shape != output_shape {
             return Err(datetime_error(format!(
                 "{context}: operands must be scalar or have matching sizes"
             )));
@@ -1557,9 +1559,9 @@ fn broadcast_three_numeric_tensors(
     }
 
     let expand = |operand: &Tensor| -> BuiltinResult<Vec<f64>> {
-        match operand.data.len() {
-            1 => Ok(vec![operand.data[0]; output_len]),
-            len if len == output_len => Ok(operand.data.clone()),
+        match tensor::tensor_element_len(operand) {
+            1 => Ok(vec![tensor::tensor_value_f64(operand, 0); output_len]),
+            len if len == output_len => Ok(tensor::tensor_values_f64(operand)),
             _ => Err(datetime_error(format!(
                 "{context}: operands must be scalar or have matching sizes"
             ))),
@@ -2082,8 +2084,8 @@ async fn datenum_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             ))
         }
     };
-    if tensor.data.len() == 1 {
-        Ok(Value::Num(tensor.data[0]))
+    if tensor::tensor_element_len(&tensor) == 1 {
+        Ok(Value::Num(tensor::tensor_value_f64(&tensor, 0)))
     } else {
         Ok(Value::Tensor(tensor))
     }
@@ -2521,7 +2523,8 @@ async fn holidays_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                 }
             }
             let serials = numeric_or_datetime_serial_tensor(args[0].clone(), "holidays")?;
-            let year = date_from_key(serial_date_key(serials.data[0])?)?.year();
+            let year =
+                date_from_key(serial_date_key(tensor::tensor_value_f64(&serials, 0))?)?.year();
             let start = key_from_date(NaiveDate::from_ymd_opt(year, 1, 1).unwrap());
             let end = key_from_date(NaiveDate::from_ymd_opt(year, 12, 31).unwrap());
             holiday_keys_between(start, end)?
@@ -2529,14 +2532,14 @@ async fn holidays_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         2 => {
             let start = numeric_or_datetime_serial_tensor(args[0].clone(), "holidays")?;
             let end = numeric_or_datetime_serial_tensor(args[1].clone(), "holidays")?;
-            if start.data.len() != 1 || end.data.len() != 1 {
+            if tensor::tensor_element_len(&start) != 1 || tensor::tensor_element_len(&end) != 1 {
                 return Err(datetime_error(
                     "holidays: start and end dates must be scalar",
                 ));
             }
             holiday_keys_between(
-                serial_date_key(start.data[0])?,
-                serial_date_key(end.data[0])?,
+                serial_date_key(tensor::tensor_value_f64(&start, 0))?,
+                serial_date_key(tensor::tensor_value_f64(&end, 0))?,
             )?
         }
         _ => {
@@ -2577,13 +2580,13 @@ async fn busdays_builtin(
     }
     let start = numeric_or_datetime_serial_tensor(start, "busdays")?;
     let end = numeric_or_datetime_serial_tensor(end, "busdays")?;
-    if start.data.len() != 1 || end.data.len() != 1 {
+    if tensor::tensor_element_len(&start) != 1 || tensor::tensor_element_len(&end) != 1 {
         return Err(datetime_error(
             "busdays: start and end dates must be scalar",
         ));
     }
-    let mut key = serial_date_key(start.data[0])?;
-    let end_key = serial_date_key(end.data[0])?;
+    let mut key = serial_date_key(tensor::tensor_value_f64(&start, 0))?;
+    let end_key = serial_date_key(tensor::tensor_value_f64(&end, 0))?;
     let span = key
         .max(end_key)
         .checked_sub(key.min(end_key))
@@ -3920,7 +3923,7 @@ mod tests {
             vec![1, 3],
         )
         .expect("typed date vector");
-        typed_date_vector.data.fill(99.0);
+        typed_date_vector.data.clear();
         let typed_round_trip =
             futures::executor::block_on(datenum_builtin(vec![Value::Tensor(typed_date_vector)]))
                 .expect("datenum typed date vector");
@@ -3935,7 +3938,7 @@ mod tests {
             vec![1, 1],
         )
         .expect("typed serial");
-        scalar.data.fill(f64::NAN);
+        scalar.data.clear();
         let scalar_out = futures::executor::block_on(datenum_builtin(vec![Value::Tensor(scalar)]))
             .expect("datenum typed scalar serial");
         assert_eq!(scalar_out, Value::Num(f64::from(serial)));
@@ -3945,7 +3948,7 @@ mod tests {
             vec![1, 2],
         )
         .expect("typed serial vector");
-        vector.data.fill(f64::NAN);
+        vector.data.clear();
         let vector_out = futures::executor::block_on(datenum_builtin(vec![Value::Tensor(vector)]))
             .expect("datenum typed vector serial");
         let Value::Tensor(vector_out) = vector_out else {

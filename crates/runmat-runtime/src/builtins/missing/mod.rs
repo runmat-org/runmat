@@ -2080,7 +2080,9 @@ fn broadcast_pairwise_numeric(
     right: &Tensor,
     op: impl Fn(f64, f64) -> f64,
 ) -> BuiltinResult<(Vec<f64>, Vec<usize>, runmat_builtins::NumericDType)> {
-    if left.data.len() == right.data.len() && left.shape == right.shape {
+    let left_len = tensor_utils::tensor_element_len(left);
+    let right_len = tensor_utils::tensor_element_len(right);
+    if left_len == right_len && left.shape == right.shape {
         let left_values = tensor_utils::tensor_values_f64_cow(left);
         let right_values = tensor_utils::tensor_values_f64_cow(right);
         let data = left_values
@@ -2090,7 +2092,7 @@ fn broadcast_pairwise_numeric(
             .collect();
         return Ok((data, left.shape.clone(), left.dtype));
     }
-    if left.data.len() == 1 {
+    if left_len == 1 {
         let left_values = tensor_utils::tensor_values_f64_cow(left);
         let right_values = tensor_utils::tensor_values_f64_cow(right);
         let data = right_values
@@ -2099,7 +2101,7 @@ fn broadcast_pairwise_numeric(
             .collect();
         return Ok((data, right.shape.clone(), right.dtype));
     }
-    if right.data.len() == 1 {
+    if right_len == 1 {
         let left_values = tensor_utils::tensor_values_f64_cow(left);
         let right_values = tensor_utils::tensor_values_f64_cow(right);
         let data = left_values
@@ -2512,12 +2514,20 @@ mod tests {
     #[test]
     fn nanmin_pairwise_reads_typed_integer_storage_exactly() {
         let mut left = Tensor::new_integer(IntegerStorage::U16(vec![9, 4, 3]), vec![1, 3]).unwrap();
-        left.data.fill(f64::NAN);
+        left.data.clear();
         let right = tensor(vec![2.0, f64::NAN, 5.0], vec![1, 3]);
 
         let result = block_on(nanmin_builtin(Value::Tensor(left), vec![right])).unwrap();
 
         assert!(matches!(result, Value::Tensor(tensor) if tensor.data == vec![2.0, 4.0, 3.0]));
+
+        let left = tensor(vec![9.0, 4.0, 3.0], vec![1, 3]);
+        let mut right = Tensor::new_integer(IntegerStorage::U8(vec![5]), vec![1, 1]).unwrap();
+        right.data.clear();
+
+        let result = block_on(nanmin_builtin(left, vec![Value::Tensor(right)])).unwrap();
+
+        assert!(matches!(result, Value::Tensor(tensor) if tensor.data == vec![5.0, 4.0, 3.0]));
     }
 
     #[test]
