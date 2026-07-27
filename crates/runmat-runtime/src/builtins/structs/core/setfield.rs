@@ -1157,7 +1157,7 @@ fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
             .ok_or_else(|| setfield_flow("index must be >= 1"));
     }
     if let Value::Tensor(t) = value {
-        if t.data.len() == 1 {
+        if tensor::is_scalar_tensor(t) {
             if let Some(storage) = t.integer_storage() {
                 return storage
                     .value_at(0)
@@ -1169,7 +1169,7 @@ fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
     }
     let number = match value {
         Value::Num(n) => *n,
-        Value::Tensor(t) if t.data.len() == 1 => tensor::tensor_values_f64(t)[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_value_f64(t, 0),
         _ => {
             let repr = format!("{value:?}");
             return Err(setfield_flow(format!(
@@ -1434,7 +1434,7 @@ fn value_to_scalar(value: Value) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(tensor::tensor_values_f64(&t)[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(&t) => Ok(tensor::tensor_value_f64(&t, 0)),
         other => Err(setfield_flow(format!(
             "setfield: cannot assign {other:?} into a numeric tensor element"
         ))),
@@ -1446,14 +1446,14 @@ fn value_to_bool(value: Value) -> BuiltinResult<bool> {
         Value::Bool(b) => Ok(b),
         Value::Num(n) => Ok(n != 0.0),
         Value::Int(i) => Ok(!i.is_zero()),
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(&t) => {
             if let Some(storage) = t.integer_storage() {
                 Ok(!storage
                     .value_at(0)
                     .ok_or_else(|| setfield_flow("setfield: invalid integer tensor storage"))?
                     .is_zero())
             } else {
-                Ok(tensor::tensor_values_f64(&t)[0] != 0.0)
+                Ok(tensor::tensor_value_f64(&t, 0) != 0.0)
             }
         }
         other => Err(setfield_flow(format!(
@@ -1585,7 +1585,7 @@ pub(crate) mod tests {
             .unwrap();
         let mut index_tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("index tensor");
-        index_tensor.data[0] = 1.0;
+        index_tensor.data.clear();
         let indices = CellArray::new_with_shape(vec![Value::Tensor(index_tensor)], vec![1, 1])
             .expect("index cell");
 
@@ -1623,12 +1623,12 @@ pub(crate) mod tests {
 
         let mut index_tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("index tensor");
-        index_tensor.data[0] = 1.0;
+        index_tensor.data.clear();
         let index =
             CellArray::new_with_shape(vec![Value::Tensor(index_tensor)], vec![1, 1]).unwrap();
         let mut rhs =
             Tensor::new_integer(IntegerStorage::U64(vec![77]), vec![1, 1]).expect("rhs tensor");
-        rhs.data[0] = 0.0;
+        rhs.data.clear();
         let updated = run_setfield(
             Value::Struct(root),
             vec![
@@ -1641,12 +1641,12 @@ pub(crate) mod tests {
 
         let mut logical_index =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("logical index");
-        logical_index.data[0] = 1.0;
+        logical_index.data.clear();
         let logical_index =
             CellArray::new_with_shape(vec![Value::Tensor(logical_index)], vec![1, 1]).unwrap();
         let mut logical_rhs =
             Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("logical rhs");
-        logical_rhs.data[0] = 0.0;
+        logical_rhs.data.clear();
         let updated = run_setfield(
             updated,
             vec![

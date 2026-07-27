@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
@@ -376,7 +377,7 @@ fn parse_size_scalar(value: &Value, context: &str) -> BuiltinResult<usize> {
         Value::Num(n) => parse_numeric(*n, context),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
-            if t.data.len() != 1 {
+            if !tensor::is_scalar_tensor(t) {
                 return Err(cell_error_with_message(
                     format!("{context}: size inputs must be scalar"),
                     &CELL_ERROR_INVALID_SIZE,
@@ -406,7 +407,8 @@ fn parse_size_scalar(value: &Value, context: &str) -> BuiltinResult<usize> {
 }
 
 fn parse_size_tensor(t: &Tensor) -> BuiltinResult<Vec<usize>> {
-    if t.data.is_empty() {
+    let len = tensor::tensor_element_len(t);
+    if len == 0 {
         return Ok(vec![0, 0]);
     }
     if !is_vector_shape(&t.shape) {
@@ -418,7 +420,7 @@ fn parse_size_tensor(t: &Tensor) -> BuiltinResult<Vec<usize>> {
     let dims = t
         .integer_storage()
         .map(|storage| {
-            (0..t.data.len())
+            (0..storage.len())
                 .map(|index| {
                     storage.value_at(index).ok_or_else(|| {
                         cell_error_with_message(
@@ -664,21 +666,25 @@ pub(crate) mod tests {
 
     #[test]
     fn cell_size_tensor_preserves_typed_integer_bounds() {
-        let dims =
+        let mut dims =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![2, 3]), vec![1, 2])
                 .expect("dims");
+        dims.data.clear();
         assert_eq!(parse_size_tensor(&dims).unwrap(), vec![2, 3]);
 
-        let scalar = Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![4]), vec![1, 1])
-            .expect("scalar");
+        let mut scalar =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![4]), vec![1, 1])
+                .expect("scalar");
+        scalar.data.clear();
         assert_eq!(
             parse_size_scalar(&Value::Tensor(scalar), "cell").unwrap(),
             4
         );
 
-        let negative =
+        let mut negative =
             Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
                 .expect("negative");
+        negative.data.clear();
         assert!(parse_size_tensor(&negative).is_err());
     }
 

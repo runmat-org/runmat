@@ -478,7 +478,7 @@ fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
         });
     }
     if let Value::Tensor(t) = value {
-        if t.data.len() == 1 {
+        if tensor::is_scalar_tensor(t) {
             if let Some(storage) = t.integer_storage() {
                 return storage
                     .value_at(0)
@@ -495,7 +495,7 @@ fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
     }
     let number = match value {
         Value::Num(n) => *n,
-        Value::Tensor(t) if t.data.len() == 1 => tensor::tensor_values_f64(t)[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_value_f64(t, 0),
         _ => {
             let repr = format!("{value:?}");
             return Err(getfield_error_with_message(
@@ -1266,7 +1266,7 @@ pub(crate) mod tests {
         .unwrap();
         let mut index_tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("index tensor");
-        index_tensor.data[0] = 1.0;
+        index_tensor.data.clear();
         let index = CellArray::new_with_shape(vec![Value::Tensor(index_tensor)], vec![1, 1])
             .expect("index cell");
 
