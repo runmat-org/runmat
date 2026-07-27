@@ -393,7 +393,7 @@ async fn parse_replication_factors(args: &[Value]) -> crate::BuiltinResult<Vec<u
 async fn parse_replication_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(t) => {
-            if t.data.is_empty() {
+            if tensor_element_len(t) == 0 {
                 return Err(repmat_invalid_factors(
                     "repmat: replication vector must contain at least one element",
                 ));
@@ -434,18 +434,19 @@ async fn parse_replication_vector(value: &Value) -> crate::BuiltinResult<Vec<usi
 
     let tensor =
         tensor::value_into_tensor_for("repmat", value.clone()).map_err(repmat_invalid_factors)?;
-    if tensor.data.is_empty() {
+    if tensor_element_len(&tensor) == 0 {
         return Err(repmat_invalid_factors(
             "repmat: replication vector must contain at least one element",
         ));
     }
-    let mut factors = Vec::with_capacity(tensor.data.len());
     if let Some(storage) = tensor.integer_storage() {
+        let mut factors = Vec::with_capacity(storage.len());
         for (idx, value) in storage.exact_values().iter().enumerate() {
             factors.push(coerce_integer_rep_factor(value, idx + 1)?);
         }
         return Ok(factors);
     }
+    let mut factors = Vec::with_capacity(tensor.data.len());
     for (idx, &raw) in tensor.data.iter().enumerate() {
         factors.push(coerce_rep_factor(raw, idx + 1)?);
     }
@@ -456,16 +457,21 @@ async fn parse_replication_scalar(value: &Value) -> crate::BuiltinResult<usize> 
     match value {
         Value::Int(value) => return coerce_integer_rep_factor(value, 1),
         Value::Tensor(t) => {
-            if t.data.len() != 1 {
-                return Err(repmat_invalid_factors(
-                    "repmat: size arguments must be scalars",
-                ));
-            }
             if let Some(storage) = t.integer_storage() {
+                if storage.len() != 1 {
+                    return Err(repmat_invalid_factors(
+                        "repmat: size arguments must be scalars",
+                    ));
+                }
                 let value = storage.value_at(0).ok_or_else(|| {
                     repmat_invalid_factors("repmat: integer scalar storage length mismatch")
                 })?;
                 return coerce_integer_rep_factor(&value, 1);
+            }
+            if t.data.len() != 1 {
+                return Err(repmat_invalid_factors(
+                    "repmat: size arguments must be scalars",
+                ));
             }
         }
         Value::LogicalArray(la) => {
@@ -487,6 +493,17 @@ async fn parse_replication_scalar(value: &Value) -> crate::BuiltinResult<usize> 
 
     let tensor =
         tensor::value_into_tensor_for("repmat", value.clone()).map_err(repmat_invalid_factors)?;
+    if let Some(storage) = tensor.integer_storage() {
+        if storage.len() != 1 {
+            return Err(repmat_invalid_factors(
+                "repmat: size arguments must be scalars",
+            ));
+        }
+        let value = storage.value_at(0).ok_or_else(|| {
+            repmat_invalid_factors("repmat: integer scalar storage length mismatch")
+        })?;
+        return coerce_integer_rep_factor(&value, 1);
+    }
     if tensor.data.len() != 1 {
         return Err(repmat_invalid_factors(
             "repmat: size arguments must be scalars",
@@ -527,6 +544,12 @@ fn coerce_rep_factor(value: f64, position: usize) -> crate::BuiltinResult<usize>
         )));
     }
     Ok(rounded as usize)
+}
+
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 fn repmat_tensor(tensor: &Tensor, reps: &[usize]) -> crate::BuiltinResult<Tensor> {
@@ -875,13 +898,16 @@ pub(crate) mod tests {
     #[test]
     fn repmat_parses_typed_integer_replication_factors_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
+        let mut scalar = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
+        scalar.data.clear();
         assert_eq!(
             block_on(parse_replication_scalar(&Value::Tensor(scalar))).unwrap(),
             large as usize
         );
 
-        let vector = Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
+        let mut vector =
+            Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
+        vector.data.clear();
         assert_eq!(
             block_on(parse_replication_vector(&Value::Tensor(vector))).unwrap(),
             vec![large as usize, 0]
