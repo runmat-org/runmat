@@ -1041,14 +1041,14 @@ async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<
     match meta.class {
         InputClass::Integer(class) => match value {
             Value::Num(n) => class.to_value(n),
-            Value::Tensor(t) if t.data.len() == 1 => {
+            Value::Tensor(t) if tensor::is_scalar_tensor(&t) => {
                 class.to_value(tensor::tensor_value_f64(&t, 0))
             }
             other => Ok(other),
         },
         InputClass::Bool => match value {
             Value::Num(n) => Ok(Value::Bool(n != 0.0)),
-            Value::Tensor(t) if t.data.len() == 1 => {
+            Value::Tensor(t) if tensor::is_scalar_tensor(&t) => {
                 Ok(Value::Bool(tensor::tensor_value_f64(&t, 0) != 0.0))
             }
             other => Ok(other),
@@ -1412,7 +1412,7 @@ pub(crate) mod tests {
     fn prod_native_template_reads_typed_integer_scalar_storage_exactly() {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U32(vec![77]), vec![1, 1]).expect("tensor");
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
         let meta = InputMeta {
             class: InputClass::Integer(IntClass::U32),
             device: DevicePreference::Host,
@@ -1426,7 +1426,7 @@ pub(crate) mod tests {
 
         let mut logical_tensor =
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("logical tensor");
-        logical_tensor.data[0] = 0.0;
+        logical_tensor.data.clear();
         let meta = InputMeta {
             class: InputClass::Bool,
             device: DevicePreference::Host,

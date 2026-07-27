@@ -1512,7 +1512,7 @@ async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<
     match meta.class {
         InputClass::Integer(class) => match value {
             Value::Num(n) => class.to_value(n),
-            Value::Tensor(t) if t.data.len() == 1 => {
+            Value::Tensor(t) if tensor::is_scalar_tensor(&t) => {
                 class.to_value(tensor::tensor_value_f64(&t, 0))
             }
             other => Ok(other),
@@ -1881,7 +1881,7 @@ pub(crate) mod tests {
     fn mean_native_template_reads_typed_integer_scalar_storage_exactly() {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![42]), vec![1, 1]).expect("tensor");
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
         let meta = InputMeta {
             class: InputClass::Integer(IntClass::U16),
             device: DevicePreference::Host,
