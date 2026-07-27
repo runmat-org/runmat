@@ -42,7 +42,10 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
 fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
     match value {
         Value::Complex(re, im) => Some((*re, *im)),
-        Value::ComplexTensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::ComplexTensor(t) if tensor_utils::is_scalar_complex_tensor(t) => {
+            let value = tensor_utils::complex_tensor_value_complex64(t, 0);
+            Some((value.re, value.im))
+        }
         _ => None,
     }
 }
@@ -792,6 +795,28 @@ mod tests {
         assert!(matrix_power_exponent_from_int(&IntValue::U64(u64::MAX)).is_err());
         assert!(matrix_power_exponent_from_f64(f64::INFINITY).is_err());
         assert!(matrix_power_exponent_from_f64(i32::MAX as f64 + 1.0).is_err());
+    }
+
+    #[test]
+    fn scalar_power_reads_typed_complex_integer_storage_exactly() {
+        let storage = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![3]),
+            IntegerStorage::I16(vec![4]),
+        )
+        .expect("complex integer storage");
+        let mut tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 1])
+            .expect("complex tensor");
+        tensor.data.clear();
+
+        let result = scalar_power_value(&Value::ComplexTensor(tensor), &Value::Num(1.0))
+            .expect("scalar power");
+        match result {
+            Value::Complex(re, im) => {
+                assert!((re - 3.0).abs() < 1e-12);
+                assert!((im - 4.0).abs() < 1e-12);
+            }
+            other => panic!("expected complex scalar, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

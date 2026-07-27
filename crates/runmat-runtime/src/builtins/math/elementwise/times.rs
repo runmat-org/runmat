@@ -652,7 +652,10 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
 fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
     match value {
         Value::Complex(re, im) => Some((*re, *im)),
-        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        Value::ComplexTensor(ct) if tensor::is_scalar_complex_tensor(ct) => {
+            let value = tensor::complex_tensor_value_complex64(ct, 0);
+            Some((value.re, value.im))
+        }
         _ => None,
     }
 }
@@ -913,6 +916,18 @@ pub(crate) mod tests {
         assert_eq!(
             extract_scalar_f64(&value).expect("scalar"),
             Some(9_007_199_254_740_993_u64 as f64)
+        );
+
+        let storage = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![8]),
+            IntegerStorage::I16(vec![-3]),
+        )
+        .expect("complex integer storage");
+        let mut complex = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
+        complex.data.clear();
+        assert_eq!(
+            scalar_complex_value(&Value::ComplexTensor(complex)),
+            Some((8.0, -3.0))
         );
     }
 

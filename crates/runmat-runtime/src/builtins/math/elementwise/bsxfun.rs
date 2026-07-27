@@ -247,7 +247,7 @@ fn logicalize_callback_output(value: Value) -> BuiltinResult<Value> {
         Value::Bool(_) | Value::LogicalArray(_) => Ok(value),
         Value::Num(value) => Ok(Value::Bool(value != 0.0)),
         Value::Int(value) => Ok(Value::Bool(value.to_f64() != 0.0)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
             Ok(Value::Bool(tensor::tensor_values_f64(&tensor)[0] != 0.0))
         }
         other => Err(bsxfun_error_with_detail(
@@ -653,25 +653,13 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
         }
         Value::Num(value) => Ok(ClassifiedValue::Double(*value)),
         Value::Int(value) => Ok(ClassifiedValue::Double(value.to_f64())),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             Ok(ClassifiedValue::Double(tensor::tensor_values_f64(tensor)[0]))
         }
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
-        Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
-            if let Some(storage) = tensor.integer_data.as_ref() {
-                let re = storage
-                    .real
-                    .value_at(0)
-                    .expect("one-element complex integer real storage")
-                    .to_f64();
-                let im = storage
-                    .imag
-                    .value_at(0)
-                    .expect("one-element complex integer imaginary storage")
-                    .to_f64();
-                return Ok(ClassifiedValue::Complex((re, im)));
-            }
-            Ok(ClassifiedValue::Complex(tensor.data[0]))
+        Value::ComplexTensor(tensor) if tensor::is_scalar_complex_tensor(tensor) => {
+            let value = tensor::complex_tensor_value_complex64(tensor, 0);
+            Ok(ClassifiedValue::Complex((value.re, value.im)))
         }
         Value::CharArray(array) if array.rows * array.cols == 1 => {
             Ok(ClassifiedValue::Char(array.data.first().copied().unwrap_or('\0')))
@@ -878,7 +866,7 @@ mod tests {
         )
         .expect("storage");
         let mut complex = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
-        complex.data[0] = (f64::NAN, f64::NAN);
+        complex.data.clear();
 
         assert_eq!(
             classify_value(&Value::ComplexTensor(complex)).expect("classify"),

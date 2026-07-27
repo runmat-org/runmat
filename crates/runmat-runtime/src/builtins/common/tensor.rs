@@ -158,6 +158,44 @@ pub fn complex_tensor_values_complex64(tensor: &ComplexTensor) -> Vec<Complex64>
         })
 }
 
+/// Return a complex tensor's element count, reading exact integer-complex
+/// storage instead of the floating compatibility buffer when present.
+pub fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
+    tensor
+        .integer_data
+        .as_ref()
+        .map_or(tensor.data.len(), |storage| storage.len())
+}
+
+/// Return true when a complex tensor contains exactly one scalar element.
+pub fn is_scalar_complex_tensor(tensor: &ComplexTensor) -> bool {
+    complex_tensor_element_len(tensor) == 1
+}
+
+/// Return one complex tensor value as Complex64, reading typed integer-complex
+/// storage exactly instead of using the compatibility backing buffer.
+pub fn complex_tensor_value_complex64(tensor: &ComplexTensor, index: usize) -> Complex64 {
+    match tensor.integer_data.as_ref() {
+        Some(storage) => {
+            let real = storage
+                .real
+                .value_at(index)
+                .expect("complex_tensor_value_complex64: real storage index is in bounds")
+                .to_f64();
+            let imag = storage
+                .imag
+                .value_at(index)
+                .expect("complex_tensor_value_complex64: imaginary storage index is in bounds")
+                .to_f64();
+            Complex64::new(real, imag)
+        }
+        None => {
+            let (real, imag) = tensor.data[index];
+            Complex64::new(real, imag)
+        }
+    }
+}
+
 /// Consume a complex tensor and return Complex64 values, preserving the fast
 /// path for ordinary complex double tensors.
 pub fn complex_tensor_into_values_complex64(tensor: ComplexTensor) -> Vec<Complex64> {
