@@ -559,7 +559,7 @@ pub(crate) fn parse_port(value: &Value) -> Result<u16, PortParseError> {
             }
             *num as i64
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
             if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                 let port = int
                     .try_to_u64()
@@ -568,7 +568,7 @@ pub(crate) fn parse_port(value: &Value) -> Result<u16, PortParseError> {
                     PortParseError::new(format!("port {port} is outside the valid range 0–65535"))
                 });
             }
-            let raw = t.data[0];
+            let raw = crate::builtins::common::tensor::tensor_value_f64(t, 0);
             if !raw.is_finite() {
                 return Err(PortParseError::new("port must be finite"));
             }
@@ -607,11 +607,11 @@ fn parse_timeout(value: &Value) -> Result<f64, TimeoutParseError> {
     let timeout = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
             if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                 int.to_f64()
             } else {
-                t.data[0]
+                crate::builtins::common::tensor::tensor_value_f64(t, 0)
             }
         }
         Value::Tensor(_) => return Err(TimeoutParseError::NonScalar),
@@ -702,7 +702,7 @@ pub(crate) mod tests {
         let mut typed_max =
             Tensor::new_integer(IntegerStorage::U64(vec![u16::MAX as u64]), vec![1, 1])
                 .expect("typed port");
-        typed_max.data[0] = 0.0;
+        typed_max.data.clear();
         assert_eq!(parse_port(&Value::Tensor(typed_max)).unwrap(), u16::MAX);
 
         let typed_too_large =
@@ -719,7 +719,7 @@ pub(crate) mod tests {
     fn typed_timeout_parser_reads_integer_storage_exactly() {
         let mut timeout =
             Tensor::new_integer(IntegerStorage::U16(vec![30]), vec![1, 1]).expect("timeout");
-        timeout.data[0] = f64::NAN;
+        timeout.data.clear();
 
         assert_eq!(parse_timeout(&Value::Tensor(timeout)).unwrap(), 30.0);
     }

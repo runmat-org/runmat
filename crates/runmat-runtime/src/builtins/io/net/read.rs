@@ -716,7 +716,7 @@ fn parse_count(value: &Value) -> BuiltinResult<usize> {
 
     let numeric = match value {
         Value::Num(n) => *n,
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
             if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                 return int.try_to_usize().ok_or_else(|| {
                     let (error, detail) = if int.try_to_u64().is_some() {
@@ -907,7 +907,7 @@ pub(crate) mod tests {
 
         let mut typed_count =
             Tensor::new_integer(IntegerStorage::U64(vec![42]), vec![1, 1]).expect("count");
-        typed_count.data[0] = 0.0;
+        typed_count.data.clear();
         assert_eq!(parse_count(&Value::Tensor(typed_count)).unwrap(), 42);
 
         let typed_negative =

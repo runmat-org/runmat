@@ -585,7 +585,7 @@ fn numeric_scalar(
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
+            if tensor::is_scalar_tensor(tensor) {
                 Ok(tensor::tensor_value_f64(tensor, 0))
             } else {
                 Err(weboptions_error_with(error, context))
@@ -741,7 +741,7 @@ pub(crate) mod tests {
             vec![1, 1],
         )
         .expect("typed timeout");
-        timeout.data = vec![0.0];
+        timeout.data.clear();
 
         let result = run_weboptions(vec![Value::from("Timeout"), Value::Tensor(timeout)])
             .expect("weboptions timeout");

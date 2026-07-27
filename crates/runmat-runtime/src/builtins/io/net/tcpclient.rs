@@ -405,7 +405,7 @@ fn parse_buffer_size(value: &Value, label: &str) -> BuiltinResult<i32> {
             }
             *n as i64
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
             if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                 int.try_to_i64().ok_or_else(|| {
                     tcpclient_flow(
@@ -414,7 +414,7 @@ fn parse_buffer_size(value: &Value, label: &str) -> BuiltinResult<i32> {
                     )
                 })?
             } else {
-                let n = t.data[0];
+                let n = crate::builtins::common::tensor::tensor_value_f64(t, 0);
                 if !n.is_finite() || n.fract() != 0.0 {
                     return Err(tcpclient_flow(
                         &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
@@ -619,7 +619,7 @@ pub(crate) mod tests {
 
         let mut typed = Tensor::new_integer(IntegerStorage::U64(vec![i32::MAX as u64]), vec![1, 1])
             .expect("typed buffer size");
-        typed.data[0] = 0.0;
+        typed.data.clear();
         assert_eq!(
             parse_buffer_size(&Value::Tensor(typed), "InputBufferSize").unwrap(),
             i32::MAX
