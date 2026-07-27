@@ -32,7 +32,7 @@ The system is designed to be a drop-in runtime for .m files, offering automatic 
 
 Key Capabilities:
 
-- MATLAB Compatibility: Supports standard .m file syntax, including arrays, complex control flow, and over 400 built-in functions 
+- MATLAB Compatibility: Supports standard .m file syntax, including arrays, complex control flow, and over 1000+ built-in functions 
 - Automatic Fusion: Builds an internal graph of array operations to fuse elementwise math and reductions into optimized kernels 
 - Tiered Execution: Combines a fast-startup VM interpreter with a JIT (based on Cranelift) for hot code paths
 - Cross-Platform GPU: Transparently offloads workloads to Metal, DirectX 12, Vulkan, or WebGPU
