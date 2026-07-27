@@ -457,7 +457,7 @@ pub(crate) fn flip_tensor_with(
     tensor: Tensor,
     dims: &[usize],
 ) -> crate::BuiltinResult<Tensor> {
-    if tensor.data.is_empty() || dims.is_empty() {
+    if tensor::tensor_element_len(&tensor) == 0 || dims.is_empty() {
         return Ok(tensor);
     }
     if let Some(storage) = tensor.integer_data.as_ref() {
@@ -489,7 +489,7 @@ pub(crate) fn flip_complex_tensor_with(
     tensor: ComplexTensor,
     dims: &[usize],
 ) -> crate::BuiltinResult<ComplexTensor> {
-    if tensor.data.is_empty() || dims.is_empty() {
+    if tensor::complex_tensor_element_len(&tensor) == 0 || dims.is_empty() {
         return Ok(tensor);
     }
     if let Some(storage) = tensor.integer_data.as_ref() {
@@ -706,9 +706,9 @@ fn ravel_index(coords: &[usize], shape: &[usize]) -> usize {
 }
 
 pub(crate) fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
-        Value::Complex(re, im)
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_data.is_none() {
+        let value = tensor::complex_tensor_value_complex64(&tensor, 0);
+        Value::Complex(value.re, value.im)
     } else {
         Value::ComplexTensor(tensor)
     }
@@ -723,7 +723,10 @@ pub(crate) mod tests {
         block_on(super::flip_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor};
+    use runmat_builtins::{
+        CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+        StringArray, Tensor,
+    };
 
     #[test]
     fn flip_type_preserves_logical_shape() {
@@ -751,6 +754,25 @@ pub(crate) mod tests {
             Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 3.0, 2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn flip_complex_scalar_keeps_typed_integer_storage_without_mirror() {
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![7]), IntegerStorage::I16(vec![-3]))
+                .expect("matching complex integer storage");
+        let mut input = ComplexTensor::new_integer(storage.clone(), vec![1, 1])
+            .expect("typed complex integer input");
+        input.data.clear();
+
+        let flipped = flip_complex_tensor(input, &[1]).expect("flip typed complex scalar");
+        assert_eq!(flipped.integer_data, Some(storage.clone()));
+
+        let value = complex_tensor_into_value(flipped);
+        let Value::ComplexTensor(output) = value else {
+            panic!("typed complex integer scalar must not collapse to double complex");
+        };
+        assert_eq!(output.integer_data, Some(storage));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

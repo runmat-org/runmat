@@ -803,9 +803,9 @@ fn cumsum_complex_tensor(
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
-        Value::Complex(re, im)
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_data.is_none() {
+        let value = tensor::complex_tensor_value_complex64(&tensor, 0);
+        Value::Complex(value.re, value.im)
     } else {
         Value::ComplexTensor(tensor)
     }
@@ -837,7 +837,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor as BuiltinsTensor};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor as BuiltinsTensor,
+    };
 
     #[test]
     fn cumsum_type_keeps_shape() {
@@ -853,6 +855,23 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(2), Some(3)])
             }
         );
+    }
+
+    #[test]
+    fn cumsum_complex_scalar_finalizer_keeps_typed_integer_storage_without_mirror() {
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::U32(vec![11]), IntegerStorage::U32(vec![5]))
+                .expect("matching complex integer storage");
+        let mut input = ComplexTensor::new_integer(storage.clone(), vec![1, 1])
+            .expect("typed complex integer input");
+        input.data.clear();
+
+        let value = complex_tensor_into_value(input);
+        let Value::ComplexTensor(output) = value else {
+            panic!("typed complex integer scalar must not collapse to double complex");
+        };
+        assert_eq!(output.integer_data, Some(storage));
+        assert!(output.data.is_empty());
     }
 
     fn cumsum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
