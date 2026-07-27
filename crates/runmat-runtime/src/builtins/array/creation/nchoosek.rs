@@ -204,7 +204,7 @@ fn scalar_coefficient_mode(value: &Value) -> Option<CoefficientMode> {
             n,
             class: int_class(int),
         }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_element_len(tensor) == 1 => {
             if let Some(value) = tensor
                 .integer_storage()
                 .and_then(|storage| storage.value_at(0))
@@ -244,7 +244,7 @@ fn resolve_coefficient_class(
 
 fn is_numeric_scalar(value: &Value) -> bool {
     matches!(value, Value::Num(_) | Value::Int(_))
-        || matches!(value, Value::Tensor(tensor) if tensor.data.len() == 1)
+        || matches!(value, Value::Tensor(tensor) if tensor_element_len(tensor) == 1)
 }
 
 fn coefficient_value(n: usize, k: usize, class: CoefficientClass) -> BuiltinResult<Value> {
@@ -507,7 +507,7 @@ fn parse_k(value: &Value) -> BuiltinResult<ParsedK> {
                 class: int_class(int),
             })
             .ok_or_else(invalid_k),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_element_len(tensor) == 1 => {
             if let Some(value) = tensor
                 .integer_storage()
                 .and_then(|storage| storage.value_at(0))
@@ -526,6 +526,12 @@ fn parse_k(value: &Value) -> BuiltinResult<ParsedK> {
         }
         _ => Err(invalid_k()),
     }
+}
+
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 fn invalid_k() -> RuntimeError {
@@ -761,7 +767,7 @@ mod tests {
                 vec![1, 1],
             )
             .expect("scalar tensor");
-            scalar.data = vec![0.0];
+            scalar.data.clear();
             let mut k = Tensor::new_integer(
                 storage
                     .from_exact_values_like(vec![one_like(&values[0])])
@@ -769,7 +775,7 @@ mod tests {
                 vec![1, 1],
             )
             .expect("k tensor");
-            k.data = vec![0.0];
+            k.data.clear();
             assert_eq!(
                 call(Value::Tensor(scalar), Value::Tensor(k)).expect("scalar coefficient"),
                 Value::Int(values[0].clone())
@@ -787,7 +793,7 @@ mod tests {
                 .expect("expected combinations");
             let mut input =
                 Tensor::new_integer(storage.clone(), vec![1, 3]).expect("integer vector");
-            input.data = vec![0.0; 3];
+            input.data.clear();
             let Value::Tensor(output) =
                 call(Value::Tensor(input), Value::Num(2.0)).expect("combinations")
             else {
