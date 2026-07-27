@@ -672,7 +672,7 @@ fn reduce_tensor_median_dim(
         return Ok(tensor.clone());
     };
 
-    if reduce_len == 0 || tensor.data.is_empty() {
+    if reduce_len == 0 || tensor_len(tensor) == 0 {
         let fill = vec![f64::NAN; tensor::element_count(&output_shape)];
         return Tensor::new(fill, output_shape)
             .map_err(|e| median_internal_error(format!("median: {e}")));
@@ -1011,6 +1011,24 @@ pub(crate) mod tests {
         let result =
             median_builtin(Value::Tensor(tensor), vec![Value::from("all")]).expect("median all");
         assert_eq!(result, Value::Int(IntValue::U64(6)));
+    }
+
+    #[test]
+    fn median_reads_typed_integer_storage_without_mirror() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![9, 1, 4, 8, 6, 3]), vec![3, 2])
+                .expect("typed input");
+        tensor.data.clear();
+
+        let Value::Tensor(result) =
+            median_builtin(Value::Tensor(tensor), Vec::new()).expect("median by column")
+        else {
+            panic!("expected typed tensor result");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I16(vec![4, 6]))
+        );
     }
 
     #[test]
