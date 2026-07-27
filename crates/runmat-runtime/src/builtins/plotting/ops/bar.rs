@@ -665,7 +665,7 @@ fn is_positional_bar_width_candidate(second: &Value, trailing: &[Value]) -> bool
 fn is_numeric_scalar_value(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) => true,
-        Value::Tensor(tensor) => tensor.data.len() == 1,
+        Value::Tensor(tensor) => tensor_utils::is_scalar_tensor(tensor),
         _ => false,
     }
 }
@@ -1477,6 +1477,18 @@ pub(crate) mod tests {
         assert_eq!(charts.len(), 2);
         assert_eq!(charts[0].values().unwrap(), &[1.0, -2.0]);
         assert_eq!(charts[1].values().unwrap(), &[3.0, 4.0]);
+    }
+
+    #[test]
+    fn bar_width_candidate_accepts_typed_integer_scalar_without_double_mirror() {
+        let mut width =
+            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("typed width");
+        width.data.clear();
+
+        assert!(is_positional_bar_width_candidate(
+            &Value::Tensor(width),
+            &[Value::String("grouped".into())]
+        ));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

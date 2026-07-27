@@ -227,12 +227,12 @@ fn parse_view_angles(args: &[Value]) -> crate::BuiltinResult<(f32, f32)> {
         2 => {
             let az = scalar_or_tensor(&args[0])?;
             let el = scalar_or_tensor(&args[1])?;
-            if az.data.len() != 1 || el.data.len() != 1 {
+            if !tensor::is_scalar_tensor(&az) || !tensor::is_scalar_tensor(&el) {
                 return Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT));
             }
             Ok((
-                tensor::tensor_values_f64(&az)[0] as f32,
-                tensor::tensor_values_f64(&el)[0] as f32,
+                tensor::tensor_value_f64(&az, 0) as f32,
+                tensor::tensor_value_f64(&el, 0) as f32,
             ))
         }
         _ => Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
@@ -409,6 +409,26 @@ mod tests {
             Tensor::new_integer(IntegerStorage::I16(vec![45, 20]), vec![1, 2]).expect("angles"),
         );
         let value = view_builtin(vec![angles]).unwrap();
+        let t = Tensor::try_from(&value).unwrap();
+
+        assert_eq!(t.data, vec![45.0, 20.0]);
+    }
+
+    #[test]
+    fn view_accepts_separate_typed_integer_angle_scalars() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+
+        let mut az =
+            Tensor::new_integer(IntegerStorage::I16(vec![45]), vec![1, 1]).expect("azimuth");
+        az.data.clear();
+        let mut el =
+            Tensor::new_integer(IntegerStorage::I16(vec![20]), vec![1, 1]).expect("elevation");
+        el.data.clear();
+
+        let value = view_builtin(vec![Value::Tensor(az), Value::Tensor(el)]).unwrap();
         let t = Tensor::try_from(&value).unwrap();
 
         assert_eq!(t.data, vec![45.0, 20.0]);

@@ -370,7 +370,9 @@ fn colormap_length(value: &Value, builtin: &'static str) -> BuiltinResult<usize>
     }
     let raw = match value {
         Value::Num(value) => *value,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            tensor_utils::tensor_value_f64(tensor, 0)
+        }
         _ => return Err(invalid(builtin, "colormap length must be a numeric scalar")),
     };
     if !raw.is_finite() || raw.fract() != 0.0 || raw < 0.0 {
@@ -388,7 +390,7 @@ fn colormap_length(value: &Value, builtin: &'static str) -> BuiltinResult<usize>
 fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
     match value {
         Value::Int(value) => Some(value.clone()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0)),
         _ => None,
@@ -564,28 +566,31 @@ mod tests {
 
     #[test]
     fn length_argument_reads_typed_integer_tensor_exactly() {
-        let length = runmat_builtins::Tensor::new_integer(
+        let mut length = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![MAX_COLORMAP_LENGTH as u64]),
             vec![1, 1],
         )
         .expect("typed length");
+        length.data.clear();
         assert_eq!(
             colormap_length(&Value::Tensor(length), "parula").unwrap(),
             MAX_COLORMAP_LENGTH
         );
 
-        let too_large = runmat_builtins::Tensor::new_integer(
+        let mut too_large = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![MAX_COLORMAP_LENGTH as u64 + 1]),
             vec![1, 1],
         )
         .expect("too large");
+        too_large.data.clear();
         assert!(colormap_length(&Value::Tensor(too_large), "parula").is_err());
 
-        let negative = runmat_builtins::Tensor::new_integer(
+        let mut negative = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative");
+        negative.data.clear();
         assert!(colormap_length(&Value::Tensor(negative), "parula").is_err());
     }
 

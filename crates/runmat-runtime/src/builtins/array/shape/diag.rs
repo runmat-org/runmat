@@ -1133,7 +1133,7 @@ fn scalar_to_isize(value: &Value) -> BuiltinResult<isize> {
             }
             Ok(rounded as isize)
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(storage) = t.integer_storage() {
                 let value = storage.value_at(0).ok_or_else(|| {
                     diag_error(
@@ -1143,7 +1143,7 @@ fn scalar_to_isize(value: &Value) -> BuiltinResult<isize> {
                 })?;
                 return scalar_to_isize(&Value::Int(value));
             }
-            scalar_to_isize(&Value::Num(t.data[0]))
+            scalar_to_isize(&Value::Num(tensor::tensor_value_f64(t, 0)))
         }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok(if array.data[0] != 0 { 1 } else { 0 })
@@ -1421,8 +1421,9 @@ mod tests {
             scalar_to_isize(&Value::Int(IntValue::I64(-1))).expect("signed offset"),
             -1
         );
-        let typed_offset =
+        let mut typed_offset =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("typed offset");
+        typed_offset.data.clear();
         assert_eq!(
             scalar_to_isize(&Value::Tensor(typed_offset)).expect("typed tensor offset"),
             -1
@@ -1430,8 +1431,9 @@ mod tests {
         let err = scalar_to_isize(&Value::Int(IntValue::U64(u64::MAX)))
             .expect_err("unrepresentable typed offset must not saturate");
         assert_eq!(err.identifier(), MESSAGE_ID_INVALID_OFFSET.identifier);
-        let typed_err = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        let mut typed_err = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("typed offset");
+        typed_err.data.clear();
         let err = scalar_to_isize(&Value::Tensor(typed_err))
             .expect_err("unrepresentable typed tensor offset must not saturate");
         assert_eq!(err.identifier(), MESSAGE_ID_INVALID_OFFSET.identifier);
