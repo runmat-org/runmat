@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::common::tensor;
 
 pub(in crate::builtins::table) async fn write_tabular_file(
     value: Value,
@@ -114,11 +115,11 @@ pub(in crate::builtins::table) fn cell_to_text(value: &Value) -> String {
                 "false".to_string()
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0))
             .map(|value| value.decimal_string())
-            .unwrap_or_else(|| format_key_number(tensor.data[0])),
+            .unwrap_or_else(|| format_key_number(tensor::tensor_value_f64(tensor, 0))),
         Value::StringArray(array) if array.data.len() == 1 => array.data[0].clone(),
         other => other.to_string(),
     }
@@ -151,7 +152,7 @@ mod tests {
     fn cell_to_text_preserves_exact_integer_scalar_storage() {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
 
         assert_eq!(cell_to_text(&Value::Tensor(tensor)), "18446744073709551615");
     }

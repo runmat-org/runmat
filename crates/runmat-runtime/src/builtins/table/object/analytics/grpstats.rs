@@ -195,7 +195,7 @@ fn scalar_number(value: &Value) -> Option<f64> {
     match value {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             Some(tensor_utils::tensor_value_f64(tensor, 0))
         }
         _ => None,
@@ -607,11 +607,11 @@ fn cell_atom(value: &Value) -> GroupAtom {
         Value::CharArray(array) if array.rows == 1 => {
             GroupAtom::Text(array.data.iter().collect::<String>().trim().to_string())
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0))
             .map(GroupAtom::Integer)
-            .unwrap_or(GroupAtom::Number(tensor.data[0])),
+            .unwrap_or_else(|| GroupAtom::Number(tensor_utils::tensor_value_f64(tensor, 0))),
         Value::LogicalArray(array) if array.data.len() == 1 => {
             GroupAtom::Logical(array.data[0] != 0)
         }
@@ -645,7 +645,7 @@ mod tests {
     #[test]
     fn scalar_number_reads_typed_integer_storage_exactly() {
         let mut alpha = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
-        alpha.data[0] = 0.25;
+        alpha.data.clear();
 
         assert_eq!(scalar_number(&Value::Tensor(alpha)), Some(1.0));
     }

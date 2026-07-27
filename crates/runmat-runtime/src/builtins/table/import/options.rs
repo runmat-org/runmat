@@ -1077,10 +1077,11 @@ impl RangeSpec {
                 Self::parse_text(&text)
             }
             Value::StringArray(sa) if sa.data.len() == 1 => Self::parse_text(&sa.data[0]),
-            Value::Tensor(t) if t.data.len() == 2 || t.data.len() == 4 => {
-                let mut indices = Vec::with_capacity(t.data.len());
+            Value::Tensor(t) if tensor_len(t) == 2 || tensor_len(t) == 4 => {
+                let len = tensor_len(t);
+                let mut indices = Vec::with_capacity(len);
                 if let Some(storage) = t.integer_storage() {
-                    for idx in 0..t.data.len() {
+                    for idx in 0..len {
                         let value = storage
                             .value_at(idx)
                             .ok_or_else(|| invalid_index("table: Range index out of bounds"))?;
@@ -1128,6 +1129,12 @@ impl RangeSpec {
             end_col: end.and_then(|item| item.1),
         })
     }
+}
+
+fn tensor_len(tensor: &runmat_builtins::Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 fn one_based_integer_to_zero(
@@ -1198,7 +1205,7 @@ mod tests {
     fn range_spec_reads_typed_integer_storage_exactly() {
         let mut range =
             Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 4, 5]), vec![1, 4]).unwrap();
-        range.data.fill(0.0);
+        range.data.clear();
 
         let parsed = RangeSpec::parse(&Value::Tensor(range)).unwrap();
         assert_eq!(parsed.start_row, 1);
