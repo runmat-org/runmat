@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::tensor::tensor_value_f64;
+use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::type_resolvers::{string_array_type, unknown_type};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
@@ -967,8 +967,8 @@ fn parse_bool_for_builtin(
             }
         }
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
-                Ok(tensor_value_f64(tensor, 0) != 0.0)
+            if tensor::is_scalar_tensor(tensor) {
+                Ok(tensor::tensor_value_f64(tensor, 0) != 0.0)
             } else {
                 Err(builtin_error_with_descriptor(
                     builtin_name,
@@ -1260,12 +1260,12 @@ pub(crate) mod tests {
     fn split_bool_options_read_typed_integer_storage_exactly() {
         let mut enabled =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("enabled");
-        enabled.data[0] = 0.0;
+        enabled.data.clear();
         assert!(parse_bool(&Value::Tensor(enabled), "IncludeDelimiters").unwrap());
 
         let mut disabled =
             Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("disabled");
-        disabled.data[0] = 1.0;
+        disabled.data.clear();
         assert!(!parse_bool(&Value::Tensor(disabled), "IncludeDelimiters").unwrap());
     }
 
