@@ -1367,7 +1367,7 @@ struct BootstrpEval {
 
 fn is_empty_function(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
         Value::LogicalArray(a) => a.data.is_empty(),
         Value::Cell(c) => c.data.is_empty(),
         Value::String(s) => s.is_empty(),
@@ -2209,6 +2209,19 @@ mod tests {
             .unwrap(),
             1.0
         );
+    }
+
+    #[test]
+    fn bootstrp_empty_function_detection_uses_typed_integer_storage_length() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("typed scalar");
+        scalar.data.clear();
+        assert!(!is_empty_function(&Value::Tensor(scalar)));
+
+        let mut empty =
+            Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 0]).expect("typed empty");
+        empty.data.clear();
+        assert!(is_empty_function(&Value::Tensor(empty)));
     }
 
     #[test]
