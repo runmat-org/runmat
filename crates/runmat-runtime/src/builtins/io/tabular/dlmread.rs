@@ -522,7 +522,7 @@ fn is_delimiter_value(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => true,
         Value::Int(_) | Value::Num(_) => true,
-        Value::Tensor(t) => t.data.len() == 1,
+        Value::Tensor(t) => tensor::is_scalar_tensor(t),
         _ => false,
     }
 }
@@ -543,9 +543,15 @@ fn is_range_candidate(value: &Value) -> bool {
             }
             looks_like_range_string(&sa.data[0])
         }
-        Value::Tensor(t) => t.data.len() == 2 || t.data.len() == 4,
+        Value::Tensor(t) => tensor_len(t) == 2 || tensor_len(t) == 4,
         _ => false,
     }
+}
+
+fn tensor_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 fn looks_like_range_string(text: &str) -> bool {
@@ -575,12 +581,12 @@ fn parse_delimiter(value: &Value) -> BuiltinResult<DelimiterSpec> {
         }
         Value::Int(i) => delimiter_from_integer(i),
         Value::Num(n) => delimiter_from_numeric(*n),
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(storage) = t.integer_storage() {
                 let value = storage.value_at(0).expect("one-element integer storage");
                 delimiter_from_integer(&value)
             } else {
-                delimiter_from_numeric(t.data[0])
+                delimiter_from_numeric(tensor::tensor_value_f64(t, 0))
             }
         }
         _ => Err(dlmread_error_with(
@@ -670,7 +676,7 @@ fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<usize> {
                 )
             })
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(storage) = t.integer_storage() {
                 let value = storage.value_at(0).expect("one-element integer storage");
                 value.try_to_usize().ok_or_else(|| {
@@ -680,7 +686,7 @@ fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<usize> {
                     )
                 })
             } else {
-                value_to_start_index(&Value::Num(t.data[0]), name)
+                value_to_start_index(&Value::Num(tensor::tensor_value_f64(t, 0)), name)
             }
         }
         _ => Err(dlmread_error_with(
@@ -1424,6 +1430,8 @@ pub(crate) mod tests {
     #[test]
     fn dlmread_integer_tensor_parsers_preserve_exact_bounds() {
         let row = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("row");
+        let mut row = row;
+        row.data.clear();
         assert_eq!(value_to_start_index(&Value::Tensor(row), "row").unwrap(), 7);
 
         let negative =
@@ -1432,6 +1440,8 @@ pub(crate) mod tests {
 
         let comma =
             Tensor::new_integer(IntegerStorage::U16(vec![44]), vec![1, 1]).expect("delimiter");
+        let mut comma = comma;
+        comma.data.clear();
         assert!(matches!(
             parse_delimiter(&Value::Tensor(comma)),
             Ok(DelimiterSpec::Char(','))
@@ -1587,7 +1597,7 @@ pub(crate) mod tests {
         let mut range =
             BuiltinTensor::new_integer(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![4, 1])
                 .expect("range");
-        range.data.fill(f64::NAN);
+        range.data.clear();
 
         let parsed = parse_range_numeric(&Value::Tensor(range)).expect("range");
 

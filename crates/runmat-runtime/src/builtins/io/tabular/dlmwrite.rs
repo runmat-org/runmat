@@ -543,7 +543,7 @@ fn interpret_delimiter_string(raw: &str) -> BuiltinResult<String> {
 fn is_numeric_scalar(value: &Value) -> bool {
     match value {
         Value::Int(_) | Value::Num(_) | Value::Bool(_) => true,
-        Value::Tensor(t) => t.data.len() == 1,
+        Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         _ => false,
     }
@@ -552,7 +552,7 @@ fn is_numeric_scalar(value: &Value) -> bool {
 fn parse_offset_value(value: &Value, context: &str) -> BuiltinResult<usize> {
     match value {
         Value::Int(value) => return integer_offset_value(value, context),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
                 let value = storage.value_at(0).expect("one-element integer storage");
                 return integer_offset_value(&value, context);
@@ -620,12 +620,12 @@ fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpec> {
             }
             Ok(PrecisionSpec::Significant(rounded as u32))
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(storage) = t.integer_storage() {
                 let value = storage.value_at(0).expect("one-element integer storage");
                 integer_precision_value(&value)
             } else {
-                parse_precision_value(&Value::Num(t.data[0]))
+                parse_precision_value(&Value::Num(tensor::tensor_value_f64(t, 0)))
             }
         }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
@@ -740,7 +740,7 @@ fn extract_scalar(value: &Value) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(tensor::tensor_values_f64(t)[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1815,7 +1815,7 @@ pub(crate) mod tests {
     fn dlmwrite_integer_tensor_options_preserve_exact_bounds() {
         let mut offset =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("offset");
-        offset.data[0] = 1.5;
+        offset.data.clear();
         assert_eq!(
             parse_offset_value(&Value::Tensor(offset), "row offset").unwrap(),
             7
@@ -1826,7 +1826,7 @@ pub(crate) mod tests {
 
         let mut precision =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("precision");
-        precision.data[0] = 1.5;
+        precision.data.clear();
         assert!(matches!(
             parse_precision_value(&Value::Tensor(precision)),
             Ok(PrecisionSpec::Significant(7))

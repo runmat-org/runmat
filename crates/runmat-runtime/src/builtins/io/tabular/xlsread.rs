@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "xlsread";
@@ -403,12 +404,12 @@ fn parse_sheet_selector(value: &Value) -> BuiltinResult<SheetSelector> {
         }
         Value::Num(n) => numeric_sheet_index(*n),
         Value::Int(i) => integer_sheet_index(i),
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(storage) = t.integer_storage() {
                 let value = storage.value_at(0).expect("one-element integer storage");
                 integer_sheet_index(&value)
             } else {
-                numeric_sheet_index(t.data[0])
+                numeric_sheet_index(tensor::tensor_value_f64(t, 0))
             }
         }
         _ => Err(xlsread_error_with(
@@ -1501,8 +1502,9 @@ mod tests {
         }
         assert!(parse_sheet_selector(&Value::Int(IntValue::I64(-1))).is_err());
 
-        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
             .expect("typed sheet tensor");
+        tensor.data.clear();
         assert!(matches!(
             parse_sheet_selector(&Value::Tensor(tensor)),
             Ok(SheetSelector::Index(6))
@@ -1528,7 +1530,7 @@ mod tests {
     fn xlsread_numeric_range_reads_typed_integer_storage_exactly() {
         let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 4, 5]), vec![1, 4])
             .expect("typed range tensor");
-        tensor.data = vec![99.0, 99.0, 99.0, 99.0];
+        tensor.data.clear();
 
         let range = parse_range(&Value::Tensor(tensor)).expect("numeric range");
         assert_eq!(range.start_row, 1);
@@ -1538,7 +1540,7 @@ mod tests {
 
         let mut invalid = Tensor::new_integer(IntegerStorage::I16(vec![-1, 1]), vec![1, 2])
             .expect("typed invalid range");
-        invalid.data = vec![2.0, 3.0];
+        invalid.data.clear();
         assert!(parse_range(&Value::Tensor(invalid)).is_err());
 
         let mut too_large = Tensor::new_integer(
@@ -1546,7 +1548,7 @@ mod tests {
             vec![1, 2],
         )
         .expect("typed excessive range");
-        too_large.data = vec![1.0, 1.0];
+        too_large.data.clear();
         assert!(parse_range(&Value::Tensor(too_large)).is_err());
     }
     use futures::executor::block_on;
