@@ -128,7 +128,7 @@ impl PointColorArg {
                 Ok(Self::Uniform(color))
             }
             Value::Tensor(tensor) => {
-                if tensor.data.len() == 1 {
+                if tensor::is_scalar_tensor(tensor) {
                     Ok(Self::ScalarValues(Value::Tensor(tensor.clone())))
                 } else if tensor.rows == 1 && (tensor.cols == 3 || tensor.cols == 4) {
                     let r = tensor_value(tensor, 0, 0) as f32;
@@ -216,7 +216,7 @@ fn is_filled_token(value: &Value) -> bool {
 
 fn value_is_empty(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::GpuTensor(handle) => total_len(handle.shape.as_slice()) == 0,
         Value::CharArray(chars) => chars.data.is_empty(),
         Value::String(s) => s.trim().is_empty(),
@@ -227,7 +227,7 @@ fn value_is_empty(value: &Value) -> bool {
 fn is_scalar_numeric(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(tensor) => tensor.data.len() == 1,
+        Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
         Value::GpuTensor(handle) => total_len(handle.shape.as_slice()) == 1,
         _ => false,
     }
@@ -579,5 +579,19 @@ mod tests {
 
         assert_eq!(size_px.len(), 2);
         assert_eq!(color_values, vec![7.0, 8.0]);
+    }
+
+    #[test]
+    fn point_scalar_helpers_accept_typed_integer_without_double_mirror() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::U16(vec![12]), vec![1, 1]).expect("scalar");
+        scalar.data.clear();
+        let value = Value::Tensor(scalar);
+
+        assert!(is_scalar_numeric(&value));
+        assert!(matches!(
+            PointColorArg::from_value(value, &LineStyleParseOptions::scatter()).expect("color"),
+            PointColorArg::ScalarValues(Value::Tensor(_))
+        ));
     }
 }

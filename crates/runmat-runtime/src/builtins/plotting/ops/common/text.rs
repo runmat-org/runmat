@@ -174,7 +174,7 @@ fn try_parse_axes_target(value: &Value) -> Option<(FigureHandle, usize)> {
     match value {
         Value::Num(v) => decode_axes_handle(*v).ok(),
         Value::Int(i) => decode_axes_handle(i.to_f64()).ok(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             decode_axes_handle(tensor_utils::tensor_value_f64(tensor, 0)).ok()
         }
         _ => None,
@@ -223,7 +223,7 @@ mod tests {
             crate::builtins::plotting::state::encode_axes_handle(FigureHandle::from(7), 2);
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U32(vec![encoded as u32]), vec![1, 1]).unwrap();
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
 
         assert_eq!(
             try_parse_axes_target(&Value::Tensor(tensor)),

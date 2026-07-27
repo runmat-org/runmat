@@ -363,7 +363,7 @@ fn parse_axes_handle(value: &Value) -> BuiltinResult<f64> {
     let scalar = match value {
         Value::Num(v) => *v,
         Value::Int(v) => v.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             tensor_utils::tensor_value_f64(tensor, 0)
         }
         Value::Tensor(_) => {
@@ -529,7 +529,7 @@ fn parse_numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(v) => Ok(*v),
         Value::Int(v) => Ok(v.to_f64()),
         Value::Bool(v) => Ok(if *v { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             Ok(tensor_utils::tensor_value_f64(tensor, 0))
         }
         other => Err(scatterplot_error(
@@ -619,7 +619,7 @@ mod tests {
 
     fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         tensor
     }
 

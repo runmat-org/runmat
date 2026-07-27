@@ -2613,7 +2613,9 @@ fn figure_position_value(position: [f64; 4]) -> Value {
 
 fn parse_figure_position(value: &Value, builtin: &'static str) -> BuiltinResult<[f64; 4]> {
     let values = match value {
-        Value::Tensor(t) if t.data.len() == 4 && is_figure_position_vector_shape(t) => {
+        Value::Tensor(t)
+            if tensor::tensor_element_len(t) == 4 && is_figure_position_vector_shape(t) =>
+        {
             tensor::tensor_values_f64(t)
         }
         _ => {
@@ -2657,7 +2659,7 @@ fn text_position_value(position: glam::Vec3) -> Value {
 
 fn parse_text_position(value: &Value, builtin: &'static str) -> BuiltinResult<glam::Vec3> {
     match value {
-        Value::Tensor(t) if t.data.len() == 2 || t.data.len() == 3 => {
+        Value::Tensor(t) if matches!(tensor::tensor_element_len(t), 2 | 3) => {
             let data = tensor::tensor_values_f64(t);
             Ok(glam::Vec3::new(
                 data[0] as f32,
@@ -4819,13 +4821,13 @@ fn apply_quiver_data_property(
     let tensor = Tensor::try_from(value).map_err(|err| {
         plotting_error(builtin, format!("{builtin}: {key} must be numeric: {err}"))
     })?;
-    if tensor.data.len() != expected_len {
+    if tensor::tensor_element_len(&tensor) != expected_len {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: {key} length must match existing quiver data length"),
         ));
     }
-    let data = tensor.data;
+    let data = tensor::tensor_values_f64(&tensor);
     super::state::update_quiver_plot(quiver_handle.figure, quiver_handle.plot_index, |quiver| {
         match key {
             "xdata" => quiver.x = data,
@@ -6378,7 +6380,7 @@ fn scalar_numeric_value(value: &Value) -> Option<f64> {
     match value {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             Some(tensor::tensor_values_f64(tensor)[0])
         }
         _ => None,
@@ -6427,7 +6429,7 @@ fn tick_labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult
             }
             Ok(labels)
         }
-        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(Vec::new()),
+        Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0 => Ok(Vec::new()),
         other => Err(plotting_error(
             builtin,
             format!("{builtin}: tick labels must be a string array or cell array of text, got {other:?}"),
@@ -6660,7 +6662,7 @@ fn handle_scalar(value: &Value, builtin: &'static str) -> BuiltinResult<f64> {
     match value {
         Value::Num(v) => Ok(*v),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(tensor::tensor_values_f64(t)[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(tensor::tensor_values_f64(t)[0]),
         _ => Err(plotting_error(
             builtin,
             format!("{builtin}: expected plotting handle"),
@@ -6857,12 +6859,14 @@ fn surface_z_grid_from_value(
     let expected = rows
         .checked_mul(cols)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: grid dimensions overflowed")))?;
-    if tensor.data.len() != expected {
+    if tensor::tensor_element_len(&tensor) != expected {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: ZData must contain exactly {expected} values"),
         ));
     }
+    tensor = tensor::integer_tensor_to_f64(tensor)
+        .map_err(|err| plotting_error(builtin, format!("{builtin}: {err}")))?;
     if tensor.rows == rows && tensor.cols == cols {
         return super::common::tensor_to_surface_grid_matlab_xy(tensor, rows, cols, builtin);
     }
@@ -7363,16 +7367,19 @@ mod tests {
 
     #[test]
     fn numeric_property_helpers_read_typed_integer_storage() {
-        let aspect = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![1, 3]).expect("aspect"),
-        );
-        let position = Value::Tensor(
+        let mut aspect_tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![1, 3]).expect("aspect");
+        aspect_tensor.data.clear();
+        let aspect = Value::Tensor(aspect_tensor);
+        let mut position_tensor =
             Tensor::new_integer(IntegerStorage::U32(vec![10, 20, 300, 200]), vec![1, 4])
-                .expect("position"),
-        );
-        let text = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::I16(vec![-2, 5, 9]), vec![1, 3]).expect("text"),
-        );
+                .expect("position");
+        position_tensor.data.clear();
+        let position = Value::Tensor(position_tensor);
+        let mut text_tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![-2, 5, 9]), vec![1, 3]).expect("text");
+        text_tensor.data.clear();
+        let text = Value::Tensor(text_tensor);
 
         assert_eq!(
             data_aspect_ratio_from_value(&aspect, "daspect").expect("aspect"),
@@ -7384,5 +7391,25 @@ mod tests {
         );
         let parsed = parse_text_position(&text, "text").expect("text position");
         assert_eq!(parsed, glam::Vec3::new(-2.0, 5.0, 9.0));
+
+        let mut zdata =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).expect("zdata");
+        zdata.data.clear();
+        let zgrid = surface_z_grid_from_value(&Value::Tensor(zdata), 2, 2, "surf").expect("zdata");
+        assert_eq!(zgrid, vec![vec![1.0, 2.0], vec![3.0, 4.0]]);
+
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
+        scalar.data.clear();
+        let scalar = Value::Tensor(scalar);
+        assert_eq!(scalar_numeric_value(&scalar), Some(7.0));
+        assert_eq!(handle_scalar(&scalar, "plot").expect("handle"), 7.0);
+
+        let empty_labels =
+            Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![1, 0]).expect("empty labels");
+        assert_eq!(
+            tick_labels_from_value(&Value::Tensor(empty_labels), "xticklabels").expect("labels"),
+            Vec::<String>::new()
+        );
     }
 }

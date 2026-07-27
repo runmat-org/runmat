@@ -24,6 +24,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 
 use super::gpu_helpers::{axis_bounds, axis_bounds_async};
 use super::plotting_error;
@@ -809,25 +810,26 @@ fn parse_scalar_level_count(value: f64, context: &str) -> BuiltinResult<ContourL
 }
 
 fn parse_tensor_levels(tensor: Tensor, context: &str) -> BuiltinResult<ContourLevelSpec> {
-    if tensor.data.is_empty() {
+    let data = tensor_utils::tensor_values_f64(&tensor);
+    if data.is_empty() {
         return Err(plotting_error(
             context,
             format!("{context}: level vector must be non-empty"),
         ));
     }
-    if tensor.data.len() == 1 {
+    if data.len() == 1 {
         if let Some(value) = tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0))
         {
             return parse_integer_level_count(&value, context);
         }
-        return parse_scalar_level_count(tensor.data[0], context);
+        return parse_scalar_level_count(data[0], context);
     }
-    if tensor.data.iter().all(|value| *value == tensor.data[0]) {
-        return Ok(ContourLevelSpec::Values(vec![tensor.data[0]]));
+    if data.iter().all(|value| *value == data[0]) {
+        return Ok(ContourLevelSpec::Values(vec![data[0]]));
     }
-    for pair in tensor.data.windows(2) {
+    for pair in data.windows(2) {
         if pair[1] <= pair[0] {
             return Err(plotting_error(
                 context,
@@ -835,7 +837,7 @@ fn parse_tensor_levels(tensor: Tensor, context: &str) -> BuiltinResult<ContourLe
             ));
         }
     }
-    Ok(ContourLevelSpec::Values(tensor.data))
+    Ok(ContourLevelSpec::Values(data))
 }
 
 fn parse_integer_level_count(value: &IntValue, context: &str) -> BuiltinResult<ContourLevelSpec> {
@@ -2320,22 +2322,24 @@ pub(crate) mod tests {
     fn scalar_level_count_reads_typed_integer_tensor_exactly() {
         setup_plot_tests();
         let exact = 9_007_199_254_740_993_u64;
-        let tensor = runmat_builtins::Tensor::new_integer(
+        let mut tensor = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![exact]),
             vec![1, 1],
         )
         .expect("typed level count");
+        tensor.data.clear();
 
         match parse_level_spec(Value::Tensor(tensor), "contour").unwrap() {
             ContourLevelSpec::Count(count) => assert_eq!(count, exact as usize),
             other => panic!("expected exact level count, got {other:?}"),
         }
 
-        let negative = runmat_builtins::Tensor::new_integer(
+        let mut negative = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative level count");
+        negative.data.clear();
         assert!(parse_level_spec(Value::Tensor(negative), "contour").is_err());
     }
 
