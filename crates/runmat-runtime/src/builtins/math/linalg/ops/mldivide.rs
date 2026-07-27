@@ -667,7 +667,7 @@ pub(crate) mod tests {
     fn mldivide_complex_scalar_promotion_reads_typed_integer_storage_exactly() {
         let mut divisor =
             Tensor::new_integer(IntegerStorage::I64(vec![2]), vec![1, 1]).expect("integer scalar");
-        divisor.data.fill(f64::NAN);
+        divisor.data.clear();
         let rhs = ComplexTensor::new(vec![(6.0, 4.0), (2.0, -8.0)], vec![2, 1]).unwrap();
 
         let result =

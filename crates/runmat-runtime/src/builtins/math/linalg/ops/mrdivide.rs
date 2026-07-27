@@ -674,7 +674,7 @@ pub(crate) mod tests {
         let lhs = ComplexTensor::new(vec![(6.0, 4.0), (2.0, -8.0)], vec![1, 2]).unwrap();
         let mut divisor =
             Tensor::new_integer(IntegerStorage::I64(vec![2]), vec![1, 1]).expect("integer scalar");
-        divisor.data.fill(f64::NAN);
+        divisor.data.clear();
 
         let result =
             mrdivide_builtin(Value::ComplexTensor(lhs), Value::Tensor(divisor)).expect("mrdivide");
