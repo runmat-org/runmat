@@ -6,7 +6,7 @@ use runmat_accelerate_api::{handle_integer_type, handle_is_logical};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntValue, NumericDType, SparseTensor, Value,
+    CellArray, CharArray, ComplexTensor, IntValue, NumericDType, SparseTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -424,7 +424,7 @@ pub fn value_shape_2d(value: &Value) -> (usize, usize) {
 
 pub fn value_is_empty(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor_len(t) == 0,
         Value::SparseTensor(t) => t.rows == 0 || t.cols == 0,
         Value::ComplexTensor(t) => t.data.is_empty(),
         Value::LogicalArray(a) => a.data.is_empty(),
@@ -434,6 +434,12 @@ pub fn value_is_empty(value: &Value) -> bool {
         Value::GpuTensor(handle) => handle.shape.contains(&0),
         _ => false,
     }
+}
+
+fn tensor_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 pub fn value_is_finite(value: &Value) -> bool {
@@ -1113,18 +1119,28 @@ mod tests {
     fn numeric_validators_read_typed_integer_storage_exactly() {
         let mut positive =
             Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("positive");
-        positive.data[0] = -1.0;
-        positive.data[1] = 0.0;
+        positive.data.clear();
         ok("mustBePositive", vec![Value::Tensor(positive)]);
 
         let mut negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1, -2]), vec![1, 2]).expect("negative");
-        negative.data[0] = 1.0;
-        negative.data[1] = 0.0;
+        negative.data.clear();
         ok("mustBeNegative", vec![Value::Tensor(negative)]);
 
         let zero = Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("zero");
         err("mustBeNonzero", vec![Value::Tensor(zero)]);
+    }
+
+    #[test]
+    fn value_is_empty_uses_typed_integer_storage_length() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
+        scalar.data.clear();
+        assert!(!value_is_empty(&Value::Tensor(scalar)));
+
+        let empty =
+            Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 0]).expect("empty tensor");
+        assert!(value_is_empty(&Value::Tensor(empty)));
     }
 
     #[test]
