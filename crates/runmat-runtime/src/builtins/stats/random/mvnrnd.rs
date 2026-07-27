@@ -334,7 +334,7 @@ async fn parse_n(value: &Value) -> BuiltinResult<usize> {
             .ok_or_else(|| invalid("mvnrnd: n must be a positive scalar integer"));
     }
     let tensor = value_to_tensor(value).await?;
-    if tensor.data.len() != 1 {
+    if !tensor::is_scalar_tensor(&tensor) {
         return Err(invalid("mvnrnd: n must be a positive scalar integer"));
     }
     let value = tensor::tensor_value_f64(&tensor, 0);
@@ -433,6 +433,12 @@ mod tests {
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Tensor {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         tensor.data.fill(poison);
+        tensor
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.clear();
         tensor
     }
 
@@ -602,7 +608,7 @@ mod tests {
 
     #[test]
     fn mvnrnd_parsers_read_typed_integer_tensor_storage_exactly() {
-        let n = poisoned_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1], -1.0);
+        let n = cleared_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]);
         assert_eq!(block_on(parse_n(&Value::Tensor(n))).unwrap(), 4);
 
         let mu = poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2], f64::NAN);
