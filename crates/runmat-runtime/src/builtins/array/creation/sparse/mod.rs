@@ -2093,7 +2093,7 @@ fn parse_size_arg(value: &Value, name: &str) -> BuiltinResult<usize> {
 fn scalar_integer_value(value: &Value) -> Option<IntValue> {
     match value {
         Value::Int(value) => Some(value.clone()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0)),
         _ => None,
@@ -2211,8 +2211,8 @@ pub(crate) mod tests {
     #[test]
     fn sparse_size_args_accept_typed_integer_scalar_tensors_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let rows = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("rows");
-        let cols = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("cols");
+        let rows = poisoned_integer_tensor(IntegerStorage::U64(vec![large]), vec![1, 1]);
+        let cols = poisoned_integer_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]);
 
         let sparse = expect_sparse(
             sparse_builtin(vec![Value::Tensor(rows), Value::Tensor(cols)]).expect("sparse"),
