@@ -23,7 +23,9 @@ pub(crate) async fn materialize_value(
 pub(crate) async fn parse_dims(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Num(_) | Value::Int(_) => parse_scalar_dims(value, builtin).await,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => parse_scalar_dims(value, builtin).await,
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            parse_scalar_dims(value, builtin).await
+        }
         Value::GpuTensor(handle) if tensor::element_count(&handle.shape) == 1 => {
             parse_scalar_dims(value, builtin).await
         }
@@ -215,7 +217,7 @@ fn indexing_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::CellArray;
+    use runmat_builtins::{CellArray, IntegerStorage, Tensor};
 
     #[test]
     fn dims_from_tokens_accepts_scalar() {
@@ -262,6 +264,21 @@ mod tests {
             "zeros",
         ))
         .is_err());
+    }
+
+    #[test]
+    fn parse_dims_reads_typed_integer_tensor_storage_exactly() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar dim");
+        scalar.data.clear();
+        let dims = block_on(parse_dims(&Value::Tensor(scalar), "zeros")).expect("scalar dims");
+        assert_eq!(dims, vec![7]);
+
+        let mut vector =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("vector dims");
+        vector.data.clear();
+        let dims = block_on(parse_dims(&Value::Tensor(vector), "zeros")).expect("vector dims");
+        assert_eq!(dims, vec![2, 3]);
     }
 
     #[test]
