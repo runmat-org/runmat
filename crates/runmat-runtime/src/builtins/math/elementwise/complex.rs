@@ -555,7 +555,7 @@ fn compatible_complex_shape(real: &Tensor, imag: &Tensor) -> BuiltinResult<Vec<u
 }
 
 fn is_scalar_tensor(tensor: &Tensor) -> bool {
-    tensor.data.len() == 1
+    tensor::is_scalar_tensor(tensor)
 }
 
 fn value_into_real_input(value: Value) -> BuiltinResult<RealInput> {
@@ -685,11 +685,12 @@ pub(crate) mod tests {
 
     #[test]
     fn complex_integer_components_preserve_uint64_storage_and_scalar_double_expansion() {
-        let real = Tensor::new_integer(
+        let mut real = Tensor::new_integer(
             IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
             vec![1, 2],
         )
         .unwrap();
+        real.data.clear();
         let result = complex_call(Value::Tensor(real), vec![Value::Num(1.0)]).expect("complex");
         let Value::ComplexTensor(complex) = result else {
             panic!("integer complex values must retain complex tensor storage");
@@ -735,7 +736,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let mut real = Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![1, 2])
                 .expect("typed integer tensor");
-            real.data = vec![99.0, 101.0];
+            real.data.clear();
             let imag = Tensor::new(vec![10.0, 20.0], vec![1, 2]).expect("imag tensor");
             let imag_handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {

@@ -241,7 +241,7 @@ fn scalar_atan2_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Some(tensor::tensor_values_f64(t)[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_values_f64(t)[0]),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(chars) if chars.rows * chars.cols == 1 => Some(
             chars
@@ -381,8 +381,8 @@ pub(crate) mod tests {
         let mut y =
             Tensor::new_integer(IntegerStorage::I16(vec![1, -1, 2, -2]), vec![2, 2]).unwrap();
         let mut x = Tensor::new_integer(IntegerStorage::I16(vec![1, 1]), vec![1, 2]).unwrap();
-        y.data.fill(0.0);
-        x.data.fill(0.0);
+        y.data.clear();
+        x.data.clear();
 
         let result = atan2_builtin(Value::Tensor(y), Value::Tensor(x)).expect("atan2");
         match result {
@@ -399,6 +399,20 @@ pub(crate) mod tests {
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn atan2_scalar_fast_path_reads_typed_integer_without_double_mirror() {
+        let mut y = Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).unwrap();
+        let mut x = Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).unwrap();
+        y.data.clear();
+        x.data.clear();
+
+        let result = atan2_builtin(Value::Tensor(y), Value::Tensor(x)).expect("atan2");
+        match result {
+            Value::Num(v) => assert!((v - 1.0f64.atan2(1.0)).abs() < EPS),
+            other => panic!("expected scalar result, got {other:?}"),
         }
     }
 
@@ -580,7 +594,7 @@ pub(crate) mod tests {
                 })
                 .expect("upload y");
             let mut x = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap();
-            x.data.fill(0.0);
+            x.data.clear();
 
             let result = atan2_builtin(Value::GpuTensor(hy), Value::Tensor(x)).expect("atan2");
             match result {
@@ -605,7 +619,7 @@ pub(crate) mod tests {
                 })
                 .expect("upload x");
             let mut y = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap();
-            y.data.fill(0.0);
+            y.data.clear();
 
             let result = atan2_builtin(Value::Tensor(y), Value::GpuTensor(hx)).expect("atan2");
             match result {

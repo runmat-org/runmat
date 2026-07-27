@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "gpuDevice";
@@ -268,7 +269,7 @@ fn is_reset_arg(value: &Value) -> bool {
         return true;
     }
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
         Value::LogicalArray(la) => la.data.is_empty(),
         _ => false,
     }
@@ -285,7 +286,7 @@ fn parse_device_index(value: &Value) -> BuiltinResult<Option<u32>> {
                 Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into())
             }
         }
-        Value::Tensor(t) => match t.data.len() {
+        Value::Tensor(t) => match tensor::tensor_element_len(t) {
             0 => Ok(None),
             1 => match t.integer_storage().and_then(|storage| storage.value_at(0)) {
                 Some(value) => integer_to_index(&value),
@@ -396,7 +397,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|_| {
             let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1])
                 .expect("integer tensor");
-            tensor.data[0] = f64::NAN;
+            tensor.data.clear();
 
             let value = call(vec![Value::Tensor(tensor)]).expect("gpuDevice");
             assert!(matches!(value, Value::Struct(_)));
