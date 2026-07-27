@@ -194,8 +194,8 @@ pub(crate) fn option_f64(
     let parsed = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            crate::builtins::common::tensor::tensor_values_f64(tensor)[0]
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
         }
         other => {
             return Err(optim_error(
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn value_to_scalar_reads_typed_integer_storage_exactly() {
         let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![-7]), vec![1, 1]).unwrap();
-        tensor.data = vec![0.0];
+        tensor.data.clear();
 
         let parsed = value_to_scalar("optim_test", Value::Tensor(tensor)).unwrap();
 

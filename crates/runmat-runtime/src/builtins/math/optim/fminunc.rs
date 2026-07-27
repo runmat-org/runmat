@@ -491,8 +491,8 @@ fn bool_value(field: &str, value: &Value) -> BuiltinResult<bool> {
         Value::Num(n) => bool_from_number(field, *n),
         Value::Int(i) => bool_from_number(field, i.to_f64()),
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => Ok(data[0] != 0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            bool_from_number(field, tensor::tensor_values_f64(tensor)[0])
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            bool_from_number(field, tensor::tensor_value_f64(tensor, 0))
         }
         Value::String(s) => bool_from_text(field, s),
         Value::StringArray(sa) if sa.data.len() == 1 => bool_from_text(field, &sa.data[0]),
@@ -1399,10 +1399,10 @@ mod tests {
     fn options_read_typed_integer_tensor_storage_exactly() {
         let mut max_iter =
             Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("MaxIter");
-        max_iter.data[0] = 1.5;
+        max_iter.data.clear();
         let mut gradient = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
             .expect("SpecifyObjectiveGradient");
-        gradient.data[0] = 0.0;
+        gradient.data.clear();
 
         let mut opts = StructValue::new();
         opts.insert("MaxIter", Value::Tensor(max_iter));

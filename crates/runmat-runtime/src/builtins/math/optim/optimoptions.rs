@@ -653,7 +653,9 @@ fn numeric_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
     let parsed = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
             if data[0] == 0 {
                 0.0
@@ -684,8 +686,8 @@ fn logical_value(field: &str, value: &Value) -> BuiltinResult<bool> {
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => Ok(data[0] != 0),
         Value::Num(n) => logical_from_number(field, *n),
         Value::Int(i) => logical_from_number(field, i.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            logical_from_number(field, tensor::tensor_values_f64(tensor)[0])
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            logical_from_number(field, tensor::tensor_value_f64(tensor, 0))
         }
         Value::String(s) => logical_from_text(field, s),
         Value::StringArray(sa) if sa.data.len() == 1 => logical_from_text(field, &sa.data[0]),
@@ -1245,7 +1247,7 @@ mod tests {
     fn optimoptions_numeric_options_read_typed_integer_storage_exactly() {
         let mut max_iter =
             Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("MaxIter");
-        max_iter.data[0] = 1.5;
+        max_iter.data.clear();
 
         let options = struct_result(
             run_optimoptions(vec![
@@ -1262,7 +1264,7 @@ mod tests {
     fn optimoptions_logical_options_read_typed_integer_storage_exactly() {
         let mut gradient = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
             .expect("SpecifyObjectiveGradient");
-        gradient.data[0] = 0.0;
+        gradient.data.clear();
 
         let options = struct_result(
             run_optimoptions(vec![

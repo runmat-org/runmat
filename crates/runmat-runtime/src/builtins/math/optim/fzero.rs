@@ -432,14 +432,16 @@ async fn initial_bracket(
 ) -> BuiltinResult<Bracket> {
     let x = crate::dispatcher::gather_if_needed_async(&x).await?;
     match x {
-        Value::Tensor(tensor) if tensor.data.len() == 2 => {
+        Value::Tensor(tensor) => {
             let values = tensor::tensor_values_f64(&tensor);
-            let a = values[0];
-            let b = values[1];
-            bracket_from_endpoints(function, a, b).await
-        }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            expand_bracket(function, tensor::tensor_values_f64(&tensor)[0], options).await
+            match values.as_slice() {
+                [a, b] => bracket_from_endpoints(function, *a, *b).await,
+                [guess] => expand_bracket(function, *guess, options).await,
+                _ => Err(fzero_error_with_detail(
+                    &FZERO_ERROR_INVALID_INPUT,
+                    "initial point must be a scalar or two-element bracket",
+                )),
+            }
         }
         Value::Num(n) => expand_bracket(function, n, options).await,
         Value::Int(i) => expand_bracket(function, i.to_f64(), options).await,
@@ -731,7 +733,7 @@ mod tests {
     fn fzero_initial_guess_reads_typed_integer_storage_exactly() {
         let mut guess =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("guess");
-        guess.data[0] = 10.0;
+        guess.data.clear();
 
         let root = block_on(fzero_builtin(
             Value::FunctionHandle("cos".into()),

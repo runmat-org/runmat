@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, Tensor, Value,
+    LogicalArray, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -332,7 +332,7 @@ async fn parse_optional_trace(value: Value) -> BuiltinResult<bool> {
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(Tensor { data, .. }) => data.is_empty(),
+        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor).is_empty(),
         Value::LogicalArray(LogicalArray { data, .. }) => data.is_empty(),
         _ => false,
     }
@@ -358,7 +358,9 @@ fn scalar_real_sync(
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(&tensor)[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+            tensor::tensor_value_f64(&tensor, 0)
+        }
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
             if data[0] != 0 {
                 1.0
@@ -563,7 +565,7 @@ fn finalize(result: QuadResult) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerStorage, Tensor};
     use std::sync::Arc;
 
     #[test]
@@ -665,10 +667,10 @@ mod tests {
     fn quad_tol_and_trace_read_typed_integer_storage_exactly() {
         crate::console::reset_thread_buffer();
         let mut tol = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("tol");
-        tol.data[0] = -1.0;
+        tol.data.clear();
         let mut trace =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("trace");
-        trace.data[0] = 0.0;
+        trace.data.clear();
 
         let result = block_on(quad_builtin(
             Value::FunctionHandle("sin".into()),
