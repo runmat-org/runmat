@@ -519,8 +519,8 @@ async fn is_zero_scalar(value: &Value) -> bool {
         Value::Int(i) => i.to_i64() == 0,
         Value::Bool(b) => !b,
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
-                t.data[0].abs() <= EPS_SCALAR
+            if tensor::is_scalar_tensor(t) {
+                tensor::tensor_value_f64(t, 0).abs() <= EPS_SCALAR
             } else {
                 false
             }
@@ -1197,6 +1197,20 @@ pub(crate) mod tests {
         let r = tensor_from_value(eval.r());
         assert_eq!(q.shape, vec![4, 3]);
         assert_eq!(r.shape, vec![3, 3]);
+    }
+
+    #[test]
+    fn qr_economy_option_reads_typed_integer_scalar_storage_exactly() {
+        let data: Vec<f64> = (0..12).map(|i| (i + 1) as f64).collect();
+        let a = Matrix::new(data, vec![4, 3]).unwrap();
+        let mut option =
+            Matrix::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("option");
+        option.data.clear();
+
+        let eval = evaluate(Value::Tensor(a), &[Value::Tensor(option)]).expect("evaluate econ");
+        assert_eq!(eval.mode(), QrMode::Economy);
+        assert_eq!(tensor_from_value(eval.q()).shape, vec![4, 3]);
+        assert_eq!(tensor_from_value(eval.r()).shape, vec![3, 3]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
