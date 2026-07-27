@@ -316,10 +316,7 @@ fn scalar_flag(name: &str, value: &Value) -> BuiltinResult<Option<usize>> {
         Value::Bool(b) => {
             return Ok(Some(if *b { 1 } else { 0 }));
         }
-        Value::Tensor(t) if t.data.len() == 1 => t
-            .integer_storage()
-            .and_then(|storage| storage.value_at(0))
-            .map_or(t.data[0], |int| int.to_f64()),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_value_f64(t, 0),
         _ => return Ok(None),
     };
     if !raw.is_finite() || raw.fract().abs() > 1e-12 || !(0.0..=1.0).contains(&raw) {
@@ -1210,12 +1207,16 @@ mod tests {
 
     #[test]
     fn scalar_flag_accepts_typed_integer_tensor_scalars() {
-        let one = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![1]), vec![1, 1])
-            .expect("flag");
+        let mut one =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![1]), vec![1, 1])
+                .expect("flag");
+        one.data.clear();
         assert_eq!(scalar_flag("mad", &Value::Tensor(one)).unwrap(), Some(1));
 
-        let two = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![2]), vec![1, 1])
-            .expect("flag");
+        let mut two =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![2]), vec![1, 1])
+                .expect("flag");
+        two.data.clear();
         assert!(scalar_flag("mad", &Value::Tensor(two)).is_err());
     }
 
