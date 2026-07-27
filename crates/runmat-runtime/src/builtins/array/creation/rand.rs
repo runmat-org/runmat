@@ -11,7 +11,6 @@ use std::sync::OnceLock;
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
-use crate::builtins::common::random;
 use crate::builtins::common::random_args::{
     complex_tensor_into_value, extract_dims, keyword_of, shape_from_value,
 };
@@ -19,7 +18,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{random, tensor};
 use runmat_builtins::ResolveContext;
 use runmat_builtins::Type;
 
@@ -355,7 +354,7 @@ fn parse_legacy_seed(value: &Value) -> crate::BuiltinResult<u64> {
                         .expect("scalar integer storage has one element"),
                 ));
             }
-            parse_legacy_seed(&Value::Num(tensor.data[0]))
+            parse_legacy_seed(&Value::Num(tensor::tensor_value_f64(tensor, 0)))
         }
         _ => Err(builtin_error("rand: seed must be a scalar numeric value")),
     }
@@ -699,7 +698,7 @@ pub(crate) mod tests {
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 

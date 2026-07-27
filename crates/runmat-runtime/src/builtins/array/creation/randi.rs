@@ -989,17 +989,20 @@ fn parse_bounds_tensor(tensor: &Tensor) -> crate::BuiltinResult<Bounds> {
             );
             return Bounds::new(lower, upper);
         }
+        return Err(builtin_error(
+            "randi: bound vector must contain exactly two elements",
+        ));
     }
     let len = tensor.data.len();
     if len == 0 {
         return Err(builtin_error("randi: empty bound vector is not allowed"));
     }
     if len == 1 {
-        return parse_upper_num(tensor.data[0]);
+        return parse_upper_num(tensor::tensor_value_f64(tensor, 0));
     }
     if len == 2 && is_vector_like(tensor) {
-        let lower = parse_integer_component(tensor.data[0])?;
-        let upper = parse_integer_component(tensor.data[1])?;
+        let lower = parse_integer_component(tensor::tensor_value_f64(tensor, 0))?;
+        let upper = parse_integer_component(tensor::tensor_value_f64(tensor, 1))?;
         Bounds::new(lower, upper)
     } else {
         Err(builtin_error(
@@ -1284,6 +1287,28 @@ pub(crate) mod tests {
         assert!(err
             .to_string()
             .contains("representable in the requested output class"));
+    }
+
+    #[test]
+    fn randi_bounds_parser_reads_typed_integer_storage_exactly() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::U64(vec![5]), vec![1, 1]).expect("scalar bounds");
+        scalar.data.clear();
+        let parsed = parse_bounds_tensor(&scalar).expect("scalar upper");
+        assert_eq!(parsed.lower, 1);
+        assert_eq!(parsed.upper, 5);
+
+        let mut vector =
+            Tensor::new_integer(IntegerStorage::I64(vec![-3, 4]), vec![1, 2]).expect("bounds");
+        vector.data.clear();
+        let parsed = parse_bounds_tensor(&vector).expect("two-element bounds");
+        assert_eq!(parsed.lower, -3);
+        assert_eq!(parsed.upper, 4);
+
+        let mut invalid = Tensor::new_integer(IntegerStorage::U8(vec![1, 2, 3]), vec![1, 3])
+            .expect("invalid bounds");
+        invalid.data.clear();
+        assert!(parse_bounds_tensor(&invalid).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

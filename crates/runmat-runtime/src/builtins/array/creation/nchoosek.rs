@@ -14,6 +14,7 @@ use crate::builtins::common::{
         BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
         ReductionNaN, ResidencyPolicy, ShapeRequirements,
     },
+    tensor,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -214,9 +215,11 @@ fn scalar_coefficient_mode(value: &Value) -> Option<CoefficientMode> {
                     class: int_class(&value),
                 });
             }
-            parse_nonnegative_integer_f64(tensor.data[0]).map(|n| CoefficientMode {
-                n,
-                class: tensor_class(tensor.dtype),
+            parse_nonnegative_integer_f64(tensor::tensor_value_f64(tensor, 0)).map(|n| {
+                CoefficientMode {
+                    n,
+                    class: tensor_class(tensor.dtype),
+                }
             })
         }
         _ => None,
@@ -517,7 +520,7 @@ fn parse_k(value: &Value) -> BuiltinResult<ParsedK> {
                     .map(|value| ParsedK { value, class })
                     .ok_or_else(invalid_k);
             }
-            parse_nonnegative_integer_f64(tensor.data[0])
+            parse_nonnegative_integer_f64(tensor::tensor_value_f64(tensor, 0))
                 .map(|value| ParsedK {
                     value,
                     class: tensor_class(tensor.dtype),
