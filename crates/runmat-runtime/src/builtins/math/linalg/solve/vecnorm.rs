@@ -463,7 +463,7 @@ fn parse_order(value: &Value) -> BuiltinResult<NormOrder> {
         Value::Int(value) => parse_numeric_order(value.to_f64()),
         Value::Tensor(tensor) => {
             if tensor::is_scalar_tensor(tensor) {
-                parse_numeric_order(tensor::tensor_values_f64(tensor)[0])
+                parse_numeric_order(tensor::tensor_value_f64(tensor, 0))
             } else {
                 Err(argument_error(format!(
                     "{NAME}: p must be a positive scalar or Inf."
@@ -516,7 +516,7 @@ fn parse_dim(value: &Value) -> BuiltinResult<usize> {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_f64(),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            tensor::tensor_values_f64(tensor)[0]
+            tensor::tensor_value_f64(tensor, 0)
         }
         Value::Bool(_) | Value::LogicalArray(_) => {
             return Err(argument_error(format!(
@@ -847,7 +847,7 @@ mod tests {
         let tensor = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
         let mut order =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("typed order");
-        order.data[0] = 2.0;
+        order.data.clear();
 
         let result = call(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("vecnorm");
         match result {
@@ -861,7 +861,7 @@ mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let mut dim =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed dim");
-        dim.data[0] = 1.0;
+        dim.data.clear();
 
         let result = call(
             Value::Tensor(tensor),
@@ -883,14 +883,14 @@ mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let mut order =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed order");
-        order.data[0] = 1.0;
+        order.data.clear();
         let err = call(Value::Tensor(tensor.clone()), vec![Value::Tensor(order)]).unwrap_err();
         assert_eq!(err.identifier(), VECNORM_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("positive numeric scalar"));
 
         let mut dim =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed dim");
-        dim.data[0] = 1.0;
+        dim.data.clear();
         let err = call(
             Value::Tensor(tensor),
             vec![Value::Num(2.0), Value::Tensor(dim)],

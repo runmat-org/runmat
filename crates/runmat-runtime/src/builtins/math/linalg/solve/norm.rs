@@ -635,7 +635,7 @@ fn parse_order_value(value: &Value) -> BuiltinResult<NormOrder> {
 }
 
 fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
-    tensor::tensor_values_f64(tensor)[0]
+    tensor::tensor_value_f64(tensor, 0)
 }
 
 fn parse_numeric(raw: f64) -> BuiltinResult<NormOrder> {
@@ -824,7 +824,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![3.0, -4.0], vec![2, 1]).unwrap();
         let mut order =
             Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("integer");
-        order.data[0] = 0.0;
+        order.data.clear();
         let value = norm_builtin(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("norm");
         match value {
             Value::Num(v) => assert_close(v, 7.0),
@@ -987,7 +987,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![2.0, -3.0], vec![2, 1]).unwrap();
         let mut order =
             Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("order");
-        order.data[0] = 0.0;
+        order.data.clear();
         let value = norm_builtin(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("norm");
         match value {
             Value::Num(v) => assert_close(v, 5.0),

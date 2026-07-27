@@ -488,7 +488,7 @@ fn parse_bool_field(name: &str, value: &Value) -> BuiltinResult<bool> {
         Value::Num(n) => Ok(*n != 0.0),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(match scalar_tensor_integer(t) {
             Some(value) => !value.is_zero(),
-            None => tensor::tensor_values_f64(t)[0] != 0.0,
+            None => tensor::tensor_value_f64(t, 0) != 0.0,
         }),
         Value::LogicalArray(arr) if arr.len() == 1 => Ok(arr.data[0] != 0),
         other => Err(argument_error(format!(
@@ -503,7 +503,7 @@ fn parse_scalar_f64(name: &str, value: &Value) -> BuiltinResult<f64> {
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(match scalar_tensor_integer(t) {
             Some(value) => value.to_f64(),
-            None => tensor::tensor_values_f64(t)[0],
+            None => tensor::tensor_value_f64(t, 0),
         }),
         other => Err(argument_error(format!(
             "linsolve: option '{name}' must be a scalar numeric value, got {other:?}"
@@ -1583,9 +1583,9 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![2.0, 0.0, 1.0, 3.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![2.0, 7.0], vec![2, 1]).unwrap();
         let mut upper = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
-        upper.data[0] = 0.0;
+        upper.data.clear();
         let mut rcond = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
-        rcond.data[0] = 1.0;
+        rcond.data.clear();
         let mut opts = StructValue::new();
         opts.fields.insert("UT".to_string(), Value::Tensor(upper));
         opts.fields

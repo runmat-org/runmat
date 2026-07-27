@@ -505,7 +505,7 @@ fn parse_norm_value(value: &Value) -> BuiltinResult<CondNorm> {
 }
 
 fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
-    tensor::tensor_values_f64(tensor)[0]
+    tensor::tensor_value_f64(tensor, 0)
 }
 
 fn parse_norm_numeric(raw: f64) -> BuiltinResult<CondNorm> {
@@ -688,7 +688,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![4.0, 2.0, -1.0, 3.0], vec![2, 2]).unwrap();
         let mut order =
             Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("order");
-        order.data[0] = 0.0;
+        order.data.clear();
         let result = cond_builtin(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("cond");
         match result {
             Value::Num(value) => assert!((value - 2.142_857_142_857_143).abs() < 1e-9),
