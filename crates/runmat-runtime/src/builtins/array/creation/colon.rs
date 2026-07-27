@@ -813,14 +813,34 @@ fn complex_to_real(name: &str, re: f64, im: f64) -> crate::BuiltinResult<f64> {
 }
 
 fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinResult<f64> {
-    if tensor.data.len() != 1 {
+    if complex_tensor_element_len(tensor) != 1 {
         return Err(colon_error_with_message(
             format!("{name}: expected scalar input"),
             &COLON_ERROR_NON_SCALAR_INPUT,
         ));
     }
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        let re = storage
+            .real
+            .value_at(0)
+            .expect("scalar complex integer tensor has one real value")
+            .to_f64();
+        let im = storage
+            .imag
+            .value_at(0)
+            .expect("scalar complex integer tensor has one imaginary value")
+            .to_f64();
+        return complex_to_real(name, re, im);
+    }
     let (re, im) = tensor.data[0];
     complex_to_real(name, re, im)
+}
+
+fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
+    tensor
+        .integer_data
+        .as_ref()
+        .map_or(tensor.data.len(), |storage| storage.real.len())
 }
 
 fn char_scalar(name: &str, array: &CharArray) -> crate::BuiltinResult<f64> {
@@ -861,7 +881,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, IntegerStorage, Tensor};
+    use runmat_builtins::{
+        CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor,
+    };
 
     fn colon_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::colon_builtin(start, stop, rest))
@@ -1102,13 +1124,13 @@ pub(crate) mod tests {
             vec![1, 1],
         )
         .unwrap();
-        start.data[0] = 1.0;
+        start.data.clear();
         let mut stop = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_995]),
             vec![1, 1],
         )
         .unwrap();
-        stop.data[0] = 3.0;
+        stop.data.clear();
 
         let result =
             colon_builtin(Value::Tensor(start), Value::Tensor(stop), Vec::new()).expect("colon");
@@ -1129,7 +1151,7 @@ pub(crate) mod tests {
     fn colon_double_path_scalar_tensor_reads_typed_integer_storage_exactly() {
         let mut start =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
-        start.data[0] = 1.0;
+        start.data.clear();
         let stop = Tensor::new(vec![6.0], vec![1, 1]).unwrap();
 
         let result =
@@ -1138,6 +1160,53 @@ pub(crate) mod tests {
             Value::Tensor(tensor) => assert_eq!(tensor.data, vec![4.0, 5.0, 6.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn colon_complex_integer_scalar_tensors_read_exact_storage() {
+        let mut start = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![1]), IntegerStorage::I16(vec![0]))
+                .expect("complex storage"),
+            vec![1, 1],
+        )
+        .expect("start");
+        start.data.clear();
+        let mut stop = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![3]), IntegerStorage::I16(vec![0]))
+                .expect("complex storage"),
+            vec![1, 1],
+        )
+        .expect("stop");
+        stop.data.clear();
+
+        let result = colon_builtin(
+            Value::ComplexTensor(start),
+            Value::ComplexTensor(stop),
+            Vec::new(),
+        )
+        .expect("colon");
+        match result {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0, 3.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+
+        let mut nonzero_imag = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![1]), IntegerStorage::I16(vec![1]))
+                .expect("complex storage"),
+            vec![1, 1],
+        )
+        .expect("nonzero imag");
+        nonzero_imag.data.clear();
+        let err = colon_builtin(
+            Value::ComplexTensor(nonzero_imag),
+            Value::Num(3.0),
+            Vec::new(),
+        )
+        .expect_err("nonzero imaginary part must reject");
+        assert_eq!(
+            err.identifier(),
+            COLON_ERROR_COMPLEX_IMAGINARY_NONZERO.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
