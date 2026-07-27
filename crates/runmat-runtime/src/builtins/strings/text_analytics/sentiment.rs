@@ -597,7 +597,7 @@ fn numeric_scalar(value: &Value, column_name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(int_value_to_f64(value)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             Ok(tensor_utils::tensor_value_f64(tensor, 0))
         }
         other => Err(sentiment_error(format!(
@@ -790,7 +790,7 @@ mod tests {
 
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
         let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 

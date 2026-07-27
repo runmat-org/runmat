@@ -333,7 +333,7 @@ fn logical_scalar(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             match tensor_utils::tensor_value_f64(tensor, 0) {
                 0.0 => Ok(false),
                 1.0 => Ok(true),
@@ -398,7 +398,7 @@ mod tests {
 
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
         let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 

@@ -1804,7 +1804,7 @@ fn parse_ngram_range(value: &Value) -> BuiltinResult<(usize, usize)> {
 fn numeric_scalar(value: &Value, fn_name: &str, option: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             Ok(tensor_utils::tensor_value_f64(tensor, 0))
         }
         other => Err(embedding_error(
@@ -2344,7 +2344,7 @@ fn parse_numeric_scalar(value: &Value, fn_name: &str, option_name: &str) -> Buil
     let n = match value {
         Value::Num(value) => *value,
         Value::Int(value) => int_value_to_f64(value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             tensor_utils::tensor_value_f64(tensor, 0)
         }
         other => {
@@ -2469,7 +2469,7 @@ fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             match tensor_utils::tensor_value_f64(tensor, 0) {
                 0.0 => Ok(false),
                 1.0 => Ok(true),
@@ -2503,7 +2503,7 @@ fn parse_positive_integer(value: &Value, fn_name: &str) -> BuiltinResult<usize> 
     let parsed = match value {
         Value::Num(value) => positive_platform_usize(*value),
         Value::Int(value) => value.try_to_usize().filter(|value| *value > 0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             positive_platform_usize(tensor_utils::tensor_value_f64(tensor, 0))
         }
         _ => None,
@@ -2518,7 +2518,7 @@ fn parse_positive_integer(value: &Value, fn_name: &str) -> BuiltinResult<usize> 
 
 fn is_numeric_scalar(value: &Value) -> bool {
     matches!(value, Value::Num(_))
-        || matches!(value, Value::Tensor(tensor) if tensor.data.len() == 1)
+        || matches!(value, Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor))
 }
 
 fn is_zip_path(path: &Path) -> bool {
@@ -2579,7 +2579,7 @@ mod tests {
 
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
         let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 
