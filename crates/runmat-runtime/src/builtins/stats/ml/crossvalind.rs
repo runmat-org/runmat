@@ -627,7 +627,9 @@ fn scalar_number(value: &Value, label: &str) -> BuiltinResult<f64> {
         Value::Num(number) => Ok(*number),
         Value::Int(integer) => Ok(integer.to_f64()),
         Value::Bool(flag) => Ok(if *flag { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor::tensor_value_f64(tensor, 0)),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok(if array.data[0] == 0 { 0.0 } else { 1.0 })
         }
@@ -700,9 +702,9 @@ mod tests {
         }
     }
 
-    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
         let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 
@@ -813,7 +815,7 @@ mod tests {
     fn typed_integer_partition_counts_are_exact_and_lossy_f64_is_rejected() {
         let typed_six = Value::Int(runmat_builtins::IntValue::U16(6));
         assert_eq!(observation_count(&typed_six).unwrap(), 6);
-        let typed_tensor_six = poisoned_int_tensor(IntegerStorage::U16(vec![6]), 1, 1);
+        let typed_tensor_six = cleared_int_tensor(IntegerStorage::U16(vec![6]), 1, 1);
         assert_eq!(observation_count(&typed_tensor_six).unwrap(), 6);
         assert_eq!(
             positive_integer(&Value::Int(runmat_builtins::IntValue::U8(3)), "KFold").unwrap(),
@@ -821,7 +823,7 @@ mod tests {
         );
         assert_eq!(
             positive_integer(
-                &poisoned_int_tensor(IntegerStorage::U8(vec![3]), 1, 1),
+                &cleared_int_tensor(IntegerStorage::U8(vec![3]), 1, 1),
                 "KFold"
             )
             .unwrap(),
@@ -832,14 +834,14 @@ mod tests {
             2
         );
         assert_eq!(
-            holdout_count(&poisoned_int_tensor(IntegerStorage::U8(vec![2]), 1, 1), 6).unwrap(),
+            holdout_count(&cleared_int_tensor(IntegerStorage::U8(vec![2]), 1, 1), 6).unwrap(),
             2
         );
 
         let folds = crossvalind_compute(vec![
             Value::from("KFold"),
             typed_tensor_six,
-            poisoned_int_tensor(IntegerStorage::U8(vec![3]), 1, 1),
+            cleared_int_tensor(IntegerStorage::U8(vec![3]), 1, 1),
         ])
         .unwrap();
         let PartitionOutput::Folds(Value::Tensor(folds)) = folds else {

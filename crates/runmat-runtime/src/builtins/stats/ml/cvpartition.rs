@@ -395,7 +395,7 @@ impl PartitionInput {
                 })?,
                 labels: None,
             }),
-            Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Self {
+            Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => Ok(Self {
                 n: positive_integer_number(tensor::tensor_value_f64(&tensor, 0), "n")?,
                 labels: None,
             }),
@@ -1107,7 +1107,9 @@ fn scalar_number(value: &Value, label: &str) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_value_f64(tensor, 0),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             if array.data[0] == 0 {
                 0.0
@@ -1205,6 +1207,12 @@ mod tests {
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).unwrap();
         tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 
@@ -1458,7 +1466,7 @@ mod tests {
         let input =
             PartitionInput::from_value(Value::Int(runmat_builtins::IntValue::U16(6))).unwrap();
         assert_eq!(input.n, 6);
-        let input = PartitionInput::from_value(poisoned_int_tensor(
+        let input = PartitionInput::from_value(cleared_int_tensor(
             IntegerStorage::U16(vec![6]),
             vec![1, 1],
         ))
@@ -1470,7 +1478,7 @@ mod tests {
         );
         assert_eq!(
             positive_integer(
-                &poisoned_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1]),
+                &cleared_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1]),
                 "KFold"
             )
             .unwrap(),
@@ -1482,7 +1490,7 @@ mod tests {
         );
         assert_eq!(
             holdout_count(
-                &poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+                &cleared_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
                 6
             )
             .unwrap(),
@@ -1494,7 +1502,7 @@ mod tests {
         );
         assert_eq!(
             selected_indices(
-                &poisoned_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1]),
+                &cleared_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1]),
                 3
             )
             .unwrap(),
@@ -1502,14 +1510,14 @@ mod tests {
         );
 
         let partition = cv(
-            poisoned_int_tensor(IntegerStorage::U16(vec![6]), vec![1, 1]),
+            cleared_int_tensor(IntegerStorage::U16(vec![6]), vec![1, 1]),
             Value::from("KFold"),
-            vec![poisoned_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1])],
+            vec![cleared_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1])],
         );
         let selected = logical_output(
             block_on(test_builtin(
                 partition,
-                vec![poisoned_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1])],
+                vec![cleared_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1])],
             ))
             .unwrap(),
         );
