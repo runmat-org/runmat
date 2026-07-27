@@ -1009,7 +1009,7 @@ fn classify_bin_argument(value: &Value) -> BuiltinResult<BinArgument> {
             Ok(BinArgument::NumBins(n))
         }
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
+            if tensor::is_scalar_tensor(tensor) {
                 Ok(BinArgument::NumBins(positive_usize_from_f64(
                     tensor::tensor_value_f64(tensor, 0),
                     "histcounts",
@@ -1112,7 +1112,7 @@ fn scalar_value(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            if !tensor::is_scalar_tensor(tensor) {
                 return Err(builtin_error(format!("{name}: {option} must be a scalar")));
             }
             Ok(tensor::tensor_value_f64(tensor, 0))
@@ -1176,6 +1176,12 @@ pub(crate) mod tests {
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         tensor.data.fill(poison);
+        Value::Tensor(tensor)
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 
@@ -1269,7 +1275,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             positive_usize(
-                &poisoned_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1], -1.0),
+                &cleared_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
                 "histcounts",
                 "NumBins",
             )
@@ -1289,17 +1295,16 @@ pub(crate) mod tests {
     fn histcounts_numeric_vectors_read_typed_integer_storage_exactly() {
         assert_eq!(
             numeric_vector(
-                &poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5]), vec![1, 3], f64::NAN),
+                &cleared_int_tensor(IntegerStorage::I16(vec![1, 3, 5]), vec![1, 3]),
                 "histcounts",
                 "BinEdges",
             )
             .unwrap(),
             vec![1.0, 3.0, 5.0]
         );
-        match classify_bin_argument(&poisoned_int_tensor(
+        match classify_bin_argument(&cleared_int_tensor(
             IntegerStorage::U16(vec![2, 4, 6]),
             vec![1, 3],
-            f64::NAN,
         ))
         .unwrap()
         {
@@ -1308,7 +1313,7 @@ pub(crate) mod tests {
         }
         assert_eq!(
             scalar_value(
-                &poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1], f64::NAN),
+                &cleared_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
                 "histcounts",
                 "BinWidth",
             )

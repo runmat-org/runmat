@@ -1375,7 +1375,7 @@ fn scalar_value(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            if !tensor::is_scalar_tensor(tensor) {
                 return Err(builtin_error(format!("{name}: {option} must be a scalar")));
             }
             Ok(tensor::tensor_value_f64(tensor, 0))
@@ -1468,9 +1468,9 @@ pub(crate) mod tests {
         }
     }
 
-    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
+    fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(poison);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 
@@ -1532,7 +1532,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             positive_usize(
-                &poisoned_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1], -1.0),
+                &cleared_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
                 NAME,
                 "NumBins",
             )
@@ -1552,7 +1552,7 @@ pub(crate) mod tests {
     fn histcounts2_numeric_vectors_read_typed_integer_storage_exactly() {
         assert_eq!(
             numeric_vector(
-                &poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5]), vec![1, 3], f64::NAN),
+                &cleared_int_tensor(IntegerStorage::I16(vec![1, 3, 5]), vec![1, 3]),
                 NAME,
                 "XBinEdges",
             )
@@ -1561,7 +1561,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             scalar_value(
-                &poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1], f64::NAN),
+                &cleared_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
                 NAME,
                 "BinWidth",
             )
