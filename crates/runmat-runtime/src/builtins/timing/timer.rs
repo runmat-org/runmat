@@ -780,7 +780,9 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(value.to_f64()),
-        Value::Tensor(value) if value.data.len() == 1 => Ok(tensor::tensor_value_f64(value, 0)),
+        Value::Tensor(value) if tensor::is_scalar_tensor(value) => {
+            Ok(tensor::tensor_value_f64(value, 0))
+        }
         other => Err(timer_error(
             &TIMER_ERROR_INVALID_INPUT,
             format!("timer: {name} must be a numeric scalar, got {other:?}"),
@@ -1355,7 +1357,7 @@ mod tests {
     fn timer_numeric_scalar_reads_typed_integer_storage_exactly() {
         let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
             .expect("typed timer scalar");
-        tensor.data = vec![0.0];
+        tensor.data.clear();
 
         assert_eq!(
             numeric_scalar(&Value::Tensor(tensor), "StartDelay").expect("numeric scalar"),

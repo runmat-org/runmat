@@ -427,10 +427,13 @@ fn parse_numeric(value: f64) -> Result<PauseArgument, RuntimeError> {
 }
 
 fn parse_tensor(tensor: Tensor) -> Result<PauseArgument, RuntimeError> {
-    if tensor.data.is_empty() {
+    let len = tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len());
+    if len == 0 {
         return Ok(PauseArgument::Wait(PauseWait::Default));
     }
-    if tensor.data.len() != 1 {
+    if len != 1 {
         return Err(pause_error_with_message(
             PAUSE_ERROR_INVALID_ARG.message,
             &PAUSE_ERROR_INVALID_ARG,
@@ -579,7 +582,7 @@ pub(crate) mod tests {
     fn pause_tensor_reads_typed_integer_storage_exactly() {
         let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
             .expect("typed pause tensor");
-        tensor.data = vec![0.0];
+        tensor.data.clear();
 
         match parse_tensor(tensor).expect("pause tensor") {
             PauseArgument::Wait(PauseWait::Seconds(seconds)) => assert_eq!(seconds, 2026.0),

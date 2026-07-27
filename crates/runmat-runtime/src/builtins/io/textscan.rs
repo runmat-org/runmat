@@ -1466,7 +1466,9 @@ fn nonnegative_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
     let raw = match value {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_i64() as f64,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_value_f64(tensor, 0),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         _ => {
             return Err(textscan_error_with(
                 &TEXTSCAN_ERROR_ARGUMENT,
@@ -1487,7 +1489,9 @@ fn numeric_fid(value: &Value) -> Option<i32> {
     let raw = match value {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_i64() as f64,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_value_f64(tensor, 0),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         _ => return None,
     };
     if raw.is_finite() && raw.fract() == 0.0 && raw >= i32::MIN as f64 && raw <= i32::MAX as f64 {
@@ -1559,7 +1563,7 @@ mod tests {
     fn textscan_scalar_parsers_read_typed_integer_storage_exactly() {
         let mut header = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1])
             .expect("typed header lines");
-        header.data = vec![0.0];
+        header.data.clear();
         assert_eq!(
             nonnegative_usize(&Value::Tensor(header), "HeaderLines").unwrap(),
             2
@@ -1567,18 +1571,18 @@ mod tests {
 
         let mut invalid = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
             .expect("typed invalid count");
-        invalid.data = vec![2.0];
+        invalid.data.clear();
         assert!(nonnegative_usize(&Value::Tensor(invalid), "HeaderLines").is_err());
 
         let mut fid =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed fid");
-        fid.data = vec![99.0];
+        fid.data.clear();
         assert_eq!(numeric_fid(&Value::Tensor(fid)), Some(7));
 
         let mut fid_too_large =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
                 .expect("typed fid");
-        fid_too_large.data = vec![7.0];
+        fid_too_large.data.clear();
         assert_eq!(numeric_fid(&Value::Tensor(fid_too_large)), None);
     }
 
