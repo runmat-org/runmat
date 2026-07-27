@@ -964,11 +964,11 @@ fn parse_upper_num(n: f64) -> crate::BuiltinResult<Bounds> {
 }
 
 fn parse_bounds_tensor(tensor: &Tensor) -> crate::BuiltinResult<Bounds> {
-    let len = tensor.data.len();
-    if len == 0 {
-        return Err(builtin_error("randi: empty bound vector is not allowed"));
-    }
     if let Some(storage) = tensor.integer_storage() {
+        let len = storage.len();
+        if len == 0 {
+            return Err(builtin_error("randi: empty bound vector is not allowed"));
+        }
         if len == 1 {
             return parse_upper_integer(int_value_to_i128(
                 storage
@@ -989,6 +989,10 @@ fn parse_bounds_tensor(tensor: &Tensor) -> crate::BuiltinResult<Bounds> {
             );
             return Bounds::new(lower, upper);
         }
+    }
+    let len = tensor.data.len();
+    if len == 0 {
+        return Err(builtin_error("randi: empty bound vector is not allowed"));
     }
     if len == 1 {
         return parse_upper_num(tensor.data[0]);
@@ -1257,7 +1261,7 @@ pub(crate) mod tests {
         let mut bounds =
             Tensor::new_integer(IntegerStorage::U64(vec![lower, u64::MAX]), vec![1, 2])
                 .expect("uint64 bounds");
-        bounds.data = vec![1.0, 1.0];
+        bounds.data.clear();
         let result = block_on(randi_builtin(vec![
             Value::Tensor(bounds),
             Value::Num(1.0),
