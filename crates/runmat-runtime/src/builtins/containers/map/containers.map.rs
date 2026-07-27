@@ -1822,7 +1822,7 @@ fn numeric_from_value(value: &Value, context: &str, builtin: &'static str) -> Bu
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(tensor::tensor_values_f64(t)[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(arr) if arr.data.len() == 1 => {
             Ok(if arr.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1847,7 +1847,7 @@ fn integer_from_value(
             }
             Ok(v)
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(storage) = t.integer_storage() {
                 let Some(v) = storage.value_at(0).and_then(|value| value.try_to_i64()) else {
                     return Err(map_error(context, builtin));
@@ -1858,7 +1858,7 @@ fn integer_from_value(
                 Ok(v)
             } else {
                 integer_from_value(
-                    &Value::Num(tensor::tensor_values_f64(t)[0]),
+                    &Value::Num(tensor::tensor_value_f64(t, 0)),
                     min,
                     max,
                     context,
@@ -1905,7 +1905,7 @@ fn unsigned_from_value(
             }
             Ok(v)
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(storage) = t.integer_storage() {
                 let Some(v) = storage.value_at(0).and_then(|value| value.try_to_u64()) else {
                     return Err(map_error(context, builtin));
@@ -1916,7 +1916,7 @@ fn unsigned_from_value(
                 Ok(v)
             } else {
                 unsigned_from_value(
-                    &Value::Num(tensor::tensor_values_f64(t)[0]),
+                    &Value::Num(tensor::tensor_value_f64(t, 0)),
                     max,
                     context,
                     builtin,
@@ -1943,14 +1943,14 @@ fn bool_from_value(value: &Value, context: &str, builtin: &'static str) -> Built
         Value::LogicalArray(arr) if arr.data.len() == 1 => Ok(arr.data[0] != 0),
         Value::Int(i) => Ok(!i.is_zero()),
         Value::Num(n) => Ok(*n != 0.0),
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(storage) = t.integer_storage() {
                 Ok(!storage
                     .value_at(0)
                     .ok_or_else(|| map_error(context, builtin))?
                     .is_zero())
             } else {
-                Ok(tensor::tensor_values_f64(t)[0] != 0.0)
+                Ok(tensor::tensor_value_f64(t, 0) != 0.0)
             }
         }
         _ => Err(map_error(context, builtin)),
@@ -2579,7 +2579,7 @@ pub(crate) mod tests {
     fn scalar_map_helpers_read_typed_integer_tensor_storage_exactly() {
         let mut u64_tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("uint64 key");
-        u64_tensor.data[0] = 0.0;
+        u64_tensor.data.clear();
         assert_eq!(
             unsigned_from_value(
                 &Value::Tensor(u64_tensor),
@@ -2593,7 +2593,7 @@ pub(crate) mod tests {
 
         let mut i32_tensor =
             Tensor::new_integer(IntegerStorage::I32(vec![-7]), vec![1, 1]).expect("int32 key");
-        i32_tensor.data[0] = 7.0;
+        i32_tensor.data.clear();
         assert_eq!(
             integer_from_value(
                 &Value::Tensor(i32_tensor),
@@ -2608,7 +2608,7 @@ pub(crate) mod tests {
 
         let mut logical_tensor =
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("logical key");
-        logical_tensor.data[0] = 0.0;
+        logical_tensor.data.clear();
         assert!(
             bool_from_value(&Value::Tensor(logical_tensor), "key", BUILTIN_CONSTRUCTOR,)
                 .expect("logical key")
