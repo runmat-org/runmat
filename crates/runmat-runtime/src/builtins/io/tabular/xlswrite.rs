@@ -1373,7 +1373,7 @@ fn cell_value_from_scalar(value: Value) -> BuiltinResult<CellValue> {
         Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
             writecell::scalar_tensor_cell_value(&tensor)
         }
-        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(CellValue::Empty),
+        Value::Tensor(tensor) if tensor::tensor_element_len(&tensor) == 0 => Ok(CellValue::Empty),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(CellValue::Boolean(logical.data[0] != 0))
         }
@@ -1642,7 +1642,7 @@ mod tests {
     fn xlswrite_numeric_range_reads_typed_integer_storage_exactly() {
         let mut range =
             Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("range");
-        range.data.fill(f64::NAN);
+        range.data.clear();
 
         let parsed = parse_range_start(&Value::Tensor(range)).expect("range");
 
@@ -1716,7 +1716,7 @@ mod tests {
         let wide = (1_u64 << 53) + 1;
         let mut typed =
             Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide tensor");
-        typed.data[0] = 0.0;
+        typed.data.clear();
 
         let scalar = block_on(XlsTable::from_value(Value::Int(IntValue::U64(u64::MAX))))
             .expect("scalar table");

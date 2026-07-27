@@ -717,7 +717,7 @@ fn cell_value_from_value(value: Value) -> BuiltinResult<CellValue> {
         Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
             scalar_tensor_cell_value(&tensor)
         }
-        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(CellValue::Empty),
+        Value::Tensor(tensor) if tensor::tensor_element_len(&tensor) == 0 => Ok(CellValue::Empty),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(CellValue::Boolean(logical.data[0] != 0))
         }
@@ -1670,7 +1670,7 @@ mod tests {
         let wide = (1_u64 << 53) + 1;
         let mut typed =
             Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide tensor");
-        typed.data[0] = 0.0;
+        typed.data.clear();
         let values = cell(
             vec![Value::Int(IntValue::U64(u64::MAX)), Value::Tensor(typed)],
             1,

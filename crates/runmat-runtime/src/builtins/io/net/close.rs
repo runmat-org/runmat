@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::accept::{
@@ -227,7 +228,7 @@ fn close_value(value: &Value) -> BuiltinResult<bool> {
             }
             Ok(closed)
         }
-        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(false),
+        Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0 => Ok(false),
         Value::LogicalArray(logical) if logical.is_empty() => Ok(false),
         _ => Err(close_flow(
             &CLOSE_ERROR_INVALID_ARGUMENT,
@@ -341,7 +342,7 @@ pub(crate) mod tests {
     use crate::builtins::io::net::tcpclient::tcpclient_builtin;
     use crate::builtins::io::net::tcpserver::{server_handle, tcpserver_builtin};
     use runmat_builtins::{
-        CellArray, CharArray, IntValue, StringArray, StructValue, Tensor, Value,
+        CellArray, CharArray, IntValue, IntegerStorage, StringArray, StructValue, Tensor, Value,
     };
     use std::net::{TcpListener, TcpStream};
     use std::thread;
@@ -401,6 +402,14 @@ pub(crate) mod tests {
             },
             other => panic!("expected tcpserver struct, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn close_accepts_empty_typed_integer_tensor_without_double_mirror() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 0]).expect("empty tensor");
+        tensor.data.clear();
+        assert_eq!(close_value(&Value::Tensor(tensor)).expect("close"), false);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

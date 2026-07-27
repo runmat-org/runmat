@@ -1701,7 +1701,7 @@ pub(crate) mod tests {
     fn fread_scalar_parser_reads_typed_integer_storage_exactly() {
         let mut scalar =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
-        scalar.data[0] = 1.5;
+        scalar.data.clear();
         assert_eq!(
             value_to_scalar(&Value::Tensor(scalar), "scalar").expect("scalar"),
             7.0
@@ -1729,14 +1729,14 @@ pub(crate) mod tests {
     fn fread_fid_and_skip_read_typed_integer_storage_exactly() {
         let mut fid =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("fid tensor");
-        fid.data[0] = 0.0;
+        fid.data.clear();
         assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
         assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
         assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
 
         let mut skip =
             Tensor::new_integer(IntegerStorage::U16(vec![9]), vec![1, 1]).expect("skip tensor");
-        skip.data[0] = f64::NAN;
+        skip.data.clear();
         assert_eq!(parse_skip(Some(&Value::Tensor(skip))).unwrap(), 9);
 
         let too_large =
