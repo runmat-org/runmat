@@ -32,7 +32,9 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Some(tensor_utils::tensor_value_f64(t, 0)),
+        Value::Tensor(t) if tensor_utils::is_scalar_tensor(t) => {
+            Some(tensor_utils::tensor_value_f64(t, 0))
+        }
         _ => None,
     }
 }
@@ -587,7 +589,7 @@ pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
 fn scalar_power_integer_candidate(value: &Value) -> bool {
     match value {
         Value::Int(_) | Value::Num(_) | Value::Bool(_) => true,
-        Value::Tensor(tensor) => tensor.data.len() == 1,
+        Value::Tensor(tensor) => tensor_utils::is_scalar_tensor(tensor),
         Value::LogicalArray(array) => array.data.len() == 1,
         _ => false,
     }
@@ -963,14 +965,14 @@ mod tests {
         let mut scalar_tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
                 .expect("scalar tensor");
-        scalar_tensor.data[0] = 0.0;
+        scalar_tensor.data.clear();
         let scalar_tensor_power =
             power(&Value::Tensor(scalar_tensor), &Value::Num(1.0)).expect("tensor scalar power");
         assert_eq!(scalar_tensor_power, Value::Int(IntValue::U64(u64::MAX)));
 
         let mut complex_base =
             Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).expect("complex base");
-        complex_base.data[0] = 0.0;
+        complex_base.data.clear();
         let complex_power = power(&Value::Tensor(complex_base), &Value::Complex(1.0, 0.0))
             .expect("complex exponent power");
         let Value::Complex(re, im) = complex_power else {

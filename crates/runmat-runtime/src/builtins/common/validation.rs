@@ -828,7 +828,7 @@ fn numeric_arg(args: &[Value], index: usize) -> Result<f64, RuntimeError> {
     match args.get(index) {
         Some(Value::Num(v)) => Ok(*v),
         Some(Value::Int(v)) => Ok(v.to_f64()),
-        Some(Value::Tensor(t)) if t.data.len() == 1 => Ok(tensor::tensor_values_f64(t)[0]),
+        Some(Value::Tensor(t)) if tensor::is_scalar_tensor(t) => Ok(tensor::tensor_value_f64(t, 0)),
         Some(other) => Err(invalid_argument_error(
             "argumentValidation",
             format!(
@@ -1515,7 +1515,7 @@ mod tests {
     fn threshold_validators_read_typed_integer_storage_exactly() {
         let mut lower =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("lower");
-        lower.data[0] = 10.0;
+        lower.data.clear();
         ok(
             "mustBeGreaterThan",
             vec![Value::Num(2.0), Value::Tensor(lower)],
@@ -1523,7 +1523,7 @@ mod tests {
 
         let mut upper =
             Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("upper");
-        upper.data[0] = 0.0;
+        upper.data.clear();
         ok(
             "mustBeLessThan",
             vec![Value::Num(2.0), Value::Tensor(upper)],
@@ -1531,10 +1531,10 @@ mod tests {
 
         let mut range_lower =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("range lower");
-        range_lower.data[0] = 10.0;
+        range_lower.data.clear();
         let mut range_upper =
             Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("range upper");
-        range_upper.data[0] = 0.0;
+        range_upper.data.clear();
         ok(
             "mustBeInRange",
             vec![

@@ -228,11 +228,11 @@ pub fn value_to_tensor(value: &Value) -> Result<Tensor, String> {
 /// Scalars (exactly one element) become their exact scalar representation;
 /// all other tensors remain as dense tensor variants.
 pub fn tensor_into_value(tensor: Tensor) -> Value {
-    if tensor.data.len() == 1 {
+    if is_scalar_tensor(&tensor) {
         if let Some(storage) = tensor.integer_storage() {
             return Value::Int(storage.value_at(0).expect("one-element integer storage"));
         }
-        Value::Num(tensor.data[0])
+        Value::Num(tensor_value_f64(&tensor, 0))
     } else {
         Value::Tensor(tensor)
     }
@@ -664,7 +664,7 @@ mod dtype_tests {
 mod dimension_tests {
     use super::{
         dimension_from_value_async, dims_from_value_async, integer_tensor_to_f64, parse_dimension,
-        scalar_f64_from_value_async, tensor_into_values_f64, tensor_values_f64,
+        scalar_f64_from_value_async, tensor_into_value, tensor_into_values_f64, tensor_values_f64,
         tensor_values_f64_cow,
     };
     use futures::executor::block_on;
@@ -817,6 +817,16 @@ mod dimension_tests {
             tensor_into_values_f64(tensor),
             vec![IntValue::U64(wide).to_f64()]
         );
+    }
+
+    #[test]
+    fn tensor_into_value_reads_typed_integer_scalar_storage_exactly() {
+        let wide = 9_007_199_254_740_993_u64;
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
+            .expect("integer tensor");
+        tensor.data.clear();
+
+        assert_eq!(tensor_into_value(tensor), Value::Int(IntValue::U64(wide)));
     }
 
     #[test]
