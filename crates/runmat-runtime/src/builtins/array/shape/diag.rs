@@ -834,7 +834,12 @@ fn evaluate_complex(tensor: ComplexTensor, args: &ParsedDiagArgs) -> BuiltinResu
             .zeros_like(1)
             .value_at(0)
             .expect("one typed integer zero");
-        let (_, shape) = evaluate_column_major_diag(&tensor.data, &tensor.shape, args, (0.0, 0.0))?;
+        let (_, shape) = evaluate_column_major_diag(
+            &storage.real.exact_values(),
+            &tensor.shape,
+            args,
+            zero.clone(),
+        )?;
         let storage = storage
             .reorder(|values| {
                 evaluate_column_major_diag(values, &tensor.shape, args, zero.clone())
@@ -1643,7 +1648,7 @@ mod tests {
         )
         .expect("complex integer storage");
         let mut value = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex tensor");
-        value.data.fill((f64::NAN, f64::NAN));
+        value.data.clear();
 
         let out =
             run_diag(Value::ComplexTensor(value), vec![Value::from("logical")]).expect("diag");

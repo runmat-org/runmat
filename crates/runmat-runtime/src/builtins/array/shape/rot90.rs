@@ -416,8 +416,7 @@ fn rot90_complex_tensor(
         return Ok(tensor);
     }
     if let Some(storage) = tensor.integer_data.as_ref() {
-        let (ignored, shape) = rot90_generic(&tensor.data, &tensor.shape, steps)?;
-        drop(ignored);
+        let (_, shape) = rot90_generic(&storage.real.exact_values(), &tensor.shape, steps)?;
         let storage = storage
             .reorder(|values| {
                 rot90_generic(values, &tensor.shape, steps)
@@ -673,7 +672,7 @@ pub(crate) mod tests {
         block_on(super::rot90_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Type};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Type};
 
     #[test]
     fn rot90_rotation_parser_reduces_full_uint64_range_exactly() {
@@ -753,6 +752,34 @@ pub(crate) mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn rot90_preserves_exact_typed_complex_integer_components_without_f64_mirror() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 2, 3, 4]),
+            IntegerStorage::I16(vec![5, 6, 7, 8]),
+        )
+        .expect("typed complex storage");
+        let mut input = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex tensor");
+        input.data.clear();
+
+        let Value::ComplexTensor(output) =
+            rot90_builtin(Value::ComplexTensor(input), Vec::new()).expect("rot90")
+        else {
+            panic!("expected exact complex integer output");
+        };
+        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(
+            output.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I16(vec![3, 1, 4, 2]),
+                    IntegerStorage::I16(vec![7, 5, 8, 6]),
+                )
+                .expect("expected rotated storage")
+            )
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

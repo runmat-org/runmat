@@ -519,7 +519,12 @@ fn repelem_complex_tensor(
     single_arg: bool,
 ) -> crate::BuiltinResult<ComplexTensor> {
     if let Some(storage) = tensor.integer_data.as_ref() {
-        let (_, shape) = repelem_column_major(&tensor.data, &tensor.shape, factors, single_arg)?;
+        let (_, shape) = repelem_column_major(
+            &storage.real.exact_values(),
+            &tensor.shape,
+            factors,
+            single_arg,
+        )?;
         let storage = storage
             .reorder(|values| {
                 repelem_column_major(values, &tensor.shape, factors, single_arg)
@@ -1418,7 +1423,9 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
         )
         .expect("typed complex storage");
-        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex tensor");
+        let mut tensor =
+            ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex tensor");
+        tensor.data.clear();
 
         let Value::ComplexTensor(output) = repelem_builtin(
             Value::ComplexTensor(tensor),
