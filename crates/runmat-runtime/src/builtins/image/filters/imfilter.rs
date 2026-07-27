@@ -418,16 +418,14 @@ fn parse_scalar(builtin: &str, value: &Value) -> BuiltinResult<f64> {
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
-                Ok(t.integer_storage()
-                    .and_then(|storage| storage.value_at(0))
-                    .map_or(t.data[0], |int| int.to_f64()))
+            if tensor::is_scalar_tensor(t) {
+                Ok(tensor::tensor_value_f64(t, 0))
             } else {
                 Err(filter_error(
                     builtin,
                     format!(
                         "{builtin}: expected scalar value, got tensor of size {}",
-                        t.data.len()
+                        tensor_element_len(t)
                     ),
                 ))
             }
@@ -450,6 +448,12 @@ fn parse_scalar(builtin: &str, value: &Value) -> BuiltinResult<f64> {
             format!("{builtin}: expected numeric scalar, got {:?}", other),
         )),
     }
+}
+
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 /// Core host implementation of `imfilter`, shared with the in-process acceleration provider.
@@ -1065,8 +1069,9 @@ pub(crate) mod tests {
 
     #[test]
     fn parse_scalar_reads_typed_integer_tensor_exactly() {
-        let scalar =
+        let mut scalar =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("scalar");
+        scalar.data.clear();
         assert_eq!(
             parse_scalar(IMFILTER_BUILTIN, &Value::Tensor(scalar)).unwrap(),
             u64::MAX as f64

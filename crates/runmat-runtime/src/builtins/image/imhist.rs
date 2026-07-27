@@ -725,7 +725,7 @@ fn scalar_number(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             Some(tensor_utils::tensor_value_f64(tensor, 0))
         }
         _ => None,
@@ -954,7 +954,7 @@ mod tests {
     fn scalar_number_reads_typed_integer_storage_exactly() {
         let mut bins = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
             .expect("typed bin count");
-        bins.data = vec![0.0];
+        bins.data.clear();
 
         assert_eq!(scalar_number(&Value::Tensor(bins)), Some(2026.0));
     }
