@@ -1031,7 +1031,7 @@ fn parse_nonnegative_integer(
         return integer_to_nonnegative(integer, builtin, name);
     }
     if let Value::Tensor(tensor) = value {
-        if tensor.data.len() == 1 {
+        if tensor_utils::is_scalar_tensor(tensor) {
             if let Some(storage) = tensor.integer_storage() {
                 let integer = storage.value_at(0).ok_or_else(|| {
                     build_runtime_error(format!("{builtin}: {name} must be a scalar"))
@@ -1073,7 +1073,7 @@ fn scalar_number(value: &Value, builtin: &'static str, name: &str) -> BuiltinRes
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             Ok(tensor_utils::tensor_value_f64(tensor, 0))
         }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
@@ -1203,7 +1203,7 @@ fn normalize_flag(flag: &str) -> String {
 }
 
 fn is_empty_numeric(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor.data.is_empty())
+    matches!(value, Value::Tensor(tensor) if tensor_utils::tensor_element_len(tensor) == 0)
 }
 
 #[cfg(test)]
@@ -1682,11 +1682,15 @@ mod tests {
         assert_eq!(value_data(bi2de(digits, vec![])), vec![5.0]);
 
         let mut width = Tensor::new_integer(IntegerStorage::U16(vec![12]), vec![1, 1]).unwrap();
-        width.data[0] = f64::NAN;
+        width.data.clear();
         assert_eq!(
             scalar_number(&Value::Tensor(width), DE2BI_NAME, "N").unwrap(),
             12.0
         );
+
+        let mut empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
+        empty.data = vec![1.0];
+        assert!(is_empty_numeric(&Value::Tensor(empty)));
 
         assert_eq!(
             block_on(decimal_vector_from_value(integer_tensor(

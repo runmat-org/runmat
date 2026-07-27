@@ -474,7 +474,7 @@ fn parse_modulation_order(value: &Value) -> BuiltinResult<usize> {
         return Ok(order);
     }
     if let Value::Tensor(tensor) = value {
-        if tensor.data.len() == 1 {
+        if tensor_utils::is_scalar_tensor(tensor) {
             if let Some(storage) = tensor.integer_storage() {
                 let integer = storage
                     .value_at(0)
@@ -587,7 +587,7 @@ fn scalar_number(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             Ok(tensor_utils::tensor_value_f64(tensor, 0))
         }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
@@ -600,7 +600,7 @@ fn scalar_number(value: &Value, name: &str) -> BuiltinResult<f64> {
 fn is_scalar_numeric(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(tensor) => tensor.data.len() == 1,
+        Value::Tensor(tensor) => tensor_utils::is_scalar_tensor(tensor),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         _ => false,
     }
@@ -1050,14 +1050,12 @@ mod tests {
 
     #[test]
     fn pskmod_typed_integer_tensors_preserve_exact_symbol_values() {
-        assert_eq!(
-            parse_modulation_order(&integer_tensor(IntegerStorage::U64(vec![4]), vec![1, 1]))
-                .unwrap(),
-            4
-        );
+        let mut order = Tensor::new_integer(IntegerStorage::U64(vec![4]), vec![1, 1]).unwrap();
+        order.data.clear();
+        assert_eq!(parse_modulation_order(&Value::Tensor(order)).unwrap(), 4);
 
         let mut phase = Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).unwrap();
-        phase.data[0] = f64::NAN;
+        phase.data.clear();
         assert_eq!(scalar_number(&Value::Tensor(phase), "phase").unwrap(), 3.0);
 
         let out = pskmod(
