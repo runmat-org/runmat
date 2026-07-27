@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "opentoline";
@@ -261,7 +262,9 @@ async fn positive_integer_arg(value: &Value, label: &str) -> BuiltinResult<usize
     }
     let Some(position) = (match gathered {
         Value::Num(value) => position_value_to_usize(value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => position_tensor_to_usize(&tensor),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+            position_tensor_to_usize(&tensor)
+        }
         _ => {
             return Err(opentoline_error(
                 &ERROR_POSITION,
@@ -326,7 +329,7 @@ fn position_tensor_to_usize(tensor: &Tensor) -> Option<usize> {
             .and_then(|value| value.try_to_usize())
             .filter(|position| *position > 0);
     }
-    position_value_to_usize(tensor.data[0])
+    position_value_to_usize(tensor::tensor_value_f64(tensor, 0))
 }
 
 async fn resolve_file(name: &str) -> BuiltinResult<PathBuf> {
@@ -425,7 +428,7 @@ mod tests {
     fn opentoline_tensor_positions_read_integer_storage_exactly() {
         let mut line =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![9]), vec![1, 1]).unwrap();
-        line.data[0] = 0.0;
+        line.data.clear();
 
         assert_eq!(
             block_on(positive_integer_arg(&Value::Tensor(line), "line")).unwrap(),
@@ -434,7 +437,7 @@ mod tests {
 
         let mut zero =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
-        zero.data[0] = 9.0;
+        zero.data.clear();
         assert!(block_on(positive_integer_arg(&Value::Tensor(zero), "line")).is_err());
     }
 
