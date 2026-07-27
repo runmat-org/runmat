@@ -390,7 +390,7 @@ fn try_extract_precision(value: &Value) -> BuiltinResult<Option<usize>> {
             validate_precision(rounded as i64)?;
             Ok(Some(rounded as usize))
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                 let digits = int.try_to_i64().ok_or_else(|| {
                     num2str_error_with_message(
@@ -401,7 +401,7 @@ fn try_extract_precision(value: &Value) -> BuiltinResult<Option<usize>> {
                 validate_precision(digits)?;
                 return Ok(Some(digits as usize));
             }
-            let value = t.data[0];
+            let value = tensor::tensor_value_f64(t, 0);
             if !value.is_finite() {
                 return Err(num2str_error_with_message(
                     "num2str: precision must be finite",
@@ -1287,8 +1287,9 @@ pub(crate) mod tests {
 
     #[test]
     fn num2str_precision_parser_preserves_typed_integer_tensor_bounds() {
-        let precision =
+        let mut precision =
             Tensor::new_integer(IntegerStorage::U64(vec![52]), vec![1, 1]).expect("precision");
+        precision.data.clear();
         assert_eq!(
             try_extract_precision(&Value::Tensor(precision)).unwrap(),
             Some(52)

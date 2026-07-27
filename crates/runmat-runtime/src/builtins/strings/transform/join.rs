@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::type_resolvers::text_concat_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
@@ -353,7 +354,7 @@ fn value_to_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
             }
             Ok(Some(rounded as usize))
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                 let dim = int
                     .try_to_usize()
@@ -361,7 +362,7 @@ fn value_to_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
                     .ok_or_else(|| join_error(&JOIN_ERROR_DIMENSION_TYPE))?;
                 return Ok(Some(dim));
             }
-            let val = t.data[0];
+            let val = tensor::tensor_value_f64(t, 0);
             if !val.is_finite() || val <= 0.0 {
                 return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
@@ -884,7 +885,8 @@ pub(crate) mod tests {
 
     #[test]
     fn join_dimension_parser_preserves_typed_integer_tensor_bounds() {
-        let dim = Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("dim");
+        let mut dim = Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("dim");
+        dim.data.clear();
         assert_eq!(value_to_dimension(&Value::Tensor(dim)).unwrap(), Some(2));
 
         let zero = Tensor::new_integer(IntegerStorage::U64(vec![0]), vec![1, 1]).expect("dim");

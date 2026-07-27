@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -386,7 +387,7 @@ fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
         Value::Num(n) => parse_numeric_dimension(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
-            if t.data.len() != 1 {
+            if !tensor::is_scalar_tensor(t) {
                 return Err(strings_error_with_message(
                     format!("{FN_NAME}: {SIZE_SCALAR_ERR}"),
                     &STRINGS_ERROR_INVALID_SIZE,
@@ -394,7 +395,7 @@ fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
             }
             match t.integer_storage().and_then(|storage| storage.value_at(0)) {
                 Some(value) => parse_integer_dimension(&value),
-                None => parse_numeric_dimension(t.data[0]),
+                None => parse_numeric_dimension(tensor::tensor_value_f64(t, 0)),
             }
         }
         Value::LogicalArray(arr) => {
@@ -411,7 +412,10 @@ fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
 }
 
 fn parse_size_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
-    if tensor.data.is_empty() {
+    let len = tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len());
+    if len == 0 {
         return Ok(vec![0, 0]);
     }
     if !is_vector_shape(&tensor.shape) {
@@ -591,15 +595,17 @@ pub(crate) mod tests {
     #[test]
     fn strings_typed_integer_scalar_tensor_parser_is_exact() {
         let large = 9_007_199_254_740_993_u64;
-        let scalar =
+        let mut scalar =
             Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("scalar");
+        scalar.data.clear();
         assert_eq!(
             parse_size_scalar(&Value::Tensor(scalar)).expect("parse scalar"),
             large as usize
         );
 
-        let vector =
+        let mut vector =
             Tensor::new_integer(IntegerStorage::U64(vec![large, 1]), vec![1, 2]).expect("vector");
+        vector.data.clear();
         assert_eq!(
             parse_size_tensor(&vector).expect("parse vector"),
             vec![large as usize, 1]

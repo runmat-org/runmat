@@ -928,7 +928,7 @@ fn parse_nonnegative_usize(value: &Value, fn_name: &str) -> BuiltinResult<usize>
     let index = match value {
         Value::Num(n) => nonnegative_platform_usize(*n),
         Value::Int(i) => i.try_to_usize(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0))
             .and_then(|value| value.try_to_usize())
@@ -1620,10 +1620,10 @@ fn scan_size_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Num(n) => Ok(vec![scan_size_dim(*n)?, 1]),
         Value::Int(value) => Ok(vec![value.try_to_usize().ok_or_else(scan_size_error)?, 1]),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             Ok(vec![scan_tensor_size_dim(tensor, 0)?, 1])
         }
-        Value::Tensor(tensor) if tensor.data.len() == 2 => Ok(vec![
+        Value::Tensor(tensor) if tensor_element_len(tensor) == 2 => Ok(vec![
             scan_tensor_size_dim(tensor, 0)?,
             scan_tensor_size_dim(tensor, 1)?,
         ]),
@@ -1632,6 +1632,12 @@ fn scan_size_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
             format!("sscanf: invalid size argument {other:?}"),
         )),
     }
+}
+
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 fn scan_tensor_size_dim(tensor: &Tensor, index: usize) -> BuiltinResult<usize> {
@@ -1697,7 +1703,7 @@ mod tests {
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![9]), vec![1, 1])
             .expect("typed scalar tensor");
         let mut tensor = tensor;
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         assert_eq!(
             parse_nonnegative_usize(&Value::Tensor(tensor), "digitsPattern").unwrap(),
             9
@@ -1721,8 +1727,9 @@ mod tests {
             scan_size_from_value(&Value::Int(IntValue::U16(4))).unwrap(),
             vec![4, 1]
         );
-        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
             .expect("typed size vector");
+        tensor.data.clear();
         assert_eq!(
             scan_size_from_value(&Value::Tensor(tensor)).unwrap(),
             vec![2, 3]

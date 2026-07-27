@@ -608,12 +608,12 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                         Value::Int(i) => Value::Int(i),
                         Value::Bool(b) => Value::Num(if b { 1.0 } else { 0.0 }),
                         Value::Tensor(t) => {
-                            if t.data.len() != 1 {
+                            if !tensor::is_scalar_tensor(&t) {
                                 return Err(string_flow(
                                     "string: cell format arguments must contain scalar values",
                                 ));
                             }
-                            Value::Num(t.data[0])
+                            Value::Num(tensor::tensor_value_f64(&t, 0))
                         }
                         Value::LogicalArray(la) => {
                             if la.data.len() != 1 {
@@ -626,13 +626,12 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                         Value::Complex(re, im) => Value::String(complex_to_string(re, im)),
                         Value::Symbolic(expr) => Value::String(expr.to_string()),
                         Value::ComplexTensor(t) => {
-                            if t.data.len() != 1 {
+                            if !complex_tensor_is_scalar(&t) {
                                 return Err(string_flow(
                                     "string: cell format arguments must contain scalar values",
                                 ));
                             }
-                            let (re, im) = t.data[0];
-                            Value::String(complex_to_string(re, im))
+                            Value::String(t.format_element(0))
                         }
                         other => {
                             return Err(string_flow(format!(
@@ -861,11 +860,11 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
             }
         }
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
+            if tensor::is_scalar_tensor(t) {
                 if let Some(value) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                     Ok(int_value_to_string(&value))
                 } else {
-                    Ok(number_to_string(t.data[0]))
+                    Ok(number_to_string(tensor::tensor_value_f64(t, 0)))
                 }
             } else {
                 Err(string_flow("string: cell numeric values must be scalar"))
@@ -873,7 +872,7 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
         }
         Value::Complex(re, im) => Ok(complex_to_string(*re, *im)),
         Value::ComplexTensor(t) => {
-            if t.data.len() == 1 {
+            if complex_tensor_is_scalar(t) {
                 Ok(t.format_element(0))
             } else {
                 Err(string_flow("string: cell complex values must be scalar"))
@@ -884,6 +883,10 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
             other
         ))),
     }
+}
+
+fn complex_tensor_is_scalar(tensor: &ComplexTensor) -> bool {
+    tensor.shape.iter().product::<usize>() == 1
 }
 
 fn ensure_sparse_dense_conversion(sparse: &SparseTensor, target: &str) -> BuiltinResult<()> {
