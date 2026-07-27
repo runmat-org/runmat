@@ -22,6 +22,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 
 use super::bar::apply_bar_style;
 use super::common::{numeric_vector, value_as_f64};
@@ -1023,10 +1024,11 @@ fn parse_hist_bin_method(value: &Value) -> BuiltinResult<HistBinMethod> {
 }
 
 fn parse_center_vector(tensor: Tensor) -> BuiltinResult<HistBinSpec> {
-    if tensor.data.is_empty() {
+    let len = tensor_utils::tensor_element_len(&tensor);
+    if len == 0 {
         return Err(hist_err("hist: bin center array cannot be empty"));
     }
-    if tensor.data.len() == 1 {
+    if len == 1 {
         if let Some(value) = tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0))
@@ -1052,7 +1054,7 @@ fn parse_bin_count_value(value: f64) -> BuiltinResult<HistBinSpec> {
 fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
     match value {
         Value::Int(value) => Some(value.clone()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0)),
         _ => None,
@@ -1596,31 +1598,34 @@ pub(crate) mod tests {
     #[test]
     fn hist_bin_counts_read_typed_integer_tensors_exactly() {
         let exact = 9_007_199_254_740_993_u64;
-        let scalar_count = runmat_builtins::Tensor::new_integer(
+        let mut scalar_count = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![exact]),
             vec![1, 1],
         )
         .expect("typed bin count");
+        scalar_count.data.clear();
         match parse_hist_bins(Some(Value::Tensor(scalar_count)), 10).unwrap() {
             HistBinSpec::Count(count) => assert_eq!(count, exact as usize),
             _ => panic!("expected count bin spec"),
         }
 
-        let num_bins = runmat_builtins::Tensor::new_integer(
+        let mut num_bins = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![exact]),
             vec![1, 1],
         )
         .expect("typed NumBins");
+        num_bins.data.clear();
         assert_eq!(
             parse_num_bins_value(&Value::Tensor(num_bins)).unwrap(),
             exact as usize
         );
 
-        let negative = runmat_builtins::Tensor::new_integer(
+        let mut negative = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative bin count");
+        negative.data.clear();
         assert!(parse_hist_bins(Some(Value::Tensor(negative)), 10).is_err());
     }
 

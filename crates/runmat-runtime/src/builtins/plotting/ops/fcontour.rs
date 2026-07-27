@@ -464,7 +464,7 @@ fn parse_mesh_density(value: &Value) -> BuiltinResult<usize> {
 fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
     match value {
         Value::Int(value) => Some(value.clone()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0)),
         _ => None,
@@ -570,7 +570,7 @@ fn contour_value_to_scalar(value: Value) -> BuiltinResult<f64> {
         Value::Num(value) => Ok(value),
         Value::Int(value) => Ok(value.to_f64()),
         Value::Bool(value) => Ok(if value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(&tensor) => {
             Ok(tensor_utils::tensor_value_f64(&tensor, 0))
         }
         Value::LogicalArray(array) if array.data.len() == 1 => {
@@ -784,25 +784,28 @@ mod tests {
 
     #[test]
     fn fcontour_mesh_density_reads_typed_integer_tensor_exactly() {
-        let exact = runmat_builtins::Tensor::new_integer(
+        let mut exact = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![400]),
             vec![1, 1],
         )
         .expect("typed density");
+        exact.data.clear();
         assert_eq!(parse_mesh_density(&Value::Tensor(exact)).unwrap(), 400);
 
-        let too_large = runmat_builtins::Tensor::new_integer(
+        let mut too_large = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![401]),
             vec![1, 1],
         )
         .expect("large density");
+        too_large.data.clear();
         assert!(parse_mesh_density(&Value::Tensor(too_large)).is_err());
 
-        let negative = runmat_builtins::Tensor::new_integer(
+        let mut negative = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative density");
+        negative.data.clear();
         assert!(parse_mesh_density(&Value::Tensor(negative)).is_err());
     }
 
@@ -813,7 +816,7 @@ mod tests {
             vec![1, 1],
         )
         .unwrap();
-        tensor.data[0] = -3.0;
+        tensor.data.clear();
 
         assert_eq!(
             contour_value_to_scalar(Value::Tensor(tensor)).unwrap(),

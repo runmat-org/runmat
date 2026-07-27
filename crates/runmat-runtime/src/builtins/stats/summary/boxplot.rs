@@ -1326,7 +1326,7 @@ fn scalar_group_label(value: &Value) -> BuiltinResult<Option<String>> {
         Value::Num(n) => Ok(n.is_finite().then(|| number_label(n))),
         Value::Int(i) => Ok(Some(number_label(&i.to_f64()))),
         Value::Bool(b) => Ok(Some(if *b { "true" } else { "false" }.to_string())),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             let value = tensor::tensor_value_f64(tensor, 0);
             Ok(value.is_finite().then(|| number_label(&value)))
         }
@@ -1499,6 +1499,17 @@ mod tests {
         assert_eq!(boxes[1].label, "2");
         assert_eq!(boxes[1].position, 9.0);
         assert!((boxes[1].median - 2.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn scalar_group_label_reads_typed_integer_storage_without_double_mirror() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![42]), vec![1, 1]).unwrap();
+        tensor.data.clear();
+
+        assert_eq!(
+            scalar_group_label(&Value::Tensor(tensor)).unwrap(),
+            Some("42".to_string())
+        );
     }
 
     #[test]
