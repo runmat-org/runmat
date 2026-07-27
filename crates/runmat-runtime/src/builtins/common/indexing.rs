@@ -452,9 +452,10 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
 
             if indices.len() == 1 {
                 let idx = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
-                if idx < 1 || idx > tensor.data.len() {
+                let len = tensor_utils::complex_tensor_element_len(tensor);
+                if idx < 1 || idx > len {
                     return Err(indexing_error_with_identifier(
-                        format!("Index {} out of bounds (1 to {})", idx, tensor.data.len()),
+                        format!("Index {} out of bounds (1 to {})", idx, len),
                         "RunMat:IndexOutOfBounds",
                     ));
                 }
@@ -773,7 +774,7 @@ mod tests {
 
     #[test]
     fn typed_complex_integer_scalar_indexing_preserves_exact_components() {
-        let tensor = ComplexTensor::new_integer(
+        let mut tensor = ComplexTensor::new_integer(
             IntegerComplexStorage::new(
                 IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
                 IntegerStorage::U64(vec![7, 8]),
@@ -782,6 +783,7 @@ mod tests {
             vec![1, 2],
         )
         .expect("tensor");
+        tensor.data.clear();
 
         let result = block_on(perform_indexing(&Value::ComplexTensor(tensor), &[2.0]))
             .expect("scalar index");
