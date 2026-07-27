@@ -264,7 +264,7 @@ fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {
                             .to_f64(),
                     ));
                 }
-                Ok(Some(t.data[0]))
+                Ok(Some(tensor_value_f64(t, 0)))
             } else {
                 Err(format!(
                     "expected scalar tensor, got tensor of size {}",
@@ -511,7 +511,7 @@ pub fn parse_dimension(value: &Value, name: &str) -> Result<usize, String> {
                 let value = storage.value_at(0).expect("one-element integer storage");
                 return parse_integer_dimension(&value, name, false);
             }
-            parse_numeric_dimension_value(tensor.data[0], name, false)
+            parse_numeric_dimension_value(tensor_value_f64(tensor, 0), name, false)
         }
         Value::Num(n) => parse_numeric_dimension_value(*n, name, false),
         other => Err(format!(

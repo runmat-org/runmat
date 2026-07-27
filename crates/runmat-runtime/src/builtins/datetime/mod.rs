@@ -2508,7 +2508,8 @@ async fn holidays_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         1 => {
             let tensor = tensor_from_numeric(args[0].clone(), "holidays");
             if let Ok(tensor) = tensor {
-                let year = (tensor.data.len() == 1).then(|| tensor::tensor_value_f64(&tensor, 0));
+                let year =
+                    tensor::is_scalar_tensor(&tensor).then(|| tensor::tensor_value_f64(&tensor, 0));
                 if let Some(year) = year.filter(|year| (1000.0..=9999.0).contains(year)) {
                     let keys = market_holiday_keys_for_year(year.round() as i32)?;
                     let len = keys.len();
@@ -2690,7 +2691,9 @@ async fn daysdif_builtin(
         .first()
         .map(|value| tensor_from_numeric(value.clone(), "daysdif"))
         .transpose()?
-        .and_then(|tensor| (tensor.data.len() == 1).then(|| tensor::tensor_value_f64(&tensor, 0)))
+        .and_then(|tensor| {
+            tensor::is_scalar_tensor(&tensor).then(|| tensor::tensor_value_f64(&tensor, 0))
+        })
         .unwrap_or(0.0)
         .round() as i64;
     let starts = numeric_or_datetime_serial_tensor(start, "daysdif")?;
@@ -4055,7 +4058,7 @@ mod tests {
         let mut typed_basis =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1]), vec![1, 1])
                 .expect("basis");
-        typed_basis.data[0] = 0.0;
+        typed_basis.data.clear();
         assert_eq!(
             futures::executor::block_on(daysdif_builtin(
                 Value::Num(serial_for_date(2024, 1, 30)),
@@ -4092,7 +4095,7 @@ mod tests {
         let mut typed_year =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2024]), vec![1, 1])
                 .unwrap();
-        typed_year.data[0] = 0.0;
+        typed_year.data.clear();
         let holidays =
             futures::executor::block_on(holidays_builtin(vec![Value::Tensor(typed_year)]))
                 .expect("holidays from typed year");
