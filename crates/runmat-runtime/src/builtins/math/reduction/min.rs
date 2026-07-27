@@ -542,7 +542,7 @@ async fn parse_call(rest: &[Value]) -> BuiltinResult<ParsedCall> {
 
 fn is_empty_placeholder(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
         Value::StringArray(sa) => sa.data.is_empty(),
         Value::CharArray(ca) => ca.data.is_empty(),
@@ -550,6 +550,12 @@ fn is_empty_placeholder(value: &Value) -> bool {
         Value::String(s) => s.is_empty(),
         _ => false,
     }
+}
+
+fn tensor_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> BuiltinResult<()> {
@@ -1882,7 +1888,7 @@ fn extract_scalar(v: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Some(tensor::tensor_values_f64(t)[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         _ => None,
     }

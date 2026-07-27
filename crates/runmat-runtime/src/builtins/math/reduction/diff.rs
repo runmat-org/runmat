@@ -370,7 +370,7 @@ fn parse_tensor_order(tensor: &Tensor) -> BuiltinResult<usize> {
             .ok_or_else(|| diff_invalid_argument("diff: integer order storage length mismatch"))?;
         return parse_integer_order(&value);
     }
-    parse_numeric_order(tensor.data[0])
+    parse_numeric_order(tensor::tensor_value_f64(tensor, 0))
 }
 
 fn parse_integer_order(value: &IntValue) -> BuiltinResult<usize> {

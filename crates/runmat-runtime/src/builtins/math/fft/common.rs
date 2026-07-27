@@ -56,10 +56,10 @@ fn zeroed_complex_vec(
 /// Parse the optional FFT length argument, returning `None` for `[]`.
 pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>> {
     match value {
-        Value::Tensor(t) if t.data.is_empty() => Ok(None),
+        Value::Tensor(t) if tensor_len(t) == 0 => Ok(None),
         Value::ComplexTensor(t) if t.data.is_empty() => Ok(None),
         Value::Tensor(t) => {
-            if t.data.len() != 1 {
+            if tensor_len(t) != 1 {
                 return Err(builtin_error(
                     builtin,
                     format!("{builtin}: length must be a scalar"),
@@ -133,6 +133,12 @@ pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>
             format!("{builtin}: length must be numeric"),
         )),
     }
+}
+
+fn tensor_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 fn parse_length_scalar(value: f64, builtin: &str) -> BuiltinResult<usize> {
@@ -908,8 +914,9 @@ mod tests {
         #[cfg(target_pointer_width = "64")]
         {
             let exact_value = 9_007_199_254_740_993_u64;
-            let exact =
+            let mut exact =
                 Tensor::new_integer(IntegerStorage::U64(vec![exact_value]), vec![1, 1]).unwrap();
+            exact.data.clear();
             assert_eq!(
                 parse_length(&Value::Tensor(exact), "fft").unwrap(),
                 Some(exact_value as usize)

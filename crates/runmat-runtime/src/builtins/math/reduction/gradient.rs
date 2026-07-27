@@ -473,7 +473,7 @@ async fn parse_spacing_argument(value: &Value, dim_len: usize) -> BuiltinResult<
 fn parse_host_spacing_argument(value: &Value, dim_len: usize) -> BuiltinResult<GradientSpacing> {
     let tensor =
         tensor::value_into_tensor_for(NAME, value.clone()).map_err(gradient_invalid_argument)?;
-    if tensor.data.is_empty() {
+    if tensor_len(&tensor) == 0 {
         return Err(gradient_invalid_argument(
             "gradient: empty spacing arguments are not supported",
         ));
@@ -488,6 +488,12 @@ fn parse_host_spacing_argument(value: &Value, dim_len: usize) -> BuiltinResult<G
 
     validate_coordinate_spacing(&spacing_values, dim_len)?;
     Ok(GradientSpacing::Coordinates(spacing_values))
+}
+
+fn tensor_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 fn validate_scalar_spacing(spacing: f64) -> BuiltinResult<()> {
@@ -953,7 +959,7 @@ mod tests {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
         let mut spacing =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("spacing");
-        spacing.data[0] = 0.0;
+        spacing.data.clear();
 
         let result = gradient_builtin(Value::Tensor(tensor), vec![Value::Tensor(spacing)])
             .expect("gradient");

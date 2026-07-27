@@ -741,7 +741,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
 
     let (scalar_hint, is_empty) = match value {
         Value::Num(_) | Value::Int(_) => (true, false),
-        Value::Tensor(t) => (tensor::is_scalar_tensor(t), t.data.is_empty()),
+        Value::Tensor(t) => (tensor::is_scalar_tensor(t), tensor_len(t) == 0),
         Value::LogicalArray(logical) => (logical.data.len() == 1, logical.data.is_empty()),
         Value::GpuTensor(handle) => {
             let count = tensor::element_count(&handle.shape);
@@ -788,6 +788,12 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
         }
     }
     Ok(Some(StdAxes::Vec(dims)))
+}
+
+fn tensor_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 fn value_as_str(value: &Value) -> Option<String> {
@@ -1152,7 +1158,7 @@ async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<
     match meta.class {
         InputClass::Integer(class) => match value {
             Value::Num(n) => class.to_value(n),
-            Value::Tensor(t) if t.data.len() == 1 => {
+            Value::Tensor(t) if tensor::is_scalar_tensor(&t) => {
                 class.to_value(tensor::tensor_value_f64(&t, 0))
             }
             other => Ok(other),
@@ -1559,7 +1565,7 @@ pub(crate) mod tests {
     fn std_native_template_reads_typed_integer_scalar_storage_exactly() {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![-7]), vec![1, 1]).expect("tensor");
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
         let meta = InputMeta {
             class: InputClass::Integer(IntClass::I16),
             device: DevicePreference::Host,

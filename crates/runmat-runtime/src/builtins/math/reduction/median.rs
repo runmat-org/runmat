@@ -561,7 +561,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MedianAxes>> {
 
     let (scalar_hint, is_empty) = match value {
         Value::Num(_) | Value::Int(_) => (true, false),
-        Value::Tensor(t) => (t.data.len() == 1, t.data.is_empty()),
+        Value::Tensor(t) => (tensor::is_scalar_tensor(t), tensor_len(t) == 0),
         Value::LogicalArray(logical) => (logical.data.len() == 1, logical.data.is_empty()),
         Value::GpuTensor(handle) => {
             let count = tensor::element_count(&handle.shape);
@@ -630,6 +630,12 @@ fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
         return median_invalid_argument("median: dimension entries must be integers");
     }
     median_invalid_argument(message)
+}
+
+fn tensor_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 fn value_as_str(value: &Value) -> Option<String> {

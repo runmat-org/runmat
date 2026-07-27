@@ -87,10 +87,16 @@ pub(crate) fn dim_product(dims: &[usize]) -> usize {
 
 pub(crate) fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor_len(t) == 0,
         Value::LogicalArray(la) => la.data.is_empty(),
         _ => false,
     }
+}
+
+fn tensor_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 pub(crate) fn is_scalar_like(value: &Value) -> bool {
@@ -346,7 +352,7 @@ fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, RuntimeError
         Value::Int(i) => Ok(Some(i.to_f64())),
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
+            if tensor::is_scalar_tensor(t) {
                 Ok(Some(tensor::tensor_value_f64(t, 0)))
             } else {
                 Ok(None)
@@ -391,8 +397,10 @@ mod tests {
 
     #[test]
     fn optional_dim_parses_typed_integer_tensor_exactly() {
-        let dim = Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
-            .expect("typed dim");
+        let mut dim =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("typed dim");
+        dim.data.clear();
 
         assert_eq!(
             parse_optional_dim("trapz", &Value::Tensor(dim)).expect("typed dim"),
@@ -402,8 +410,9 @@ mod tests {
 
     #[test]
     fn optional_dim_rejects_negative_typed_integer_tensor() {
-        let dim =
+        let mut dim =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative dim");
+        dim.data.clear();
 
         assert!(parse_optional_dim("trapz", &Value::Tensor(dim)).is_err());
     }
@@ -422,7 +431,7 @@ mod tests {
     fn scalar_spacing_reads_typed_integer_storage_exactly() {
         let mut spacing =
             Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("spacing");
-        spacing.data[0] = 0.0;
+        spacing.data.clear();
 
         let spec =
             spacing_from_value("trapz", Some(Value::Tensor(spacing)), &[1, 4], 2).expect("spacing");

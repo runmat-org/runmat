@@ -1695,11 +1695,11 @@ async fn parse_variance_normalization(
     value: &Value,
 ) -> BuiltinResult<Option<VarianceNormalization>> {
     let values = match value {
-        Value::Tensor(tensor) if tensor.data.is_empty() => {
+        Value::Tensor(tensor) if tensor_len(tensor) == 0 => {
             return Ok(Some(VarianceNormalization::Sample));
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            vec![tensor::tensor_values_f64(tensor)[0]]
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            vec![tensor::tensor_value_f64(tensor, 0)]
         }
         Value::Tensor(_) => {
             return Err(invalid_argument(
@@ -1721,11 +1721,11 @@ async fn parse_variance_normalization(
         }
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(handle).await?;
-            if tensor.data.is_empty() {
+            if tensor_len(&tensor) == 0 {
                 return Ok(Some(VarianceNormalization::Sample));
             }
-            if tensor.data.len() == 1 {
-                vec![tensor::tensor_values_f64(&tensor)[0]]
+            if tensor::is_scalar_tensor(&tensor) {
+                vec![tensor::tensor_value_f64(&tensor, 0)]
             } else {
                 return Err(invalid_argument(
                     name,
@@ -1885,10 +1885,16 @@ fn scalar_f64(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Some(tensor::tensor_values_f64(t)[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         _ => None,
     }
+}
+
+fn tensor_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 fn positive_integer(name: &'static str, raw: f64, what: &str) -> BuiltinResult<usize> {
@@ -2288,7 +2294,7 @@ mod tests {
         let input = tensor(vec![4., 8., 6.], vec![1, 3]);
         let mut normalization =
             Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("integer tensor");
-        normalization.data[0] = 0.0;
+        normalization.data.clear();
 
         let result = call(
             "movstd",
