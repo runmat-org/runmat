@@ -368,7 +368,9 @@ fn parse_sample_time(value: &Value) -> BuiltinResult<f64> {
     let sample_time = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         other => {
             return Err(ss_error_with_detail(
                 &SS_ERROR_INVALID_SAMPLE_TIME,
@@ -639,12 +641,11 @@ mod tests {
             ),
             Value::Tensor(Tensor::new_integer(IntegerStorage::I8(vec![1, 0]), vec![1, 2]).unwrap()),
             Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap()),
-            vec![
-                Value::from("Ts"),
-                Value::Tensor(
-                    Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap(),
-                ),
-            ],
+            vec![Value::from("Ts"), {
+                let mut ts = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
+                ts.data.clear();
+                Value::Tensor(ts)
+            }],
         )
         .expect("ss");
 

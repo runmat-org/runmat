@@ -846,8 +846,8 @@ fn scalar_property(object: &ObjectInstance, name: &'static str) -> BuiltinResult
     match object.properties.get(name) {
         Some(Value::Num(value)) => Ok(*value),
         Some(Value::Int(value)) => Ok(value.to_f64()),
-        Some(Value::Tensor(tensor)) if tensor.data.len() == 1 => {
-            Ok(tensor::tensor_values_f64(tensor)[0])
+        Some(Value::Tensor(tensor)) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
         }
         Some(other) => Err(lqr_error(
             &LQR_ERROR_INVALID_MODEL,
@@ -1074,14 +1074,15 @@ mod tests {
 
     #[test]
     fn lqr_accepts_typed_integer_sample_time_property_on_state_space_object() {
+        let mut sample_time =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
+        sample_time.data.clear();
         let sys = block_on(crate::builtins::control::ss::ss_builtin(
             tensor(vec![1.0, 0.0, 1.0, 1.0], 2, 2),
             tensor(vec![0.0, 1.0], 2, 1),
             tensor(vec![1.0, 0.0], 1, 2),
             Value::Num(0.0),
-            vec![Value::Tensor(
-                Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap(),
-            )],
+            vec![Value::Tensor(sample_time)],
         ))
         .expect("discrete ss");
         let _guard = crate::output_count::push_output_count(Some(2));

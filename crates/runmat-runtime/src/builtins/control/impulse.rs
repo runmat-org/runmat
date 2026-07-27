@@ -415,7 +415,9 @@ fn scalar_property(value: &Value, label: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor::tensor_value_f64(tensor, 0)),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         other => Err(impulse_error_with_detail(
             &IMPULSE_ERROR_INVALID_MODEL,
             format!("{label} must be a real scalar, got {other:?}"),
@@ -464,7 +466,7 @@ fn scalar_time_from_value(value: &Value) -> BuiltinResult<Option<f64>> {
         Value::Num(n) => Ok(Some(*n)),
         Value::Int(i) => Ok(Some(i.to_f64())),
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             Ok(Some(tensor::tensor_value_f64(tensor, 0)))
         }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
@@ -998,6 +1000,43 @@ mod tests {
             panic!("expected output list");
         };
         assert_eq!(tensor_data(outputs[1].clone()), vec![0.0, 1.0]);
+    }
+
+    #[test]
+    fn impulse_scalar_final_time_reads_typed_integer_storage_length_exactly() {
+        let mut object = ObjectInstance::new("tf".to_string());
+        object.properties.insert(
+            "Numerator".to_string(),
+            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        );
+        object.properties.insert(
+            "Denominator".to_string(),
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+        );
+        object.properties.insert(
+            "Variable".to_string(),
+            Value::CharArray(CharArray::new_row("s")),
+        );
+        object.properties.insert("Ts".to_string(), Value::Num(0.0));
+        object
+            .properties
+            .insert("InputDelay".to_string(), Value::Num(0.0));
+        object
+            .properties
+            .insert("OutputDelay".to_string(), Value::Num(0.0));
+
+        let mut final_time =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("final time");
+        final_time.data.clear();
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let result =
+            run_impulse(Value::Object(object), vec![Value::Tensor(final_time)]).expect("impulse");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list");
+        };
+        let time = tensor_data(outputs[1].clone());
+        assert_eq!(time.first().copied(), Some(0.0));
+        assert_eq!(time.last().copied(), Some(2.0));
     }
 
     #[test]

@@ -661,7 +661,9 @@ pub fn scalar_f64(value: &Value, context: &str, builtin: &'static str) -> Builti
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor::tensor_value_f64(tensor, 0)),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] == 0 { 0.0 } else { 1.0 })
         }
@@ -679,7 +681,7 @@ pub fn scalar_complex(value: &Value, builtin: &'static str) -> BuiltinResult<Com
         Value::Int(i) => Ok(Complex64::new(i.to_f64(), 0.0)),
         Value::Bool(b) => Ok(Complex64::new(if *b { 1.0 } else { 0.0 }, 0.0)),
         Value::Complex(re, im) => Ok(Complex64::new(*re, *im)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             Ok(Complex64::new(tensor::tensor_value_f64(tensor, 0), 0.0))
         }
         Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
@@ -1232,8 +1234,13 @@ mod tests {
     use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
     fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let is_scalar = shape.iter().product::<usize>() == 1;
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        if is_scalar {
+            tensor.data.clear();
+        } else {
+            tensor.data.fill(f64::NAN);
+        }
         Value::Tensor(tensor)
     }
 

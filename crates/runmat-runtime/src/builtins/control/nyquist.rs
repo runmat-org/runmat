@@ -250,7 +250,9 @@ fn scalar_property(value: &Value, label: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor::tensor_value_f64(tensor, 0)),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         other => Err(nyquist_error(format!(
             "nyquist: {label} must be a real scalar, got {other:?}"
         ))),
@@ -674,7 +676,12 @@ mod tests {
             "Variable".to_string(),
             Value::CharArray(CharArray::new_row("s")),
         );
-        object.properties.insert("Ts".to_string(), Value::Num(0.0));
+        let mut sample_time =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("sample time");
+        sample_time.data.clear();
+        object
+            .properties
+            .insert("Ts".to_string(), Value::Tensor(sample_time));
         object
             .properties
             .insert("InputDelay".to_string(), Value::Num(0.0));
