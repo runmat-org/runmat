@@ -362,7 +362,18 @@ fn parse_arguments(
                     cumsum_error_with_detail(&CUMSUM_ERROR_INVALID_ARGUMENT, err)
                 })?);
             }
-            Value::Tensor(t) if t.data.is_empty() => {
+            Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+                if dim.is_some() {
+                    return Err(cumsum_error_with_detail(
+                        &CUMSUM_ERROR_INVALID_ARGUMENT,
+                        "dimension specified more than once",
+                    ));
+                }
+                dim = Some(tensor::parse_dimension(value, "cumsum").map_err(|err| {
+                    cumsum_error_with_detail(&CUMSUM_ERROR_INVALID_ARGUMENT, err)
+                })?);
+            }
+            Value::Tensor(t) if tensor::tensor_element_len(t) == 0 => {
                 // MATLAB allows [] as a placeholder for the default dimension; ignore it.
             }
             Value::LogicalArray(la) if la.data.is_empty() => {
@@ -956,6 +967,26 @@ pub(crate) mod tests {
                     vec![2, 2],
                 )
                 .expect("reverse output"),
+            )
+        );
+    }
+
+    #[test]
+    fn cumsum_parses_typed_integer_dimension_without_mirror() {
+        let input = BuiltinsTensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5]), vec![2, 2])
+            .expect("input");
+        let mut dim = BuiltinsTensor::new_integer(IntegerStorage::I32(vec![2]), vec![1, 1])
+            .expect("dimension");
+        dim.data.clear();
+
+        let result = cumsum_builtin(Value::Tensor(input), vec![Value::Tensor(dim)])
+            .expect("cumsum dimension from typed integer tensor");
+
+        assert_eq!(
+            result,
+            Value::Tensor(
+                BuiltinsTensor::new_integer(IntegerStorage::I16(vec![1, 4, 3, 9]), vec![2, 2],)
+                    .expect("dimension two output"),
             )
         );
     }

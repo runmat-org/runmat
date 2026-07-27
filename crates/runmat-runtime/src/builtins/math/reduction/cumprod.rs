@@ -384,7 +384,18 @@ fn parse_arguments(
                     cumprod_error_with_detail(&CUMPROD_ERROR_INVALID_ARGUMENT, err)
                 })?);
             }
-            Value::Tensor(t) if t.data.is_empty() => {
+            Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+                if dim.is_some() {
+                    return Err(cumprod_error_with_detail(
+                        &CUMPROD_ERROR_INVALID_ARGUMENT,
+                        "dimension specified more than once",
+                    ));
+                }
+                dim = Some(tensor::parse_dimension(value, "cumprod").map_err(|err| {
+                    cumprod_error_with_detail(&CUMPROD_ERROR_INVALID_ARGUMENT, err)
+                })?);
+            }
+            Value::Tensor(t) if tensor::tensor_element_len(t) == 0 => {
                 // MATLAB allows [] as a placeholder for the default dimension; ignore it.
             }
             Value::LogicalArray(la) if la.data.is_empty() => {
@@ -859,7 +870,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor as BuiltinsTensor};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor as BuiltinsTensor};
 
     #[test]
     fn cumprod_type_keeps_shape() {
@@ -964,6 +975,26 @@ pub(crate) mod tests {
                     vec![2, 2],
                 )
                 .expect("reverse output"),
+            )
+        );
+    }
+
+    #[test]
+    fn cumprod_parses_typed_integer_dimension_without_mirror() {
+        let input = BuiltinsTensor::new_integer(IntegerStorage::I16(vec![2, 3, 4, 5]), vec![2, 2])
+            .expect("input");
+        let mut dim = BuiltinsTensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1])
+            .expect("dimension");
+        dim.data.clear();
+
+        let result = cumprod_builtin(Value::Tensor(input), vec![Value::Tensor(dim)])
+            .expect("cumprod dimension from typed integer tensor");
+
+        assert_eq!(
+            result,
+            Value::Tensor(
+                BuiltinsTensor::new_integer(IntegerStorage::I16(vec![2, 3, 8, 15]), vec![2, 2],)
+                    .expect("dimension two output"),
             )
         );
     }
