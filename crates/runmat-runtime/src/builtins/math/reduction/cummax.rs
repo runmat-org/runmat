@@ -514,7 +514,18 @@ fn parse_arguments(
                     cummax_error_with_detail(&CUMMAX_ERROR_INVALID_ARGUMENT, err)
                 })?);
             }
-            Value::Tensor(t) if t.data.is_empty() => {
+            Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+                if dim.is_some() {
+                    return Err(cummax_error_with_detail(
+                        &CUMMAX_ERROR_INVALID_ARGUMENT,
+                        "dimension specified more than once",
+                    ));
+                }
+                dim = Some(tensor::parse_dimension(value, "cummax").map_err(|err| {
+                    cummax_error_with_detail(&CUMMAX_ERROR_INVALID_ARGUMENT, err)
+                })?);
+            }
+            Value::Tensor(t) if tensor::tensor_element_len(t) == 0 => {
                 // MATLAB allows [] placeholders; ignore them.
             }
             Value::LogicalArray(l) if l.data.is_empty() => {}
@@ -1151,7 +1162,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     #[test]
     fn cummax_type_keeps_shape() {
@@ -1284,6 +1295,31 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor indices, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cummax_parses_typed_integer_dimension_without_mirror() {
+        let input =
+            Tensor::new_integer(IntegerStorage::I16(vec![4, 3, 2, 5]), vec![2, 2]).expect("input");
+        let mut dim =
+            Tensor::new_integer(IntegerStorage::I32(vec![2]), vec![1, 1]).expect("dimension");
+        dim.data.clear();
+
+        let eval = evaluate(Value::Tensor(input), &[Value::Tensor(dim)])
+            .expect("cummax dimension from typed integer tensor");
+        let (values, indices) = eval.into_pair();
+
+        assert_eq!(
+            values,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I16(vec![4, 3, 4, 5]), vec![2, 2])
+                    .expect("dimension two values"),
+            )
+        );
+        assert_eq!(
+            indices,
+            Value::Tensor(Tensor::new(vec![1.0, 1.0, 1.0, 2.0], vec![2, 2]).expect("indices"))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
