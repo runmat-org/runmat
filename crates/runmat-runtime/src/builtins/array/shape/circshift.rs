@@ -428,7 +428,7 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
             Ok(vec![rounded as isize])
         }
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) && !tensor.data.is_empty() {
+            if !is_vector_shape(&tensor.shape) && tensor_element_len(tensor) != 0 {
                 return Err(circshift_invalid_shift(
                     "circshift: shifts must be specified as a scalar or vector",
                 ));
@@ -513,7 +513,7 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
             Ok(vec![rounded as usize])
         }
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) && !tensor.data.is_empty() {
+            if !is_vector_shape(&tensor.shape) && tensor_element_len(tensor) != 0 {
                 return Err(circshift_invalid_dims(
                     "circshift: dimension vectors must be row or column vectors",
                 ));
@@ -525,7 +525,7 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
                     circshift_invalid_dims("circshift: dimensions must be positive integers")
                 });
             }
-            let mut dims = Vec::with_capacity(tensor.data.len());
+            let mut dims = Vec::with_capacity(tensor_element_len(tensor));
             for &val in &tensor.data {
                 if !val.is_finite() {
                     return Err(circshift_invalid_dims(
@@ -595,6 +595,12 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
             "circshift: unsupported dimension argument type",
         )),
     }
+}
+
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 fn integer_tensor_shift_vector(tensor: &Tensor) -> Option<crate::BuiltinResult<Vec<isize>>> {
@@ -1025,14 +1031,25 @@ pub(crate) mod tests {
         #[cfg(target_pointer_width = "64")]
         {
             let exact_shift = 9_007_199_254_740_993_i64;
-            let shift_tensor =
+            let mut shift_tensor =
                 Tensor::new_integer(IntegerStorage::I64(vec![-1, exact_shift]), vec![1, 2])
                     .expect("shift vector");
+            shift_tensor.data.clear();
             assert_eq!(
                 value_to_shift_vector(&Value::Tensor(shift_tensor)).expect("typed shift vector"),
                 vec![-1, exact_shift as isize]
             );
         }
+        let mut non_vector_shift =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2])
+                .expect("non-vector shift");
+        non_vector_shift.data.clear();
+        let shift_shape_err = value_to_shift_vector(&Value::Tensor(non_vector_shift))
+            .expect_err("non-vector typed shift must reject");
+        assert_eq!(
+            shift_shape_err.identifier(),
+            CIRCSHIFT_ERROR_INVALID_SHIFT.identifier
+        );
         let shift_err = value_to_shift_vector(&Value::Int(IntValue::U64(u64::MAX)))
             .expect_err("unrepresentable typed shift must not saturate");
         assert_eq!(
@@ -1047,14 +1064,25 @@ pub(crate) mod tests {
         #[cfg(target_pointer_width = "64")]
         {
             let exact_dim = 9_007_199_254_740_993_u64;
-            let dim_tensor =
+            let mut dim_tensor =
                 Tensor::new_integer(IntegerStorage::U64(vec![2, exact_dim]), vec![1, 2])
                     .expect("dimension vector");
+            dim_tensor.data.clear();
             assert_eq!(
                 value_to_dims_vector(&Value::Tensor(dim_tensor)).expect("typed dimension vector"),
                 vec![2, exact_dim as usize]
             );
         }
+        let mut non_vector_dims =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![2, 2])
+                .expect("non-vector dims");
+        non_vector_dims.data.clear();
+        let dims_shape_err = value_to_dims_vector(&Value::Tensor(non_vector_dims))
+            .expect_err("non-vector typed dimension vector must reject");
+        assert_eq!(
+            dims_shape_err.identifier(),
+            CIRCSHIFT_ERROR_INVALID_DIMS.identifier
+        );
         let dims_err = value_to_dims_vector(&Value::Int(IntValue::I64(-1)))
             .expect_err("negative typed dimension must reject");
         assert_eq!(
@@ -1162,8 +1190,9 @@ pub(crate) mod tests {
     fn circshift_large_integer_tensor_shift_uses_exact_modulo() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![5, 1]).unwrap();
         let shift = 9_007_199_254_740_993_i64;
-        let shift_tensor =
+        let mut shift_tensor =
             Tensor::new_integer(IntegerStorage::I64(vec![shift]), vec![1, 1]).expect("shift");
+        shift_tensor.data.clear();
         let result = circshift_builtin(
             Value::Tensor(tensor),
             Value::Tensor(shift_tensor),

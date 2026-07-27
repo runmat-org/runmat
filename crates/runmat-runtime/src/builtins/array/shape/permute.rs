@@ -252,13 +252,16 @@ fn parse_order_tensor(builtin: &'static str, tensor: &Tensor) -> crate::BuiltinR
             format!("{builtin}: order must be a row or column vector"),
         ));
     }
-    if tensor.data.is_empty() {
+    let len = tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len());
+    if len == 0 {
         return Err(permute_error(
             builtin,
             format!("{builtin}: order must contain at least one dimension"),
         ));
     }
-    let mut order = Vec::with_capacity(tensor.data.len());
+    let mut order = Vec::with_capacity(len);
     if let Some(storage) = tensor.integer_storage() {
         for entry in storage.exact_values() {
             let index = entry.try_to_usize().ok_or_else(|| {
@@ -727,15 +730,18 @@ pub(crate) mod tests {
 
     #[test]
     fn permute_order_parser_uses_exact_integer_tensor_storage() {
-        let exact_order = Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![1, 2])
+        let mut exact_order = Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![1, 2])
             .expect("integer order");
+        exact_order.data.clear();
         assert_eq!(
             parse_order_argument("permute", Value::Tensor(exact_order)).expect("parse order"),
             vec![2, 1]
         );
 
-        let out_of_range = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2])
-            .expect("integer order");
+        let mut out_of_range =
+            Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2])
+                .expect("integer order");
+        out_of_range.data.clear();
         let err = parse_order_argument("permute", Value::Tensor(out_of_range))
             .expect_err("uint64 order must reject exactly");
         assert!(
@@ -743,8 +749,9 @@ pub(crate) mod tests {
             "unexpected error: {err}"
         );
 
-        let negative =
+        let mut negative =
             Tensor::new_integer(IntegerStorage::I8(vec![1, -1]), vec![1, 2]).expect("order");
+        negative.data.clear();
         let err = parse_order_argument("permute", Value::Tensor(negative))
             .expect_err("negative order must reject");
         assert!(
