@@ -240,10 +240,13 @@ pub fn tensor_into_value(tensor: Tensor) -> Value {
 
 /// Return true when a tensor contains exactly one scalar element.
 pub fn is_scalar_tensor(tensor: &Tensor) -> bool {
+    tensor_element_len(tensor) == 1
+}
+
+fn tensor_element_len(tensor: &Tensor) -> usize {
     tensor
         .integer_storage()
         .map_or(tensor.data.len(), |storage| storage.len())
-        == 1
 }
 
 fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {
@@ -252,7 +255,7 @@ fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {
         Value::Int(i) => Ok(Some(i.to_f64())),
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
+            if is_scalar_tensor(t) {
                 if let Some(storage) = t.integer_storage() {
                     return Ok(Some(
                         storage
@@ -265,7 +268,7 @@ fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {
             } else {
                 Err(format!(
                     "expected scalar tensor, got tensor of size {}",
-                    t.data.len()
+                    tensor_element_len(t)
                 ))
             }
         }
@@ -310,7 +313,7 @@ pub async fn dimension_from_value_async(
 ) -> Result<Option<usize>, String> {
     match value {
         Value::Int(value) => return parse_integer_dimension(value, name, allow_zero).map(Some),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
                 let value = storage.value_at(0).expect("one-element integer storage");
                 return parse_integer_dimension(&value, name, allow_zero).map(Some);
@@ -503,7 +506,7 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
 pub fn parse_dimension(value: &Value, name: &str) -> Result<usize, String> {
     match value {
         Value::Int(i) => parse_integer_dimension(i, name, false),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
                 let value = storage.value_at(0).expect("one-element integer storage");
                 return parse_integer_dimension(&value, name, false);
@@ -661,7 +664,8 @@ mod dtype_tests {
 mod dimension_tests {
     use super::{
         dimension_from_value_async, dims_from_value_async, integer_tensor_to_f64, parse_dimension,
-        tensor_into_values_f64, tensor_values_f64, tensor_values_f64_cow,
+        scalar_f64_from_value_async, tensor_into_values_f64, tensor_values_f64,
+        tensor_values_f64_cow,
     };
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
@@ -705,8 +709,9 @@ mod dimension_tests {
             Ok(Some(vec![2, 3]))
         );
 
-        let scalar_dim = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1])
+        let mut scalar_dim = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1])
             .expect("integer scalar dim");
+        scalar_dim.data.clear();
         assert_eq!(
             block_on(dimension_from_value_async(
                 &Value::Tensor(scalar_dim),
@@ -720,8 +725,9 @@ mod dimension_tests {
     #[test]
     fn typed_integer_tensor_dimension_parsers_preserve_large_values_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1])
+        let mut scalar = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1])
             .expect("large integer dim");
+        scalar.data.clear();
         assert_eq!(
             parse_dimension(&Value::Tensor(scalar.clone()), "size"),
             Ok(large as usize)
@@ -745,8 +751,9 @@ mod dimension_tests {
 
     #[test]
     fn typed_integer_tensor_dimension_parsers_reject_negative_values() {
-        let negative =
+        let mut negative =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative dim");
+        negative.data.clear();
         assert!(parse_dimension(&Value::Tensor(negative.clone()), "size").is_err());
         assert!(block_on(dimension_from_value_async(
             &Value::Tensor(negative.clone()),
@@ -760,6 +767,14 @@ mod dimension_tests {
     #[test]
     fn typed_integer_tensor_f64_boundary_reads_exact_storage() {
         let wide = 9_007_199_254_740_993_u64;
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("scalar");
+        scalar.data.clear();
+        assert_eq!(
+            block_on(scalar_f64_from_value_async(&Value::Tensor(scalar))),
+            Ok(Some(IntValue::U64(wide).to_f64()))
+        );
+
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide, wide - 1]), vec![1, 2])
             .expect("integer tensor");
         assert_eq!(
