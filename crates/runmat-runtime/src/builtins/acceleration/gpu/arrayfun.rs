@@ -1275,8 +1275,8 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
         Value::LogicalArray(la) if la.len() == 1 => Ok(ClassifiedValue::Logical(la.data[0] != 0)),
         Value::Int(i) => Ok(ClassifiedValue::Double(i.to_f64())),
         Value::Num(n) => Ok(ClassifiedValue::Double(*n)),
-        Value::Tensor(t) if t.data.len() == 1 => {
-            Ok(ClassifiedValue::Double(tensor::tensor_values_f64(t)[0]))
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            Ok(ClassifiedValue::Double(tensor::tensor_value_f64(t, 0)))
         }
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
         Value::ComplexTensor(t) if t.data.len() == 1 => Ok(ClassifiedValue::Complex(t.data[0])),
@@ -1383,7 +1383,7 @@ pub(crate) mod tests {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
         let input = ArrayInput {
             data: ArrayData::Tensor(tensor),
             is_scalar: false,
@@ -1400,7 +1400,7 @@ pub(crate) mod tests {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
 
         match classify_value(&Value::Tensor(tensor)).expect("classify") {
             ClassifiedValue::Double(value) => {

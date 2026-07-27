@@ -652,9 +652,9 @@ fn classify_uniform_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
         Value::Num(value) => Ok(ClassifiedValue::Double(*value)),
         Value::Int(value) => Ok(ClassifiedValue::Double(value.to_f64())),
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(ClassifiedValue::Double(
-            tensor::tensor_values_f64(tensor)[0],
-        )),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(ClassifiedValue::Double(tensor::tensor_value_f64(tensor, 0)))
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok(ClassifiedValue::Logical(array.data[0] != 0))
         }
@@ -702,7 +702,7 @@ mod tests {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
 
         match classify_uniform_value(&Value::Tensor(tensor)).expect("classify") {
             ClassifiedValue::Double(value) => {

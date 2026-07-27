@@ -1013,8 +1013,8 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
         Value::Num(n) => Ok(ClassifiedValue::Double(*n)),
         Value::Int(iv) => Ok(ClassifiedValue::Double(iv.to_f64())),
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
-        Value::Tensor(t) if t.data.len() == 1 => {
-            Ok(ClassifiedValue::Double(tensor::tensor_values_f64(t)[0]))
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            Ok(ClassifiedValue::Double(tensor::tensor_value_f64(t, 0)))
         }
         Value::LogicalArray(la) if la.data.len() == 1 => {
             Ok(ClassifiedValue::Logical(la.data[0] != 0))
@@ -1046,7 +1046,7 @@ pub(crate) mod tests {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
 
         match classify_value(&Value::Tensor(tensor)).expect("classify") {
             ClassifiedValue::Double(value) => {
