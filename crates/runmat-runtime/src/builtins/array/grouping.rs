@@ -1061,7 +1061,7 @@ async fn accumarray_impl(subs: Value, data: Value, rest: Vec<Value>) -> BuiltinR
 fn accumarray_subscripts(subs: Value) -> BuiltinResult<Vec<Vec<usize>>> {
     match subs {
         Value::Tensor(tensor) => {
-            if tensor.data.is_empty() {
+            if tensor_utils::tensor_element_len(&tensor) == 0 {
                 return Ok(Vec::new());
             }
             if let Some(storage) = tensor.integer_storage() {
@@ -1160,9 +1160,10 @@ fn accumarray_data_values(data: Value, rows: usize) -> BuiltinResult<Vec<f64>> {
                     "accumarray: data must be scalar or match subscript row count",
                 ));
             }
-            if tensor.data.len() == 1 {
-                Ok(vec![tensor.data[0]; rows])
-            } else if tensor.data.len() == rows {
+            let len = tensor_utils::tensor_element_len(&tensor);
+            if len == 1 {
+                Ok(vec![tensor_utils::tensor_value_f64(&tensor, 0); rows])
+            } else if len == rows {
                 Ok(tensor.data)
             } else {
                 Err(grouping_error(
@@ -1883,7 +1884,7 @@ fn value_as_numeric_scalar(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             Some(tensor_utils::tensor_value_f64(tensor, 0))
         }
         Value::LogicalArray(array) if array.data.len() == 1 => {
@@ -1895,7 +1896,7 @@ fn value_as_numeric_scalar(value: &Value) -> Option<f64> {
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => tensor_utils::tensor_element_len(tensor) == 0,
         Value::StringArray(array) => array.data.is_empty(),
         Value::Cell(cell) => cell.data.is_empty(),
         Value::CharArray(chars) => chars.data.is_empty(),
@@ -2092,7 +2093,7 @@ mod tests {
     #[test]
     fn grouping_numeric_scalar_reads_typed_integer_storage_exactly() {
         let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1]).unwrap();
-        tensor.data = vec![0.0];
+        tensor.data.clear();
 
         assert_eq!(
             value_as_numeric_scalar(&Value::Tensor(tensor)),
@@ -2114,6 +2115,28 @@ mod tests {
         .unwrap();
 
         assert_eq!(selected, vec!["beta", "alpha"]);
+    }
+
+    #[test]
+    fn accumarray_empty_subscripts_read_typed_integer_storage() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
+        tensor.data = vec![1.0];
+
+        assert_eq!(
+            accumarray_subscripts(Value::Tensor(tensor)).unwrap(),
+            Vec::<Vec<usize>>::new()
+        );
+    }
+
+    #[test]
+    fn accumarray_data_values_reads_typed_integer_storage_exactly() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).unwrap();
+        tensor.data.clear();
+
+        assert_eq!(
+            accumarray_data_values(Value::Tensor(tensor), 3).unwrap(),
+            vec![7.0; 3]
+        );
     }
 
     #[test]
