@@ -445,7 +445,7 @@ async fn parse_polynomial(context: &str, label: &str, value: Value) -> BuiltinRe
         Value::Tensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
             let orientation = orientation_from_shape(&tensor.shape);
-            if tensor.data.is_empty() {
+            if tensor::tensor_element_len(&tensor) == 0 {
                 (vec![Complex64::new(0.0, 0.0)], orientation)
             } else {
                 (
@@ -460,15 +460,11 @@ async fn parse_polynomial(context: &str, label: &str, value: Value) -> BuiltinRe
         Value::ComplexTensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
             let orientation = orientation_from_shape(&tensor.shape);
-            if tensor.data.is_empty() {
+            if tensor::complex_tensor_element_len(&tensor) == 0 {
                 (vec![Complex64::new(0.0, 0.0)], orientation)
             } else {
                 (
-                    tensor
-                        .data
-                        .into_iter()
-                        .map(|(re, im)| Complex64::new(re, im))
-                        .collect(),
+                    tensor::complex_tensor_into_values_complex64(tensor),
                     orientation,
                 )
             }
@@ -565,7 +561,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -619,8 +615,9 @@ pub(crate) mod tests {
 
     #[test]
     fn derivative_typed_integer_coefficients_cross_double_boundary_exactly() {
-        let tensor =
+        let mut tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![3, -2, 5, 7]), vec![1, 4]).unwrap();
+        tensor.data.clear();
         let result = derivative_single(Value::Tensor(tensor)).expect("polyder");
         match result {
             Value::Tensor(t) => {
@@ -633,6 +630,36 @@ pub(crate) mod tests {
                 assert!(t.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn derivative_typed_complex_integer_coefficients_cross_double_boundary_exactly() {
+        let mut tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I16(vec![3, -2, 5, 7]),
+                IntegerStorage::I16(vec![1, 0, -1, 2]),
+            )
+            .expect("complex integer storage"),
+            vec![1, 4],
+        )
+        .expect("complex integer tensor");
+        tensor.data.clear();
+
+        let result = derivative_single(Value::ComplexTensor(tensor)).expect("polyder");
+        match result {
+            Value::ComplexTensor(t) => {
+                assert_eq!(t.shape, vec![1, 3]);
+                assert!(t
+                    .data
+                    .iter()
+                    .zip([(9.0, 3.0), (-4.0, 0.0), (5.0, -1.0)])
+                    .all(|((re, im), (er, ei))| {
+                        (re - er).abs() < 1e-12 && (im - ei).abs() < 1e-12
+                    }));
+                assert!(t.integer_data.is_none());
+            }
+            other => panic!("expected complex tensor result, got {other:?}"),
         }
     }
 
@@ -658,8 +685,10 @@ pub(crate) mod tests {
 
     #[test]
     fn product_typed_integer_coefficients_cross_double_boundary_exactly() {
-        let p = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, -2]), vec![1, 3]).unwrap();
-        let a = Tensor::new_integer(IntegerStorage::U16(vec![1, 1]), vec![1, 2]).unwrap();
+        let mut p = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, -2]), vec![1, 3]).unwrap();
+        p.data.clear();
+        let mut a = Tensor::new_integer(IntegerStorage::U16(vec![1, 1]), vec![1, 2]).unwrap();
+        a.data.clear();
         let result =
             derivative_product(Value::Tensor(p), Value::Tensor(a)).expect("polyder product");
         match result {
@@ -708,8 +737,10 @@ pub(crate) mod tests {
 
     #[test]
     fn quotient_typed_integer_coefficients_cross_double_boundary_exactly() {
-        let u = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, -4]), vec![1, 3]).unwrap();
-        let v = Tensor::new_integer(IntegerStorage::I16(vec![1, -1]), vec![1, 2]).unwrap();
+        let mut u = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, -4]), vec![1, 3]).unwrap();
+        u.data.clear();
+        let mut v = Tensor::new_integer(IntegerStorage::I16(vec![1, -1]), vec![1, 2]).unwrap();
+        v.data.clear();
         let eval = evaluate_quotient(Value::Tensor(u), Value::Tensor(v)).expect("polyder quotient");
         match eval.numerator() {
             Value::Tensor(t) => {
