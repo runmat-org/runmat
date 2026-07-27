@@ -3,6 +3,7 @@
 //! Implements language-style tensor indexing and access patterns.
 
 use crate::builtins::common::shape::normalize_scalar_shape;
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{ComplexTensor, IntegerComplexStorage, SparseTensor, Tensor, Value};
 
@@ -363,9 +364,10 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
             if indices.len() == 1 {
                 // Linear indexing (1-based)
                 let idx = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
-                if idx < 1 || idx > tensor.data.len() {
+                let len = tensor_utils::tensor_element_len(tensor);
+                if idx < 1 || idx > len {
                     return Err(indexing_error_with_identifier(
-                        format!("Index {} out of bounds (1 to {})", idx, tensor.data.len()),
+                        format!("Index {} out of bounds (1 to {})", idx, len),
                         "RunMat:IndexOutOfBounds",
                     ));
                 }
@@ -756,11 +758,12 @@ mod tests {
 
     #[test]
     fn dense_integer_scalar_indexing_preserves_the_exact_value() {
-        let tensor = Tensor::new_integer(
+        let mut tensor = Tensor::new_integer(
             IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
             vec![1, 2],
         )
         .expect("tensor");
+        tensor.data.clear();
 
         assert_eq!(
             block_on(perform_indexing(&Value::Tensor(tensor), &[2.0])).expect("scalar index"),

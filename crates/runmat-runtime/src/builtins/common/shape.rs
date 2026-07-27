@@ -1,5 +1,6 @@
 use runmat_builtins::{Tensor, Value};
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::dispatcher::gather_if_needed_async;
 use crate::RuntimeError;
 
@@ -62,7 +63,7 @@ pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError>
 #[async_recursion::async_recursion(?Send)]
 pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
     let numel = match value {
-        Value::Tensor(t) => t.data.len(),
+        Value::Tensor(t) => tensor_utils::tensor_element_len(t),
         Value::SparseTensor(t) => t.rows.saturating_mul(t.cols),
         Value::ComplexTensor(t) => t.data.len(),
         Value::LogicalArray(la) => la.data.len(),
@@ -107,6 +108,7 @@ pub fn dims_to_row_tensor(dims: &[usize]) -> Result<Tensor, String> {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -139,6 +141,16 @@ pub(crate) mod tests {
             block_on(value_numel(&Value::GpuTensor(handle))).unwrap(),
             120
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn numel_reads_typed_integer_storage_length_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 7, 9]), vec![1, 3]).unwrap();
+        tensor.data.clear();
+
+        assert_eq!(block_on(value_numel(&Value::Tensor(tensor))).unwrap(), 3);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
