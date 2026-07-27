@@ -397,7 +397,7 @@ fn apply_options_struct(options: &mut Options, value: &Value) -> BuiltinResult<(
 
 fn is_empty_option_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),
         Value::Cell(cell) => cell.data.is_empty(),
         Value::StringArray(array) => array.data.is_empty(),
@@ -1084,7 +1084,7 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Int(value) => Ok(value.to_f64()),
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            Ok(tensor::tensor_values_f64(tensor)[0])
+            Ok(tensor::tensor_value_f64(tensor, 0))
         }
         _ => Err(invalid(format!("tsne: {name} must be a numeric scalar"))),
     }
@@ -1095,7 +1095,7 @@ fn bool_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            let raw = tensor::tensor_values_f64(tensor)[0];
+            let raw = tensor::tensor_value_f64(tensor, 0);
             if raw == 0.0 || raw == 1.0 {
                 Ok(raw != 0.0)
             } else {
@@ -1107,7 +1107,7 @@ fn bool_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
 }
 
 fn is_empty_numeric(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor.data.is_empty())
+    matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0)
 }
 
 #[cfg(test)]
@@ -1123,6 +1123,12 @@ mod tests {
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).unwrap();
         tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 
@@ -1247,13 +1253,13 @@ mod tests {
             ),
             vec![
                 Value::String("NumDimensions".into()),
-                poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+                cleared_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
                 Value::String("NumPCAComponents".into()),
-                poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+                cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
                 Value::String("Perplexity".into()),
-                poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+                cleared_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
                 Value::String("Standardize".into()),
-                poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+                cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
                 Value::String("InitialY".into()),
                 poisoned_int_tensor(IntegerStorage::I16(vec![0; 8]), vec![4, 2]),
                 Value::String("Options".into()),
@@ -1261,7 +1267,7 @@ mod tests {
                     let mut options = StructValue::new();
                     options.insert(
                         "MaxIter",
-                        poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
+                        cleared_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
                     );
                     Value::Struct(options)
                 },
@@ -1287,6 +1293,16 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.message.contains("InitialY"));
+    }
+
+    #[test]
+    fn tsne_empty_option_helpers_use_typed_integer_storage_len() {
+        let mut empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
+        empty.data = vec![1.0];
+        let empty = Value::Tensor(empty);
+
+        assert!(is_empty_numeric(&empty));
+        assert!(is_empty_option_value(&empty));
     }
 
     #[tokio::test]
