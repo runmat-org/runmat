@@ -172,33 +172,6 @@ pub fn gather_tensor_from_gpu(
     block_on(gather_tensor_from_gpu_async(handle, context))
 }
 
-pub fn tensor_to_surface_grid(
-    z: Tensor,
-    x_len: usize,
-    y_len: usize,
-    context: &'static str,
-) -> BuiltinResult<Vec<Vec<f64>>> {
-    if z.data.len() != x_len * y_len {
-        return Err(plotting_error(
-            context,
-            format!(
-                "{context}: surface data must contain exactly {} values ({}×{})",
-                x_len * y_len,
-                x_len,
-                y_len
-            ),
-        ));
-    }
-    let mut grid = vec![vec![0.0; y_len]; x_len];
-    for (row, row_vec) in grid.iter_mut().enumerate() {
-        for (col, cell) in row_vec.iter_mut().enumerate().take(y_len) {
-            let idx = col * x_len + row; // column-major layout
-            *cell = z.data[idx];
-        }
-    }
-    Ok(grid)
-}
-
 /// Convert a MATLAB surface matrix Z (rows x cols) into the plot grid layout expected by
 /// `SurfacePlot::new(x_axis, y_axis, z_grid)` where x indexes columns and y indexes rows.
 pub fn tensor_to_surface_grid_matlab_xy(

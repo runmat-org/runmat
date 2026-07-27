@@ -226,4 +226,67 @@ mod tests {
         .expect("image pack should succeed");
         assert_eq!(packed.vertex_count, 4);
     }
+
+    #[test]
+    fn gpu_truecolor_layout_matches_non_square_cpu_image_contract() {
+        let Some((device, queue)) = maybe_device() else {
+            return;
+        };
+        let x = [10.0f32, 20.0, 30.0];
+        let y = [1.0f32, 2.0];
+        let image_data = [
+            0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6, // red
+            0.7, 0.8, 0.9, 1.0, 0.1, 0.2, // green
+            0.3, 0.4, 0.5, 0.6, 0.7, 0.8, // blue
+        ];
+        let image = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("image-layout-test-truecolor"),
+                contents: bytemuck::cast_slice(&image_data),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        let packed = pack_truecolor_vertices(
+            &device,
+            &queue,
+            &TrueColorImageGpuInputs {
+                x_axis: AxisData::F32(&x),
+                y_axis: AxisData::F32(&y),
+                image_buffer: image,
+                rows: 2,
+                cols: 3,
+                channels: 3,
+                scalar: ScalarType::F32,
+            },
+        )
+        .expect("image pack should succeed");
+
+        let byte_len = packed.vertex_count * std::mem::size_of::<Vertex>();
+        let bytes =
+            crate::gpu::util::copy_readback_bytes(&device, &queue, &packed.buffer, byte_len)
+                .block_on()
+                .expect("image vertices should read back");
+        let vertices = bytes
+            .chunks_exact(std::mem::size_of::<Vertex>())
+            .map(bytemuck::pod_read_unaligned)
+            .collect::<Vec<Vertex>>();
+        let expected_positions = [
+            [10.0, 1.0, 0.0],
+            [10.0, 2.0, 0.0],
+            [20.0, 1.0, 0.0],
+            [20.0, 2.0, 0.0],
+            [30.0, 1.0, 0.0],
+            [30.0, 2.0, 0.0],
+        ];
+        assert_eq!(
+            vertices
+                .iter()
+                .map(|vertex| vertex.position)
+                .collect::<Vec<_>>(),
+            expected_positions
+        );
+        for (vertex, expected) in vertices.iter().zip(image_data[..6].iter()) {
+            assert!((vertex.color[0] - expected).abs() < f32::EPSILON);
+        }
+    }
 }

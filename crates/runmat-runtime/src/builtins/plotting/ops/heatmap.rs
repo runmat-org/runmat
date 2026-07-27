@@ -222,12 +222,11 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 
     let rows = color_data.rows;
     let cols = color_data.cols;
-    let render_data = transpose_for_surface(&color_data);
     let x_axis = AxisSource::Host(default_axis(cols));
     let y_axis = AxisSource::Host(default_axis(rows));
     let color_limits = color_limits_snapshot();
     let mut surface = super::image::build_indexed_image_surface(
-        &SurfaceDataInput::Host(render_data),
+        &SurfaceDataInput::Host(color_data.clone()),
         &x_axis,
         &y_axis,
         ColorMap::Parula,
@@ -386,25 +385,6 @@ fn default_axis(len: usize) -> Vec<f64> {
     (1..=len).map(|idx| idx as f64).collect()
 }
 
-fn transpose_for_surface(tensor: &Tensor) -> Tensor {
-    let mut data = vec![0.0; tensor.data.len()];
-    for row in 0..tensor.rows {
-        for col in 0..tensor.cols {
-            let src = row + tensor.rows * col;
-            let dst = col + tensor.cols * row;
-            data[dst] = tensor.data[src];
-        }
-    }
-    Tensor {
-        data,
-        shape: vec![tensor.cols, tensor.rows],
-        rows: tensor.cols,
-        cols: tensor.rows,
-        integer_data: None,
-        dtype: tensor.dtype,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -455,6 +435,10 @@ mod tests {
         assert!(surface.image_mode);
         assert_eq!(surface.x_data, vec![1.0, 2.0, 3.0]);
         assert_eq!(surface.y_data, vec![1.0, 2.0]);
+        assert_eq!(
+            surface.z_data.as_deref(),
+            Some(&[vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]][..])
+        );
         assert!(fig.axes_metadata(0).unwrap().colorbar_enabled);
     }
 

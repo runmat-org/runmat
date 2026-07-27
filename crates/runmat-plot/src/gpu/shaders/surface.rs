@@ -67,8 +67,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let stride_x = max(params.x_stride, 1u);
     let stride_y = max(params.y_stride, 1u);
-    let lod_row = idx % lod_x_len;
-    let lod_col = idx / lod_x_len;
+    let lod_row = idx / lod_y_len;
+    let lod_col = idx % lod_y_len;
     var row = lod_row * stride_x;
     var col = lod_col * stride_y;
     row = min(row, params.x_len - 1u);
@@ -175,8 +175,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let stride_x = max(params.x_stride, 1u);
     let stride_y = max(params.y_stride, 1u);
-    let lod_row = idx % lod_x_len;
-    let lod_col = idx / lod_x_len;
+    let lod_row = idx / lod_y_len;
+    let lod_col = idx % lod_y_len;
     var row = lod_row * stride_x;
     var col = lod_col * stride_y;
     row = min(row, params.x_len - 1u);

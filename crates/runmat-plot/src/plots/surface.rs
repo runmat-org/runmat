@@ -1640,6 +1640,37 @@ mod tests {
     }
 
     #[test]
+    fn image_mode_surface_preserves_non_square_rgba_pixel_order() {
+        let x = vec![0.0, 1.0, 2.0];
+        let y = vec![10.0, 20.0];
+        let z = vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]];
+
+        let mut surface = SurfacePlot::new(x, y, z)
+            .unwrap()
+            .with_image_mode(true)
+            .with_colormap(ColorMap::Gray)
+            .with_color_limits(Some((1.0, 6.0)));
+        let render_data = surface.render_data();
+
+        let Some(ImageData::Rgba8 {
+            width,
+            height,
+            data,
+        }) = render_data.image
+        else {
+            panic!("image-mode surfaces should carry an RGBA texture payload");
+        };
+        assert_eq!((width, height), (3, 2));
+        assert_eq!(
+            data,
+            vec![
+                51, 51, 51, 255, 153, 153, 153, 255, 255, 255, 255, 255, // top
+                0, 0, 0, 255, 102, 102, 102, 255, 204, 204, 204, 255, // bottom
+            ]
+        );
+    }
+
+    #[test]
     fn test_colormap_mapping() {
         let jet = ColorMap::Jet;
 
