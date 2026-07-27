@@ -306,7 +306,7 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
                     name,
                 );
             }
-            scalar_to_isize(&Value::Num(t.data[0]), name)
+            scalar_to_isize(&Value::Num(tensor::tensor_value_f64(t, 0)), name)
         }
         Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
         other => Err(tril_error_with_message(
@@ -464,7 +464,7 @@ pub(crate) mod tests {
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 

@@ -372,13 +372,13 @@ fn parse_numeric_rotation(value: f64) -> crate::BuiltinResult<i64> {
 }
 
 fn parse_tensor_rotation(tensor: &Tensor) -> crate::BuiltinResult<i64> {
-    if tensor.data.len() != 1 {
+    if !tensor::is_scalar_tensor(tensor) {
         return Err(rot90_error_with_message(
             "rot90: K must be a scalar integer",
             &ROT90_ERROR_INVALID_ROTATION,
         ));
     }
-    parse_numeric_rotation(tensor.data[0])
+    parse_numeric_rotation(tensor::tensor_value_f64(tensor, 0))
 }
 
 fn parse_logical_rotation(array: &LogicalArray) -> crate::BuiltinResult<i64> {
@@ -692,7 +692,7 @@ pub(crate) mod tests {
     fn rot90_rotation_parser_reads_typed_integer_storage_exactly() {
         let mut count =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
-        count.data = vec![0.0];
+        count.data.clear();
 
         assert_eq!(
             parse_rotation_steps(Some(&Value::Tensor(count))).expect("typed integer K"),

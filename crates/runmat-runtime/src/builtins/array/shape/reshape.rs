@@ -487,10 +487,11 @@ async fn parse_size_arguments(args: &[Value]) -> crate::BuiltinResult<Vec<DimTok
 async fn parse_size_scalar(value: &Value) -> crate::BuiltinResult<DimToken> {
     match value {
         Value::Tensor(t) => {
-            if t.data.is_empty() {
+            let len = tensor::tensor_element_len(t);
+            if len == 0 {
                 return Ok(DimToken::Auto);
             }
-            if t.data.len() != 1 {
+            if len != 1 {
                 return Err(reshape_error("reshape: size arguments must be scalars"));
             }
         }
@@ -590,7 +591,7 @@ pub(crate) mod tests {
         block_on(super::reshape_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, LogicalArray};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray};
 
     #[test]
     fn reshape_type_infers_rank_from_size_vector() {
@@ -627,6 +628,18 @@ pub(crate) mod tests {
                 shape: Some(vec![None, None])
             }
         );
+    }
+
+    #[test]
+    fn reshape_size_scalar_reads_typed_integer_storage_exactly() {
+        let mut dim = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1])
+            .expect("dimension tensor");
+        dim.data.clear();
+
+        match block_on(parse_size_scalar(&Value::Tensor(dim))).expect("dimension") {
+            DimToken::Known(value) => assert_eq!(value, 3),
+            other => panic!("expected known dimension, got {other:?}"),
+        }
     }
 
     fn tensor_from_slice(data: &[f64], shape: &[usize]) -> Tensor {

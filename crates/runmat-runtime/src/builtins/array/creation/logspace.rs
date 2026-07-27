@@ -234,7 +234,7 @@ fn tensor_scalar(name: &str, tensor: &Tensor) -> crate::BuiltinResult<Scalar> {
     if !tensor::is_scalar_tensor(tensor) {
         return Err(builtin_error(format!("{name}: expected scalar input")));
     }
-    Ok(Scalar::Real(tensor::tensor_values_f64(tensor)[0]))
+    Ok(Scalar::Real(tensor::tensor_value_f64(tensor, 0)))
 }
 
 fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinResult<Scalar> {
@@ -291,7 +291,7 @@ fn parse_tensor_count(tensor: &Tensor) -> crate::BuiltinResult<usize> {
             .expect("scalar integer tensor has one storage value");
         return parse_integer_count(&value);
     }
-    parse_numeric_count(tensor.data[0])
+    parse_numeric_count(tensor::tensor_value_f64(tensor, 0))
 }
 
 fn parse_integer_count(value: &IntValue) -> crate::BuiltinResult<usize> {
@@ -540,6 +540,27 @@ pub(crate) mod tests {
         count.data.clear();
 
         assert!(block_on(parse_count(&Value::Tensor(count))).is_err());
+    }
+
+    #[test]
+    fn logspace_real_integer_tensor_endpoints_read_exact_storage() {
+        let mut start =
+            Tensor::new_integer(IntegerStorage::I64(vec![0]), vec![1, 1]).expect("start tensor");
+        start.data.clear();
+        let mut stop =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("stop tensor");
+        stop.data.clear();
+
+        let result = logspace_builtin(
+            Value::Tensor(start),
+            Value::Tensor(stop),
+            vec![Value::Int(IntValue::I32(3))],
+        )
+        .expect("logspace");
+        match result {
+            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 10.0, 100.0]),
+            other => panic!("expected tensor result, got {other:?}"),
+        }
     }
 
     #[test]
