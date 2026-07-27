@@ -556,7 +556,9 @@ fn parse_order(value: Value) -> BuiltinResult<usize> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(&tensor)[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+            tensor::tensor_value_f64(&tensor, 0)
+        }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             if logical.data[0] != 0 {
                 1.0
@@ -1290,7 +1292,7 @@ mod tests {
     fn butter_order_reads_typed_integer_storage_exactly() {
         let mut order =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("order");
-        order.data[0] = 4.0;
+        order.data.clear();
         let _guard = crate::output_count::push_output_count(Some(2));
 
         let values = match block_on(butter_builtin(

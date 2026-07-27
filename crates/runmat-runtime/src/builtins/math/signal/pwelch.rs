@@ -777,7 +777,7 @@ async fn parse_frequency_grid(value: Value, window_len: usize) -> BuiltinResult<
 fn is_scalar_numeric(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(tensor) => tensor.data.len() == 1,
+        Value::Tensor(tensor) => tensor_utils::is_scalar_tensor(tensor),
         Value::ComplexTensor(tensor) => tensor.data.len() == 1,
         Value::LogicalArray(logical) => logical.data.len() == 1,
         _ => false,
@@ -795,7 +795,7 @@ async fn parse_window(value: Value) -> BuiltinResult<Vec<f64>> {
             }
             return Ok(hamming_window(len));
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor_utils::is_scalar_tensor(t) => {
             let len = parse_nonnegative_integer(BUILTIN_NAME, "window", &value).map_err(|err| {
                 pwelch_error_with_detail(&PWELCH_ERROR_INVALID_WINDOW, err.message())
             })?;
@@ -1216,6 +1216,28 @@ mod tests {
             .unwrap();
         assert_eq!(peak_idx, 4);
         assert_eq!(f[peak_idx], 4.0);
+    }
+
+    #[test]
+    fn pwelch_scalar_window_reads_typed_integer_storage_length_exactly() {
+        let mut window =
+            Tensor::new_integer(IntegerStorage::I16(vec![8]), vec![1, 1]).expect("window length");
+        window.data.clear();
+
+        let out = call(
+            Value::Tensor(Tensor::new(vec![1.0; 16], vec![1, 16]).unwrap()),
+            &[
+                Value::Tensor(window),
+                Value::Num(0.0),
+                Value::Num(8.0),
+                Value::Num(8.0),
+            ],
+            Some(2),
+        )
+        .unwrap();
+        let (pxx, f) = output_pair(out);
+        assert_eq!(pxx.len(), 5);
+        assert_eq!(f.len(), 5);
     }
 
     #[test]

@@ -392,7 +392,9 @@ fn validate_gain(value: &Value) -> BuiltinResult<()> {
         Value::Num(n) if n.is_finite() => Ok(()),
         Value::Int(_) | Value::Bool(_) => Ok(()),
         Value::Complex(re, im) if re.is_finite() && im.is_finite() => Ok(()),
-        Value::Tensor(t) if t.data.len() == 1 && tensor::tensor_value_f64(t, 0).is_finite() => {
+        Value::Tensor(t)
+            if tensor::is_scalar_tensor(t) && tensor::tensor_value_f64(t, 0).is_finite() =>
+        {
             Ok(())
         }
         Value::ComplexTensor(t)
@@ -736,7 +738,7 @@ mod tests {
     fn explicit_zpk_gain_reads_typed_integer_storage_exactly() {
         let mut gain =
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("integer gain");
-        gain.data[0] = f64::INFINITY;
+        gain.data.clear();
 
         let data = block_on(parse_zero_pole_data(vec![
             col(&[0.2, 0.4]),

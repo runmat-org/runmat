@@ -264,7 +264,7 @@ pub(crate) fn parse_scalar_f64(
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
         Value::Bool(b) => f64::from(u8::from(*b)),
-        Value::Tensor(t) if t.data.len() == 1 => tensor::tensor_values_f64(t)[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_value_f64(t, 0),
         _ => {
             return Err(signal_error(
                 builtin,
@@ -316,7 +316,7 @@ pub(crate) fn scalar_length_arg(value: Value) -> Result<usize, WindowArgError> {
         Value::Num(n) => n,
         Value::Int(i) => i.to_f64(),
         Value::Bool(b) => usize::from(b) as f64,
-        Value::Tensor(t) if t.data.len() == 1 => tensor::tensor_values_f64(&t)[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(&t) => tensor::tensor_value_f64(&t, 0),
         _ => return Err(WindowArgError::InvalidLength),
     };
     if !scalar.is_finite() || scalar < 0.0 {
@@ -477,7 +477,7 @@ mod tests {
     #[test]
     fn signal_scalar_parser_reads_typed_integer_storage_exactly() {
         let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).unwrap();
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
 
         let scalar = parse_scalar_f64("test", "fs", &Value::Tensor(tensor)).expect("scalar");
 
@@ -503,7 +503,7 @@ mod tests {
     #[test]
     fn scalar_length_arg_reads_typed_integer_storage_exactly() {
         let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
 
         let len = scalar_length_arg(Value::Tensor(tensor)).expect("valid length");
 
