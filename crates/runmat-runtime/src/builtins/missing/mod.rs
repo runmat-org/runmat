@@ -2127,7 +2127,7 @@ fn numeric_scalar(value: &Value, context: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(f64::from(*b)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             Ok(tensor_utils::tensor_value_f64(tensor, 0))
         }
         other => Err(invalid_argument(format!(
@@ -2159,7 +2159,7 @@ fn validate_matrix_dim(dim: usize, context: &str) -> BuiltinResult<()> {
 fn scalar_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
     match value {
         Value::Int(integer) => return integer_size_to_usize(integer, context),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
                 let integer = storage.value_at(0).ok_or_else(|| {
                     internal_error(format!("{context}: integer scalar storage length mismatch"))
@@ -2266,7 +2266,7 @@ mod tests {
     fn missing_numeric_scalar_reads_typed_integer_storage_exactly() {
         let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
             .expect("typed numeric scalar");
-        tensor.data = vec![0.0];
+        tensor.data.clear();
 
         assert_eq!(
             numeric_scalar(&Value::Tensor(tensor), "fillmissing constant").unwrap(),
