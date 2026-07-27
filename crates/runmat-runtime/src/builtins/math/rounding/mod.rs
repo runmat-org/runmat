@@ -358,7 +358,10 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
 fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
     match value {
         Value::Complex(re, im) => Some((*re, *im)),
-        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        Value::ComplexTensor(ct) if tensor::complex_tensor_element_len(ct) == 1 => {
+            let value = tensor::complex_tensor_value_complex64(ct, 0);
+            Some((value.re, value.im))
+        }
         _ => None,
     }
 }
@@ -396,9 +399,9 @@ fn complex_div(ar: f64, ai: f64, br: f64, bi: f64) -> (f64, f64) {
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
-        Value::Complex(re, im)
+    if tensor::complex_tensor_element_len(&tensor) == 1 {
+        let value = tensor::complex_tensor_value_complex64(&tensor, 0);
+        Value::Complex(value.re, value.im)
     } else {
         Value::ComplexTensor(tensor)
     }
@@ -629,6 +632,29 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn mod_complex_scalar_helpers_read_typed_integer_complex_storage_without_mirror() {
+        let mut complex = ComplexTensor::new_integer(
+            runmat_builtins::IntegerComplexStorage::new(
+                IntegerStorage::I16(vec![9]),
+                IntegerStorage::I16(vec![-2]),
+            )
+            .expect("integer complex storage"),
+            vec![1, 1],
+        )
+        .expect("integer complex tensor");
+        complex.data.clear();
+
+        assert_eq!(
+            scalar_complex_value(&Value::ComplexTensor(complex.clone())),
+            Some((9.0, -2.0))
+        );
+        assert_eq!(
+            complex_tensor_into_value(complex),
+            Value::Complex(9.0, -2.0)
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_char_array_support() {
@@ -727,7 +753,7 @@ pub(crate) mod tests {
     fn mod_scalar_fast_path_reads_typed_integer_storage_exactly() {
         let mut lhs =
             Tensor::new_integer(IntegerStorage::I16(vec![7]), vec![1, 1]).expect("lhs tensor");
-        lhs.data[0] = -999.0;
+        lhs.data.clear();
 
         assert_eq!(scalar_real_value(&Value::Tensor(lhs.clone())), Some(7.0));
 
