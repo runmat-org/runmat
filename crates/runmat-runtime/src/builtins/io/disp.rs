@@ -253,7 +253,8 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
 
 fn format_numeric_tensor(tensor: &Tensor) -> Vec<String> {
     let shape = canonical_dims(&tensor.shape);
-    if tensor.data.is_empty() {
+    let len = tensor::tensor_element_len(tensor);
+    if len == 0 {
         if shape.len() == 2 && shape[0] == 0 && shape[1] == 0 {
             return vec!["[]".to_string()];
         }
@@ -271,7 +272,7 @@ fn format_numeric_tensor(tensor: &Tensor) -> Vec<String> {
     if shape.len() <= 2 {
         let rows = shape[0];
         let cols = shape.get(1).copied().unwrap_or(1);
-        if tensor.data.len() == 1 {
+        if len == 1 {
             return vec![format_tensor_value(tensor, 0)];
         }
         return format_table(
@@ -325,10 +326,11 @@ fn format_numeric_tensor_pages(tensor: &Tensor, dims: &[usize]) -> Vec<String> {
 }
 
 fn format_numeric_tensor_nested(tensor: &Tensor) -> Vec<String> {
-    if tensor.data.is_empty() {
+    let len = tensor::tensor_element_len(tensor);
+    if len == 0 {
         return vec!["[]".to_string()];
     }
-    if tensor.data.len() == 1 {
+    if len == 1 {
         return vec![format_tensor_value(tensor, 0)];
     }
     let shape = canonical_dims(&tensor.shape);
@@ -361,7 +363,8 @@ fn format_integer_storage_value(storage: &IntegerStorage, index: usize) -> Strin
 
 fn format_complex_tensor(tensor: &ComplexTensor) -> Vec<String> {
     let shape = canonical_dims(&tensor.shape);
-    if tensor.data.is_empty() {
+    let len = tensor::complex_tensor_element_len(tensor);
+    if len == 0 {
         return vec!["[]".to_string()];
     }
     if shape.contains(&0) {
@@ -373,7 +376,7 @@ fn format_complex_tensor(tensor: &ComplexTensor) -> Vec<String> {
     if shape.len() <= 2 {
         let rows = shape[0];
         let cols = shape.get(1).copied().unwrap_or(1);
-        if tensor.data.len() == 1 {
+        if len == 1 {
             return vec![tensor.format_element(0)];
         }
         return format_table(
@@ -427,10 +430,11 @@ fn format_complex_tensor_pages(tensor: &ComplexTensor, dims: &[usize]) -> Vec<St
 }
 
 fn format_complex_tensor_nested(tensor: &ComplexTensor) -> Vec<String> {
-    if tensor.data.is_empty() {
+    let len = tensor::complex_tensor_element_len(tensor);
+    if len == 0 {
         return vec!["[]".to_string()];
     }
-    if tensor.data.len() == 1 {
+    if len == 1 {
         return vec![tensor.format_element(0)];
     }
     let shape = canonical_dims(&tensor.shape);
@@ -582,9 +586,10 @@ fn summarize_for_cell(value: &Value) -> String {
         Value::Bool(flag) => format!("[{}]", if *flag { 1 } else { 0 }),
         Value::Complex(re, im) => format!("[{}]", Value::Complex(*re, *im)),
         Value::Tensor(tensor) => {
-            if tensor.data.is_empty() {
+            let len = tensor::tensor_element_len(tensor);
+            if len == 0 {
                 "[]".to_string()
-            } else if tensor.data.len() == 1 {
+            } else if len == 1 {
                 format!("[{}]", format_tensor_value(tensor, 0))
             } else {
                 let class_name = tensor
@@ -602,9 +607,10 @@ fn summarize_for_cell(value: &Value) -> String {
             dims_to_string(&[sparse.rows, sparse.cols])
         ),
         Value::ComplexTensor(tensor) => {
-            if tensor.data.is_empty() {
+            let len = tensor::complex_tensor_element_len(tensor);
+            if len == 0 {
                 "[]".to_string()
-            } else if tensor.data.len() == 1 {
+            } else if len == 1 {
                 format!("[{}]", tensor.format_element(0))
             } else {
                 let class_name = tensor
@@ -976,9 +982,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integer_tensor_display_uses_exact_backing_storage() {
-        let tensor =
+        let mut tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
                 .expect("integer tensor");
+        tensor.data.clear();
 
         let lines = format_for_disp(&Value::Tensor(tensor));
 
@@ -988,8 +995,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integer_tensor_nested_summary_preserves_class() {
-        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2])
+        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2])
             .expect("integer tensor");
+        tensor.data.clear();
         let mut fields = StructValue::new();
         fields.insert("values", Value::Tensor(tensor));
 
@@ -1006,7 +1014,8 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![7, 0]),
         )
         .expect("matching components");
-        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex");
+        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex");
+        tensor.data.clear();
         assert_eq!(
             format_for_disp(&Value::ComplexTensor(tensor.clone())),
             vec![format!("{}+7i  {}", u64::MAX, 1_u64 << 63)]
