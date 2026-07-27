@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::OpenOptions;
 
@@ -581,9 +582,10 @@ fn string_array_to_text(sa: &StringArray) -> Vec<char> {
 }
 
 fn tensor_to_bytes(tensor: &Tensor) -> BuiltinResult<Vec<u8>> {
-    let mut out = Vec::with_capacity(tensor.data.len());
+    let len = tensor_utils::tensor_element_len(tensor);
+    let mut out = Vec::with_capacity(len);
     if let Some(storage) = tensor.integer_storage() {
-        for idx in 0..tensor.data.len() {
+        for idx in 0..len {
             let value = storage
                 .value_at(idx)
                 .expect("integer storage mirrors tensor shape");
@@ -599,8 +601,9 @@ fn tensor_to_bytes(tensor: &Tensor) -> BuiltinResult<Vec<u8>> {
         }
         return Ok(out);
     }
-    for (idx, value) in tensor.data.iter().enumerate() {
-        match float_to_byte(*value) {
+    let values = tensor_utils::tensor_values_f64_cow(tensor);
+    for (idx, value) in values.iter().copied().enumerate() {
+        match float_to_byte(value) {
             Ok(byte) => out.push(byte),
             Err(msg) => {
                 return Err(filewrite_error_with_detail(
@@ -924,7 +927,7 @@ pub(crate) mod tests {
         let path = unique_path("filewrite_typed_raw_bytes");
         let mut tensor = Tensor::new_integer(IntegerStorage::U8(vec![0, 127, 255]), vec![3, 1])
             .expect("typed byte tensor");
-        tensor.data.fill(42.0);
+        tensor.data.clear();
 
         run_filewrite(
             Value::from(path.to_string_lossy().to_string()),

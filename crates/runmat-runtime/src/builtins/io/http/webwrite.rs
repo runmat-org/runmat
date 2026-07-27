@@ -722,9 +722,10 @@ fn encode_binary_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
 }
 
 fn tensor_f64_to_bytes(tensor: &Tensor) -> BuiltinResult<Vec<u8>> {
-    let mut bytes = Vec::with_capacity(tensor.data.len());
-    for value in &tensor.data {
-        bytes.push(float_to_byte(*value)?);
+    let values = tensor_utils::tensor_values_f64_cow(tensor);
+    let mut bytes = Vec::with_capacity(values.len());
+    for value in values.iter().copied() {
+        bytes.push(float_to_byte(value)?);
     }
     Ok(bytes)
 }
@@ -1481,7 +1482,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webwrite_binary_payload_respected() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 255.0], vec![4, 1]).unwrap();
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U8(vec![1, 2, 3, 255]),
+            vec![4, 1],
+        )
+        .unwrap();
+        tensor.data.clear();
         let payload = Value::Tensor(tensor);
         let mut opts_struct = StructValue::new();
         opts_struct

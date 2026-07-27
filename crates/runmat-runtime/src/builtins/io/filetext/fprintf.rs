@@ -309,10 +309,11 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
 fn try_tensor_char_row_as_string(value: &Value) -> Option<Result<String, String>> {
     match value {
         Value::Tensor(t) => {
-            let is_row = (t.shape.len() == 2 && t.shape[0] == 1 && t.data.len() == t.shape[1])
-                || (t.shape.len() == 1 && t.data.len() == t.shape[0]);
+            let len = tensor::tensor_element_len(t);
+            let is_row = (t.shape.len() == 2 && t.shape[0] == 1 && len == t.shape[1])
+                || (t.shape.len() == 1 && len == t.shape[0]);
             if is_row {
-                let mut out = String::with_capacity(t.data.len());
+                let mut out = String::with_capacity(len);
                 if let Some(storage) = t.integer_storage() {
                     for code in storage.exact_values() {
                         if let Some(ch) = char_from_int_value(&code) {
@@ -369,7 +370,7 @@ fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
             // Only accept numeric codepoint vectors of length >= 2 as formatSpec.
             // This avoids misinterpreting stray 1x1 numerics (e.g., accidental stack values)
             // as a valid format string.
-            if t.data.len() >= 2 {
+            if tensor::tensor_element_len(t) >= 2 {
                 match try_tensor_char_row_as_string(value) {
                     Some(Ok(s)) => Ok(Some(Value::String(s))),
                     Some(Err(e)) => Err(e),
@@ -770,7 +771,7 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .expect("format tensor");
-        format.data.fill(f64::NAN);
+        format.data.clear();
 
         assert_eq!(
             coerce_to_format_string(&Value::Tensor(format)).unwrap(),
@@ -782,7 +783,7 @@ pub(crate) mod tests {
     fn fprintf_fid_parser_reads_typed_integer_storage_exactly() {
         let mut fid =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("fid tensor");
-        fid.data[0] = 0.0;
+        fid.data.clear();
         assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
 
         let too_large =
