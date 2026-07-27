@@ -281,7 +281,7 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Some(tensor::tensor_values_f64(t)[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
@@ -677,7 +677,7 @@ fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
         Value::Num(n) => Ok(Some(*n)),
         Value::Int(i) => Ok(Some(i.to_f64())),
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(Some(tensor::tensor_values_f64(t)[0])),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(Some(tensor::tensor_value_f64(t, 0))),
         Value::LogicalArray(l) if l.data.len() == 1 => {
             Ok(Some(if l.data[0] != 0 { 1.0 } else { 0.0 }))
         }
@@ -911,6 +911,24 @@ pub(crate) mod tests {
 
     fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::power_builtin(lhs, rhs, rest))
+    }
+
+    #[test]
+    fn scalar_extractors_read_typed_integer_tensor_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("integer tensor");
+        tensor.data.clear();
+        let value = Value::Tensor(tensor);
+
+        assert_eq!(
+            scalar_real_value(&value),
+            Some(9_007_199_254_740_993_u64 as f64)
+        );
+        assert_eq!(
+            extract_scalar_f64(&value).expect("scalar"),
+            Some(9_007_199_254_740_993_u64 as f64)
+        );
     }
 
     #[test]
