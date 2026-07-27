@@ -521,7 +521,7 @@ fn nonempty_field<'a>(st: &'a StructValue, name: &str) -> Option<&'a Value> {
 }
 
 fn is_empty_numeric(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor.data.is_empty())
+    matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0)
 }
 
 fn canonical_name(name: &str) -> String {
@@ -660,7 +660,7 @@ fn scalar_f64(value: &Value, label: &str) -> BuiltinResult<f64> {
             }
         }
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            tensor::tensor_values_f64(tensor)[0]
+            tensor::tensor_value_f64(tensor, 0)
         }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             if array.data[0] == 0 {
@@ -1579,6 +1579,12 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
     fn output_pair(value: Value) -> (Value, Value) {
         let Value::OutputList(values) = value else {
             panic!("expected output list");
@@ -1784,11 +1790,11 @@ mod tests {
             Value::String("normal".to_string()),
             vec![
                 Value::CharArray(CharArray::new_row("Lambda")),
-                poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+                cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
                 Value::CharArray(CharArray::new_row("Weights")),
                 poisoned_int_tensor(IntegerStorage::U16(vec![1, 1, 2, 2, 1]), 5, 1),
                 Value::CharArray(CharArray::new_row("MaxIter")),
-                poisoned_int_tensor(IntegerStorage::U16(vec![300]), 1, 1),
+                cleared_int_tensor(IntegerStorage::U16(vec![300]), 1, 1),
                 Value::CharArray(CharArray::new_row("Standardize")),
                 Value::Bool(false),
             ],
@@ -1827,5 +1833,13 @@ mod tests {
         };
         assert_eq!(coeffs.shape, vec![1, 1]);
         assert!(coeffs.data[0].is_finite());
+    }
+
+    #[test]
+    fn lassoglm_empty_numeric_helper_uses_typed_integer_storage_len() {
+        let mut empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
+        empty.data = vec![1.0];
+
+        assert!(is_empty_numeric(&Value::Tensor(empty)));
     }
 }

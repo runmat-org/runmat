@@ -466,7 +466,9 @@ fn scalar_f64(value: &Value, label: &str) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_value_f64(tensor, 0),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             if array.data[0] == 0 {
                 0.0
@@ -1158,6 +1160,12 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
     fn output_pair(value: Value) -> (Value, Value) {
         let Value::OutputList(values) = value else {
             panic!("expected output list");
@@ -1253,13 +1261,13 @@ mod tests {
             y,
             vec![
                 Value::CharArray(CharArray::new_row("Lambda")),
-                poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+                cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
                 Value::CharArray(CharArray::new_row("Alpha")),
-                poisoned_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+                cleared_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
                 Value::CharArray(CharArray::new_row("Weights")),
                 poisoned_int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1]), vec![4, 1]),
                 Value::CharArray(CharArray::new_row("MaxIter")),
-                poisoned_int_tensor(IntegerStorage::U16(vec![50]), vec![1, 1]),
+                cleared_int_tensor(IntegerStorage::U16(vec![50]), vec![1, 1]),
                 Value::CharArray(CharArray::new_row("Standardize")),
                 Value::Bool(false),
             ],
