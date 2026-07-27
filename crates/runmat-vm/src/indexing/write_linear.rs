@@ -7,6 +7,10 @@ use crate::indexing::write_slice::{
 };
 use crate::interpreter::errors::mex;
 use runmat_builtins::{ComplexTensor, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
+use runmat_runtime::builtins::common::tensor::{
+    complex_tensor_element_len, complex_tensor_value_complex64, is_scalar_tensor,
+    tensor_element_len, tensor_value_f64,
+};
 use runmat_runtime::RuntimeError;
 
 fn map_assignment_shape_error(err: impl std::fmt::Display) -> RuntimeError {
@@ -18,8 +22,8 @@ fn map_acceleration_error(context: &str, err: impl std::fmt::Display) -> Runtime
 }
 
 fn is_empty_tensor(value: &Value) -> bool {
-    matches!(value, Value::Tensor(t) if t.data.is_empty() || t.rows == 0 || t.cols == 0)
-        || matches!(value, Value::ComplexTensor(t) if t.data.is_empty() || t.rows == 0 || t.cols == 0)
+    matches!(value, Value::Tensor(t) if tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0)
+        || matches!(value, Value::ComplexTensor(t) if complex_tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0)
 }
 
 fn integer_storage_scalar(storage: &IntegerStorage) -> IntValue {
@@ -46,7 +50,7 @@ async fn rhs_to_integer_assignment_scalar(
         } else {
             0.0
         })),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.integer_storage() {
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => match tensor.integer_storage() {
             Some(storage) => Ok(IntegerAssignmentValue::Exact(integer_storage_scalar(
                 storage,
             ))),
@@ -91,7 +95,7 @@ async fn rhs_to_complex_integer_assignment_scalar(
     };
     match rhs {
         Value::Complex(real, imag) => Ok(scalar(*real, *imag)),
-        Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
+        Value::ComplexTensor(tensor) if complex_tensor_element_len(tensor) == 1 => {
             if let Some(storage) = &tensor.integer_data {
                 return Ok(ComplexIntegerAssignmentValue {
                     real: IntegerAssignmentValue::Exact(
@@ -305,8 +309,8 @@ pub async fn rhs_to_real_scalar(rhs: &Value) -> Result<f64, RuntimeError> {
     match rhs {
         Value::Num(x) => Ok(*x),
         Value::Tensor(t2) => {
-            if t2.data.len() == 1 {
-                Ok(t2.data[0])
+            if is_scalar_tensor(t2) {
+                Ok(tensor_value_f64(t2, 0))
             } else {
                 Err(mex("ScalarRequired", "RHS must be scalar"))
             }
@@ -340,8 +344,11 @@ pub async fn rhs_to_complex_scalar(rhs: &Value) -> Result<(f64, f64), RuntimeErr
         Value::Num(n) => Ok((*n, 0.0)),
         Value::Int(i) => Ok((i.to_f64(), 0.0)),
         Value::Bool(b) => Ok((if *b { 1.0 } else { 0.0 }, 0.0)),
-        Value::Tensor(t) if t.data.len() == 1 => Ok((t.data[0], 0.0)),
-        Value::ComplexTensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if is_scalar_tensor(t) => Ok((tensor_value_f64(t, 0), 0.0)),
+        Value::ComplexTensor(t) if complex_tensor_element_len(t) == 1 => {
+            let value = complex_tensor_value_complex64(t, 0);
+            Ok((value.re, value.im))
+        }
         Value::GpuTensor(h) => {
             let total = h.shape.iter().copied().product::<usize>();
             if total != 1 {
@@ -833,6 +840,50 @@ mod tests {
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![1, u64::MAX]))
+        );
+    }
+
+    #[test]
+    fn linear_assignment_reads_typed_integer_rhs_without_mirror() {
+        let tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).expect("tensor");
+        let mut rhs = Tensor::new_integer(IntegerStorage::U16(vec![11]), vec![1, 1]).expect("rhs");
+        rhs.data.clear();
+
+        let result = block_on(assign_tensor_scalar(
+            tensor,
+            &[2],
+            &Value::Tensor(rhs),
+            false,
+        ))
+        .expect("assignment");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.data, vec![0.0, 11.0]);
+    }
+
+    #[test]
+    fn integer_linear_assignment_reads_typed_integer_rhs_without_mirror() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).expect("tensor");
+        let mut rhs = Tensor::new_integer(IntegerStorage::I16(vec![7]), vec![1, 1]).expect("rhs");
+        rhs.data.clear();
+
+        let result = block_on(assign_tensor_scalar(
+            tensor,
+            &[2],
+            &Value::Tensor(rhs),
+            false,
+        ))
+        .expect("assignment");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I16(vec![1, 7]))
         );
     }
 

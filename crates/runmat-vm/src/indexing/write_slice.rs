@@ -7,6 +7,9 @@ use runmat_accelerate_api::{HostIntegerDataOwned, HostIntegerDataView, HostInteg
 use runmat_builtins::{
     ComplexTensor, IntegerComplexStorage, IntegerStorage, SparseTensor, StringArray, Tensor, Value,
 };
+use runmat_runtime::builtins::common::tensor::{
+    self, complex_tensor_element_len, is_scalar_tensor, tensor_element_len, tensor_value_f64,
+};
 use runmat_runtime::RuntimeError;
 
 fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
@@ -21,11 +24,11 @@ fn is_empty_delete_rhs(value: &Value) -> bool {
     matches!(
         value,
         Value::Tensor(t)
-            if t.data.is_empty() || t.rows == 0 || t.cols == 0
+            if tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0
     ) || matches!(
         value,
         Value::ComplexTensor(t)
-            if t.data.is_empty() || t.rows == 0 || t.cols == 0
+            if complex_tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0
     ) || matches!(value, Value::OutputList(values) if values.is_empty())
 }
 
@@ -103,7 +106,7 @@ fn scalar_integer_value(value: &Value) -> Result<IntegerAssignmentValue, Runtime
         } else {
             0.0
         })),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.integer_storage() {
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => match tensor.integer_storage() {
             Some(storage) => Ok(IntegerAssignmentValue::Exact(
                 integer_assignment::values(storage)[0].clone(),
             )),
@@ -1214,10 +1217,11 @@ pub async fn materialize_rhs_linear_real(
         Value::Int(int_val) => Ok(vec![int_val.to_f64(); count]),
         Value::Bool(b) => Ok(vec![if b { 1.0 } else { 0.0 }; count]),
         Value::Tensor(t) => {
-            if t.data.len() == count {
-                Ok(t.data)
-            } else if t.data.len() == 1 {
-                Ok(vec![t.data[0]; count])
+            let len = tensor_element_len(&t);
+            if len == count {
+                Ok(tensor::tensor_into_values_f64(t))
+            } else if len == 1 {
+                Ok(vec![tensor_value_f64(&t, 0); count])
             } else {
                 Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
             }
@@ -1281,7 +1285,8 @@ pub async fn materialize_rhs_nd_real(
             for d in 1..selection_lengths.len() {
                 strides[d] = strides[d - 1] * shape[d - 1].max(1);
             }
-            if t.data.len()
+            let data = tensor::tensor_into_values_f64(t);
+            if data.len()
                 != shape
                     .iter()
                     .copied()
@@ -1290,7 +1295,7 @@ pub async fn materialize_rhs_nd_real(
                 return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
             RhsView::Tensor {
-                data: t.data,
+                data,
                 shape,
                 strides,
             }
@@ -1426,7 +1431,7 @@ fn value_to_real_scalar(value: &Value) -> Result<f64, RuntimeError> {
         Value::Num(n) => Ok(*n),
         Value::Int(int_val) => Ok(int_val.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if is_scalar_tensor(t) => Ok(tensor_value_f64(t, 0)),
         _ => f64::try_from(value).map_err(Into::into),
     }
 }
@@ -1517,9 +1522,10 @@ mod tests {
     fn integer_plan_assignment_preserves_exact_uint64_rhs() {
         let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 3]), vec![1, 3]).expect("tensor");
-        let rhs = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 9]), vec![1, 2]).expect("rhs"),
-        );
+        let mut rhs_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 9]), vec![1, 2]).expect("rhs");
+        rhs_tensor.data.clear();
+        let rhs = Value::Tensor(rhs_tensor);
         let plan = IndexPlan::new(vec![0, 1], vec![1, 2], vec![2], 1, vec![1, 3]);
         let result = block_on(assign_tensor_with_plan(tensor, &plan, &rhs)).expect("assign");
 
@@ -1530,6 +1536,22 @@ mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 9, 3]))
         );
+    }
+
+    #[test]
+    fn real_plan_assignment_reads_typed_integer_rhs_without_mirror() {
+        let tensor = Tensor::new(vec![0.0, 0.0, 0.0], vec![1, 3]).expect("tensor");
+        let mut rhs_tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![4, 9]), vec![1, 2]).expect("rhs");
+        rhs_tensor.data.clear();
+        let rhs = Value::Tensor(rhs_tensor);
+        let plan = IndexPlan::new(vec![0, 2], vec![1, 2], vec![2], 1, vec![1, 3]);
+        let result = block_on(assign_tensor_with_plan(tensor, &plan, &rhs)).expect("assign");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.data, vec![4.0, 0.0, 9.0]);
     }
 
     #[test]

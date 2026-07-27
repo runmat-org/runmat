@@ -2,7 +2,9 @@ use crate::indexing::plan::total_len_from_shape;
 use crate::interpreter::errors::mex;
 use runmat_builtins::{IntValue, Value};
 use runmat_runtime::{
-    builtins::common::shape::is_scalar_shape, dispatcher::gather_if_needed_async, RuntimeError,
+    builtins::common::{shape::is_scalar_shape, tensor},
+    dispatcher::gather_if_needed_async,
+    RuntimeError,
 };
 
 pub type VmResult<T> = Result<T, RuntimeError>;
@@ -93,13 +95,13 @@ fn index_scalar_from_host_value(value: &Value) -> Option<IndexScalar> {
     match value {
         Value::Num(n) => exact_index_from_f64(*n).map(IndexScalar::Signed),
         Value::Int(int_val) => Some(IndexScalar::from_int(int_val)),
-        Value::Tensor(t) if t.data.len() == 1 && is_scalar_shape(&t.shape) => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) && is_scalar_shape(&t.shape) => {
             if let Some(storage) = t.integer_storage() {
                 storage
                     .value_at(0)
                     .map(|value| IndexScalar::from_int(&value))
             } else {
-                exact_index_from_f64(t.data[0]).map(IndexScalar::Signed)
+                exact_index_from_f64(tensor::tensor_value_f64(t, 0)).map(IndexScalar::Signed)
             }
         }
         _ => None,
@@ -468,8 +470,9 @@ mod tests {
     #[test]
     fn scalar_integer_tensor_indices_use_exact_integer_storage() {
         let exact = (1_u64 << 53) + 1;
-        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1])
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1])
             .expect("scalar uint64 tensor");
+        tensor.data.clear();
         let err = futures::executor::block_on(indices_from_value_linear(&Value::Tensor(tensor), 8))
             .expect_err("huge scalar integer tensor index should be out of bounds");
         assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
