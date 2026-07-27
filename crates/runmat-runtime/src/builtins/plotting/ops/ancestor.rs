@@ -327,7 +327,7 @@ fn scalar_handle(value: &Value) -> Option<f64> {
     match value {
         Value::Num(v) => Some(*v),
         Value::Int(i) => Some(i.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             Some(tensor_utils::tensor_value_f64(tensor, 0))
         }
         _ => None,

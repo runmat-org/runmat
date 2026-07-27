@@ -98,8 +98,8 @@ pub fn parse_optional_figure_handle(
             let text = parse_string(value).unwrap_or_default();
             parse_string_handle_or_next(&text, ctx)
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            let value = tensor::tensor_values_f64(tensor)[0];
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            let value = tensor::tensor_value_f64(tensor, 0);
             Ok(Some(handle_from_scalar(value, ctx)?))
         }
         Value::Num(v) => Ok(Some(handle_from_scalar(*v, ctx)?)),

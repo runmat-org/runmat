@@ -292,10 +292,9 @@ fn figure_handle_arg(value: &Value) -> BuiltinResult<Option<FigureHandle>> {
     match value {
         Value::Num(v) => Ok(Some(handle_from_scalar(*v, BUILTIN_NAME)?)),
         Value::Int(i) => Ok(Some(handle_from_scalar(i.to_f64(), BUILTIN_NAME)?)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Some(handle_from_scalar(
-            tensor_utils::tensor_value_f64(tensor, 0),
-            BUILTIN_NAME,
-        )?)),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => Ok(Some(
+            handle_from_scalar(tensor_utils::tensor_value_f64(tensor, 0), BUILTIN_NAME)?,
+        )),
         _ => Ok(None),
     }
 }
@@ -639,7 +638,7 @@ mod tests {
     fn print_figure_handle_arg_reads_typed_integer_storage_exactly() {
         let mut tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U32(vec![5]), vec![1, 1]).unwrap();
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
 
         assert_eq!(
             figure_handle_arg(&Value::Tensor(tensor)).unwrap(),

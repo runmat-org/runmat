@@ -157,10 +157,9 @@ fn figure_handle_arg(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>
     match value {
         Value::Num(v) => Ok(Some(handle_from_scalar(*v, "gca")?)),
         Value::Int(i) => Ok(Some(handle_from_scalar(i.to_f64(), "gca")?)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Some(handle_from_scalar(
-            tensor_utils::tensor_value_f64(tensor, 0),
-            "gca",
-        )?)),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => Ok(Some(
+            handle_from_scalar(tensor_utils::tensor_value_f64(tensor, 0), "gca")?,
+        )),
         _ => Ok(None),
     }
 }
@@ -195,7 +194,7 @@ pub(crate) mod tests {
             vec![1, 1],
         )
         .unwrap();
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
 
         assert_eq!(
             figure_handle_arg(&Value::Tensor(tensor)).unwrap(),

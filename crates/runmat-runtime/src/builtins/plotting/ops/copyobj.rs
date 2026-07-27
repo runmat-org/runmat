@@ -306,7 +306,7 @@ fn handle_scalar(value: &Value, role: &'static str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(value.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             Ok(tensor_utils::tensor_value_f64(tensor, 0))
         }
         _ => Err(copyobj_error(
@@ -366,7 +366,7 @@ mod tests {
     fn copyobj_handle_scalar_reads_typed_integer_storage_exactly() {
         let mut tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U32(vec![7]), vec![1, 1]).unwrap();
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
 
         assert_eq!(
             handle_scalar(&Value::Tensor(tensor), "source").unwrap(),

@@ -180,7 +180,7 @@ fn depth_from_value(value: &Value) -> crate::BuiltinResult<usize> {
     let number = match value {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             tensor_utils::tensor_value_f64(tensor, 0)
         }
         _ => return Err(invalid_argument("-depth must be numeric")),
@@ -635,7 +635,7 @@ mod tests {
     #[test]
     fn findobj_depth_reads_typed_integer_storage_exactly() {
         let mut tensor = Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).unwrap();
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
 
         assert_eq!(depth_from_value(&Value::Tensor(tensor)).unwrap(), 3);
     }
