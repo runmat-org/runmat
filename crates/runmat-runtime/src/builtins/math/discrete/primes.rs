@@ -8,7 +8,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::{gpu_helpers, tensor as tensor_utils};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "primes";
@@ -155,7 +155,7 @@ async fn scalar_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<PrimeRequest>
 }
 
 fn scalar_from_tensor(tensor: Tensor) -> BuiltinResult<PrimeRequest> {
-    if tensor.data.len() != 1 {
+    if !tensor_utils::is_scalar_tensor(&tensor) {
         return Err(error_with_detail(
             &ERROR_INVALID_INPUT,
             "n must be a scalar value",
@@ -387,8 +387,9 @@ mod tests {
             assert_eq!(out.integer_storage(), Some(&expected));
         }
 
-        let input = Tensor::new_integer(IntegerStorage::I64(vec![12]), vec![1, 1])
+        let mut input = Tensor::new_integer(IntegerStorage::I64(vec![12]), vec![1, 1])
             .expect("exact int64 tensor");
+        input.data.clear();
         let out = call(Value::Tensor(input)).expect("integer tensor primes");
         assert_eq!(
             out.integer_storage(),

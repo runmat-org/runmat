@@ -308,13 +308,11 @@ fn parse_offset(value: &Value, context: &str) -> BuiltinResult<usize> {
         Value::Num(n) => coerce_offset_from_float(*n, context),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
-            if t.data.len() != 1 {
+            let len = tensor::tensor_element_len(t);
+            if len != 1 {
                 return Err(csvwrite_error_with(
                     &CSVWRITE_ERROR_OFFSETS,
-                    format!(
-                        "csvwrite: {context} must be a scalar, got {} elements",
-                        t.data.len()
-                    ),
+                    format!("csvwrite: {context} must be a scalar, got {} elements", len),
                 ));
             }
             if let Some(storage) = t.integer_storage() {
@@ -740,19 +738,22 @@ pub(crate) mod tests {
 
     #[test]
     fn csvwrite_offset_parser_preserves_typed_integer_tensor_bounds() {
-        let offset =
+        let mut offset =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed offset");
+        offset.data.clear();
         assert_eq!(
             parse_offset(&Value::Tensor(offset), "row offset").unwrap(),
             7
         );
 
-        let negative =
+        let mut negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative");
+        negative.data.clear();
         assert!(parse_offset(&Value::Tensor(negative), "row offset").is_err());
 
-        let too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        let mut too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("too large");
+        too_large.data.clear();
         let parsed = parse_offset(&Value::Tensor(too_large), "row offset");
         if usize::try_from(u64::MAX).is_ok() {
             assert_eq!(parsed.unwrap(), usize::MAX);

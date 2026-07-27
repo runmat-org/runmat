@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::data::{
     array_object, data_error, dataset_object, dataset_root, ensure_manifest_sequence,
     get_object_prop, manifest_path, manifest_version_token, now_rfc3339, parse_schema,
@@ -2412,9 +2413,10 @@ async fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> BuiltinResult<()> {
 fn parse_shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(t) => {
-            let mut out = Vec::with_capacity(t.data.len());
+            let len = tensor_utils::tensor_element_len(t);
+            let mut out = Vec::with_capacity(len);
             if let Some(storage) = t.integer_storage() {
-                for index in 0..t.data.len() {
+                for index in 0..storage.len() {
                     let value = storage.value_at(index).expect("integer storage length");
                     out.push(value.try_to_usize().ok_or_else(|| {
                         data_error("shape dimensions must be non-negative integers")
@@ -2808,7 +2810,7 @@ fn parse_dim_range(value: &Value, extent: usize) -> BuiltinResult<DimRange> {
                 end: idx + 1,
             })
         }
-        Value::Tensor(t) if t.data.len() == 2 => {
+        Value::Tensor(t) if tensor_utils::tensor_element_len(t) == 2 => {
             if let Some(storage) = t.integer_storage() {
                 let Some(start) = storage
                     .value_at(0)
@@ -3134,7 +3136,7 @@ mod tests {
         let mut shape =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2, 3]), vec![1, 2])
                 .expect("shape");
-        shape.data = vec![99.0, 99.0];
+        shape.data.clear();
         assert_eq!(
             parse_shape_from_value(&Value::Tensor(shape)).expect("shape"),
             vec![2, 3]
@@ -3143,13 +3145,13 @@ mod tests {
         let mut negative =
             Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
                 .expect("shape");
-        negative.data = vec![2.0];
+        negative.data.clear();
         assert!(parse_shape_from_value(&Value::Tensor(negative)).is_err());
 
         let mut range =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2, 4]), vec![1, 2])
                 .expect("range");
-        range.data = vec![99.0, 99.0];
+        range.data.clear();
         let parsed = parse_dim_range(&Value::Tensor(range), 5).expect("range");
         assert_eq!(parsed.start, 1);
         assert_eq!(parsed.end, 4);
@@ -3159,7 +3161,7 @@ mod tests {
             vec![1, 2],
         )
         .expect("range");
-        invalid.data = vec![1.0, 1.0];
+        invalid.data.clear();
         assert!(parse_dim_range(&Value::Tensor(invalid), 5).is_err());
     }
     use crate::dispatcher::call_builtin;
