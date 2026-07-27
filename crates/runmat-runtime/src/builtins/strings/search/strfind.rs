@@ -443,11 +443,12 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
             }
         }
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            let len = tensor::tensor_element_len(tensor);
+            if len != 1 {
                 Err(strfind_error_with_message(
                     format!(
                         "strfind: option values must be scalar numeric values (received {} elements)",
-                        tensor.data.len()
+                        len
                     ),
                     &STRFIND_ERROR_INVALID_OPTION,
                 ))
@@ -685,7 +686,7 @@ pub(crate) mod tests {
     fn strfind_force_cell_output_typed_integer_tensor_reads_exact_storage() {
         let mut flag =
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("integer tensor");
-        flag.data.fill(f64::NAN);
+        flag.data.clear();
         let result = run_strfind(
             Value::String("mission".into()),
             Value::String("s".into()),

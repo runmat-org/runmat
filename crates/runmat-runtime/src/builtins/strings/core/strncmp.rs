@@ -246,7 +246,7 @@ fn parse_prefix_length(value: Value) -> BuiltinResult<usize> {
         Value::Num(n) => parse_prefix_length_from_float(n),
         Value::Bool(b) => Ok(if b { 1 } else { 0 }),
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            if tensor::tensor_element_len(&tensor) != 1 {
                 return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
             }
             parse_prefix_length_from_float(tensor::tensor_value_f64(&tensor, 0))
@@ -399,7 +399,7 @@ pub(crate) mod tests {
     fn strncmp_prefix_length_typed_integer_tensor_reads_exact_storage() {
         let mut limit =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer tensor");
-        limit.data.fill(f64::NAN);
+        limit.data.clear();
         let result = strncmp_builtin(
             Value::String("gamma".into()),
             Value::String("gamut".into()),
