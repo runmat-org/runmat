@@ -714,7 +714,9 @@ fn cell_value_from_value(value: Value) -> BuiltinResult<CellValue> {
         Value::CharArray(ca) if ca.rows == 1 => Ok(CellValue::Text(ca.data.iter().collect())),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(CellValue::Text(sa.data[0].clone())),
         Value::StringArray(sa) if sa.data.is_empty() => Ok(CellValue::Empty),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => scalar_tensor_cell_value(&tensor),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+            scalar_tensor_cell_value(&tensor)
+        }
         Value::Tensor(tensor) if tensor.data.is_empty() => Ok(CellValue::Empty),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(CellValue::Boolean(logical.data[0] != 0))
@@ -1642,7 +1644,7 @@ mod tests {
         let filename = path.to_string_lossy().into_owned();
         let mut typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
             .expect("typed scalar tensor");
-        typed.data = vec![0.0];
+        typed.data.clear();
         let values = cell(
             vec![
                 Value::CharArray(CharArray::new_row("name")),

@@ -565,7 +565,7 @@ fn value_to_f64(value: &Value, context: &str) -> BuiltinResult<f64> {
         }
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
+            if tensor::is_scalar_tensor(t) {
                 let v = tensor::tensor_value_f64(t, 0);
                 if v.is_finite() {
                     Ok(v)
@@ -600,12 +600,12 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
             Value::Num(n) => out.push(format_numeric_token(n)),
             Value::Int(i) => out.push(i.decimal_string()),
             Value::Tensor(t) => {
-                if t.data.len() == 1 {
+                if tensor::is_scalar_tensor(&t) {
                     if let Some(storage) = t.integer_storage() {
                         let value = storage.value_at(0).expect("one-element integer storage");
                         out.push(value.decimal_string());
                     } else {
-                        out.push(format_numeric_token(t.data[0]));
+                        out.push(format_numeric_token(tensor::tensor_value_f64(&t, 0)));
                     }
                 } else {
                     return Err(readmatrix_error_with(
@@ -1634,7 +1634,7 @@ pub(crate) mod tests {
         let wide = (1_u64 << 53) + 1;
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("token");
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
 
         let tokens =
             block_on(parse_treat_as_missing(&Value::Tensor(tensor))).expect("TreatAsMissing token");
@@ -1645,7 +1645,7 @@ pub(crate) mod tests {
     fn empty_value_reads_typed_integer_tensor_storage_exactly() {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![-7]), vec![1, 1]).expect("empty value");
-        tensor.data[0] = 99.0;
+        tensor.data.clear();
 
         let value = value_to_f64(&Value::Tensor(tensor), "EmptyValue").expect("EmptyValue");
         assert_eq!(value, -7.0);

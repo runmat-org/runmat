@@ -452,13 +452,13 @@ fn parse_sheet_selector(value: &Value) -> BuiltinResult<SheetSelector> {
             let index = integer_sheet_index(i)?;
             Ok(SheetSelector::Index(index))
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(storage) = t.integer_storage() {
                 let value = storage.value_at(0).expect("one-element integer storage");
                 let index = integer_sheet_index(&value)?;
                 Ok(SheetSelector::Index(index))
             } else {
-                numeric_sheet_index(t.data[0])
+                numeric_sheet_index(tensor::tensor_value_f64(t, 0))
             }
         }
         _ => {
@@ -1370,7 +1370,7 @@ fn cell_value_from_scalar(value: Value) -> BuiltinResult<CellValue> {
         Value::CharArray(ca) if ca.rows == 1 => Ok(CellValue::Text(ca.data.iter().collect())),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(CellValue::Text(sa.data[0].clone())),
         Value::StringArray(sa) if sa.data.is_empty() => Ok(CellValue::Empty),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
             writecell::scalar_tensor_cell_value(&tensor)
         }
         Value::Tensor(tensor) if tensor.data.is_empty() => Ok(CellValue::Empty),
@@ -1682,7 +1682,7 @@ mod tests {
         let filename = path.to_string_lossy().into_owned();
         let mut typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
             .expect("typed scalar tensor");
-        typed.data = vec![0.0];
+        typed.data.clear();
         let values = cell(
             vec![
                 Value::from("name"),
@@ -1968,18 +1968,21 @@ mod tests {
 
     #[test]
     fn xlswrite_sheet_selector_preserves_typed_integer_tensor_bounds() {
-        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
             .expect("typed sheet tensor");
+        tensor.data.clear();
         assert!(matches!(
             parse_sheet_selector(&Value::Tensor(tensor)),
             Ok(SheetSelector::Index(6))
         ));
 
-        let too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        let mut too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("typed sheet tensor");
+        too_large.data.clear();
         assert!(parse_sheet_selector(&Value::Tensor(too_large)).is_err());
-        let negative =
+        let mut negative =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative");
+        negative.data.clear();
         assert!(parse_sheet_selector(&Value::Tensor(negative)).is_err());
     }
 
