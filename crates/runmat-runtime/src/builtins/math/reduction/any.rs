@@ -610,19 +610,20 @@ impl TruthTensor {
     }
 
     fn from_tensor(tensor: Tensor) -> Self {
-        let shape = if tensor::element_count(&tensor.shape) == tensor.data.len() {
+        let values = tensor::tensor_values_f64_cow(&tensor);
+        let len = values.len();
+        let shape = if tensor::element_count(&tensor.shape) == len {
             normalize_scalar_shape(&tensor.shape)
         } else if is_scalar_shape(&tensor.shape) {
-            if tensor.data.is_empty() {
+            if len == 0 {
                 Vec::new()
             } else {
-                vec![tensor.data.len()]
+                vec![len]
             }
         } else {
             tensor.shape.clone()
         };
-        let data = tensor
-            .data
+        let data = values
             .iter()
             .map(|&v| TruthValue {
                 truthy: if v.is_nan() { true } else { v != 0.0 },
@@ -960,7 +961,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, ComplexTensor, IntValue};
+    use runmat_builtins::{CharArray, ComplexTensor, IntValue, IntegerStorage};
 
     fn any_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::any_builtin(value, rest))
@@ -1010,6 +1011,24 @@ pub(crate) mod tests {
     fn any_matrix_default_dimension() {
         let tensor = Tensor::new(vec![0.0, 0.0, 2.0, 0.0, 0.0, 0.0], vec![2, 3]).unwrap();
         let result = any_builtin(Value::Tensor(tensor), Vec::new()).expect("any");
+        match result {
+            Value::LogicalArray(out) => {
+                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.data, vec![0, 1, 0]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn any_reads_typed_integer_storage_without_mirror() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![0, 0, 2, 0, 0, 0]), vec![2, 3])
+                .expect("typed integer input");
+        tensor.data.clear();
+
+        let result = any_builtin(Value::Tensor(tensor), Vec::new()).expect("any");
+
         match result {
             Value::LogicalArray(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
