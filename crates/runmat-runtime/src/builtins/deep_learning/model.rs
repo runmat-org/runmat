@@ -285,7 +285,7 @@ fn logical_scalar(value: &Value, function: &'static str, label: &str) -> Builtin
                 ))
             }
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
             let n = crate::builtins::common::tensor::tensor_value_f64(t, 0);
             if n == 0.0 || n == 1.0 {
                 Ok(n != 0.0)

@@ -52,6 +52,12 @@ fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) 
     Value::Tensor(tensor)
 }
 
+fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+    let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+    tensor.data.clear();
+    Value::Tensor(tensor)
+}
+
 #[test]
 fn dlarray_node_ids_preserve_typed_integer_bounds() {
     let node_id = |value| {
@@ -122,7 +128,7 @@ fn layer_constructors_preserve_core_properties_and_name_values() {
 
 #[test]
 fn layer_constructors_read_typed_integer_size_storage_exactly() {
-    let output_size = poisoned_int_tensor(IntegerStorage::U16(vec![10]), vec![1, 1], -1.0);
+    let output_size = cleared_int_tensor(IntegerStorage::U16(vec![10]), vec![1, 1]);
     let fc = block_on(fully_connected_layer_builtin(output_size, vec![])).unwrap();
     let Value::Object(object) = &fc else {
         panic!("expected object");
@@ -219,7 +225,7 @@ fn dlnetwork_initialize_option_reads_typed_integer_storage_exactly() {
         Value::String("relu".into()),
     ]))
     .unwrap();
-    let initialize = poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1], 1.0);
+    let initialize = cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]);
     let net = block_on(dlnetwork_builtin(vec![
         Value::Cell(CellArray::new(vec![relu], 1, 1).unwrap()),
         Value::String("Initialize".into()),
@@ -783,11 +789,11 @@ fn export_onnx_options_read_typed_integer_storage_exactly() {
         net,
         Value::String(path.to_string_lossy().into_owned()),
         Value::String("OpsetVersion".into()),
-        poisoned_int_tensor(IntegerStorage::U16(vec![14]), vec![1, 1], -1.0),
+        cleared_int_tensor(IntegerStorage::U16(vec![14]), vec![1, 1]),
         Value::String("BatchSize".into()),
-        poisoned_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1], -1.0),
+        cleared_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
         Value::String("Verbose".into()),
-        poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1], 1.0),
+        cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
     ]))
     .unwrap();
     assert_eq!(result, Value::OutputList(Vec::new()));
@@ -2078,10 +2084,10 @@ fn adamupdate_hyperparameters_read_typed_integer_storage_exactly() {
         Value::Tensor(Tensor::new(vec![0.1], vec![1, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
-        poisoned_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1], f64::NAN),
-        poisoned_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1], f64::NAN),
-        poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1], f64::NAN),
-        poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1], f64::NAN),
+        cleared_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
+        cleared_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
+        cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+        cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
     ]))
     .expect("adamupdate");
     let Value::Tensor(parameters) = out else {

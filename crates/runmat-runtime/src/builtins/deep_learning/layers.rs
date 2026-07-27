@@ -13,7 +13,8 @@ fn is_numeric_scalar(value: &Value) -> bool {
         Value::Num(n) => n.is_finite(),
         Value::Int(_) => true,
         Value::Tensor(t) => {
-            t.data.len() == 1 && crate::builtins::common::tensor::tensor_value_f64(t, 0).is_finite()
+            crate::builtins::common::tensor::is_scalar_tensor(t)
+                && crate::builtins::common::tensor::tensor_value_f64(t, 0).is_finite()
         }
         _ => false,
     }

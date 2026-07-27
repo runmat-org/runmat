@@ -1243,7 +1243,7 @@ fn optional_finite_scalar(
     match value {
         Value::Num(n) if n.is_finite() => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if crate::builtins::common::tensor::is_scalar_tensor(tensor) => {
             let n = crate::builtins::common::tensor::tensor_value_f64(tensor, 0);
             if n.is_finite() {
                 Ok(n)

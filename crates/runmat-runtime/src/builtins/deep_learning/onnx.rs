@@ -179,7 +179,7 @@ fn logical_scalar(value: &Value, label: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(flag) => Ok(*flag),
         Value::Num(n) if *n == 0.0 || *n == 1.0 => Ok(*n != 0.0),
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
             let n = crate::builtins::common::tensor::tensor_value_f64(t, 0);
             if n == 0.0 || n == 1.0 {
                 Ok(n != 0.0)

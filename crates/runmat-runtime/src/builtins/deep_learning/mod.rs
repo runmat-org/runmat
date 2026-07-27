@@ -311,7 +311,7 @@ pub(super) fn numeric_scalar(
         Value::Num(n) if n.is_finite() => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(t)
-            if t.data.len() == 1
+            if crate::builtins::common::tensor::is_scalar_tensor(t)
                 && crate::builtins::common::tensor::tensor_value_f64(t, 0).is_finite() =>
         {
             Ok(crate::builtins::common::tensor::tensor_value_f64(t, 0))
