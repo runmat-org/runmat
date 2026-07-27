@@ -290,7 +290,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<ModeAxes>> {
                 .await
                 .map_err(|e| mode_error_with(&MODE_ERROR_INVALID_DIMENSION, e))?
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             tensor::dimension_from_value_async(value, NAME, false)
                 .await
                 .map_err(|e| mode_error_with(&MODE_ERROR_INVALID_DIMENSION, e))?
@@ -905,6 +905,104 @@ impl IntKind {
             ),
         }
     }
+
+    fn value_from_int_value(self, value: &IntValue) -> IntValue {
+        match self {
+            IntKind::I8 => IntValue::I8(value.to_i64().clamp(i8::MIN as i64, i8::MAX as i64) as i8),
+            IntKind::I16 => {
+                IntValue::I16(value.to_i64().clamp(i16::MIN as i64, i16::MAX as i64) as i16)
+            }
+            IntKind::I32 => {
+                IntValue::I32(value.to_i64().clamp(i32::MIN as i64, i32::MAX as i64) as i32)
+            }
+            IntKind::I64 => IntValue::I64(value.to_i64()),
+            IntKind::U8 => IntValue::U8(value.try_to_u64().unwrap_or(0).min(u8::MAX as u64) as u8),
+            IntKind::U16 => {
+                IntValue::U16(value.try_to_u64().unwrap_or(0).min(u16::MAX as u64) as u16)
+            }
+            IntKind::U32 => {
+                IntValue::U32(value.try_to_u64().unwrap_or(0).min(u32::MAX as u64) as u32)
+            }
+            IntKind::U64 => IntValue::U64(value.try_to_u64().unwrap_or(0)),
+        }
+    }
+
+    fn storage_from_int_values(self, values: Vec<IntValue>) -> IntegerStorage {
+        match self {
+            IntKind::I8 => IntegerStorage::I8(
+                values
+                    .into_iter()
+                    .map(|value| match self.value_from_int_value(&value) {
+                        IntValue::I8(value) => value,
+                        _ => unreachable!("int kind creates matching int8 values"),
+                    })
+                    .collect(),
+            ),
+            IntKind::I16 => IntegerStorage::I16(
+                values
+                    .into_iter()
+                    .map(|value| match self.value_from_int_value(&value) {
+                        IntValue::I16(value) => value,
+                        _ => unreachable!("int kind creates matching int16 values"),
+                    })
+                    .collect(),
+            ),
+            IntKind::I32 => IntegerStorage::I32(
+                values
+                    .into_iter()
+                    .map(|value| match self.value_from_int_value(&value) {
+                        IntValue::I32(value) => value,
+                        _ => unreachable!("int kind creates matching int32 values"),
+                    })
+                    .collect(),
+            ),
+            IntKind::I64 => IntegerStorage::I64(
+                values
+                    .into_iter()
+                    .map(|value| match self.value_from_int_value(&value) {
+                        IntValue::I64(value) => value,
+                        _ => unreachable!("int kind creates matching int64 values"),
+                    })
+                    .collect(),
+            ),
+            IntKind::U8 => IntegerStorage::U8(
+                values
+                    .into_iter()
+                    .map(|value| match self.value_from_int_value(&value) {
+                        IntValue::U8(value) => value,
+                        _ => unreachable!("int kind creates matching uint8 values"),
+                    })
+                    .collect(),
+            ),
+            IntKind::U16 => IntegerStorage::U16(
+                values
+                    .into_iter()
+                    .map(|value| match self.value_from_int_value(&value) {
+                        IntValue::U16(value) => value,
+                        _ => unreachable!("int kind creates matching uint16 values"),
+                    })
+                    .collect(),
+            ),
+            IntKind::U32 => IntegerStorage::U32(
+                values
+                    .into_iter()
+                    .map(|value| match self.value_from_int_value(&value) {
+                        IntValue::U32(value) => value,
+                        _ => unreachable!("int kind creates matching uint32 values"),
+                    })
+                    .collect(),
+            ),
+            IntKind::U64 => IntegerStorage::U64(
+                values
+                    .into_iter()
+                    .map(|value| match self.value_from_int_value(&value) {
+                        IntValue::U64(value) => value,
+                        _ => unreachable!("int kind creates matching uint64 values"),
+                    })
+                    .collect(),
+            ),
+        }
+    }
 }
 
 fn tensor_into_class_value(mut tensor: Tensor, class: OutputClass) -> BuiltinResult<Value> {
@@ -1014,15 +1112,27 @@ fn tensor_into_class_array_value(mut tensor: Tensor, class: OutputClass) -> Buil
 }
 
 fn tensor_into_integer_class_value(tensor: Tensor, kind: IntKind) -> BuiltinResult<Value> {
-    if tensor.data.len() == 1 {
-        Ok(kind.to_value(tensor.data[0]))
+    if tensor::is_scalar_tensor(&tensor) {
+        if let Some(storage) = tensor.integer_storage() {
+            return Ok(Value::Int(
+                kind.value_from_int_value(
+                    &storage
+                        .value_at(0)
+                        .expect("one-element integer tensor storage"),
+                ),
+            ));
+        }
+        Ok(kind.to_value(tensor::tensor_value_f64(&tensor, 0)))
     } else {
         tensor_into_integer_class_array_value(tensor, kind)
     }
 }
 
 fn tensor_into_integer_class_array_value(tensor: Tensor, kind: IntKind) -> BuiltinResult<Value> {
-    let storage = kind.storage_from_f64_values(&tensor.data);
+    let storage = tensor
+        .integer_storage()
+        .map(|storage| kind.storage_from_int_values(storage.exact_values()))
+        .unwrap_or_else(|| kind.storage_from_f64_values(&tensor.data));
     Tensor::new_integer(storage, tensor.shape)
         .map(Value::Tensor)
         .map_err(mode_internal_error)
@@ -1194,6 +1304,26 @@ pub(crate) mod tests {
         .unwrap();
         let result =
             mode_call(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))]).expect("mode");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.data, vec![1.0, 2.0, 1.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mode_dimension_argument_reads_typed_integer_scalar_storage() {
+        let tensor = Tensor::new(
+            vec![1.0, 2.0, 1.0, 3.0, 2.0, 3.0, 1.0, 4.0, 5.0],
+            vec![3, 3],
+        )
+        .unwrap();
+        let mut dim = Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1]).unwrap();
+        dim.data.clear();
+
+        let result = mode_call(Value::Tensor(tensor), vec![Value::Tensor(dim)]).expect("mode");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
@@ -1377,6 +1507,26 @@ pub(crate) mod tests {
             let result = mode_call(Value::Tensor(input), Vec::new()).expect("mode");
             assert_eq!(result, Value::Int(expected));
         }
+    }
+
+    #[test]
+    fn mode_integer_class_materialization_reads_exact_storage() {
+        let wide = u64::MAX - 1;
+        let mut scalar = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
+        scalar.data.clear();
+        assert_eq!(
+            tensor_into_integer_class_value(scalar, IntKind::U64).expect("scalar"),
+            Value::Int(IntValue::U64(wide))
+        );
+
+        let mut vector =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide, wide - 1]), vec![1, 2]).unwrap();
+        vector.data.clear();
+        let result = tensor_into_integer_class_array_value(vector, IntKind::U64).expect("vector");
+        assert_eq!(
+            expect_tensor(&result).integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide, wide - 1]))
+        );
     }
 
     #[test]
