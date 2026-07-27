@@ -576,12 +576,8 @@ async fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bo
         }
         Value::ComplexTensor(mut tensor) => {
             ensure_vector_shape("polyval", &tensor.shape)?;
-            let all_real = tensor.data.iter().all(|&(_, im)| im.abs() <= EPS);
-            let data = tensor
-                .data
-                .drain(..)
-                .map(|(re, im)| Complex64::new(re, im))
-                .collect();
+            let all_real = complex_tensor_values_are_real(&tensor);
+            let data = complex_tensor_values(&mut tensor);
             Ok((data, all_real))
         }
         Value::LogicalArray(mut array) => {
@@ -633,13 +629,9 @@ async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
         )),
         Value::ComplexTensor(tensor) => Ok((
             NumericArray {
-                data: tensor
-                    .data
-                    .iter()
-                    .map(|&(re, im)| Complex64::new(re, im))
-                    .collect(),
+                data: complex_tensor_values_ref(&tensor),
                 shape: tensor.shape.clone(),
-                all_real: tensor.data.iter().all(|&(_, im)| im.abs() <= EPS),
+                all_real: complex_tensor_values_are_real(&tensor),
             },
             false,
         )),
@@ -701,7 +693,7 @@ async fn parse_mu(value: Value) -> BuiltinResult<Mu> {
             parse_mu(Value::Tensor(gathered)).await
         }
         Value::Tensor(tensor) => {
-            if tensor.data.len() < 2 {
+            if tensor_element_len(&tensor) < 2 {
                 return Err(polyval_error(
                     "polyval: mu must contain at least two elements",
                 ));
@@ -723,7 +715,7 @@ async fn parse_mu(value: Value) -> BuiltinResult<Mu> {
             polyval_error("polyval: mu must be a numeric vector with at least two values"),
         ),
         Value::ComplexTensor(tensor) => {
-            if tensor.data.len() < 2 {
+            if complex_tensor_element_len(&tensor) < 2 {
                 return Err(polyval_error(
                     "polyval: mu must contain at least two elements",
                 ));
@@ -818,27 +810,25 @@ async fn convert_matrix(value: Value, coeff_len: usize) -> BuiltinResult<(Matrix
             convert_matrix(Value::Tensor(tensor), coeff_len).await
         }
         Value::Tensor(tensor) => {
-            let Tensor {
-                data, rows, cols, ..
-            } = tensor;
+            let rows = tensor.rows;
+            let cols = tensor.cols;
             if rows != coeff_len || cols != coeff_len {
                 return Err(polyval_error("polyval: size of S.R must match the coefficient vector"));
             }
-            let data = data.into_iter().map(|re| Complex64::new(re, 0.0)).collect();
+            let data = tensor::tensor_values_f64(&tensor)
+                .into_iter()
+                .map(|re| Complex64::new(re, 0.0))
+                .collect();
             Ok((Matrix { rows, cols, data }, true))
         }
-        Value::ComplexTensor(tensor) => {
-            let ComplexTensor {
-                data, rows, cols, ..
-            } = tensor;
+        Value::ComplexTensor(mut tensor) => {
+            let rows = tensor.rows;
+            let cols = tensor.cols;
             if rows != coeff_len || cols != coeff_len {
                 return Err(polyval_error("polyval: size of S.R must match the coefficient vector"));
             }
-            let imag_small = data.iter().all(|&(_, im)| im.abs() <= EPS);
-            let data = data
-                .into_iter()
-                .map(|(re, im)| Complex64::new(re, im))
-                .collect();
+            let imag_small = complex_tensor_values_are_real(&tensor);
+            let data = complex_tensor_values(&mut tensor);
             Ok((Matrix { rows, cols, data }, imag_small))
         }
         Value::LogicalArray(array) => {
@@ -883,7 +873,7 @@ async fn scalar_to_f64(value: Value, context: &str) -> BuiltinResult<f64> {
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(flag) => Ok(if flag { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            if tensor_element_len(&tensor) != 1 {
                 return Err(polyval_error(format!("{context} must be a scalar")));
             }
             Ok(tensor::tensor_values_f64(&tensor)[0])
@@ -1056,10 +1046,68 @@ fn is_vector_shape(shape: &[usize]) -> bool {
     shape.iter().filter(|&&dim| dim > 1).count() <= 1
 }
 
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
+}
+
+fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
+    tensor
+        .integer_data
+        .as_ref()
+        .map_or(tensor.data.len(), |storage| storage.len())
+}
+
+fn complex_tensor_values(tensor: &mut ComplexTensor) -> Vec<Complex64> {
+    if let Some(storage) = tensor.integer_data.take() {
+        return storage
+            .real
+            .exact_values()
+            .into_iter()
+            .zip(storage.imag.exact_values())
+            .map(|(re, im)| Complex64::new(re.to_f64(), im.to_f64()))
+            .collect();
+    }
+    tensor
+        .data
+        .drain(..)
+        .map(|(re, im)| Complex64::new(re, im))
+        .collect()
+}
+
+fn complex_tensor_values_ref(tensor: &ComplexTensor) -> Vec<Complex64> {
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        return storage
+            .real
+            .exact_values()
+            .into_iter()
+            .zip(storage.imag.exact_values())
+            .map(|(re, im)| Complex64::new(re.to_f64(), im.to_f64()))
+            .collect();
+    }
+    tensor
+        .data
+        .iter()
+        .map(|&(re, im)| Complex64::new(re, im))
+        .collect()
+}
+
+fn complex_tensor_values_are_real(tensor: &ComplexTensor) -> bool {
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        return storage
+            .imag
+            .exact_values()
+            .iter()
+            .all(|value| value.is_zero());
+    }
+    tensor.data.iter().all(|&(_, im)| im.abs() <= EPS)
+}
+
 #[async_recursion::async_recursion(?Send)]
 async fn is_empty_value(value: &Value) -> BuiltinResult<bool> {
     match value {
-        Value::Tensor(t) => Ok(t.data.is_empty()),
+        Value::Tensor(t) => Ok(tensor_element_len(t) == 0),
         Value::LogicalArray(l) => Ok(l.data.is_empty()),
         Value::Cell(ca) => Ok(ca.data.is_empty()),
         Value::GpuTensor(handle) => {
@@ -1195,9 +1243,14 @@ pub(crate) mod tests {
 
     #[test]
     fn polyval_typed_integer_coefficients_points_and_mu_cross_double_boundary_exactly() {
-        let coeffs = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0]), vec![1, 3]).unwrap();
-        let points = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2]), vec![1, 3]).unwrap();
-        let mu = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).unwrap();
+        let mut coeffs =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0]), vec![1, 3]).unwrap();
+        coeffs.data.clear();
+        let mut points =
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2]), vec![1, 3]).unwrap();
+        points.data.clear();
+        let mut mu = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).unwrap();
+        mu.data.clear();
         let value = polyval_builtin(
             Value::Tensor(coeffs),
             Value::Tensor(points),
@@ -1227,7 +1280,7 @@ pub(crate) mod tests {
         )
         .expect("complex integer mu");
         let mut mu = ComplexTensor::new_integer(storage, vec![1, 2]).expect("mu tensor");
-        mu.data.fill((f64::NAN, f64::NAN));
+        mu.data.clear();
 
         let value = polyval_builtin(
             Value::Tensor(coeffs),
@@ -1245,6 +1298,43 @@ pub(crate) mod tests {
                 assert_eq!(tensor.data, vec![0.25, 0.0, 0.25]);
             }
             other => panic!("expected tensor output, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn polyval_stats_fields_read_typed_integer_storage_exactly() {
+        let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
+        let points = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
+        let mut st = StructValue::new();
+        let mut r = Tensor::new_integer(
+            IntegerStorage::I16(vec![1, 0, 0, 0, 1, 0, 0, 0, 1]),
+            vec![3, 3],
+        )
+        .unwrap();
+        r.data.clear();
+        let mut df = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
+        df.data.clear();
+        let mut normr = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).unwrap();
+        normr.data.clear();
+        st.fields.insert("R".to_string(), Value::Tensor(r));
+        st.fields.insert("df".to_string(), Value::Tensor(df));
+        st.fields.insert("normr".to_string(), Value::Tensor(normr));
+
+        let eval = futures::executor::block_on(evaluate(
+            Value::Tensor(coeffs),
+            Value::Tensor(points),
+            &[Value::Struct(st)],
+            true,
+        ))
+        .expect("polyval");
+
+        let (_, delta) = eval.into_pair().expect("delta available");
+        match delta {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 3]);
+                assert!(tensor.data.iter().all(|value| value.is_finite()));
+            }
+            other => panic!("expected tensor delta, got {other:?}"),
         }
     }
 
