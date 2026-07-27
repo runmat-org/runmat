@@ -491,7 +491,7 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
             Ok(rounded as usize)
         }
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
-            parse_degree(&Value::Num(tensor::tensor_values_f64(t)[0]))
+            parse_degree(&Value::Num(tensor::tensor_value_f64(t, 0)))
         }
         Value::LogicalArray(l) if l.len() == 1 => {
             parse_degree(&Value::Num(if l.data[0] != 0 { 1.0 } else { 0.0 }))
@@ -1126,7 +1126,8 @@ pub(crate) mod tests {
     fn polyfit_typed_integer_vectors_degree_and_weights_cross_double_boundary_exactly() {
         let x = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![4, 1]).unwrap();
         let y = Tensor::new_integer(IntegerStorage::I16(vec![2, 4, 6, 8]), vec![4, 1]).unwrap();
-        let degree = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        let mut degree = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        degree.data.clear();
         let weights =
             Tensor::new_integer(IntegerStorage::U16(vec![1, 1, 1, 1]), vec![1, 4]).unwrap();
         let eval = evaluate(

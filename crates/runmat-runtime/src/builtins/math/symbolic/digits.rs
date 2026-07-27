@@ -127,7 +127,9 @@ fn parse_digits(value: &Value) -> BuiltinResult<usize> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         other => {
             return Err(digits_error_with_message(
                 &DIGITS_ERRORS[1],
@@ -223,7 +225,7 @@ mod tests {
         let _guard = lock_digits();
         let mut precision =
             Tensor::new_integer(IntegerStorage::U16(vec![40]), vec![1, 1]).expect("precision");
-        precision.data[0] = 2.5;
+        precision.data.clear();
 
         assert_eq!(
             block_on(digits_builtin(vec![Value::Tensor(precision)])).expect("digits"),
@@ -237,7 +239,7 @@ mod tests {
         let _guard = lock_digits();
         let mut precision =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("precision");
-        precision.data[0] = 40.0;
+        precision.data.clear();
 
         let err = block_on(digits_builtin(vec![Value::Tensor(precision)])).unwrap_err();
         assert_eq!(

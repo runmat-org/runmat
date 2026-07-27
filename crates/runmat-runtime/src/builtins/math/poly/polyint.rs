@@ -362,12 +362,12 @@ async fn parse_constant(value: Value) -> BuiltinResult<Complex64> {
     let gathered = dispatcher::gather_if_needed_async(&value).await?;
     match gathered {
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            if !tensor::is_scalar_tensor(&tensor) {
                 return Err(polyint_error(
                     "polyint: constant of integration must be a scalar",
                 ));
             }
-            Ok(Complex64::new(tensor::tensor_values_f64(&tensor)[0], 0.0))
+            Ok(Complex64::new(tensor::tensor_value_f64(&tensor, 0), 0.0))
         }
         Value::ComplexTensor(tensor) => {
             if tensor.data.len() != 1 {
@@ -528,7 +528,8 @@ pub(crate) mod tests {
     #[test]
     fn polyint_typed_integer_coefficients_and_constant_cross_double_boundary_exactly() {
         let tensor = Tensor::new_integer(IntegerStorage::I16(vec![4, 0, -8]), vec![1, 3]).unwrap();
-        let constant = Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).unwrap();
+        let mut constant = Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).unwrap();
+        constant.data.clear();
         let result =
             polyint_builtin(Value::Tensor(tensor), vec![Value::Tensor(constant)]).expect("polyint");
         match result {

@@ -53,9 +53,9 @@ pub(crate) fn value_to_symbolic_scalar(value: &Value) -> Option<SymbolicExpr> {
         Value::Num(value) => Some(SymbolicExpr::constant(*value)),
         Value::Int(value) => Some(SymbolicExpr::constant(value.to_f64())),
         Value::Bool(value) => Some(SymbolicExpr::constant(if *value { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Some(SymbolicExpr::constant(
-            tensor_utils::tensor_value_f64(tensor, 0),
-        )),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => Some(
+            SymbolicExpr::constant(tensor_utils::tensor_value_f64(tensor, 0)),
+        ),
         _ => None,
     }
 }
@@ -98,7 +98,7 @@ mod tests {
     fn symbolic_scalar_reads_typed_integer_tensor_storage_exactly() {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![257]), vec![1, 1]).expect("tensor");
-        tensor.data[0] = 2.0;
+        tensor.data.clear();
 
         let expr =
             value_to_symbolic_scalar(&Value::Tensor(tensor)).expect("symbolic scalar conversion");

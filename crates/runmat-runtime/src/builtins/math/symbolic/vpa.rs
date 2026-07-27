@@ -124,7 +124,9 @@ fn parse_precision(value: &Value) -> BuiltinResult<usize> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         _ => return Err(vpa_error(&VPA_ERRORS[2])),
     };
     validate_digits(parsed).map_err(|err| {
@@ -473,7 +475,7 @@ mod tests {
     fn vpa_precision_reads_typed_integer_tensor_storage_exactly() {
         let mut precision =
             Tensor::new_integer(IntegerStorage::U16(vec![12]), vec![1, 1]).expect("precision");
-        precision.data[0] = 2.5;
+        precision.data.clear();
 
         let value = block_on(vpa_builtin(
             Value::Num(std::f64::consts::PI),
@@ -565,7 +567,7 @@ mod tests {
     fn vpa_rejects_negative_typed_integer_tensor_precision() {
         let mut precision =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("precision");
-        precision.data[0] = 12.0;
+        precision.data.clear();
 
         let err =
             block_on(vpa_builtin(Value::Num(1.0), vec![Value::Tensor(precision)])).unwrap_err();

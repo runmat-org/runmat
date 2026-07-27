@@ -876,7 +876,7 @@ async fn scalar_to_f64(value: Value, context: &str) -> BuiltinResult<f64> {
             if tensor_element_len(&tensor) != 1 {
                 return Err(polyval_error(format!("{context} must be a scalar")));
             }
-            Ok(tensor::tensor_values_f64(&tensor)[0])
+            Ok(tensor::tensor_value_f64(&tensor, 0))
         }
         Value::LogicalArray(array) => {
             if array.data.len() != 1 {
