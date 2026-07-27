@@ -1555,16 +1555,30 @@ fn parse_name_selector(
                 }
             })
             .collect(),
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|value| {
-                let idx = positive_integer(*value, context)?;
-                names.get(idx - 1).cloned().ok_or_else(|| {
-                    grouping_error(format!("{context}: variable index out of range"))
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .exact_values()
+                    .iter()
+                    .map(|value| {
+                        let idx = positive_integer_value(value, context)?;
+                        names.get(idx - 1).cloned().ok_or_else(|| {
+                            grouping_error(format!("{context}: variable index out of range"))
+                        })
+                    })
+                    .collect();
+            }
+            tensor
+                .data
+                .iter()
+                .map(|value| {
+                    let idx = positive_integer(*value, context)?;
+                    names.get(idx - 1).cloned().ok_or_else(|| {
+                        grouping_error(format!("{context}: variable index out of range"))
+                    })
                 })
-            })
-            .collect(),
+                .collect()
+        }
         other => Err(grouping_error(format!(
             "{context}: unsupported variable selector {other:?}"
         ))),
@@ -1619,6 +1633,11 @@ fn collect_group_results(values: Vec<Value>, rows: usize, context: &str) -> Buil
 }
 
 fn collect_column_values(values: Vec<Value>, rows: usize) -> BuiltinResult<Value> {
+    if let Some(storage) = homogeneous_integer_values(&values) {
+        return Tensor::new_integer(storage, vec![rows, 1])
+            .map(Value::Tensor)
+            .map_err(grouping_error);
+    }
     if values
         .iter()
         .all(|value| value_as_numeric_scalar(value).is_some())
@@ -1668,7 +1687,12 @@ fn collect_column_values(values: Vec<Value>, rows: usize) -> BuiltinResult<Value
 
 fn vector_elements(value: Value) -> BuiltinResult<Vec<Value>> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.data.into_iter().map(Value::Num).collect()),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return Ok(storage.exact_values().into_iter().map(Value::Int).collect());
+            }
+            Ok(tensor.data.into_iter().map(Value::Num).collect())
+        }
         Value::LogicalArray(array) => Ok(array
             .data
             .into_iter()
@@ -1684,6 +1708,28 @@ fn vector_elements(value: Value) -> BuiltinResult<Vec<Value>> {
         Value::String(text) => Ok(vec![Value::String(text)]),
         other => Ok(vec![other]),
     }
+}
+
+fn homogeneous_integer_values(values: &[Value]) -> Option<IntegerStorage> {
+    let first = match values.first()? {
+        Value::Int(IntValue::I8(_)) => IntegerStorage::I8(Vec::new()),
+        Value::Int(IntValue::I16(_)) => IntegerStorage::I16(Vec::new()),
+        Value::Int(IntValue::I32(_)) => IntegerStorage::I32(Vec::new()),
+        Value::Int(IntValue::I64(_)) => IntegerStorage::I64(Vec::new()),
+        Value::Int(IntValue::U8(_)) => IntegerStorage::U8(Vec::new()),
+        Value::Int(IntValue::U16(_)) => IntegerStorage::U16(Vec::new()),
+        Value::Int(IntValue::U32(_)) => IntegerStorage::U32(Vec::new()),
+        Value::Int(IntValue::U64(_)) => IntegerStorage::U64(Vec::new()),
+        _ => return None,
+    };
+    let mut exact = Vec::with_capacity(values.len());
+    for value in values {
+        let Value::Int(value) = value else {
+            return None;
+        };
+        exact.push(value.clone());
+    }
+    first.from_exact_values_like(exact).ok()
 }
 
 fn multi_output(outputs: Vec<Value>) -> BuiltinResult<Value> {
@@ -2055,6 +2101,22 @@ mod tests {
     }
 
     #[test]
+    fn grouping_name_selector_reads_typed_integer_storage_exactly() {
+        let mut selector =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 1]), vec![1, 2]).unwrap();
+        selector.data = vec![0.0, 0.0];
+
+        let selected = parse_name_selector(
+            &Value::Tensor(selector),
+            &["alpha".into(), "beta".into()],
+            "test selector",
+        )
+        .unwrap();
+
+        assert_eq!(selected, vec!["beta", "alpha"]);
+    }
+
+    #[test]
     fn accumarray_rejects_negative_exact_integer_subscripts_and_sizes() {
         let subs = Value::Tensor(
             Tensor::new_integer(IntegerStorage::I16(vec![1, -1]), vec![2, 1]).unwrap(),
@@ -2176,6 +2238,38 @@ mod tests {
         };
         assert!(is_tabular_object(&object));
         assert_eq!(table_height(&object).unwrap(), 4);
+    }
+
+    #[test]
+    fn combinations_preserves_typed_integer_columns_without_f64_mirror() {
+        let mut first =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 9]), vec![1, 2]).unwrap();
+        first.data = Vec::new();
+        let out = block_on(combinations_builtin(
+            Value::Tensor(first),
+            vec![Value::StringArray(
+                StringArray::new(vec!["x".into(), "y".into()], vec![1, 2]).unwrap(),
+            )],
+        ))
+        .unwrap();
+
+        let Value::Object(object) = out else {
+            panic!("expected table");
+        };
+        let variables = table_variables(&object).unwrap();
+        let first_column = variables
+            .fields
+            .values()
+            .next()
+            .expect("first table variable");
+
+        match first_column {
+            Value::Tensor(tensor) => assert_eq!(
+                tensor.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX, u64::MAX, 9, 9]))
+            ),
+            other => panic!("expected typed integer tensor column, got {other:?}"),
+        }
     }
 
     #[test]
