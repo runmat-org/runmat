@@ -381,7 +381,7 @@ impl FillScalar {
                 Ok(FillScalar::Logical(logical.data[0] != 0))
             }
             Value::Tensor(tensor) => {
-                if tensor.data.len() != 1 {
+                if !tensor::is_scalar_tensor(tensor) {
                     return Err("fill: fill value must be a scalar".to_string());
                 }
                 if let Some(storage) = tensor.integer_storage() {
@@ -390,15 +390,15 @@ impl FillScalar {
                         .ok_or_else(|| "fill: fill value must be a scalar".to_string())?;
                     Ok(FillScalar::Integer(value))
                 } else {
-                    Ok(FillScalar::Real(tensor.data[0]))
+                    Ok(FillScalar::Real(tensor::tensor_value_f64(tensor, 0)))
                 }
             }
             Value::Complex(re, im) => Ok(FillScalar::Complex(*re, *im)),
             Value::ComplexTensor(tensor) => {
-                if tensor.data.len() != 1 {
-                    return Err("fill: fill value must be a scalar".to_string());
-                }
                 if let Some(storage) = tensor.integer_data.as_ref() {
+                    if storage.len() != 1 {
+                        return Err("fill: fill value must be a scalar".to_string());
+                    }
                     let re = storage
                         .real
                         .value_at(0)
@@ -410,6 +410,9 @@ impl FillScalar {
                         .ok_or_else(|| "fill: fill value must be a scalar".to_string())?
                         .to_f64();
                     return Ok(FillScalar::Complex(re, im));
+                }
+                if tensor.data.len() != 1 {
+                    return Err("fill: fill value must be a scalar".to_string());
                 }
                 Ok(FillScalar::Complex(tensor.data[0].0, tensor.data[0].1))
             }
@@ -1032,8 +1035,9 @@ pub(crate) mod tests {
             Some(&IntegerStorage::U64(vec![wide, wide, wide]))
         );
 
-        let fill_value = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1])
+        let mut fill_value = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1])
             .expect("typed fill scalar");
+        fill_value.data.clear();
         let prototype = Tensor::new_integer(IntegerStorage::U32(vec![0]), vec![1, 1])
             .expect("uint32 prototype");
         let result = block_on(fill_builtin(
@@ -1120,7 +1124,7 @@ pub(crate) mod tests {
         )
         .expect("complex integer storage");
         let mut scalar = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
-        scalar.data[0] = (f64::NAN, f64::NAN);
+        scalar.data.clear();
 
         let result = block_on(fill_builtin(
             Value::ComplexTensor(scalar),
