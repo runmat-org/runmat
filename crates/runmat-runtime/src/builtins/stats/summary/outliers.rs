@@ -1076,7 +1076,9 @@ fn scalar_number(value: &Value) -> Option<f64> {
     }
     match value {
         Value::Num(value) => Some(*value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Some(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     }
 }
@@ -1084,7 +1086,7 @@ fn scalar_number(value: &Value) -> Option<f64> {
 fn integer_scalar(value: &Value) -> Option<IntValue> {
     match value {
         Value::Int(value) => Some(value.clone()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0)),
         _ => None,
@@ -1115,12 +1117,14 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.clear();
+        Value::Tensor(tensor)
     }
 
-    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(poison);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 

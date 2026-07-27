@@ -11,6 +11,7 @@ use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LinePlot, LineStyle};
 
 use crate::builtins::common::random_args::keyword_of;
+use crate::builtins::common::tensor;
 use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
 use crate::builtins::plotting::state::{render_active_plot, PlotRenderOptions};
 use crate::builtins::stats::summary::distribution_math::standard_normal_inv;
@@ -1105,7 +1106,9 @@ fn scalar_number(value: &Value) -> Option<f64> {
     }
     match value {
         Value::Num(value) => Some(*value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Some(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     }
 }
@@ -1113,7 +1116,7 @@ fn scalar_number(value: &Value) -> Option<f64> {
 fn integer_scalar(value: &Value) -> Option<IntValue> {
     match value {
         Value::Int(value) => Some(value.clone()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0)),
         _ => None,
@@ -1149,7 +1152,9 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, len: usize) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, vec![len, 1]).unwrap())
+        let mut tensor = Tensor::new_integer(storage, vec![len, 1]).unwrap();
+        tensor.data.clear();
+        Value::Tensor(tensor)
     }
 
     fn output_tensors(value: Value) -> Vec<Tensor> {
