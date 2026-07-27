@@ -92,7 +92,7 @@ impl<'a> ExactOperand<'a> {
             }
             Value::Tensor(tensor) => {
                 let Some(storage) = tensor.integer_storage() else {
-                    if tensor.data.len() == 1 {
+                    if crate::builtins::common::tensor::is_scalar_tensor(tensor) {
                         return Ok(Self::ScalarReal(value));
                     }
                     return Err(unsupported_error(

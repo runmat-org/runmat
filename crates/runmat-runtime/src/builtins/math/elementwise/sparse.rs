@@ -125,7 +125,7 @@ fn scalar_real(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Some(tensor::tensor_values_f64(t)[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows.checked_mul(ca.cols) == Some(1) => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
@@ -657,17 +657,18 @@ fn sparse_stored_values_are_finite(sparse: &SparseTensor) -> bool {
 }
 
 fn dense_has_nonfinite_at_sparse_implicit_zero(sparse: &SparseTensor, dense: &Tensor) -> bool {
-    if dense.data.iter().all(|value| value.is_finite()) {
+    let dense_values = tensor::tensor_values_f64_cow(dense);
+    if dense_values.iter().all(|value| value.is_finite()) {
         return false;
     }
-    if dense.data.len() == 1 {
-        return !dense.data[0].is_finite() && sparse_has_implicit_zeros(sparse);
+    if tensor::is_scalar_tensor(dense) {
+        return !dense_values[0].is_finite() && sparse_has_implicit_zeros(sparse);
     }
 
     for col in 0..sparse.cols {
         for row in 0..sparse.rows {
             let dense_idx = dense_index_for_sparse_position(dense, row, col);
-            if !dense.data[dense_idx].is_finite() && sparse.get(row, col).is_none() {
+            if !dense_values[dense_idx].is_finite() && sparse.get(row, col).is_none() {
                 return true;
             }
         }

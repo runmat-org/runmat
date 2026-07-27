@@ -349,7 +349,7 @@ pub(crate) fn cast_complex_value(value: Value, target: IntegerTarget) -> Result<
 
 fn cast_tensor_value(target: IntegerTarget, tensor: Tensor) -> Result<Value, CastError> {
     let tensor = target.cast_tensor(tensor).map_err(CastError::Internal)?;
-    if tensor.data.len() == 1 {
+    if crate::builtins::common::tensor::is_scalar_tensor(&tensor) {
         let storage = tensor
             .integer_data
             .expect("integer cast must construct exact integer storage");
@@ -551,6 +551,18 @@ mod tests {
             };
             assert_eq!(output.integer_storage(), Some(&expected_storage));
         }
+    }
+
+    #[test]
+    fn integer_cast_scalar_result_uses_exact_storage_len() {
+        let mut input =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("input");
+        input.data.clear();
+
+        let output = crate::dispatcher::call_builtin("uint32", &[Value::Tensor(input)])
+            .expect("integer scalar cast");
+
+        assert_eq!(output, Value::Int(IntValue::U32(u32::MAX)));
     }
 
     #[test]
