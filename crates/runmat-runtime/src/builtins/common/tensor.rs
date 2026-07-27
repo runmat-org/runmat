@@ -243,7 +243,7 @@ pub fn is_scalar_tensor(tensor: &Tensor) -> bool {
     tensor_element_len(tensor) == 1
 }
 
-fn tensor_element_len(tensor: &Tensor) -> usize {
+pub fn tensor_element_len(tensor: &Tensor) -> usize {
     tensor
         .integer_storage()
         .map_or(tensor.data.len(), |storage| storage.len())

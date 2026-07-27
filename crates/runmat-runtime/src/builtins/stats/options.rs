@@ -705,8 +705,8 @@ fn bool_or_on_off_value(field: &str, value: &Value) -> BuiltinResult<Value> {
         Value::Int(i) if i.to_f64() == 0.0 || i.to_f64() == 1.0 => {
             Ok(Value::Bool(i.to_f64() != 0.0))
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            let value = tensor::tensor_values_f64(tensor)[0];
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            let value = tensor::tensor_value_f64(tensor, 0);
             if value == 0.0 || value == 1.0 {
                 Ok(Value::Bool(value != 0.0))
             } else {
@@ -741,7 +741,9 @@ fn numeric_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         other => {
             return Err(statset_error(
                 &STATSET_ERROR_INVALID_OPTION,
@@ -789,7 +791,7 @@ fn lookup_struct_field<'a>(options: &'a StructValue, name: &str) -> Option<&'a V
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),
         Value::Cell(cell) => cell.data.is_empty(),
         Value::StringArray(array) => array.data.is_empty(),
@@ -850,6 +852,9 @@ mod tests {
     fn num_field(options: &StructValue, name: &str) -> f64 {
         match options.fields.get(name).unwrap() {
             Value::Num(value) => *value,
+            Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+                tensor::tensor_value_f64(tensor, 0)
+            }
             other => panic!("expected numeric field {name}, got {other:?}"),
         }
     }
@@ -882,17 +887,17 @@ mod tests {
     fn statset_reads_typed_integer_tensor_options_exactly() {
         let mut max_iter =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("MaxIter");
-        max_iter.data[0] = 1.5;
+        max_iter.data.clear();
         let mut tol_fun =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("TolFun");
-        tol_fun.data[0] = f64::NAN;
+        tol_fun.data.clear();
         let mut deriv_step =
             Tensor::new_integer(IntegerStorage::U16(vec![3, 4]), vec![1, 2]).expect("DerivStep");
         deriv_step.data[0] = f64::NAN;
         deriv_step.data[1] = -1.0;
         let mut use_parallel =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("UseParallel");
-        use_parallel.data[0] = 0.0;
+        use_parallel.data.clear();
 
         let options = struct_value(
             block_on(statset_builtin(vec![
