@@ -240,7 +240,10 @@ pub fn tensor_into_value(tensor: Tensor) -> Value {
 
 /// Return true when a tensor contains exactly one scalar element.
 pub fn is_scalar_tensor(tensor: &Tensor) -> bool {
-    tensor.data.len() == 1
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
+        == 1
 }
 
 fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {

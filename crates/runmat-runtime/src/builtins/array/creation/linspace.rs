@@ -548,7 +548,8 @@ pub(crate) mod tests {
     #[test]
     fn linspace_count_parser_preserves_typed_integer_tensors_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let count = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
+        let mut count = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
+        count.data.clear();
 
         assert_eq!(
             parse_count_host(&Value::Tensor(count)).unwrap(),
@@ -558,7 +559,8 @@ pub(crate) mod tests {
 
     #[test]
     fn linspace_count_parser_rejects_negative_typed_integer_tensors() {
-        let count = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
+        let mut count = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
+        count.data.clear();
 
         assert!(parse_count_host(&Value::Tensor(count)).is_err());
     }
@@ -802,9 +804,9 @@ pub(crate) mod tests {
     fn linspace_typed_integer_tensor_endpoints_read_exact_storage() {
         let mut start =
             Tensor::new_integer(IntegerStorage::I16(vec![-2]), vec![1, 1]).expect("start");
-        start.data[0] = 2.0;
+        start.data.clear();
         let mut stop = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).expect("stop");
-        stop.data[0] = 8.0;
+        stop.data.clear();
 
         let result = linspace_builtin(
             Value::Tensor(start),

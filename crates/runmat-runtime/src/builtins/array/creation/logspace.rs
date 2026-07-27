@@ -525,7 +525,8 @@ pub(crate) mod tests {
     #[test]
     fn logspace_count_parser_preserves_typed_integer_tensors_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let count = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
+        let mut count = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
+        count.data.clear();
 
         assert_eq!(
             block_on(parse_count(&Value::Tensor(count))).unwrap(),
@@ -535,7 +536,8 @@ pub(crate) mod tests {
 
     #[test]
     fn logspace_count_parser_rejects_negative_typed_integer_tensors() {
-        let count = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
+        let mut count = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
+        count.data.clear();
 
         assert!(block_on(parse_count(&Value::Tensor(count))).is_err());
     }
@@ -705,9 +707,9 @@ pub(crate) mod tests {
     fn logspace_typed_integer_tensor_endpoints_read_exact_storage() {
         let mut start =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("start");
-        start.data[0] = 1.0;
+        start.data.clear();
         let mut stop = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("stop");
-        stop.data[0] = 3.0;
+        stop.data.clear();
 
         let result = logspace_builtin(
             Value::Tensor(start),
