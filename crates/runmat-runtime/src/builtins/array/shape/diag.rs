@@ -1256,20 +1256,38 @@ fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
     match value {
         Value::LogicalArray(array) => Ok(array),
         Value::Tensor(tensor) => {
-            let data: Vec<u8> = tensor
-                .data
-                .iter()
-                .map(|value| if *value != 0.0 { 1 } else { 0 })
-                .collect();
+            let data: Vec<u8> = if let Some(storage) = tensor.integer_storage() {
+                storage
+                    .exact_values()
+                    .into_iter()
+                    .map(|value| if value.is_zero() { 0 } else { 1 })
+                    .collect()
+            } else {
+                tensor
+                    .data
+                    .iter()
+                    .map(|value| if *value != 0.0 { 1 } else { 0 })
+                    .collect()
+            };
             LogicalArray::new(data, tensor.shape)
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
         }
         Value::ComplexTensor(tensor) => {
-            let data: Vec<u8> = tensor
-                .data
-                .iter()
-                .map(|(re, im)| if *re != 0.0 || *im != 0.0 { 1 } else { 0 })
-                .collect();
+            let data: Vec<u8> = if let Some(storage) = &tensor.integer_data {
+                storage
+                    .real
+                    .exact_values()
+                    .into_iter()
+                    .zip(storage.imag.exact_values())
+                    .map(|(re, im)| if re.is_zero() && im.is_zero() { 0 } else { 1 })
+                    .collect()
+            } else {
+                tensor
+                    .data
+                    .iter()
+                    .map(|(re, im)| if *re != 0.0 || *im != 0.0 { 1 } else { 0 })
+                    .collect()
+            };
             LogicalArray::new(data, tensor.shape)
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
         }
@@ -1382,7 +1400,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerComplexStorage};
 
     fn run_diag(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(diag_builtin(value, rest))
@@ -1604,6 +1622,39 @@ mod tests {
     }
 
     #[test]
+    fn diag_logical_output_reads_typed_integer_storage_exactly() {
+        let mut value =
+            Tensor::new_integer(IntegerStorage::I16(vec![-2, 0, 7]), vec![1, 3]).expect("tensor");
+        value.data.fill(f64::NAN);
+
+        let out = run_diag(Value::Tensor(value), vec![Value::from("logical")]).expect("diag");
+        let Value::LogicalArray(array) = out else {
+            panic!("expected logical output");
+        };
+        assert_eq!(array.shape, vec![3, 3]);
+        assert_eq!(array.data, vec![1, 0, 0, 0, 0, 0, 0, 0, 1]);
+    }
+
+    #[test]
+    fn diag_logical_output_reads_typed_complex_integer_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![0, -3, 0, 0]),
+            IntegerStorage::I16(vec![0, 0, 0, 5]),
+        )
+        .expect("complex integer storage");
+        let mut value = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex tensor");
+        value.data.fill((f64::NAN, f64::NAN));
+
+        let out =
+            run_diag(Value::ComplexTensor(value), vec![Value::from("logical")]).expect("diag");
+        let Value::LogicalArray(array) = out else {
+            panic!("expected logical output");
+        };
+        assert_eq!(array.shape, vec![2, 1]);
+        assert_eq!(array.data, vec![0, 1]);
+    }
+
+    #[test]
     fn diag_double_override_from_logical_input() {
         let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
         let out =
@@ -1624,6 +1675,27 @@ mod tests {
         };
         assert_eq!(array.shape, vec![2, 2]);
         assert_eq!(array.data, vec![1, 0, 0, 0]);
+    }
+
+    #[test]
+    fn diag_like_logical_reads_typed_integer_storage_exactly() {
+        let mut value = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .expect("tensor");
+        value.data.fill(f64::NAN);
+
+        let out = run_diag(
+            Value::Tensor(value),
+            vec![Value::from("like"), Value::Bool(true)],
+        )
+        .expect("diag");
+        let Value::LogicalArray(array) = out else {
+            panic!("expected logical output");
+        };
+        assert_eq!(array.shape, vec![2, 2]);
+        assert_eq!(array.data, vec![0, 0, 0, 1]);
     }
 
     #[test]
