@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::{
     helpers::{bytes_to_char_array, read_text_line},
     registry,
@@ -279,7 +280,7 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
                 "file identifier is out of range",
             )
         }),
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(storage) = t.integer_storage() {
                 let value = storage.value_at(0).expect("one-element integer storage");
                 return value.try_to_i32().ok_or_else(|| {
@@ -289,7 +290,7 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
                     )
                 });
             }
-            let n = t.data[0];
+            let n = tensor::tensor_value_f64(t, 0);
             if !n.is_finite() {
                 return Err(fgetl_error_with_detail(
                     &FGETL_ERROR_INVALID_INPUT,

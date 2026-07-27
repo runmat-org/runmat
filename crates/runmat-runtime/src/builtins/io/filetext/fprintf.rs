@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::registry::{self, FileInfo, SharedFileHandle};
 use crate::console::{record_console_output, ConsoleStream};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -518,13 +519,13 @@ fn parse_fid(value: &Value) -> Result<i32, String> {
                 .ok_or_else(|| "fprintf: file identifier is out of range".to_string());
         }
         Value::Tensor(t) => {
-            if t.shape == vec![1, 1] && t.data.len() == 1 {
+            if t.shape == vec![1, 1] && tensor::is_scalar_tensor(t) {
                 if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                     return int
                         .try_to_i32()
                         .ok_or_else(|| "fprintf: file identifier is out of range".to_string());
                 }
-                t.data[0]
+                tensor::tensor_value_f64(t, 0)
             } else {
                 return Err("fprintf: file identifier must be numeric".to_string());
             }

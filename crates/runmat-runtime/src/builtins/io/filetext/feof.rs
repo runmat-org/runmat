@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::registry;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -248,7 +249,7 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
             feof_error_with_detail(&FEOF_ERROR_INVALID_INPUT, "file identifier is out of range")
         }),
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
+            if tensor::is_scalar_tensor(t) {
                 if let Some(storage) = t.integer_storage() {
                     let value = storage.value_at(0).expect("one-element integer storage");
                     return value.try_to_i32().ok_or_else(|| {
@@ -258,7 +259,7 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
                         )
                     });
                 }
-                parse_scalar_fid(t.data[0])
+                parse_scalar_fid(tensor::tensor_value_f64(t, 0))
             } else {
                 Err(feof_error_with_detail(
                     &FEOF_ERROR_INVALID_INPUT,
@@ -359,8 +360,9 @@ pub(crate) mod tests {
         assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
         assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
 
-        let fid_tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+        let mut fid_tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
             .expect("typed fid tensor");
+        fid_tensor.data[0] = 0.0;
         assert_eq!(parse_fid(&Value::Tensor(fid_tensor)).unwrap(), 7);
         let fid_too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("typed fid tensor");

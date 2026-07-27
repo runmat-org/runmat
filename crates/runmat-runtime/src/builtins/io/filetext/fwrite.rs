@@ -424,13 +424,13 @@ fn parse_fid(value: &Value) -> Result<i32, String> {
                 .try_to_i32()
                 .ok_or_else(|| "fwrite: file identifier is out of range".to_string());
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                 return int
                     .try_to_i32()
                     .ok_or_else(|| "fwrite: file identifier is out of range".to_string());
             }
-            t.data[0]
+            tensor::tensor_value_f64(t, 0)
         }
         _ => return Err("fwrite: file identifier must be numeric".to_string()),
     };
@@ -499,7 +499,7 @@ fn is_string_like(value: &Value) -> bool {
 fn is_numeric_like(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(t) => t.data.len() == 1,
+        Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(la) => la.data.len() == 1,
         _ => false,
     }
@@ -557,11 +557,11 @@ fn parse_skip(arg: Option<&Value>) -> Result<usize, String> {
     match arg {
         None => Ok(0),
         Some(Value::Int(int)) => int_to_skip(int),
-        Some(Value::Tensor(t)) if t.data.len() == 1 => {
+        Some(Value::Tensor(t)) if tensor::is_scalar_tensor(t) => {
             if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                 return int_to_skip(&int);
             }
-            parse_skip_scalar(t.data[0])
+            parse_skip_scalar(tensor::tensor_value_f64(t, 0))
         }
         Some(value) => {
             let scalar = numeric_scalar(value, "fwrite: skip must be numeric")?;
@@ -687,7 +687,7 @@ fn numeric_scalar(value: &Value, err: &str) -> Result<f64, String> {
         Value::Num(n) => Ok(*n),
         Value::Int(int) => Ok(int.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(tensor::tensor_values_f64(t)[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(la) if la.data.len() == 1 => {
             Ok(if la.data[0] != 0 { 1.0 } else { 0.0 })
         }
