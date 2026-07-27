@@ -71,7 +71,7 @@ fn numeric_index(value: &Value) -> Option<usize> {
         return (index >= 1).then_some(index);
     }
     if let Value::Tensor(tensor) = value {
-        if tensor.data.len() != 1 {
+        if !tensor::is_scalar_tensor(tensor) {
             return None;
         }
         if let Some(storage) = tensor.integer_storage() {
@@ -81,7 +81,9 @@ fn numeric_index(value: &Value) -> Option<usize> {
     }
     let n = match value {
         Value::Num(value) => *value,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         _ => return None,
     };
     if !n.is_finite() || n < 1.0 || n.fract() != 0.0 || n > usize::MAX as f64 {
@@ -201,7 +203,7 @@ mod tests {
         );
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer tensor");
-        tensor.data[0] = 1.0;
+        tensor.data.clear();
 
         let name = dispatch_inputname(vec![Value::Tensor(tensor)]).expect("inputname succeeds");
         assert_eq!(name, Value::String("beta".to_string()));

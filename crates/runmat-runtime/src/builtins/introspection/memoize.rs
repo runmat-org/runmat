@@ -485,11 +485,11 @@ fn memoized_state(handle: &HandleRef) -> BuiltinResult<(Value, bool, usize)> {
                 Some(Value::Num(value)) => *value != 0.0,
                 Some(Value::Int(value)) => !value.is_zero(),
                 Some(Value::LogicalArray(array)) if array.data.len() == 1 => array.data[0] != 0,
-                Some(Value::Tensor(tensor)) if tensor.data.len() == 1 => {
+                Some(Value::Tensor(tensor)) if tensor::is_scalar_tensor(tensor) => {
                     if let Some(storage) = tensor.integer_storage() {
                         !storage.value_at(0).is_some_and(|value| value.is_zero())
                     } else {
-                        tensor::tensor_values_f64(tensor)[0] != 0.0
+                        tensor::tensor_value_f64(tensor, 0) != 0.0
                     }
                 }
                 _ => true,
@@ -515,7 +515,7 @@ fn parse_cache_size(value: Option<&Value>) -> BuiltinResult<usize> {
         });
     }
     if let Some(Value::Tensor(t)) = value {
-        if t.data.len() == 1 {
+        if tensor::is_scalar_tensor(t) {
             if let Some(storage) = t.integer_storage() {
                 return storage
                     .value_at(0)
@@ -532,7 +532,7 @@ fn parse_cache_size(value: Option<&Value>) -> BuiltinResult<usize> {
     }
     let numeric = match value {
         Some(Value::Num(v)) => *v,
-        Some(Value::Tensor(t)) if t.data.len() == 1 => tensor::tensor_values_f64(t)[0],
+        Some(Value::Tensor(t)) if tensor::is_scalar_tensor(t) => tensor::tensor_value_f64(t, 0),
         Some(Value::LogicalArray(a)) if a.data.len() == 1 => a.data[0] as f64,
         Some(Value::Bool(v)) => {
             if *v {
@@ -1215,7 +1215,7 @@ mod tests {
     fn parse_cache_size_reads_typed_integer_tensor_storage_exactly() {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1]).expect("cache size");
-        tensor.data[0] = 0.0;
+        tensor.data.clear();
 
         assert_eq!(
             parse_cache_size(Some(&Value::Tensor(tensor))).expect("cache size"),

@@ -194,7 +194,7 @@ fn parse_finite_arity_bound(
             .ok_or_else(|| descriptor_error(builtin, error));
     }
     if let Value::Tensor(tensor) = value {
-        if tensor.data.len() != 1 {
+        if !tensor::is_scalar_tensor(tensor) {
             return Err(descriptor_error(builtin, error));
         }
         if let Some(storage) = tensor.integer_storage() {
@@ -206,7 +206,9 @@ fn parse_finite_arity_bound(
     }
     let number = match value {
         Value::Num(value) => *value,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor::tensor_values_f64(tensor)[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         _ => return Err(descriptor_error(builtin, error)),
     };
 
@@ -226,8 +228,8 @@ fn parse_max_arity_bound(
             Ok(ArityBound::Unbounded)
         }
         Value::Tensor(tensor)
-            if tensor.data.len() == 1 && {
-                let value = tensor::tensor_values_f64(tensor)[0];
+            if tensor::is_scalar_tensor(tensor) && {
+                let value = tensor::tensor_value_f64(tensor, 0);
                 value.is_infinite() && value.is_sign_positive()
             } =>
         {
@@ -395,8 +397,8 @@ mod tests {
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer min");
         let mut max =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer max");
-        min.data[0] = 3.0;
-        max.data[0] = 1.0;
+        min.data.clear();
+        max.data.clear();
 
         let value = dispatch_narginchk(vec![Value::Tensor(min), Value::Tensor(max)])
             .expect("narginchk succeeds");
