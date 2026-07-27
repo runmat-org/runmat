@@ -1103,7 +1103,7 @@ async fn parse_unidrnd_args(args: Vec<Value>) -> BuiltinResult<(Tensor, Vec<usiz
     } else {
         parse_shape_args("unidrnd", &args[1..]).await?
     };
-    if n.data.len() != 1 && normalize_shape(n.shape.clone()) != shape {
+    if !tensor::is_scalar_tensor(&n) && normalize_shape(n.shape.clone()) != shape {
         return Err(sampling_error(
             "unidrnd",
             "unidrnd: requested size must match non-scalar n",
@@ -1133,7 +1133,7 @@ pub mod unidrnd {
             .into_iter()
             .enumerate()
             .map(|(idx, u)| {
-                let upper = if n.data.len() == 1 {
+                let upper = if tensor::is_scalar_tensor(&n) {
                     tensor::tensor_value_f64(&n, 0)
                 } else {
                     tensor::tensor_value_f64(&n, idx)
@@ -1203,7 +1203,7 @@ fn parse_nonnegative_usize(name: &str, value: Value, label: &str) -> BuiltinResu
     }
     let tensor = tensor::value_into_tensor_for(name, value)
         .map_err(|err| sampling_error(name, format!("{name}: {err}")))?;
-    if tensor.data.len() != 1 {
+    if !tensor::is_scalar_tensor(&tensor) {
         return Err(sampling_error(
             name,
             format!("{name}: {label} must be a scalar"),
@@ -1227,7 +1227,7 @@ fn parse_nonnegative_usize(name: &str, value: Value, label: &str) -> BuiltinResu
 fn parse_nonnegative_scalar_ratio(value: Value, label: &str) -> BuiltinResult<f64> {
     let tensor = tensor::value_into_tensor_for("dividerand", value)
         .map_err(|err| sampling_error("dividerand", format!("dividerand: {err}")))?;
-    if tensor.data.len() != 1 {
+    if !tensor::is_scalar_tensor(&tensor) {
         return Err(sampling_error(
             "dividerand",
             format!("dividerand: {label} must be a scalar"),
@@ -1380,7 +1380,7 @@ fn is_empty_function(value: &Value) -> bool {
 fn is_scalar_boot_arg(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => true,
-        Value::Tensor(t) => t.data.len() == 1,
+        Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(a) => a.data.len() == 1,
         Value::StringArray(a) => a.data.len() == 1,
         Value::CharArray(a) => a.data.len() == 1,
@@ -1693,7 +1693,11 @@ mod tests {
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(poison);
+        if tensor::element_count(&tensor.shape) == 0 {
+            tensor.data.fill(poison);
+        } else {
+            tensor.data.clear();
+        }
         Value::Tensor(tensor)
     }
 

@@ -8,6 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 
 use log::debug;
 use runmat_builtins::{
@@ -448,7 +449,7 @@ fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
             }
             Ok(rounded as u64)
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                 int.try_to_u64().ok_or_else(|| {
                     rng_error_with(
@@ -457,7 +458,7 @@ fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
                     )
                 })
             } else {
-                parse_seed_scalar(&Value::Num(t.data[0]), label)
+                parse_seed_scalar(&Value::Num(tensor::tensor_value_f64(t, 0)), label)
             }
         }
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => Err(rng_error_with(
@@ -473,7 +474,7 @@ fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
 
 fn parse_state_scalar(value: &Value) -> BuiltinResult<u64> {
     match value {
-        Value::Tensor(t) => match t.data.len() {
+        Value::Tensor(t) => match tensor::element_count(&t.shape) {
             1 => {
                 if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                     int.try_to_u64().ok_or_else(|| {
@@ -483,7 +484,7 @@ fn parse_state_scalar(value: &Value) -> BuiltinResult<u64> {
                         )
                     })
                 } else {
-                    parse_state_scalar(&Value::Num(t.data[0]))
+                    parse_state_scalar(&Value::Num(tensor::tensor_value_f64(t, 0)))
                 }
             }
             2 => {
@@ -506,8 +507,8 @@ fn parse_state_scalar(value: &Value) -> BuiltinResult<u64> {
                     )
                 } else {
                     (
-                        parse_state_word(t.data[0], "rng: State[1]")?,
-                        parse_state_word(t.data[1], "rng: State[2]")?,
+                        parse_state_word(tensor::tensor_value_f64(t, 0), "rng: State[1]")?,
+                        parse_state_word(tensor::tensor_value_f64(t, 1), "rng: State[2]")?,
                     )
                 };
                 Ok(lo | ((hi as u64) << 32))
@@ -691,6 +692,8 @@ pub(crate) mod tests {
     fn rng_typed_integer_tensor_seed_and_state_are_exact() {
         let seed =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("seed");
+        let mut seed = seed;
+        seed.data.clear();
         assert_eq!(
             parse_seed_scalar(&Value::Tensor(seed), "rng: seed").expect("typed seed"),
             u64::MAX
@@ -698,6 +701,8 @@ pub(crate) mod tests {
 
         let scalar_state =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("state");
+        let mut scalar_state = scalar_state;
+        scalar_state.data.clear();
         assert_eq!(
             parse_state_scalar(&Value::Tensor(scalar_state)).expect("typed state"),
             u64::MAX
@@ -708,6 +713,8 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .expect("state words");
+        let mut word_state = word_state;
+        word_state.data.clear();
         assert_eq!(
             parse_state_scalar(&Value::Tensor(word_state)).expect("typed state words"),
             u64::MAX
@@ -715,6 +722,8 @@ pub(crate) mod tests {
 
         let negative_seed =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("seed");
+        let mut negative_seed = negative_seed;
+        negative_seed.data.clear();
         assert!(parse_seed_scalar(&Value::Tensor(negative_seed), "rng: seed").is_err());
 
         let wide_word = Tensor::new_integer(
@@ -722,6 +731,8 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .expect("state word");
+        let mut wide_word = wide_word;
+        wide_word.data.clear();
         assert!(parse_state_scalar(&Value::Tensor(wide_word)).is_err());
     }
 

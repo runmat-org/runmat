@@ -212,7 +212,7 @@ fn scalar_f64(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             Some(tensor::tensor_value_f64(tensor, 0))
         }
         _ => None,
@@ -432,7 +432,7 @@ mod tests {
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 
