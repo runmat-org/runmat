@@ -324,7 +324,7 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Some(tensor::tensor_values_f64(t)[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
@@ -452,7 +452,8 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+        CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor,
+        Type,
     };
 
     fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -701,6 +702,22 @@ pub(crate) mod tests {
         match result {
             Value::Int(IntValue::I32(v)) => assert_eq!(v, -3),
             other => panic!("expected int32 scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rem_scalar_fast_path_reads_typed_integer_storage_exactly() {
+        let mut lhs =
+            Tensor::new_integer(IntegerStorage::I16(vec![-7]), vec![1, 1]).expect("lhs tensor");
+        lhs.data[0] = 999.0;
+
+        assert_eq!(scalar_real_value(&Value::Tensor(lhs.clone())), Some(-7.0));
+
+        let result = rem_builtin(Value::Tensor(lhs), Value::Num(4.0)).expect("rem");
+        match result {
+            Value::Int(IntValue::I16(v)) => assert_eq!(v, -3),
+            other => panic!("expected int16 scalar result, got {other:?}"),
         }
     }
 
