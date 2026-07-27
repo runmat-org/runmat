@@ -354,7 +354,7 @@ fn parse_order(value: &Value) -> BuiltinResult<Option<usize>> {
             diff_invalid_argument("diff: order must be a non-negative integer scalar")
         }),
         Value::Num(n) => parse_numeric_order(*n).map(Some),
-        Value::Tensor(t) if t.data.len() == 1 => parse_tensor_order(t).map(Some),
+        Value::Tensor(t) if tensor_element_len(t) == 1 => parse_tensor_order(t).map(Some),
         Value::Bool(b) => Ok(Some(if *b { 1 } else { 0 })),
         other => Err(diff_invalid_argument(format!(
             "diff: order must be a non-negative integer scalar, got {:?}",
@@ -405,7 +405,7 @@ fn parse_dimension_arg(value: &Value) -> BuiltinResult<Option<usize>> {
         Value::Int(_) | Value::Num(_) => tensor::parse_dimension(value, "diff")
             .map(Some)
             .map_err(diff_invalid_argument),
-        Value::Tensor(t) if t.data.len() == 1 => tensor::parse_dimension(value, "diff")
+        Value::Tensor(t) if tensor_element_len(t) == 1 => tensor::parse_dimension(value, "diff")
             .map(Some)
             .map_err(diff_invalid_argument),
         other => Err(diff_invalid_argument(format!(
@@ -416,7 +416,13 @@ fn parse_dimension_arg(value: &Value) -> BuiltinResult<Option<usize>> {
 }
 
 fn is_empty_array(value: &Value) -> bool {
-    matches!(value, Value::Tensor(t) if t.data.is_empty())
+    matches!(value, Value::Tensor(t) if tensor_element_len(t) == 0)
+}
+
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
 }
 
 async fn diff_gpu(
@@ -659,14 +665,17 @@ pub(crate) mod tests {
     #[test]
     fn diff_typed_integer_tensor_order_and_dimension_parse_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let order =
+        let mut order =
             Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("typed order");
+        order.data.clear();
         assert_eq!(
             parse_order(&Value::Tensor(order)).expect("typed order"),
             Some(large as usize)
         );
 
-        let dim = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1]).expect("typed dim");
+        let mut dim =
+            Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1]).expect("typed dim");
+        dim.data.clear();
         assert_eq!(
             parse_dimension_arg(&Value::Tensor(dim)).expect("typed dim"),
             Some(3)
@@ -675,12 +684,14 @@ pub(crate) mod tests {
 
     #[test]
     fn diff_typed_integer_tensor_order_and_dimension_reject_negative_values() {
-        let order =
+        let mut order =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative order");
+        order.data.clear();
         assert!(parse_order(&Value::Tensor(order)).is_err());
 
-        let dim =
+        let mut dim =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative dim");
+        dim.data.clear();
         assert!(parse_dimension_arg(&Value::Tensor(dim)).is_err());
     }
 
