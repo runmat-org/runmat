@@ -1270,10 +1270,10 @@ fn complex_scalar(value: &Value, label: &str) -> BuiltinResult<(f64, f64)> {
         Value::Int(i) => Ok((i.to_f64(), 0.0)),
         Value::Bool(b) => Ok((if *b { 1.0 } else { 0.0 }, 0.0)),
         Value::Complex(re, im) => Ok((*re, *im)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_element_len(tensor) == 1 => {
             Ok((tensor::tensor_value_f64(tensor, 0), 0.0))
         }
-        Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
+        Value::ComplexTensor(tensor) if complex_tensor_element_len(tensor) == 1 => {
             if let Some(storage) = tensor.integer_data.as_ref() {
                 let re = storage
                     .real
@@ -1296,6 +1296,19 @@ fn complex_scalar(value: &Value, label: &str) -> BuiltinResult<(f64, f64)> {
             "decomposition: {label} must be scalar, got {other:?}"
         ))),
     }
+}
+
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor
+        .integer_storage()
+        .map_or(tensor.data.len(), |storage| storage.len())
+}
+
+fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
+    tensor
+        .integer_data
+        .as_ref()
+        .map_or(tensor.data.len(), |storage| storage.real.len())
 }
 
 fn real_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
@@ -1544,7 +1557,7 @@ mod tests {
         let d = call_constructor(vec![a]).expect("decomposition");
         let mut scale =
             Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("scale");
-        scale.data[0] = f64::NAN;
+        scale.data.clear();
 
         let scaled = call_mtimes(d, Value::Tensor(scale.clone())).expect("scale");
         let prop = block_on(decomposition_subsref(
@@ -1566,7 +1579,7 @@ mod tests {
         .expect("typed complex storage");
         let mut complex_scale =
             ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex scale");
-        complex_scale.data[0] = (f64::NAN, f64::NAN);
+        complex_scale.data.clear();
         assert_eq!(
             complex_scalar(&Value::ComplexTensor(complex_scale), "scale").unwrap(),
             (4.0, -2.0)
