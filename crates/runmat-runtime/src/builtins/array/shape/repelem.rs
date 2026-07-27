@@ -381,8 +381,11 @@ fn parse_host_factor(value: &Value, position: usize) -> crate::BuiltinResult<Rep
                     .collect::<crate::BuiltinResult<Vec<_>>>()
                     .map(RepFactor::Vector);
             }
-            if tensor.data.len() == 1 {
-                Ok(RepFactor::Scalar(coerce_count(tensor.data[0], position)?))
+            if tensor::is_scalar_tensor(tensor) {
+                Ok(RepFactor::Scalar(coerce_count(
+                    tensor::tensor_value_f64(tensor, 0),
+                    position,
+                )?))
             } else {
                 ensure_vector_shape(&tensor.shape, position)?;
                 let mut out = Vec::with_capacity(tensor.data.len());
@@ -1387,7 +1390,9 @@ pub(crate) mod tests {
         let scalar = parse_host_factor(&Value::Int(IntValue::U64(exact)), 1).unwrap();
         assert!(matches!(scalar, RepFactor::Scalar(value) if value == exact as usize));
 
-        let vector = Tensor::new_integer(IntegerStorage::U64(vec![1, exact]), vec![1, 2]).unwrap();
+        let mut vector =
+            Tensor::new_integer(IntegerStorage::U64(vec![1, exact]), vec![1, 2]).unwrap();
+        vector.data.clear();
         let factors = parse_host_factor(&Value::Tensor(vector), 1).unwrap();
         assert!(matches!(factors, RepFactor::Vector(values) if values == vec![1, exact as usize]));
 

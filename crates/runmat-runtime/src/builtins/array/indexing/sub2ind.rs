@@ -420,10 +420,10 @@ fn subscript_value(tensor: &Tensor, idx: usize) -> SubscriptValue {
                 .expect("subscript index is within integer storage bounds"),
         );
     }
-    if tensor.data.len() == 1 {
-        SubscriptValue::Float(tensor.data[0])
+    if tensor::is_scalar_tensor(tensor) {
+        SubscriptValue::Float(tensor::tensor_value_f64(tensor, 0))
     } else {
-        SubscriptValue::Float(tensor.data[idx])
+        SubscriptValue::Float(tensor::tensor_value_f64(tensor, idx))
     }
 }
 
@@ -578,9 +578,9 @@ pub(crate) mod tests {
     fn sub2ind_typed_integer_subscripts_read_exact_storage() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
         let mut rows = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]).unwrap();
-        rows.data = vec![0.0, 0.0, 0.0];
+        rows.data.clear();
         let mut cols = Tensor::new_integer(IntegerStorage::I16(vec![4]), vec![1, 1]).unwrap();
-        cols.data = vec![0.0];
+        cols.data.clear();
 
         let result = sub2ind_builtin(
             Value::Tensor(dims),

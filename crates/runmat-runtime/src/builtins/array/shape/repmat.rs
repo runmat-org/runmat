@@ -504,12 +504,12 @@ async fn parse_replication_scalar(value: &Value) -> crate::BuiltinResult<usize> 
         })?;
         return coerce_integer_rep_factor(&value, 1);
     }
-    if tensor.data.len() != 1 {
+    if !tensor::is_scalar_tensor(&tensor) {
         return Err(repmat_invalid_factors(
             "repmat: size arguments must be scalars",
         ));
     }
-    coerce_rep_factor(tensor.data[0], 1)
+    coerce_rep_factor(tensor::tensor_value_f64(&tensor, 0), 1)
 }
 
 fn coerce_integer_rep_factor(value: &IntValue, position: usize) -> crate::BuiltinResult<usize> {
@@ -916,10 +916,12 @@ pub(crate) mod tests {
 
     #[test]
     fn repmat_rejects_negative_typed_integer_replication_factors() {
-        let scalar = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
+        let mut scalar = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
+        scalar.data.clear();
         assert!(block_on(parse_replication_scalar(&Value::Tensor(scalar))).is_err());
 
-        let vector = Tensor::new_integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]).unwrap();
+        let mut vector = Tensor::new_integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]).unwrap();
+        vector.data.clear();
         assert!(block_on(parse_replication_vector(&Value::Tensor(vector))).is_err());
     }
 

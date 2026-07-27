@@ -496,7 +496,7 @@ async fn parse_size_argument(
     message: &str,
 ) -> crate::BuiltinResult<usize> {
     let is_vector = match value {
-        Value::Tensor(t) => t.data.len() != 1,
+        Value::Tensor(t) => tensor::tensor_element_len(t) != 1,
         Value::GpuTensor(handle) => tensor::element_count(&handle.shape) != 1,
         _ => false,
     };
@@ -554,6 +554,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::randperm_builtin(args))
@@ -615,6 +616,31 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(1), None])
             }
         );
+    }
+
+    #[test]
+    fn randperm_size_arguments_read_typed_integer_storage_exactly() {
+        let mut n = Tensor::new_integer(IntegerStorage::U64(vec![5]), vec![1, 1]).expect("n");
+        n.data.clear();
+        assert_eq!(
+            block_on(parse_size_argument(
+                &Value::Tensor(n),
+                false,
+                "randperm: N must be a non-negative integer (and <= 2^53)",
+            ))
+            .expect("N"),
+            5
+        );
+
+        let mut vector =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("vector");
+        vector.data.clear();
+        assert!(block_on(parse_size_argument(
+            &Value::Tensor(vector),
+            false,
+            "randperm: N must be a non-negative integer (and <= 2^53)",
+        ))
+        .is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
