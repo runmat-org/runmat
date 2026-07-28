@@ -802,7 +802,11 @@ fn numeric_dummyvar_classes(labels: &[Option<Label>], rows: usize) -> BuiltinRes
         let Label::Numeric(value) = label else {
             continue;
         };
-        if *value <= 0.0 || value.fract() != 0.0 || *value > usize::MAX as f64 {
+        if *value <= 0.0
+            || value.fract() != 0.0
+            || *value > usize::MAX as f64
+            || (usize::BITS == 64 && *value == usize::MAX as f64)
+        {
             return Err(invalid(
                 "dummyvar",
                 "dummyvar: numeric groups must contain positive integer levels or NaN",
@@ -1064,9 +1068,35 @@ fn parse_output_kind(name: &str, text: &str) -> BuiltinResult<OutputKind> {
 }
 
 fn positive_dim(name: &str, value: &Value) -> BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return value.try_to_usize().filter(|dim| *dim >= 1).ok_or_else(|| {
+            invalid(
+                name,
+                format!("{name}: featureDim must be a positive integer scalar"),
+            )
+        });
+    }
+    if let Value::Tensor(tensor) = value {
+        if tensor::is_scalar_tensor(tensor) {
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .value_at(0)
+                    .and_then(|value| value.try_to_usize())
+                    .filter(|dim| *dim >= 1)
+                    .ok_or_else(|| {
+                        invalid(
+                            name,
+                            format!("{name}: featureDim must be a positive integer scalar"),
+                        )
+                    });
+            }
+        }
+    }
     let dim = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         _ => {
             return Err(invalid(
                 name,
@@ -1074,7 +1104,11 @@ fn positive_dim(name: &str, value: &Value) -> BuiltinResult<usize> {
             ))
         }
     };
-    if dim.fract() != 0.0 || dim < 1.0 || dim > usize::MAX as f64 {
+    if dim.fract() != 0.0
+        || dim < 1.0
+        || dim > usize::MAX as f64
+        || (usize::BITS == 64 && dim == usize::MAX as f64)
+    {
         return Err(invalid(
             name,
             format!("{name}: featureDim must be a positive integer scalar"),
@@ -1267,7 +1301,7 @@ fn linear_for_coords(coords: &[usize], strides: &[usize]) -> usize {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -1394,6 +1428,16 @@ mod tests {
             out.data,
             vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]
         );
+    }
+
+    #[test]
+    fn dummyvar_rejects_unrepresentable_numeric_level_before_cast() {
+        let err = block_on(dummyvar_builtin(tensor(
+            vec![usize::MAX as f64],
+            vec![1, 1],
+        )))
+        .unwrap_err();
+        assert!(err.message.contains("positive integer levels"));
     }
 
     #[test]
@@ -1554,6 +1598,32 @@ mod tests {
         };
         assert_eq!(out.shape, vec![3, 2]);
         assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn onehot_feature_dimension_parses_integer_bounds_exactly() {
+        assert_eq!(
+            positive_dim("onehotencode", &Value::Int(IntValue::U16(2))).unwrap(),
+            2
+        );
+        assert_eq!(
+            positive_dim(
+                "onehotencode",
+                &mirrorless_int_tensor(IntegerStorage::U64(vec![2]), vec![1, 1])
+            )
+            .unwrap(),
+            2
+        );
+
+        for value in [
+            Value::Int(IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64),
+            Value::Num(usize::MAX as f64 + 1.0),
+            mirrorless_int_tensor(IntegerStorage::U64(vec![0]), vec![1, 1]),
+        ] {
+            assert!(positive_dim("onehotencode", &value).is_err());
+        }
     }
 
     #[test]

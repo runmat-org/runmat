@@ -212,7 +212,12 @@ fn parse_finite_arity_bound(
         _ => return Err(descriptor_error(builtin, error)),
     };
 
-    if !number.is_finite() || number < 0.0 || number.fract() != 0.0 || number > usize::MAX as f64 {
+    if !number.is_finite()
+        || number < 0.0
+        || number.fract() != 0.0
+        || number > usize::MAX as f64
+        || (usize::BITS == 64 && number == usize::MAX as f64)
+    {
         return Err(descriptor_error(builtin, error));
     }
     Ok(number as usize)
@@ -358,7 +363,7 @@ pub fn nargoutchk_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     #[test]
     fn narginchk_uses_runtime_call_count_context() {
@@ -403,5 +408,26 @@ mod tests {
         let value = dispatch_narginchk(vec![Value::Tensor(min), Value::Tensor(max)])
             .expect("narginchk succeeds");
         assert_eq!(value, Value::Num(0.0));
+
+        assert_eq!(
+            parse_finite_arity_bound(
+                &Value::Int(IntValue::U16(2)),
+                "narginchk",
+                &NARGINCHK_ERROR_BOUNDS_INVALID
+            )
+            .unwrap(),
+            2
+        );
+        for value in [
+            Value::Int(IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(
+                parse_finite_arity_bound(&value, "narginchk", &NARGINCHK_ERROR_BOUNDS_INVALID)
+                    .is_err()
+            );
+        }
     }
 }

@@ -1187,7 +1187,7 @@ fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
     if number <= 0.0 {
         return Err(setfield_flow("index must be >= 1"));
     }
-    if number > usize::MAX as f64 {
+    if number > usize::MAX as f64 || (usize::BITS == 64 && number == usize::MAX as f64) {
         return Err(setfield_flow("index exceeds platform limits"));
     }
     Ok(number as usize)
@@ -1607,6 +1607,9 @@ pub(crate) mod tests {
             },
             other => panic!("expected cell array, got {other:?}"),
         }
+
+        assert!(parse_positive_scalar(&Value::Num(usize::MAX as f64)).is_err());
+        assert!(parse_positive_scalar(&Value::Num(usize::MAX as f64 + 1.0)).is_err());
     }
 
     #[test]

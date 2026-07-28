@@ -527,7 +527,7 @@ fn parse_positive_integer(number: f64) -> BuiltinResult<usize> {
             &GETFIELD_ERROR_INDEX_INVALID,
         ));
     }
-    if number > usize::MAX as f64 {
+    if number > usize::MAX as f64 || (usize::BITS == 64 && number == usize::MAX as f64) {
         return Err(getfield_error_with_message(
             "index exceeds platform limits",
             &GETFIELD_ERROR_INDEX_INVALID,
@@ -1276,6 +1276,9 @@ pub(crate) mod tests {
         )
         .expect("struct array element");
         assert_eq!(result, Value::from("Grace"));
+
+        assert!(parse_positive_integer(usize::MAX as f64).is_err());
+        assert!(parse_positive_integer(usize::MAX as f64 + 1.0).is_err());
     }
 
     #[test]
