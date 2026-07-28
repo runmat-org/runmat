@@ -1358,7 +1358,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use once_cell::sync::OnceCell;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, NumericDType, StringArray, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, NumericDType, StringArray, Tensor};
     use runmat_filesystem::File;
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
@@ -1491,11 +1491,33 @@ pub(crate) mod tests {
         ensure_test_resolver();
         let single = Tensor::new_with_dtype(vec![1.25, 2.5], vec![1, 2], NumericDType::F32)
             .expect("single tensor");
-        let uint16 = Tensor::new_with_dtype(vec![10.0, 20.0], vec![1, 2], NumericDType::U16)
+        let int8 = Tensor::new_integer(IntegerStorage::I8(vec![i8::MIN, i8::MAX]), vec![1, 2])
+            .expect("int8 tensor");
+        let uint8 = Tensor::new_integer(IntegerStorage::U8(vec![0, u8::MAX]), vec![1, 2])
+            .expect("uint8 tensor");
+        let int16 = Tensor::new_integer(IntegerStorage::I16(vec![i16::MIN, i16::MAX]), vec![1, 2])
+            .expect("int16 tensor");
+        let uint16 = Tensor::new_integer(IntegerStorage::U16(vec![0, u16::MAX]), vec![1, 2])
             .expect("uint16 tensor");
+        let int32 = Tensor::new_integer(IntegerStorage::I32(vec![i32::MIN, i32::MAX]), vec![1, 2])
+            .expect("int32 tensor");
+        let uint32 = Tensor::new_integer(IntegerStorage::U32(vec![0, u32::MAX]), vec![1, 2])
+            .expect("uint32 tensor");
+        let int64 = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
+            .expect("int64 tensor");
+        let uint64 =
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
+                .expect("uint64 tensor");
         set_workspace(&[
             ("single_data", Value::Tensor(single)),
+            ("int8_data", Value::Tensor(int8)),
+            ("uint8_data", Value::Tensor(uint8)),
+            ("int16_data", Value::Tensor(int16)),
             ("uint16_data", Value::Tensor(uint16)),
+            ("int32_data", Value::Tensor(int32)),
+            ("uint32_data", Value::Tensor(uint32)),
+            ("int64_data", Value::Tensor(int64)),
+            ("uint64_data", Value::Tensor(uint64)),
             ("i8_scalar", Value::Int(IntValue::I8(-3))),
         ]);
 
@@ -1504,34 +1526,48 @@ pub(crate) mod tests {
         let args = vec![
             Value::from(path.to_string_lossy().to_string()),
             Value::from("single_data"),
+            Value::from("int8_data"),
+            Value::from("uint8_data"),
+            Value::from("int16_data"),
             Value::from("uint16_data"),
+            Value::from("int32_data"),
+            Value::from("uint32_data"),
+            Value::from("int64_data"),
+            Value::from("uint64_data"),
             Value::from("i8_scalar"),
         ];
         block_on(save_builtin(args)).unwrap();
 
-        let file = File::open(&path).unwrap();
-        let mat = matfile::MatFile::parse(file).unwrap();
-        match mat.find_by_name("single_data").unwrap().data() {
-            matfile::NumericData::Single { real, imag } => {
-                assert_eq!(real, &[1.25, 2.5]);
-                assert!(imag.is_none());
+        let values: HashMap<_, _> = block_on(crate::builtins::io::mat::load::read_mat_file(&path))
+            .unwrap()
+            .into_iter()
+            .collect();
+        match values.get("single_data").unwrap() {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.dtype, NumericDType::F32);
+                assert_eq!(tensor.data, vec![1.25, 2.5]);
             }
-            other => panic!("expected single array, got {other:?}"),
+            other => panic!("expected single tensor, got {other:?}"),
         }
-        match mat.find_by_name("uint16_data").unwrap().data() {
-            matfile::NumericData::UInt16 { real, imag } => {
-                assert_eq!(real, &[10, 20]);
-                assert!(imag.is_none());
+        for (name, storage) in [
+            ("int8_data", IntegerStorage::I8(vec![i8::MIN, i8::MAX])),
+            ("uint8_data", IntegerStorage::U8(vec![0, u8::MAX])),
+            ("int16_data", IntegerStorage::I16(vec![i16::MIN, i16::MAX])),
+            ("uint16_data", IntegerStorage::U16(vec![0, u16::MAX])),
+            ("int32_data", IntegerStorage::I32(vec![i32::MIN, i32::MAX])),
+            ("uint32_data", IntegerStorage::U32(vec![0, u32::MAX])),
+            ("int64_data", IntegerStorage::I64(vec![i64::MIN, i64::MAX])),
+            (
+                "uint64_data",
+                IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+            ),
+        ] {
+            match values.get(name).unwrap() {
+                Value::Tensor(tensor) => assert_eq!(tensor.integer_storage(), Some(&storage)),
+                other => panic!("expected integer tensor for {name}, got {other:?}"),
             }
-            other => panic!("expected uint16 array, got {other:?}"),
         }
-        match mat.find_by_name("i8_scalar").unwrap().data() {
-            matfile::NumericData::Int8 { real, imag } => {
-                assert_eq!(real, &[-3]);
-                assert!(imag.is_none());
-            }
-            other => panic!("expected int8 scalar, got {other:?}"),
-        }
+        assert_eq!(values.get("i8_scalar"), Some(&Value::Int(IntValue::I8(-3))));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
