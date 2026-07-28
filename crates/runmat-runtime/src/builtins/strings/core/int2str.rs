@@ -486,9 +486,10 @@ pub(crate) mod tests {
             .expect("uint64 scalar");
         assert_eq!(char_rows(scalar), vec![u64::MAX.to_string()]);
 
-        let tensor =
+        let mut tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
                 .expect("uint64 tensor");
+        tensor.data.clear();
         let matrix = int2str_builtin(Value::Tensor(tensor), Vec::new()).expect("uint64 array");
         assert_eq!(
             char_rows(matrix),

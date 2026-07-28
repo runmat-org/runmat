@@ -3,7 +3,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, SparseTensor, StringArray, Tensor, Value,
+    CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, SparseTensor, StringArray,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -225,10 +226,7 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
         Value::Symbolic(expr) => Ok(vec![expr.to_string().chars().collect()]),
         Value::StringArray(sa) => string_array_rows(sa),
         Value::Num(n) => Ok(vec![vec![number_to_char(*n)?]]),
-        Value::Int(i) => {
-            let as_double = i.to_f64();
-            Ok(vec![vec![number_to_char(as_double)?]])
-        }
+        Value::Int(i) => Ok(vec![vec![integer_value_to_char(i)?]]),
         Value::Bool(b) => {
             let code = if *b { 1.0 } else { 0.0 };
             Ok(vec![vec![number_to_char(code)?]])
@@ -298,7 +296,11 @@ fn string_array_rows(sa: &StringArray) -> BuiltinResult<Vec<Vec<char>>> {
 
 fn tensor_rows(t: &Tensor) -> BuiltinResult<Vec<Vec<char>>> {
     ensure_two_dimensional(&t.shape, "char")?;
-    let (rows, cols) = infer_rows_cols(&t.shape, t.data.len());
+    let integer_storage = t.integer_storage();
+    let element_len = integer_storage
+        .map(IntegerStorage::len)
+        .unwrap_or(t.data.len());
+    let (rows, cols) = infer_rows_cols(&t.shape, element_len);
     if rows == 0 {
         return Ok(Vec::new());
     }
@@ -310,8 +312,11 @@ fn tensor_rows(t: &Tensor) -> BuiltinResult<Vec<Vec<char>>> {
                 continue;
             }
             let idx = r + c * rows;
-            let value = t.data[idx];
-            row.push(number_to_char(value)?);
+            let ch = match integer_storage {
+                Some(storage) => integer_storage_to_char(storage, idx)?,
+                None => number_to_char(t.data[idx])?,
+            };
+            row.push(ch);
         }
         out.push(row);
     }
@@ -416,6 +421,55 @@ fn number_to_char(value: f64) -> BuiltinResult<char> {
     })
 }
 
+fn integer_storage_to_char(storage: &IntegerStorage, index: usize) -> BuiltinResult<char> {
+    let value = storage.value_at(index).ok_or_else(|| {
+        char_error_with_message(
+            "char: integer storage length does not match tensor shape",
+            &CHAR_ERROR_INTERNAL,
+        )
+    })?;
+    integer_value_to_char(&value)
+}
+
+fn integer_value_to_char(value: &IntValue) -> BuiltinResult<char> {
+    let code = match value {
+        IntValue::I8(value) => signed_integer_to_codepoint(*value as i128)?,
+        IntValue::I16(value) => signed_integer_to_codepoint(*value as i128)?,
+        IntValue::I32(value) => signed_integer_to_codepoint(*value as i128)?,
+        IntValue::I64(value) => signed_integer_to_codepoint(*value as i128)?,
+        IntValue::U8(value) => unsigned_integer_to_codepoint(*value as u128)?,
+        IntValue::U16(value) => unsigned_integer_to_codepoint(*value as u128)?,
+        IntValue::U32(value) => unsigned_integer_to_codepoint(*value as u128)?,
+        IntValue::U64(value) => unsigned_integer_to_codepoint(*value as u128)?,
+    };
+    char::from_u32(code).ok_or_else(|| {
+        char_error_with_message(
+            format!("char: invalid code point {code}"),
+            &CHAR_ERROR_INVALID_CODEPOINT,
+        )
+    })
+}
+
+fn signed_integer_to_codepoint(value: i128) -> BuiltinResult<u32> {
+    if value < 0 {
+        return Err(char_error_with_message(
+            format!("char: negative code points are invalid (got {value})"),
+            &CHAR_ERROR_INVALID_CODEPOINT,
+        ));
+    }
+    unsigned_integer_to_codepoint(value as u128)
+}
+
+fn unsigned_integer_to_codepoint(value: u128) -> BuiltinResult<u32> {
+    if value > 0x10FFFF {
+        return Err(char_error_with_message(
+            format!("char: code point {value} exceeds Unicode range"),
+            &CHAR_ERROR_INVALID_CODEPOINT,
+        ));
+    }
+    Ok(value as u32)
+}
+
 fn ensure_two_dimensional(shape: &[usize], context: &str) -> BuiltinResult<()> {
     if shape.len() <= 2 {
         return Ok(());
@@ -506,6 +560,52 @@ pub(crate) mod tests {
             }
             other => panic!("expected char array, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn char_from_typed_integer_tensor_reads_exact_storage_without_mirror() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![82, 0x10FFFF]), vec![1, 2])
+            .expect("typed tensor");
+        tensor.data.clear();
+
+        let result = char_builtin(vec![Value::Tensor(tensor)]).expect("char");
+        match result {
+            Value::CharArray(ca) => {
+                assert_eq!(ca.rows, 1);
+                assert_eq!(ca.cols, 2);
+                assert_eq!(ca.data, vec!['R', char::from_u32(0x10FFFF).unwrap()]);
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn char_rejects_negative_typed_integer_storage_without_mirror() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed tensor");
+        tensor.data.clear();
+
+        let err = error_message(char_builtin(vec![Value::Tensor(tensor)]).expect_err("char"));
+        assert!(
+            err.contains("negative code points"),
+            "unexpected error text: {err}"
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn char_rejects_out_of_range_uint64_storage_without_mirror() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![0x110000]), vec![1, 1])
+            .expect("typed tensor");
+        tensor.data.clear();
+
+        let err = error_message(char_builtin(vec![Value::Tensor(tensor)]).expect_err("char"));
+        assert!(
+            err.contains("exceeds Unicode range"),
+            "unexpected error text: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
