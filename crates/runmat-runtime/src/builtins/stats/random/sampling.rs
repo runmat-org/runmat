@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    CellArray, CharArray, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -356,7 +356,7 @@ async fn gathered(value: Value, name: &str) -> BuiltinResult<Value> {
 }
 
 fn parse_positive_usize(name: &str, value: &Value, label: &str) -> BuiltinResult<usize> {
-    if let Value::Int(value) = value {
+    if let Some(value) = scalar_integer_value(value) {
         return value
             .try_to_usize()
             .filter(|value| *value > 0)
@@ -366,6 +366,9 @@ fn parse_positive_usize(name: &str, value: &Value, label: &str) -> BuiltinResult
     }
     let raw = match value {
         Value::Num(v) => *v,
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         Value::Bool(v) => {
             if *v {
                 1.0
@@ -392,6 +395,20 @@ fn parse_positive_usize(name: &str, value: &Value, label: &str) -> BuiltinResult
         ));
     }
     Ok(raw as usize)
+}
+
+fn scalar_integer_value(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor.integer_storage().map(|storage| {
+                storage
+                    .value_at(0)
+                    .expect("scalar integer tensor has one storage value")
+            })
+        }
+        _ => None,
+    }
 }
 
 fn parse_bool(name: &str, value: &Value, label: &str) -> BuiltinResult<bool> {
@@ -1193,7 +1210,7 @@ async fn parse_dividerand_args(args: Vec<Value>) -> BuiltinResult<DividerandArgs
 }
 
 fn parse_nonnegative_usize(name: &str, value: Value, label: &str) -> BuiltinResult<usize> {
-    if let Value::Int(value) = &value {
+    if let Some(value) = scalar_integer_value(&value) {
         return value.try_to_usize().ok_or_else(|| {
             sampling_error(
                 name,
@@ -2193,6 +2210,21 @@ mod tests {
     #[test]
     fn sampling_scalar_parsers_read_typed_integer_tensor_storage_exactly() {
         assert_eq!(
+            parse_positive_usize(
+                "datasample",
+                &poisoned_int_tensor(IntegerStorage::U16(vec![3]), vec![1, 1], f64::NAN),
+                "k",
+            )
+            .unwrap(),
+            3
+        );
+        assert!(parse_positive_usize(
+            "datasample",
+            &poisoned_int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1], 3.0),
+            "k",
+        )
+        .is_err());
+        assert_eq!(
             parse_nonnegative_usize(
                 "dividerand",
                 poisoned_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1], -1.0),
@@ -2201,6 +2233,12 @@ mod tests {
             .unwrap(),
             4
         );
+        assert!(parse_nonnegative_usize(
+            "dividerand",
+            poisoned_int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1], 4.0),
+            "Q",
+        )
+        .is_err());
         assert_eq!(
             parse_nonnegative_scalar_ratio(
                 poisoned_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1], f64::NAN),
