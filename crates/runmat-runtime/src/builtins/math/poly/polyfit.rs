@@ -471,10 +471,12 @@ impl PolyfitEval {
 }
 
 fn parse_degree(value: &Value) -> BuiltinResult<usize> {
-    match value {
-        Value::Int(i) => i.try_to_usize().ok_or_else(|| {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
             polyfit_argument_error("polyfit: degree must be a non-negative integer")
-        }),
+        });
+    }
+    match value {
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(polyfit_argument_error("polyfit: degree must be finite"));
@@ -486,6 +488,11 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
             if rounded < 0.0 {
                 return Err(polyfit_argument_error(
                     "polyfit: degree must be a non-negative integer",
+                ));
+            }
+            if !fits_platform_usize(rounded) {
+                return Err(polyfit_argument_error(
+                    "polyfit: degree exceeds platform limits",
                 ));
             }
             Ok(rounded as usize)
@@ -500,6 +507,10 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
             "polyfit: degree must be a scalar numeric value, got {other:?}"
         ))),
     }
+}
+
+fn fits_platform_usize(value: f64) -> bool {
+    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -1027,6 +1038,31 @@ pub(crate) mod tests {
         );
         assert!(parse_degree(&Value::Int(IntValue::I64(-1))).is_err());
     }
+
+    #[test]
+    fn degree_parser_reads_typed_integer_scalar_storage_exactly() {
+        let mut degree =
+            Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("typed degree");
+        degree.data.clear();
+
+        assert_eq!(parse_degree(&Value::Tensor(degree)).unwrap(), 3);
+
+        let mut negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative degree");
+        negative.data.clear();
+        assert!(parse_degree(&Value::Tensor(negative)).is_err());
+    }
+
+    #[test]
+    fn degree_parser_rejects_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_degree(&Value::Num(boundary)).is_err());
+    }
+
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage};

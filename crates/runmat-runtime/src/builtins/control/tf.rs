@@ -473,6 +473,15 @@ async fn tf_binary(
 }
 
 fn parse_integer_exponent(value: &Value) -> BuiltinResult<i64> {
+    if let Some(integer) = crate::builtins::common::tensor::scalar_integer_value(value) {
+        return integer.try_to_i64().ok_or_else(|| {
+            control_error(
+                "tf",
+                "RunMat:tf:InvalidExponent",
+                "tf: exponent exceeds integer range",
+            )
+        });
+    }
     let exponent = scalar_f64(value, "exponent", "tf")?;
     if !exponent.is_finite() || exponent.fract().abs() > 0.0 {
         return Err(control_error(
@@ -482,6 +491,13 @@ fn parse_integer_exponent(value: &Value) -> BuiltinResult<i64> {
         ));
     }
     if exponent < i64::MIN as f64 || exponent > i64::MAX as f64 {
+        return Err(control_error(
+            "tf",
+            "RunMat:tf:InvalidExponent",
+            "tf: exponent exceeds integer range",
+        ));
+    }
+    if exponent == i64::MAX as f64 {
         return Err(control_error(
             "tf",
             "RunMat:tf:InvalidExponent",
@@ -639,6 +655,34 @@ mod tests {
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+    }
+
+    #[test]
+    fn exponent_parser_reads_typed_integer_scalar_storage_exactly() {
+        assert_eq!(
+            parse_integer_exponent(&Value::Int(IntValue::I64(-3))).unwrap(),
+            -3
+        );
+
+        let mut exponent =
+            Tensor::new_integer(IntegerStorage::I16(vec![-2]), vec![1, 1]).expect("typed exponent");
+        exponent.data.clear();
+        assert_eq!(
+            parse_integer_exponent(&Value::Tensor(exponent)).unwrap(),
+            -2
+        );
+
+        let mut too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![i64::MAX as u64 + 1]), vec![1, 1])
+                .expect("wide exponent");
+        too_large.data.clear();
+        assert!(parse_integer_exponent(&Value::Tensor(too_large)).is_err());
+    }
+
+    #[test]
+    fn exponent_parser_rejects_unrepresentable_double_boundary() {
+        assert!(parse_integer_exponent(&Value::Num(i64::MAX as f64)).is_err());
+        assert!(parse_integer_exponent(&Value::Num((i64::MAX as f64) + 1024.0)).is_err());
     }
 
     #[test]

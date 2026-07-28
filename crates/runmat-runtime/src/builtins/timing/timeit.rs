@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::timing::type_resolvers::timeit_type;
 
 const TARGET_BATCH_SECONDS: f64 = 0.005;
@@ -229,13 +230,15 @@ fn parse_num_outputs(rest: &[Value]) -> Result<Option<usize>, crate::RuntimeErro
 }
 
 fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeError> {
-    match value {
-        Value::Int(iv) => iv.try_to_usize().ok_or_else(|| {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
             timeit_error_with_message(
                 TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.message,
                 &TIMEIT_ERROR_NUM_OUTPUTS_NONNEG,
             )
-        }),
+        });
+    }
+    match value {
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(timeit_error_with_message(
@@ -256,6 +259,12 @@ fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeErro
                     &TIMEIT_ERROR_NUM_OUTPUTS_INTEGER,
                 ));
             }
+            if !fits_platform_usize(rounded) {
+                return Err(timeit_error_with_message(
+                    TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.message,
+                    &TIMEIT_ERROR_NUM_OUTPUTS_NONNEG,
+                ));
+            }
             Ok(rounded as usize)
         }
         _ => Err(timeit_error_with_message(
@@ -263,6 +272,10 @@ fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeErro
             &TIMEIT_ERROR_NUM_OUTPUTS_SCALAR,
         )),
     }
+}
+
+fn fits_platform_usize(value: f64) -> bool {
+    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
 }
 
 async fn determine_loop_count(callable: &TimeitCallable) -> Result<usize, crate::RuntimeError> {
@@ -493,8 +506,36 @@ pub(crate) mod tests {
         );
         assert!(parse_non_negative_integer(&Value::Int(IntValue::I64(-1))).is_err());
     }
+
+    #[test]
+    fn output_count_reads_typed_integer_scalar_storage_exactly() {
+        let mut count = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1])
+            .expect("typed output count");
+        count.data.clear();
+
+        assert_eq!(
+            parse_non_negative_integer(&Value::Tensor(count)).unwrap(),
+            2
+        );
+
+        let mut negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative output count");
+        negative.data.clear();
+        assert!(parse_non_negative_integer(&Value::Tensor(negative)).is_err());
+    }
+
+    #[test]
+    fn output_count_rejects_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_non_negative_integer(&Value::Num(boundary)).is_err());
+    }
+
     use futures::executor::block_on;
-    use runmat_builtins::{Closure, IntValue};
+    use runmat_builtins::{Closure, IntValue, IntegerStorage, Tensor};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
