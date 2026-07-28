@@ -223,7 +223,10 @@ impl MacdInput {
 
 fn compute_macd(close: &Tensor, include_signal: bool) -> BuiltinResult<(Tensor, Option<Tensor>)> {
     let shape = tensor_shape_for(close);
-    let rows = shape.first().copied().unwrap_or(close.data.len());
+    let rows = shape
+        .first()
+        .copied()
+        .unwrap_or_else(|| tensor::tensor_element_len(close));
     let cols = if shape.len() >= 2 { shape[1] } else { 1 };
     let fast = exponential_moving_average(&close.data, rows, cols, FAST_ALPHA);
     let slow = exponential_moving_average(&close.data, rows, cols, SLOW_ALPHA);
@@ -292,7 +295,10 @@ fn validate_price_variables(object: &runmat_builtins::ObjectInstance) -> Builtin
         };
         let tensor = tensor_from_numeric_value(value.clone())?;
         let shape = tensor_shape_for(&tensor);
-        let rows = shape.first().copied().unwrap_or(tensor.data.len());
+        let rows = shape
+            .first()
+            .copied()
+            .unwrap_or_else(|| tensor::tensor_element_len(&tensor));
         let cols = if shape.len() >= 2 { shape[1] } else { 1 };
         if rows != height || cols != 1 || shape.len() > 2 {
             return Err(macd_invalid(format!(
@@ -314,7 +320,7 @@ fn tensor_from_numeric_value(value: Value) -> BuiltinResult<Tensor> {
 
 fn tensor_shape_for(tensor: &Tensor) -> Vec<usize> {
     if tensor.shape.is_empty() {
-        tensor::default_shape_for(&tensor.shape, tensor.data.len())
+        tensor::default_shape_for(&tensor.shape, tensor::tensor_element_len(tensor))
     } else {
         tensor.shape.clone()
     }
@@ -429,6 +435,14 @@ mod tests {
         assert_close(out.data[2], 0.283125);
         assert_close(out.data[3], 0.743578125);
         assert_close(out.data[4], 1.697244140625);
+    }
+
+    #[test]
+    fn tensor_shape_for_reads_scalar_typed_integer_storage_without_mirror() {
+        let mut input = Tensor::new_integer(IntegerStorage::U8(vec![7]), Vec::new()).unwrap();
+        input.data.clear();
+
+        assert_eq!(tensor_shape_for(&input), vec![1, 1]);
     }
 
     #[test]

@@ -229,7 +229,7 @@ async fn parse_args(args: Vec<Value>) -> BuiltinResult<QqplotEvaluation> {
             let x = value_to_tensor(iter.next().unwrap()).await?;
             let y = value_to_tensor(iter.next().unwrap()).await?;
             let p = probabilities_from_tensor(value_to_tensor(iter.next().unwrap()).await?)?;
-            if y.data.is_empty() {
+            if tensor::tensor_element_len(&y) == 0 {
                 Ok(QqplotEvaluation {
                     mode: PlotMode::Normal,
                     series: normal_series_from_tensor(x, Some(p))?,
@@ -259,7 +259,7 @@ async fn value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
 }
 
 fn normal_series_from_tensor(x: Tensor, pvec: Option<Vec<f64>>) -> BuiltinResult<Vec<Series>> {
-    let shape = tensor::default_shape_for(&x.shape, x.data.len());
+    let shape = tensor::default_shape_for(&x.shape, tensor::tensor_element_len(&x));
     let columns = columns_from_tensor(x, &shape)?;
     columns
         .into_iter()
@@ -278,8 +278,8 @@ fn two_sample_series_from_tensors(
     y: Tensor,
     pvec: Option<Vec<f64>>,
 ) -> BuiltinResult<Vec<Series>> {
-    let x_shape = tensor::default_shape_for(&x.shape, x.data.len());
-    let y_shape = tensor::default_shape_for(&y.shape, y.data.len());
+    let x_shape = tensor::default_shape_for(&x.shape, tensor::tensor_element_len(&x));
+    let y_shape = tensor::default_shape_for(&y.shape, tensor::tensor_element_len(&y));
     let x_columns = columns_from_tensor(x, &x_shape)?;
     let y_columns = columns_from_tensor(y, &y_shape)?;
     if x_columns.is_empty() || y_columns.is_empty() {
@@ -626,8 +626,9 @@ mod tests {
     #[test]
     fn qqplot_numeric_helpers_read_typed_integer_storage_exactly() {
         let wide = u64::MAX - 1;
-        let tensor =
+        let mut tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![wide, wide - 1]), vec![2, 1]).unwrap();
+        tensor.data.clear();
         assert_eq!(
             tensor_values_f64(&tensor),
             vec![
@@ -642,8 +643,20 @@ mod tests {
                 IntValue::U64(wide - 1).to_f64()
             ]]
         );
-        let pvec = Tensor::new_integer(IntegerStorage::U8(vec![75, 25]), vec![1, 2]).unwrap();
+        let mut pvec = Tensor::new_integer(IntegerStorage::U8(vec![75, 25]), vec![1, 2]).unwrap();
+        pvec.data.clear();
         assert_eq!(probabilities_from_tensor(pvec).unwrap(), vec![0.25, 0.75]);
+    }
+
+    #[test]
+    fn qqplot_scalar_typed_integer_sample_uses_storage_len_for_default_shape() {
+        let mut input = Tensor::new_integer(IntegerStorage::I16(vec![42]), Vec::new()).unwrap();
+        input.data.clear();
+
+        let series = normal_series_from_tensor(input, None).unwrap();
+
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0].observed, vec![42.0]);
     }
 
     #[test]
