@@ -1119,7 +1119,7 @@ fn resolve_node_token(
 fn looks_like_weights(value: &Value, expected_len: usize) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) => expected_len == 1,
-        Value::Tensor(tensor) => tensor.data.len() == expected_len,
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == expected_len,
         _ => false,
     }
 }
@@ -1690,7 +1690,9 @@ mod tests {
     }
 
     fn int_numeric(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor"))
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
+        tensor.data.clear();
+        Value::Tensor(tensor)
     }
 
     fn tensor_data(value: Value) -> Vec<f64> {
