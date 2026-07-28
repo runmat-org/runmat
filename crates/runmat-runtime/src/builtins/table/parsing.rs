@@ -14,7 +14,7 @@ pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String>
 pub(super) fn bool_scalar(value: &Value, context: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(flag) => Ok(*flag),
-        Value::Int(value) => Ok(value.to_i64() != 0),
+        Value::Int(value) => Ok(!value.is_zero()),
         Value::Num(value) if value.is_finite() => Ok(*value != 0.0),
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
             let text = scalar_text(value, context)?;

@@ -301,7 +301,7 @@ fn count_nonzero_value(value: &Value) -> BuiltinResult<usize> {
         Value::LogicalArray(logical) => Ok(count_nonzero_logical(logical)),
         Value::CharArray(chars) => Ok(count_nonzero_char(chars)),
         Value::Num(n) => Ok(if is_nonzero_scalar(*n) { 1 } else { 0 }),
-        Value::Int(i) => Ok(if i.to_i64() != 0 { 1 } else { 0 }),
+        Value::Int(i) => Ok(if !i.is_zero() { 1 } else { 0 }),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Complex(re, im) => Ok(if is_nonzero_complex(*re, *im) { 1 } else { 0 }),
         Value::GpuTensor(_) => Err(nnz_descriptor_error_with_detail(
@@ -433,7 +433,7 @@ fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
             shape: vec![1, 1],
         }),
         Value::Int(i) => Ok(Mask {
-            bits: vec![if i.to_i64() != 0 { 1 } else { 0 }],
+            bits: vec![if !i.is_zero() { 1 } else { 0 }],
             shape: vec![1, 1],
         }),
         Value::Bool(b) => Ok(Mask {
@@ -751,6 +751,12 @@ pub(crate) mod tests {
     #[test]
     fn nnz_scalar_nonzero() {
         let result = nnz_host_value(Value::Int(IntValue::I32(-5)), None).expect("nnz");
+        assert_eq!(result, Value::Num(1.0));
+    }
+
+    #[test]
+    fn nnz_scalar_wide_uint64_is_nonzero() {
+        let result = nnz_host_value(Value::Int(IntValue::U64(u64::MAX)), None).expect("nnz");
         assert_eq!(result, Value::Num(1.0));
     }
 

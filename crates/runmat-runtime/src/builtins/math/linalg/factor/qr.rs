@@ -516,7 +516,7 @@ async fn parse_options(args: &[Value]) -> BuiltinResult<QrOptions> {
 async fn is_zero_scalar(value: &Value) -> bool {
     match value {
         Value::Num(n) => n.abs() <= EPS_SCALAR,
-        Value::Int(i) => i.to_i64() == 0,
+        Value::Int(i) => i.is_zero(),
         Value::Bool(b) => !b,
         Value::Tensor(t) => {
             if tensor::is_scalar_tensor(t) {

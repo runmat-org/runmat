@@ -463,7 +463,7 @@ impl FillScalar {
     fn as_bool(&self) -> bool {
         match self {
             FillScalar::Real(v) => *v != 0.0,
-            FillScalar::Integer(i) => i.to_i64() != 0,
+            FillScalar::Integer(i) => !i.is_zero(),
             FillScalar::Logical(b) => *b,
             FillScalar::Complex(re, im) => *re != 0.0 || *im != 0.0,
         }
@@ -900,6 +900,39 @@ pub(crate) mod tests {
             Value::LogicalArray(l) => {
                 assert_eq!(l.shape, vec![4, 4]);
                 assert!(l.data.iter().all(|&b| b == 1));
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fill_logical_option_reads_wide_uint64_truth_exactly() {
+        let wide = u64::MAX;
+        let result = block_on(fill_builtin(
+            Value::Int(runmat_builtins::IntValue::U64(wide)),
+            vec![Value::Num(1.0), Value::Num(3.0), Value::from("logical")],
+        ))
+        .expect("scalar uint64 logical fill");
+        match result {
+            Value::LogicalArray(array) => {
+                assert_eq!(array.shape, vec![1, 3]);
+                assert_eq!(array.data, vec![1, 1, 1]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+
+        let mut fill_value =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("uint64 fill");
+        fill_value.data[0] = 0.0;
+        let result = block_on(fill_builtin(
+            Value::Tensor(fill_value),
+            vec![Value::Num(1.0), Value::Num(2.0), Value::from("logical")],
+        ))
+        .expect("typed uint64 logical fill");
+        match result {
+            Value::LogicalArray(array) => {
+                assert_eq!(array.shape, vec![1, 2]);
+                assert_eq!(array.data, vec![1, 1]);
             }
             other => panic!("expected logical array, got {other:?}"),
         }

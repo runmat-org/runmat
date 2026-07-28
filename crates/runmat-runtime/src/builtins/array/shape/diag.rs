@@ -1403,7 +1403,7 @@ fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
         }
         Value::Num(n) => LogicalArray::new(vec![if n != 0.0 { 1 } else { 0 }], vec![1, 1])
             .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}"))),
-        Value::Int(i) => LogicalArray::new(vec![if i.to_i64() != 0 { 1 } else { 0 }], vec![1, 1])
+        Value::Int(i) => LogicalArray::new(vec![if !i.is_zero() { 1 } else { 0 }], vec![1, 1])
             .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}"))),
         Value::Bool(flag) => LogicalArray::new(vec![if flag { 1 } else { 0 }], vec![1, 1])
             .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}"))),
@@ -1737,9 +1737,9 @@ mod tests {
     }
 
     #[test]
-    fn diag_logical_output_reads_typed_integer_storage_exactly() {
-        let mut value =
-            Tensor::new_integer(IntegerStorage::I16(vec![-2, 0, 7]), vec![1, 3]).expect("tensor");
+    fn diag_logical_output_reads_wide_uint64_storage_exactly() {
+        let mut value = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 0, 7]), vec![1, 3])
+            .expect("tensor");
         value.data.fill(f64::NAN);
 
         let out = run_diag(Value::Tensor(value), vec![Value::from("logical")]).expect("diag");

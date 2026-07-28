@@ -708,7 +708,7 @@ fn parse_newline_value(value: &Value) -> BuiltinResult<LineEnding> {
 fn parse_append_value(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(*b),
-        Value::Int(i) => Ok(i.to_i64() != 0),
+        Value::Int(i) => Ok(!i.is_zero()),
         Value::Num(n) => Ok(*n != 0.0),
         Value::String(s) => parse_bool_string(s),
         Value::CharArray(ca) if ca.rows == 1 => {

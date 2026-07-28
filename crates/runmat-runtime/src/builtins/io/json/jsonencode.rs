@@ -371,12 +371,12 @@ fn apply_option(
 fn coerce_bool(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(*b),
-        Value::Int(i) => Ok(i.to_i64() != 0),
+        Value::Int(i) => Ok(!i.is_zero()),
         Value::Num(n) => bool_from_f64(*n),
         Value::Tensor(t) => {
             if tensor::is_scalar_tensor(t) {
                 if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
-                    return Ok(int.to_i64() != 0);
+                    return Ok(!int.is_zero());
                 }
                 bool_from_f64(tensor::tensor_value_f64(t, 0))
             } else {
@@ -1127,7 +1127,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn jsonencode_options_read_typed_integer_storage_exactly() {
+    fn jsonencode_options_read_wide_uint64_storage_exactly() {
         let mut false_option =
             Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("integer tensor");
         false_option.data.clear();
@@ -1138,8 +1138,8 @@ pub(crate) mod tests {
         .expect("jsonencode");
         assert_eq!(as_string(compact), "[1,2]");
 
-        let mut true_option =
-            Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("integer tensor");
+        let mut true_option = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("integer tensor");
         true_option.data.clear();
         let pretty = block_on(jsonencode_builtin(
             Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("tensor")),

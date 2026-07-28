@@ -950,7 +950,7 @@ fn parse_bool_for_builtin(
 ) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(*b),
-        Value::Int(i) => Ok(i.to_i64() != 0),
+        Value::Int(i) => Ok(!i.is_zero()),
         Value::Num(n) => Ok(*n != 0.0),
         Value::LogicalArray(array) => {
             if array.data.len() == 1 {
@@ -1246,7 +1246,9 @@ fn strsplit_name_key(value: &Value) -> Option<StrsplitNameKey> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{
+        CellArray, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type,
+    };
 
     fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::split_builtin(text, rest))
@@ -1257,7 +1259,9 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn split_bool_options_read_typed_integer_storage_exactly() {
+    fn split_bool_options_read_wide_uint64_truth_exactly() {
+        assert!(parse_bool(&Value::Int(IntValue::U64(u64::MAX)), "IncludeDelimiters").unwrap());
+
         let mut enabled =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("enabled");
         enabled.data.clear();

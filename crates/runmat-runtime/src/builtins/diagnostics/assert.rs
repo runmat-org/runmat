@@ -335,7 +335,7 @@ fn evaluate_condition(value: Value) -> crate::BuiltinResult<ConditionOutcome> {
             ConditionOutcome::Fail
         }),
         Value::Int(int_value) => {
-            if int_value.to_i64() != 0 {
+            if !int_value.is_zero() {
                 Ok(ConditionOutcome::Pass)
             } else {
                 Ok(ConditionOutcome::Fail)
@@ -372,6 +372,18 @@ fn evaluate_condition(value: Value) -> crate::BuiltinResult<ConditionOutcome> {
 }
 
 fn evaluate_tensor_condition(tensor: &Tensor) -> crate::BuiltinResult<ConditionOutcome> {
+    if let Some(storage) = tensor.integer_storage() {
+        if storage.len() == 0 {
+            return Ok(ConditionOutcome::Pass);
+        }
+        for idx in 0..storage.len() {
+            if storage.value_at(idx).is_none_or(|value| value.is_zero()) {
+                return Ok(ConditionOutcome::Fail);
+            }
+        }
+        return Ok(ConditionOutcome::Pass);
+    }
+
     if tensor.data.is_empty() {
         return Ok(ConditionOutcome::Pass);
     }
@@ -384,6 +396,21 @@ fn evaluate_tensor_condition(tensor: &Tensor) -> crate::BuiltinResult<ConditionO
 }
 
 fn evaluate_complex_tensor(tensor: &ComplexTensor) -> crate::BuiltinResult<ConditionOutcome> {
+    if let Some(storage) = tensor.integer_data.as_ref() {
+        if storage.len() == 0 {
+            return Ok(ConditionOutcome::Pass);
+        }
+        for idx in 0..storage.len() {
+            let real = storage.real.value_at(idx);
+            let imag = storage.imag.value_at(idx);
+            if real.is_none_or(|value| value.is_zero()) && imag.is_none_or(|value| value.is_zero())
+            {
+                return Ok(ConditionOutcome::Fail);
+            }
+        }
+        return Ok(ConditionOutcome::Pass);
+    }
+
     if tensor.data.is_empty() {
         return Ok(ConditionOutcome::Pass);
     }
@@ -546,7 +573,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+        ResolveContext, Tensor, Type,
+    };
 
     fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::assert_builtin(args))
@@ -560,6 +590,13 @@ pub(crate) mod tests {
     #[test]
     fn assert_true_passes() {
         let result = assert_builtin(vec![Value::Bool(true)]).expect("assert should pass");
+        assert_eq!(result, Value::Num(0.0));
+    }
+
+    #[test]
+    fn assert_scalar_wide_uint64_passes() {
+        let result =
+            assert_builtin(vec![Value::Int(IntValue::U64(u64::MAX))]).expect("assert should pass");
         assert_eq!(result, Value::Num(0.0));
     }
 
@@ -603,6 +640,22 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(assert_default_identifier()));
     }
 
+    #[test]
+    fn assert_reads_typed_integer_tensor_storage_exactly() {
+        let mut passing =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1]), vec![2, 1]).unwrap();
+        passing.data.fill(0.0);
+        assert_builtin(vec![Value::Tensor(passing)]).expect("assert should pass");
+
+        let mut failing =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 0]), vec![2, 1]).unwrap();
+        failing.data.fill(1.0);
+        let err = unwrap_error(
+            assert_builtin(vec![Value::Tensor(failing)]).expect_err("assert should fail"),
+        );
+        assert_eq!(err.identifier(), Some(assert_default_identifier()));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_detects_nan() {
@@ -633,6 +686,30 @@ pub(crate) mod tests {
         let tensor = ComplexTensor::new(vec![(1.0, 0.0), (0.0, 0.0)], vec![2, 1]).expect("tensor");
         let err = unwrap_error(
             assert_builtin(vec![Value::ComplexTensor(tensor)]).expect_err("assert should fail"),
+        );
+        assert_eq!(err.identifier(), Some(assert_default_identifier()));
+    }
+
+    #[test]
+    fn assert_reads_typed_complex_integer_tensor_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![0, u64::MAX]),
+            IntegerStorage::U64(vec![5, 0]),
+        )
+        .expect("complex integer storage");
+        let mut passing = ComplexTensor::new_integer(storage, vec![2, 1]).unwrap();
+        passing.data.clear();
+        assert_builtin(vec![Value::ComplexTensor(passing)]).expect("assert should pass");
+
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 0]),
+            IntegerStorage::U64(vec![0, 0]),
+        )
+        .expect("complex integer storage");
+        let mut failing = ComplexTensor::new_integer(storage, vec![2, 1]).unwrap();
+        failing.data = vec![(1.0, 0.0), (1.0, 0.0)];
+        let err = unwrap_error(
+            assert_builtin(vec![Value::ComplexTensor(failing)]).expect_err("assert should fail"),
         );
         assert_eq!(err.identifier(), Some(assert_default_identifier()));
     }

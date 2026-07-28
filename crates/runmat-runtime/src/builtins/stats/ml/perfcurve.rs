@@ -637,7 +637,8 @@ fn scalar_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
         Value::Bool(value) => Ok(*value),
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Int(value) => Ok(value.to_i64() != 0),
+        Value::Int(value) if value.is_zero() => Ok(false),
+        Value::Int(value) if value.try_to_u64() == Some(1) => Ok(true),
         _ => match canonical(&scalar_text(value, name)?).as_str() {
             "true" | "on" | "yes" => Ok(true),
             "false" | "off" | "no" => Ok(false),
@@ -1521,6 +1522,15 @@ mod tests {
             .expect("scalar text"),
             "18446744073709551615"
         );
+    }
+
+    #[test]
+    fn perfcurve_scalar_bool_rejects_wide_uint64_option() {
+        assert!(scalar_bool(
+            &Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            "option"
+        )
+        .is_err());
     }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Value {

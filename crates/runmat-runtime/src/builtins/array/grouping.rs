@@ -1866,7 +1866,7 @@ fn bool_scalar(value: &Value, context: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(flag) => Ok(*flag),
         Value::Num(value) => Ok(*value != 0.0),
-        Value::Int(value) => Ok(value.to_i64() != 0),
+        Value::Int(value) => Ok(!value.is_zero()),
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         other => Err(grouping_error(format!(
             "{context}: expected logical scalar, got {other:?}"
